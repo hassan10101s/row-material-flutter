@@ -155,7 +155,7 @@ class ReportService {
     final bytes = await PdfRenderer.renderLabel(ctx);
     final entryCode = '${inspection['entry_code'] ?? ''}';
     return ReportDoc(
-      filename: 'Label_${entryCode}_${_timestamp()}.pdf',
+      filename: 'Label_${entryCode}_${fileTimestamp()}.pdf',
       bytes: bytes,
       title: 'Label_$entryCode',
     );
@@ -180,7 +180,7 @@ class ReportService {
     );
     final bytes = await PdfRenderer.renderBatchLabels(ctx);
     return ReportDoc(
-      filename: 'BatchLabels_${inspections.length}_${_timestamp()}.pdf',
+      filename: 'BatchLabels_${inspections.length}_${fileTimestamp()}.pdf',
       bytes: bytes,
       title: 'BatchLabels_${inspections.length}',
     );
@@ -290,7 +290,7 @@ class ReportService {
     );
     final bytes = await PdfRenderer.renderFollowUp(ctx);
     return ReportDoc(
-      filename: 'تقرير_المتابعة_${day}_${_timestamp()}.pdf',
+      filename: 'تقرير_المتابعة_${day}_${fileTimestamp()}.pdf',
       bytes: bytes,
       title: 'تقرير المتابعة - $day',
     );
@@ -394,10 +394,3 @@ String _dateOnlyIso(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
-
-String _timestamp() {
-  final now = DateTime.now();
-  String pad(int n) => n.toString().padLeft(2, '0');
-  return '${now.year}${pad(now.month)}${pad(now.day)}_'
-      '${pad(now.hour)}${pad(now.minute)}${pad(now.second)}';
-}

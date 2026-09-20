@@ -12,6 +12,14 @@ String todayIso() {
   return '${_pad2(now.year)}-${_pad2(now.month)}-${_pad2(now.day)}';
 }
 
+/// Compact timestamp mirroring `datetime.now().strftime('%Y%m%d_%H%M%S')`
+/// used in backup/label file names.
+String fileTimestamp([DateTime? when]) {
+  final now = when ?? DateTime.now();
+  return '${now.year}${_pad2(now.month)}${_pad2(now.day)}_'
+      '${_pad2(now.hour)}${_pad2(now.minute)}${_pad2(now.second)}';
+}
+
 String _pad2(int n) => n.toString().padLeft(2, '0');
 
 /// Parse a Python-style ISO datetime like "2026-09-20T14:30:00" or with

@@ -44,11 +44,47 @@ class DatabaseHelper {
   }
 
   Future<void> rebuild() async {
+    await close();
+    await database;
+  }
+
+  /// Close and drop both open connections (used before replacing the live file
+  /// during restore).
+  Future<void> close() async {
     await _db?.close();
     await _readDb?.close();
     _db = null;
     _readDb = null;
-    await database;
+  }
+
+  /// Re-run the full idempotent schema on the live database: creates any
+  /// missing tables, indexes and legacy columns (parity with Python
+  /// `Database.ensure_schema` after a restore).
+  Future<void> ensureSchema() async {
+    final db = await database;
+    await _createSchema(db);
+  }
+
+  /// Open an arbitrary SQLite file (read-write), apply the full current schema
+  /// guarantees (create missing tables + add missing columns), then close.
+  /// Used by restore's pre-flight migration on a temp copy.
+  Future<void> applySchemaToArbitraryFile(String path) async {
+    final db = await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 1,
+        onConfigure: (db) async {
+          await db.execute('PRAGMA journal_mode=WAL');
+          await db.execute('PRAGMA synchronous=NORMAL');
+          await db.execute('PRAGMA busy_timeout=5000');
+        },
+      ),
+    );
+    try {
+      await _createSchema(db);
+    } finally {
+      await db.close();
+    }
   }
 
   Future<Database> _open(String path) async {

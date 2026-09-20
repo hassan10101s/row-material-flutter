@@ -34,10 +34,16 @@ class AppPaths {
   }
 
   Future<Directory> backupsDir() async {
-    final dir = await appSupportRoot();
-    await dir.create(recursive: true);
+    final dir = await exportsRoot();
     final backups = Directory(p.join(dir.path, 'backups'));
     await backups.create(recursive: true);
     return backups;
+  }
+
+  Future<Directory> autoBackupDir() async {
+    final dir = await backupsDir();
+    final auto = Directory(p.join(dir.path, 'auto'));
+    await auto.create(recursive: true);
+    return auto;
   }
 }
