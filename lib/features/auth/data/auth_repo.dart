@@ -60,6 +60,7 @@ class AuthRepo {
     required String fullName,
     required String password,
     required String role,
+    String? usageExpiryDate,
   }) async {
     final db = await dbHelper.database;
     if (!await needsSetup()) {
@@ -81,6 +82,14 @@ class AuthRepo {
       'is_active': 1,
       'created_at': createdAt,
     });
+    // Persist the sealed usage-expiry license date (mirrors auth.py
+    // bootstrap_create_admin saving usage_expiry_date in settings).
+    if (usageExpiryDate != null && usageExpiryDate.trim().isNotEmpty) {
+      final key = await secret.load();
+      final sealed = sealText(usageExpiryDate.trim(), key);
+      await db.insert('settings', {'key': 'usage_expiry_date', 'value': sealed},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    }
     return User(
       id: id,
       username: username.trim(),

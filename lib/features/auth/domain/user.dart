@@ -23,6 +23,7 @@ class User {
       role == 'Developer' || role == 'Admin';
   bool get canEditInspections =>
       role == 'Developer' || role == 'Admin' || role == 'Lab User';
+  bool get canCreateInspection => canEditInspections;
   bool get canEditUsers => role == 'Developer';
   bool get canSeeSettings => role == 'Developer' || role == 'Admin';
 

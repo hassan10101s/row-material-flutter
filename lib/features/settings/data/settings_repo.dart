@@ -35,6 +35,28 @@ class SettingsRepo {
     await batch.commit(noResult: true);
   }
 
+  /// Ensure the standard settings rows exist (port of
+  /// SettingsService.ensure_defaults from core/controller.py init).
+  Future<void> ensureDefaults() async {
+    final db = await dbHelper.database;
+    final defaults = <String, String>{
+      'department_label': 'Quality Assurance Department',
+      'usage_expiry_date': '',
+      'reference_seed_done': '',
+    };
+    final existing = <String>{};
+    for (final r in await db.query('settings')) {
+      existing.add('${r['key']}');
+    }
+    final batch = db.batch();
+    for (final e in defaults.entries) {
+      if (!existing.contains(e.key)) {
+        batch.insert('settings', {'key': e.key, 'value': e.value});
+      }
+    }
+    await batch.commit(noResult: true);
+  }
+
   Future<Map<String, dynamic>?> getSetting(String key) async {
     final db = await dbHelper.database;
     final rows = await db.query('settings', where: 'key = ?', whereArgs: [key]);
