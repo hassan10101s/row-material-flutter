@@ -954,3 +954,81 @@ String formatValueWithUnit(String? value, String unit) {
   }
   return unit.isNotEmpty ? '$text $unit' : text;
 }
+
+/// infer_chemical_unit port from core/utils.py.
+String inferChemicalUnit(Object? parameterData, [String? parameterName]) {
+  final directUnit = referenceUnitText(parameterData);
+  if (directUnit.isNotEmpty) return directUnit;
+  var name = parameterName;
+  if (name == null || name.trim().isEmpty) {
+    name = referenceValueText(parameterData);
+  }
+  final normalized = name.trim().toLowerCase();
+  const ppmTokens = [
+    'afla', 'aflat', 'aflatoxin', 'okra', 'ochra', 'ochratoxin', 'افلا', 'اكرا',
+  ];
+  for (final token in ppmTokens) {
+    if (normalized.contains(token)) return 'ppm';
+  }
+  return '%';
+}
+
+/// is_physical_out_of_range port from core/utils.py.
+bool isPhysicalOutOfRange(String? actualValue, Object? requirement) {
+  if (actualValue == null || actualValue.trim().isEmpty) return false;
+  final valStr = actualValue.trim().toLowerCase();
+  final reqStr = referenceValueText(requirement).toLowerCase();
+
+  if (reqStr == 'negative') return valStr != 'negative';
+
+  final rangeSep = reqStr.replaceAll(RegExp(r'\s*:\s*'), '-');
+  final rangeMatch =
+      RegExp(r'^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*$').firstMatch(rangeSep);
+  if (rangeMatch != null) {
+    final minLimit = double.tryParse(rangeMatch.group(1)!);
+    final maxLimit = double.tryParse(rangeMatch.group(2)!);
+    final current = double.tryParse(valStr);
+    if (minLimit != null &&
+        maxLimit != null &&
+        current != null) {
+      return current < minLimit || current > maxLimit;
+    }
+  }
+
+  final isAbnormal = valStr.contains('abnormal') ||
+      valStr.contains('غير طبيعي') ||
+      valStr.contains('غير مطابق') ||
+      RegExp(r'\bno\b').hasMatch(valStr) ||
+      valStr.contains('not good') ||
+      valStr.contains('not-good') ||
+      valStr.contains('notgood') ||
+      valStr.contains('pale') ||
+      valStr.contains('سيء');
+  if (isAbnormal) return true;
+
+  final isNormal = valStr.contains('normal') ||
+      valStr.contains('طبيعي') ||
+      valStr.contains('مطابق') ||
+      valStr.contains('ok') ||
+      valStr.contains('good') ||
+      valStr.contains('جيد') ||
+      valStr.contains('positive') ||
+      valStr.contains('acceptable');
+  if (isNormal) return false;
+
+  final maxMatch = RegExp(r'max\.?\s*(\d+(?:\.\d+)?)').firstMatch(reqStr);
+  if (maxMatch != null) {
+    final maxLimit = double.tryParse(maxMatch.group(1)!);
+    final current = double.tryParse(valStr);
+    if (maxLimit != null && current != null && current > maxLimit) return true;
+  }
+
+  final minMatch = RegExp(r'min\.?\s*(\d+(?:\.\d+)?)').firstMatch(reqStr);
+  if (minMatch != null) {
+    final minLimit = double.tryParse(minMatch.group(1)!);
+    final current = double.tryParse(valStr);
+    if (minLimit != null && current != null && current < minLimit) return true;
+  }
+
+  return false;
+}

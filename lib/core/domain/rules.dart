@@ -33,10 +33,22 @@ const List<String> decisionCodes = [
 
 /// Labels bilingual by status code.
 const Map<String, Map<String, String>> decisionLabels = {
-  'APPROVED': {'ar': 'قبول نهائي', 'en': 'Final Approval'},
-  'CONDITIONAL_APPROVAL': {'ar': 'قبول مبدئي مع المتابعة', 'en': 'Conditional Approval'},
-  'PARTIAL_REJECTION': {'ar': 'رفض جزئي', 'en': 'Partial Rejection'},
-  'FULL_REJECTION': {'ar': 'رفض كلي', 'en': 'Full Rejection'},
+  'APPROVED': {'ar': 'قبول نهائي', 'en': 'Final Approval', 'css': 'Approved'},
+  'CONDITIONAL_APPROVAL': {
+    'ar': 'قبول مبدئي مع المتابعة',
+    'en': 'Conditional Approval',
+    'css': 'Approved',
+  },
+  'PARTIAL_REJECTION': {
+    'ar': 'رفض جزئي',
+    'en': 'Partial Rejection',
+    'css': 'Partial',
+  },
+  'FULL_REJECTION': {
+    'ar': 'رفض كلي',
+    'en': 'Full Rejection',
+    'css': 'Rejected',
+  },
 };
 
 const int truckNumberMaxLength = 10;

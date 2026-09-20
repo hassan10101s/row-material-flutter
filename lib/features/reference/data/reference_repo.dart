@@ -280,6 +280,22 @@ Map<String, dynamic> serializeInspectionRow(Map<String, dynamic> row) {
   return out;
 }
 
-Map<String, String> decisionMeta(String status) =>
-    decisionLabels[status] ??
-    {'ar': status, 'en': status};
+/// decision_meta port: label_ar / label_en / css_class (keeps ar/en aliases).
+Map<String, String> decisionMeta(String status) {
+  final entry = decisionLabels[status];
+  if (entry == null) {
+    return {
+      'label_ar': status,
+      'label_en': status,
+      'css_class': status,
+      'ar': status,
+      'en': status,
+    };
+  }
+  return {
+    ...entry,
+    'label_ar': entry['ar']!,
+    'label_en': entry['en']!,
+    'css_class': entry['css'] ?? 'Unknown',
+  };
+}
