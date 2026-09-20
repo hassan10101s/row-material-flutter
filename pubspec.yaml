@@ -1,0 +1,88 @@
+name: material_lab
+description: "Material Lab — مختبر المواد الخام"
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # ── Database ──────────────────────
+  sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.0
+  path: ^1.9.0
+
+  # ── Auth & Firebase (Google login) ─
+  firebase_core: ^3.4.0
+  firebase_auth: ^5.2.0
+  google_sign_in: ^6.2.1
+  flutter_secure_storage: ^9.0.0
+
+  # ── State & DI ─────────────────────
+  flutter_bloc: ^8.1.0
+  equatable: ^2.0.5
+  get_it: ^7.6.0
+
+  # ── UI ──────────────────────────────
+  flutter_screenutil: ^5.9.3
+  data_table_2: ^2.5.0
+  font_awesome_flutter: ^11.0.0
+  fl_chart: ^0.68.0
+
+  # ── PDF, Excel & QR ────────────────
+  pdf: ^3.10.0
+  printing: ^5.12.0
+  excel: ^4.0.6
+  qr_flutter: ^4.1.0
+  qr: ^3.0.0
+
+  # ── Crypto (PBKDF2 + HMAC-XOR seal) ─
+  pointycastle: ^3.8.0
+  crypto: ^3.0.3
+
+  # ── Backup / File ───────────────────
+  file_picker: ^8.0.0
+  path_provider: ^2.1.0
+
+  # ── Navigation ──────────────────────
+  go_router: ^13.0.0
+
+  # ── Network / Share ─────────────────
+  dio: ^5.4.0
+  connectivity_plus: ^6.0.0
+  url_launcher: ^6.3.2
+  share_plus: ^8.0.0
+
+  # ── Utils ───────────────────────────
+  intl: ^0.20.2
+  shared_preferences: ^2.5.5
+  package_info_plus: ^9.0.1
+  device_info_plus: ^10.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  mocktail: ^1.0.3
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/Reference.xlsx
+    - assets/units.xlsx
+    - assets/images/
+    - assets/icons/
+
+  fonts:
+    - family: Cairo
+      fonts:
+        - asset: assets/fonts/Cairo-Variable.ttf
