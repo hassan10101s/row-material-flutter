@@ -15,6 +15,7 @@ import '../../../router/app_router.dart';
 import '../../auth/domain/user.dart';
 import '../../backup/data/backup_manager.dart';
 import '../../settings/data/settings_repo.dart';
+import 'migration_panel.dart';
 
 /// Settings (port of Web SettingsView: General / Export / Database / Users).
 class SettingsScreen extends StatefulWidget {
@@ -289,6 +290,10 @@ class _DatabasePanelState extends State<_DatabasePanel> {
             ),
           ],
         ),
+        const SizedBox(height: AppSpacing.lg),
+        const Divider(),
+        const SizedBox(height: AppSpacing.lg),
+        const MigrationPanel(),
       ],
     );
   }
