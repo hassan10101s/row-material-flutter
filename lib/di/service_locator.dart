@@ -7,6 +7,7 @@ import '../core/database/database_helper.dart';
 import '../core/security/local_secret.dart';
 import '../core/security/password_hash.dart';
 import '../core/services/seed_service.dart';
+import '../core/theme/theme_service.dart';
 import '../features/auth/data/auth_repo.dart';
 import '../features/backup/data/backup_manager.dart';
 import '../features/dashboard/data/dashboard_repo.dart';
@@ -43,6 +44,8 @@ Future<void> initServiceLocator() async {
   getIt
     ..registerLazySingleton(() => hasher)
     ..registerLazySingleton<SettingsRepo>(() => SettingsRepo(dbHelper: dbHelper, secret: secret))
+    ..registerLazySingleton<ThemeService>(
+        () => ThemeService(settings: getIt<SettingsRepo>()))
     ..registerLazySingleton<ReferenceRepo>(() => ReferenceRepo(dbHelper: dbHelper))
     ..registerLazySingleton<InspectionRepo>(
         () => InspectionRepo(dbHelper: dbHelper, referenceRepo: getIt<ReferenceRepo>()))

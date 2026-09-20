@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/theme/theme_service.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -172,6 +173,15 @@ class _TopBar extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             const Spacer(),
+            IconButton(
+              tooltip: 'تبديل المظهر | Toggle theme',
+              onPressed: () => getIt<ThemeService>().toggle(),
+              icon: Icon(
+                getIt<ThemeService>().mode == ThemeMode.dark
+                    ? Icons.light_mode_outlined
+                    : Icons.dark_mode_outlined,
+              ),
+            ),
             if (user.isDeveloper)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../../design_system/tokens/app_colors.dart';
 import '../../design_system/tokens/app_palette.dart';
 import '../../design_system/tokens/app_text_theme.dart';
 
@@ -15,7 +14,6 @@ class AppTheme {
 
   static ThemeData _build(Brightness brightness) {
     final palette = brightness == Brightness.light ? AppPalette.light : AppPalette.dark;
-    AppColors.brightness = brightness;
     final scheme = ColorScheme.fromSeed(
       seedColor: palette.primary,
       brightness: brightness,
