@@ -8,6 +8,7 @@ import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/presentation/setup_screen.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
 import '../features/history/presentation/history_screen.dart';
+import '../features/inspections/presentation/inspections_screen.dart';
 import '../features/lab/presentation/lab_screen.dart';
 import '../features/reference/presentation/reference_screen.dart';
 import '../features/reports/presentation/reports_screen.dart';
@@ -55,7 +56,7 @@ class AppRouter {
           ),
           GoRoute(
             path: 'inspections',
-            builder: (c, s) => const PlaceholderPage(label: AppRoutes.inspections),
+            builder: (c, s) => const InspectionsScreen(),
           ),
           GoRoute(
             path: 'reports',
@@ -111,31 +112,9 @@ class AppRouter {
       case AppRoutes.settings:
         return const SettingsScreen();
       case AppRoutes.inspections:
-        return const PlaceholderPage(label: AppRoutes.inspections);
+        return const InspectionsScreen();
       default:
         return const DashboardScreen();
     }
-  }
-}
-
-/// Temporary scaffold for pages not yet implemented.
-class PlaceholderPage extends StatelessWidget {
-  final String label;
-  const PlaceholderPage({super.key, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.construction, size: 48, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(height: 12),
-          Text(label, style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 4),
-          Text('قيد التنفيذ — Coming soon'),
-        ],
-      ),
-    );
   }
 }
