@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../tokens/app_colors.dart';
 import '../tokens/app_font_weights.dart';
@@ -23,7 +24,7 @@ class AppTopAppBar extends StatelessWidget implements PreferredSizeWidget {
     return AppBar(
       title: Text(
         title,
-        style: const TextStyle(fontWeight: AppFontWeights.bold, fontSize: 18),
+        style: TextStyle(fontWeight: AppFontWeights.bold, fontSize: 18.spMax),
       ),
       centerTitle: true,
       leading: leading ??

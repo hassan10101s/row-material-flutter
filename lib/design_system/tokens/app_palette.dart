@@ -59,10 +59,10 @@ class AppPalette {
   );
 
   static const AppPalette dark = AppPalette(
-    background: Color(0xFF070B14),
-    surface: Color(0xFF0F1626),
-    surfaceSoft: Color(0xFF101A2E),
-    surfaceDeep: Color(0xFF05070D),
+    background: Color(0xFF0F172A),
+    surface: Color(0xFF1E293B),
+    surfaceSoft: Color(0xFF1B2537),
+    surfaceDeep: Color(0xFF0D1424),
     primary: Color(0xFF38BDF8),
     primaryDeep: Color(0xFF0EA5E9),
     accent: Color(0xFF818CF8),
@@ -71,9 +71,9 @@ class AppPalette {
     partial: Color(0xFFFB923C),
     danger: Color(0xFFF87171),
     info: Color(0xFF60A5FA),
-    textStrong: Color(0xFFE7EDF5),
-    textMuted: Color(0xFF8CA0B8),
-    border: Color(0xFF1E2B3F),
-    borderMuted: Color(0xFF162238),
+    textStrong: Color(0xFFF1F5F9),
+    textMuted: Color(0xFF94A3B8),
+    border: Color(0xFF334155),
+    borderMuted: Color(0xFF243147),
   );
 }

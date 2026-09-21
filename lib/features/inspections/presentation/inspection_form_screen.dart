@@ -1,31 +1,27 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
-import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_field.dart';
-import '../../../app/auth_gate.dart';
 import '../../../di/service_locator.dart';
-import '../../reference/data/reference_repo.dart';
 import '../data/inspection_repo.dart';
-
+import 'cubit/inspection_form_cubit.dart';
+import 'cubit/inspection_form_state.dart';
 /// New-inspection form (port of Web InspectionsForm + decision editing).
 class InspectionFormScreen extends StatefulWidget {
   const InspectionFormScreen({super.key});
-
   @override
   State<InspectionFormScreen> createState() => _InspectionFormScreenState();
 }
-
 class _InspectionFormScreenState extends State<InspectionFormScreen> {
-  final _repo = getIt<InspectionRepo>();
-  final _reference = getIt<ReferenceRepo>();
-
   late final TextEditingController _date = TextEditingController(text: todayIso());
   final _expiry = TextEditingController();
   final _supplier = TextEditingController();
@@ -36,28 +32,10 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   final _decisionReason = TextEditingController();
   final _followUp = TextEditingController();
   final _rejectedQty = TextEditingController();
-
   final List<TextEditingController> _sampleNames = [TextEditingController(text: 'Result')];
-
   final Map<String, List<TextEditingController>> _physical = {};
   final Map<String, List<TextEditingController>> _chemical = {};
-
-  List<Map<String, dynamic>> _materials = [];
-  int? _materialId;
-  String _materialCode = '';
-  String _decision = 'APPROVED';
-  bool _loading = true;
-  bool _saving = false;
-  String? _error;
-
   int get _sampleCount => _sampleNames.length;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadMaterials();
-  }
-
   @override
   void dispose() {
     for (final c in [..._sampleNames, _expiry, _supplier, _truck, _qty, _sampleTaker,
@@ -76,35 +54,10 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     }
     super.dispose();
   }
-
-  Future<void> _loadMaterials() async {
-    try {
-      final materials = await _reference.listMaterials();
-      if (!mounted) return;
-      setState(() {
-        _materials = materials;
-        _loading = false;
-      });
-    } on AppError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    }
-  }
-
   Future<void> _selectMaterial(int id) async {
     final date = _date.text.trim().isEmpty ? todayIso() : _date.text.trim();
-    final material = await _reference.getMaterial(id, inspectionDate: date);
-    if (!mounted) return;
-    setState(() {
-      _materialId = id;
-      _materialCode = '${material['material_code'] ?? ''}';
-      _entryCode.text = '${material['next_entry_code'] ?? ''}';
-      _rebuildResults(_physical, material['physical_reference'], 'physical');
-      _rebuildResults(_chemical, material['chemical_reference'], 'chemical');
-    });
+    await context.read<InspectionFormCubit>().selectMaterial(id, date: date);
   }
-
   void _rebuildResults(Map<String, List<TextEditingController>> target,
       dynamic ref, String type) {
     target.clear();
@@ -114,7 +67,6 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       target[key] = [for (var i = 0; i < _sampleCount; i++) TextEditingController()];
     });
   }
-
   void _addSample() {
     if (_sampleCount >= 3) {
       AppFeedback.error(context, 'الحد الأقصى 3 عينات | A maximum of 3 samples.');
@@ -129,7 +81,6 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       }
     });
   }
-
   void _removeSample(int index) {
     if (_sampleCount <= 1) return;
     setState(() {
@@ -143,7 +94,6 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       }
     });
   }
-
   Map<String, dynamic> _collectResults(Map<String, List<TextEditingController>> source) {
     final out = <String, dynamic>{};
     source.forEach((param, controllers) {
@@ -155,9 +105,9 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     });
     return out;
   }
-
   Future<void> _save() async {
-    if (_materialId == null) {
+    final state = context.read<InspectionFormCubit>().state;
+    if (state.materialId == null) {
       AppFeedback.error(context, 'يجب اختيار المادة | Material selection is required.');
       return;
     }
@@ -170,51 +120,109 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
           'اسم آخذ العينة مطلوب (3 أحرف على الأقل) | Sample taker is required.');
       return;
     }
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      final user = getIt<AuthGate>().currentUser;
-      if (user == null) throw const AppError('انتهت الجلسة | Session expired.');
-      final payload = <String, dynamic>{
-        'material_id': _materialId,
-        'inspection_date': _date.text.trim(),
-        'expiry_date': _expiry.text.trim(),
-        'entry_code': _entryCode.text.trim(),
-        'supplier': _supplier.text.trim(),
-        'truck_number': _truck.text.trim(),
-        'quantity': _qty.text.trim(),
-        'sample_taken_by': _sampleTaker.text.trim(),
-        'sample_names': [for (final c in _sampleNames) c.text],
-        'physical_results': _collectResults(_physical),
-        'chemical_results': _collectResults(_chemical),
-        'decision_status': _decision,
-        'decision_reason': _decisionReason.text.trim(),
-        'follow_up_note': _followUp.text.trim(),
-        'rejected_quantity': _rejectedQty.text.trim(),
-      };
-      await _repo.create(payload, UserContext(
-        id: user.id,
-        fullName: user.fullName,
-        role: user.role,
-      ));
-      if (!mounted) return;
+    final user = getIt<AuthGate>().currentUser;
+    if (user == null) {
+      AppFeedback.error(context, 'انتهت الجلسة | Session expired.');
+      return;
+    }
+    final payload = <String, dynamic>{
+      'material_id': state.materialId,
+      'inspection_date': _date.text.trim(),
+      'expiry_date': _expiry.text.trim(),
+      'entry_code': _entryCode.text.trim(),
+      'supplier': _supplier.text.trim(),
+      'truck_number': _truck.text.trim(),
+      'quantity': _qty.text.trim(),
+      'sample_taken_by': _sampleTaker.text.trim(),
+      'sample_names': [for (final c in _sampleNames) c.text],
+      'physical_results': _collectResults(_physical),
+      'chemical_results': _collectResults(_chemical),
+      'decision_status': state.decision,
+      'decision_reason': _decisionReason.text.trim(),
+      'follow_up_note': _followUp.text.trim(),
+      'rejected_quantity': _rejectedQty.text.trim(),
+    };
+    final ok = await context.read<InspectionFormCubit>().save(
+          payload,
+          UserContext(
+            id: user.id,
+            fullName: user.fullName,
+            role: user.role,
+          ),
+        );
+    if (!mounted) return;
+    if (ok) {
       AppFeedback.success(context, 'تم حفظ الفحص | Inspection saved.');
       Navigator.of(context).pop(true);
-    } on AppError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-      AppFeedback.error(context, e.message);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    } finally {
-      if (mounted) setState(() => _saving = false);
     }
   }
-
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
+    return BlocListener<InspectionFormCubit, InspectionFormState>(
+      listenWhen: (prev, curr) =>
+          prev.refRevision != curr.refRevision || prev.entryCode != curr.entryCode,
+      listener: (context, state) {
+        if (state.refRevision != 0) {
+          _rebuildResults(_physical, state.physicalReference, 'physical');
+          _rebuildResults(_chemical, state.chemicalReference, 'chemical');
+        }
+        if (_entryCode.text != state.entryCode && state.entryCode.isNotEmpty) {
+          _entryCode.text = state.entryCode;
+        }
+      },
+      child: _FormBody(date: _date, expiry: _expiry, supplier: _supplier, truck: _truck, qty: _qty, sampleTaker: _sampleTaker, entryCode: _entryCode, decisionReason: _decisionReason, followUp: _followUp, rejectedQty: _rejectedQty, sampleNames: _sampleNames, physical: _physical, chemical: _chemical, sampleCount: _sampleCount, onSelectMaterial: _selectMaterial, onAddSample: _addSample, onRemoveSample: _removeSample, onRegenerateEntry: () async {
+        if (context.read<InspectionFormCubit>().state.materialId == null) return;
+        final date = _date.text.trim().isEmpty ? todayIso() : _date.text.trim();
+        await context.read<InspectionFormCubit>().regenerateEntryCode(date);
+      }, onSave: _save),
+    );
+  }
+}
+class _FormBody extends StatelessWidget {
+  final TextEditingController date;
+  final TextEditingController expiry;
+  final TextEditingController supplier;
+  final TextEditingController truck;
+  final TextEditingController qty;
+  final TextEditingController sampleTaker;
+  final TextEditingController entryCode;
+  final TextEditingController decisionReason;
+  final TextEditingController followUp;
+  final TextEditingController rejectedQty;
+  final List<TextEditingController> sampleNames;
+  final Map<String, List<TextEditingController>> physical;
+  final Map<String, List<TextEditingController>> chemical;
+  final int sampleCount;
+  final ValueChanged<int> onSelectMaterial;
+  final VoidCallback onAddSample;
+  final ValueChanged<int> onRemoveSample;
+  final VoidCallback onRegenerateEntry;
+  final VoidCallback onSave;
+  const _FormBody({
+    required this.date,
+    required this.expiry,
+    required this.supplier,
+    required this.truck,
+    required this.qty,
+    required this.sampleTaker,
+    required this.entryCode,
+    required this.decisionReason,
+    required this.followUp,
+    required this.rejectedQty,
+    required this.sampleNames,
+    required this.physical,
+    required this.chemical,
+    required this.sampleCount,
+    required this.onSelectMaterial,
+    required this.onAddSample,
+    required this.onRemoveSample,
+    required this.onRegenerateEntry,
+    required this.onSave,
+  });
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<InspectionFormCubit>().state;
+    if (state.loading) {
       return const Center(child: CircularProgressIndicator());
     }
     return SingleChildScrollView(
@@ -224,23 +232,23 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
         children: [
           Text('فحص جديد | New Inspection', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: AppSpacing.md),
-          if (_error != null) ...[
-            Text(_error!,
-                style: TextStyle(color: AppColors.danger, fontSize: 13)),
+          if (state.error != null) ...[
+            Text(state.error!,
+                style: TextStyle(color: AppColors.danger, fontSize: 13.spMax)),
             const SizedBox(height: AppSpacing.md),
           ],
           _Card(
             title: 'البيانات الأساسية | Basic data',
             children: [
               DropdownButtonFormField<int>(
-                initialValue: _materialId,
+                initialValue: state.materialId,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'المادة | Material',
                   isDense: true,
                 ),
                 items: [
-                  for (final m in _materials)
+                  for (final m in state.materials)
                     DropdownMenuItem<int>(
                       value: (m['id'] as num).toInt(),
                       child: Text('${m['material_name']} (${m['material_code']})',
@@ -248,7 +256,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                     ),
                 ],
                 onChanged: (value) {
-                  if (value != null) _selectMaterial(value);
+                  if (value != null) onSelectMaterial(value);
                 },
               ),
               const SizedBox(height: AppSpacing.md),
@@ -257,14 +265,14 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                   Expanded(
                     child: AppField(
                       label: 'تاريخ الفحص | Date (YYYY-MM-DD)',
-                      controller: _date,
+                      controller: date,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.lg),
                   Expanded(
                     child: AppField(
                       label: 'تاريخ الانتهاء | Expiry (YYYY-MM-DD)',
-                      controller: _expiry,
+                      controller: expiry,
                     ),
                   ),
                 ],
@@ -275,21 +283,21 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                   Expanded(
                     child: AppField(
                       label: 'المورد | Supplier',
-                      controller: _supplier,
+                      controller: supplier,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.lg),
                   Expanded(
                     child: AppField(
                       label: 'رقم الشاحنة | Truck no.',
-                      controller: _truck,
+                      controller: truck,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.lg),
                   Expanded(
                     child: AppField(
                       label: 'الكمية | Quantity',
-                      controller: _qty,
+                      controller: qty,
                       keyboardType: TextInputType.numberWithOptions(decimal: true),
                     ),
                   ),
@@ -301,7 +309,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                   Expanded(
                     child: AppField(
                       label: 'آخذ العينة | Sample taker',
-                      controller: _sampleTaker,
+                      controller: sampleTaker,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.lg),
@@ -311,21 +319,14 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                         Expanded(
                           child: AppField(
                             label: 'رقم القيد | Entry code',
-                            controller: _entryCode,
+                            controller: entryCode,
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
                         IconButton(
                           tooltip: 'إعادة توليد | Regenerate',
-                          onPressed: () async {
-                            if (_materialId == null) return;
-                            final code = await _reference.generateEntryCode(
-                              _materialCode,
-                              _date.text.trim(),
-                            );
-                            if (mounted) setState(() => _entryCode.text = code);
-                          },
-                          icon: const Icon(Icons.refresh, size: 20),
+                          onPressed: onRegenerateEntry,
+                          icon: Icon(Icons.refresh, size: 20.r),
                         ),
                       ],
                     ),
@@ -338,7 +339,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
           _Card(
             title: 'العينات | Samples',
             children: [
-              for (var i = 0; i < _sampleCount; i++)
+              for (var i = 0; i < sampleCount; i++)
                 Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                   child: Row(
@@ -346,15 +347,15 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                       Expanded(
                         child: AppField(
                           label: 'اسم العينة ${i + 1} | Sample #${i + 1}',
-                          controller: _sampleNames[i],
+                          controller: sampleNames[i],
                         ),
                       ),
-                      if (_sampleCount > 1) ...[
+                      if (sampleCount > 1) ...[
                         const SizedBox(width: AppSpacing.sm),
                         IconButton(
                           tooltip: 'إزالة | Remove',
-                          onPressed: () => _removeSample(i),
-                          icon: const Icon(Icons.close, size: 20),
+                          onPressed: () => onRemoveSample(i),
+                          icon: Icon(Icons.close, size: 20.r),
                         ),
                       ],
                     ],
@@ -364,22 +365,22 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                 small: true,
                 style: AppButtonStyle.secondary,
                 label: 'إضافة عينة | Add Sample',
-                icon: const Icon(Icons.add, size: 18),
-                onPressed: _sampleCount >= 3 ? null : _addSample,
+                icon: Icon(Icons.add, size: 18.r),
+                onPressed: sampleCount >= 3 ? null : onAddSample,
               ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
-          if (_physical.isNotEmpty)
+          if (physical.isNotEmpty)
             _Card(
               title: 'النتائج الفيزيائية | Physical results',
-              children: [_resultsGrid(_physical)],
+              children: [_resultsGrid(physical)],
             ),
-          if (_chemical.isNotEmpty) ...[
+          if (chemical.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.md),
             _Card(
               title: 'النتائج الكيميائية | Chemical results',
-              children: [_resultsGrid(_chemical)],
+              children: [_resultsGrid(chemical)],
             ),
           ],
           const SizedBox(height: AppSpacing.md),
@@ -387,7 +388,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
             title: 'قرار الجودة | Decision',
             children: [
               DropdownButtonFormField<String>(
-                initialValue: _decision,
+                initialValue: state.decision,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'القرار | Decision',
@@ -402,30 +403,32 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                   DropdownMenuItem(value: 'FULL_REJECTION', child: Text('رفض كامل | Full rejection')),
                 ],
                 onChanged: (value) {
-                  if (value != null) setState(() => _decision = value);
+                  if (value != null) {
+                    context.read<InspectionFormCubit>().setDecision(value);
+                  }
                 },
               ),
               const SizedBox(height: AppSpacing.md),
-              if (_decision == 'CONDITIONAL_APPROVAL') ...[
+              if (state.decision == 'CONDITIONAL_APPROVAL') ...[
                 AppField(
                   label: 'ملاحظة المتابعة | Follow-up note',
-                  controller: _followUp,
+                  controller: followUp,
                   maxLines: 3,
                 ),
                 const SizedBox(height: AppSpacing.md),
               ],
-              if (_decision == 'PARTIAL_REJECTION') ...[
+              if (state.decision == 'PARTIAL_REJECTION') ...[
                 AppField(
                   label: 'الكمية المرفوضة | Rejected quantity',
-                  controller: _rejectedQty,
+                  controller: rejectedQty,
                   keyboardType: TextInputType.numberWithOptions(decimal: true),
                 ),
                 const SizedBox(height: AppSpacing.md),
               ],
-              if (_decision == 'FULL_REJECTION' || _decision == 'PARTIAL_REJECTION') ...[
+              if (state.decision == 'FULL_REJECTION' || state.decision == 'PARTIAL_REJECTION') ...[
                 AppField(
                   label: 'سبب القرار | Decision reason',
-                  controller: _decisionReason,
+                  controller: decisionReason,
                   maxLines: 3,
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -433,15 +436,17 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
             ],
           ),
           const SizedBox(height: AppSpacing.xl),
-          Row(
+          Wrap(
+            spacing: AppSpacing.md,
+            runSpacing: AppSpacing.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               AppButton(
                 label: AppStrings.save,
-                icon: const Icon(Icons.check, size: 18),
-                loading: _saving,
-                onPressed: _saving ? null : _save,
+                icon: Icon(Icons.check, size: 18.r),
+                loading: state.saving,
+                onPressed: state.saving ? null : onSave,
               ),
-              const SizedBox(width: AppSpacing.md),
               AppButton(
                 style: AppButtonStyle.secondary,
                 label: AppStrings.cancel,
@@ -453,22 +458,21 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       ),
     );
   }
-
   Widget _resultsGrid(Map<String, List<TextEditingController>> source) {
     final params = source.keys.toList();
     return Column(
       children: [
-        if (_sampleCount > 1)
+        if (sampleCount > 1)
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.xs),
             child: Row(
               children: [
                 const Expanded(flex: 2, child: SizedBox()),
-                for (var i = 0; i < _sampleCount; i++)
+                for (var i = 0; i < sampleCount; i++)
                   Expanded(
                     flex: 3,
                     child: Text('عينة ${i + 1} | Sample #${i + 1}',
-                        style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+                        style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
                   ),
               ],
             ),
@@ -484,19 +488,19 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
                   child: Padding(
                     padding: const EdgeInsets.only(top: 10),
                     child: Text(param,
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                        style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.spMax)),
                   ),
                 ),
                 Expanded(
                   flex: 3,
-                  child: _sampleCount == 1
+                  child: sampleCount == 1
                       ? TextField(
                           controller: source[param]!.first,
                           decoration: const InputDecoration(isDense: true),
                         )
                       : Row(
                           children: [
-                            for (var i = 0; i < _sampleCount; i++) ...[
+                            for (var i = 0; i < sampleCount; i++) ...[
                               if (i > 0) const SizedBox(width: AppSpacing.md),
                               Expanded(
                                 child: TextField(
@@ -515,12 +519,10 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     );
   }
 }
-
 class _Card extends StatelessWidget {
   final String title;
   final List<Widget> children;
   const _Card({required this.title, required this.children});
-
   @override
   Widget build(BuildContext context) {
     return AppCard(

@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
-import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_field.dart';
-import '../../../di/service_locator.dart';
 import '../../../router/app_router.dart';
-import '../../auth/data/auth_repo.dart';
+import 'cubit/login_cubit.dart';
 
 /// Login screen (port of Web LoginScreen + controller.auth_login).
 class LoginScreen extends StatefulWidget {
@@ -23,8 +22,6 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _username = TextEditingController();
   final _password = TextEditingController();
-  var _busy = false;
-  String? _error;
   var _obscure = true;
 
   @override
@@ -35,35 +32,24 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<void> _submit() async {
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await getIt<AuthRepo>().login(
-        username: _username.text.trim(),
-        password: _password.text,
-      );
-      getIt<AuthGate>().updated();
-      if (mounted) context.go(AppRoutes.dashboard);
-    } on AppError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+    final ok = await context.read<LoginCubit>().submit(
+          username: _username.text.trim(),
+          password: _password.text,
+        );
+    if (!mounted || !ok) return;
+    context.go(AppRoutes.dashboard);
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<LoginCubit>().state;
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
+            constraints: BoxConstraints(maxWidth: 420.w),
             child: Card(
               child: Padding(
                 padding: const EdgeInsets.all(28),
@@ -71,7 +57,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(Icons.science, size: 48, color: AppColors.primary),
+                    Icon(Icons.science, size: 48.r, color: AppColors.primary),
                     const SizedBox(height: AppSpacing.md),
                     Text(
                       AppStrings.appTitle,
@@ -82,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     Text(
                       AppStrings.tagline,
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                      style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
                     ),
                     const SizedBox(height: AppSpacing.lg),
                     AppField(
@@ -102,20 +88,20 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: () => setState(() => _obscure = !_obscure),
                       ),
                     ),
-                    if (_error != null) ...[
+                    if (state.error != null) ...[
                       const SizedBox(height: AppSpacing.md),
                       Text(
-                        _error!,
+                        state.error!,
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.danger, fontSize: 13),
+                        style: TextStyle(color: AppColors.danger, fontSize: 13.spMax),
                       ),
                     ],
                     const SizedBox(height: AppSpacing.lg),
                     AppButton(
                       label: AppStrings.login,
                       expanded: true,
-                      loading: _busy,
-                      onPressed: _busy ? null : _submit,
+                      loading: state.busy,
+                      onPressed: state.busy ? null : _submit,
                     ),
                     const SizedBox(height: AppSpacing.md),
                     TextButton.icon(
@@ -128,12 +114,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           actions: [
                             TextButton(
                                 onPressed: () => Navigator.of(c).pop(),
-                                child: const Text('حسناً | OK')),
+                                child: Text(AppText.t('حسناً', 'OK'))),
                           ],
                         ),
                       ),
-                      icon: const Icon(Icons.support_agent, size: 18),
-                      label: const Text('الدعم | Support'),
+                      icon: Icon(Icons.support_agent, size: 18.r),
+                      label: Text(AppText.t('الدعم', 'Support')),
                     ),
                   ],
                 ),

@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../app/auth_gate.dart';
 import '../../../core/services/seed_service.dart';
@@ -202,7 +203,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
                 ),
                 child: Text(
                   path?.isNotEmpty == true ? path! : '—',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -216,7 +217,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
             AppButton(
               small: true,
               label: 'استيراد | Import',
-              icon: const Icon(Icons.import_export, size: 16),
+              icon: Icon(Icons.import_export, size: 16.r),
               loading: _busyKey == importKey,
               onPressed: _busyKey != null ? null : onImport,
             ),
@@ -231,14 +232,14 @@ class _MigrationPanelState extends State<MigrationPanel> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
+        Text(
           'استيراد من قاعدة بيانات خارجية | Import from External DB',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
           'وتستورد المستخدمين والفحوصات أو الخامات من قاعدة بيانات أخرى، لترقية البيانات إلى النسخة الجديدة من البرنامج.',
-          style: TextStyle(fontSize: 13, color: AppColors.textMuted),
+          style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
         ),
         const SizedBox(height: AppSpacing.lg),
         _row(

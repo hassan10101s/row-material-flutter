@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
@@ -9,7 +11,8 @@ import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../di/service_locator.dart';
-import '../data/lab_repo.dart';
+import 'cubit/run_test_cubit.dart';
+import 'cubit/run_test_state.dart';
 
 /// Run a sample test against an analysis (raw material or product).
 class RunTestTab extends StatefulWidget {
@@ -21,20 +24,9 @@ class RunTestTab extends StatefulWidget {
 }
 
 class _RunTestTabState extends State<RunTestTab> {
-  final _repo = getIt<LabRepo>();
-
-  List<Map<String, dynamic>> _analyses = [];
-  List<Map<String, dynamic>> _products = [];
-  int? _analysisId;
-  String _sourceType = 'raw_material';
-  String _sourceName = '';
-  int? _productId;
   final _entryCode = TextEditingController();
   final _sampleName = TextEditingController(text: 'Sample 1');
   final _resultText = TextEditingController();
-  bool _loading = true;
-  bool _running = false;
-  String? _error;
 
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
@@ -43,66 +35,26 @@ class _RunTestTabState extends State<RunTestTab> {
   }
 
   @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
   void dispose() {
     _entryCode.dispose();
     _sampleName.dispose();
     _resultText.dispose();
+    for (final c in _dynamicControllers.values) {
+      c.dispose();
+    }
+    _dynamicControllers.clear();
     super.dispose();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final analyses = await _repo.listAnalyses();
-      final products = await _repo.listProducts();
-      if (!mounted) return;
-      setState(() {
-        _analyses = analyses;
-        _products = products;
-        if (_analysisId == null && analyses.isNotEmpty) {
-          _analysisId = (analyses.first['id'] as num).toInt();
-        }
-        _loading = false;
-      });
-    } on AppError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    }
-  }
-
   Future<void> _lookupEntry() async {
-    final code = _entryCode.text.trim();
-    if (code.isEmpty) return;
-    final inspection = await _repo.resolveInspection(code);
+    final found = await context.read<RunTestCubit>().lookupEntry(_entryCode.text);
     if (!mounted) return;
-    if (inspection == null) {
-      AppFeedback.error(context, 'كود الدخول غير موجود | Entry code not found.');
-      return;
-    }
-    setState(() => _sourceName = '${inspection['material_name'] ?? ''}');
-  }
-
-  List<String> get _dynamicFields {
-    final selected = _analyses.where((a) => a['id'] == _analysisId).toList();
-    if (selected.isEmpty) return const [];
-    return [
-      for (final f in (selected.first['dynamic_fields'] as List?) ?? const <dynamic>[])
-        if ('$f'.trim().isNotEmpty && '$f'.trim().toLowerCase() != 'sample name') '$f',
-    ];
+    if (!found) AppFeedback.error(context, 'كود الدخول غير موجود | Entry code not found.');
   }
 
   Future<void> _run() async {
-    if (_analysisId == null) {
+    final state = context.read<RunTestCubit>().state;
+    if (state.analysisId == null) {
       AppFeedback.error(context, 'اختر التحليل | Select an analysis.');
       return;
     }
@@ -110,24 +62,14 @@ class _RunTestTabState extends State<RunTestTab> {
       AppFeedback.error(context, 'اسم العينة مطلوب | Sample name is required.');
       return;
     }
-    setState(() {
-      _running = true;
-      _error = null;
-    });
     try {
-      final result = await _repo.runSampleTest(
-        analysisId: _analysisId!,
-        sourceType: _sourceType,
-        sourceRefId: _sourceType == 'product' ? _productId : null,
-        sourceName: _sourceType == 'product'
-            ? '${_products.firstWhere((p) => p['id'] == _productId)['name'] ?? ''}'
-            : _sourceName,
-        sampleName: _sampleName.text.trim(),
-        resultText: _resultText.text.trim(),
-        dynamicValues: _dynamicValues,
-        user: _currentUserMap,
-        entryCode: _sourceType == 'raw_material' ? _entryCode.text.trim() : '',
-      );
+      final result = await context.read<RunTestCubit>().run(
+            sampleName: _sampleName.text.trim(),
+            resultText: _resultText.text.trim(),
+            dynamicValues: _dynamicValues,
+            entryCode: _entryCode.text.trim(),
+            user: _currentUserMap,
+          );
       if (!mounted) return;
       widget.onTestRun();
       await showDialog<void>(
@@ -138,8 +80,6 @@ class _RunTestTabState extends State<RunTestTab> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       if (mounted) AppFeedback.error(context, '$e');
-    } finally {
-      if (mounted) setState(() => _running = false);
     }
   }
 
@@ -155,17 +95,32 @@ class _RunTestTabState extends State<RunTestTab> {
             field: _dynamicControllers[field]!.text.trim(),
       };
 
+  List<String> _dynamicFieldsOf(RunTestState state) {
+    for (final a in state.analyses) {
+      if (a['id'] == state.analysisId) {
+        return [
+          for (final f in (a['dynamic_fields'] as List?) ?? const <dynamic>[])
+            if ('$f'.trim().isNotEmpty && '$f'.trim().toLowerCase() != 'sample name') '$f',
+        ];
+      }
+    }
+    return const [];
+  }
+
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<RunTestCubit>().state;
+    final cubit = context.read<RunTestCubit>();
+    final dynamicFields = _dynamicFieldsOf(state);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('تشغيل اختبار | Run a test', style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: AppSpacing.md),
-        if (_loading) ...[
+        if (state.loading) ...[
           const Center(child: CircularProgressIndicator()),
-        ] else if (_error != null) ...[
-          Text(_error!, style: TextStyle(color: AppColors.danger)),
+        ] else if (state.error != null) ...[
+          Text(state.error!, style: TextStyle(color: AppColors.danger)),
         ] else
           AppCard(
             padding: EdgeInsets.zero,
@@ -175,14 +130,14 @@ class _RunTestTabState extends State<RunTestTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   DropdownButtonFormField<int>(
-                    initialValue: _analysisId,
+                    initialValue: state.analysisId,
                     isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'التحليل | Analysis',
                       isDense: true,
                     ),
                     items: [
-                      for (final a in _analyses)
+                      for (final a in state.analyses)
                         DropdownMenuItem<int>(
                           value: (a['id'] as num).toInt(),
                           child: Text('${a['name']} (${a['unit'] ?? '%'})',
@@ -190,12 +145,12 @@ class _RunTestTabState extends State<RunTestTab> {
                         ),
                     ],
                     onChanged: (v) {
-                      if (v != null) setState(() => _analysisId = v);
+                      if (v != null) cubit.selectAnalysis(v);
                     },
                   ),
                   const SizedBox(height: AppSpacing.md),
                   DropdownButtonFormField<String>(
-                    initialValue: _sourceType,
+                    initialValue: state.sourceType,
                     isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'المصدر | Source',
@@ -207,11 +162,11 @@ class _RunTestTabState extends State<RunTestTab> {
                       DropdownMenuItem(value: 'product', child: Text('منتج | Product')),
                     ],
                     onChanged: (v) {
-                      if (v != null) setState(() => _sourceType = v);
+                      if (v != null) cubit.setSourceType(v);
                     },
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  if (_sourceType == 'raw_material') ...[
+                  if (state.sourceType == 'raw_material') ...[
                     Row(
                       children: [
                         Expanded(
@@ -230,27 +185,27 @@ class _RunTestTabState extends State<RunTestTab> {
                         ),
                       ],
                     ),
-                    if (_sourceName.isNotEmpty) ...[
+                    if (state.sourceName.isNotEmpty) ...[
                       const SizedBox(height: AppSpacing.sm),
-                      Text('المادة | Material: $_sourceName'),
+                      Text('المادة | Material: ${state.sourceName}'),
                     ],
                   ] else ...[
                     DropdownButtonFormField<int>(
-                      initialValue: _productId,
+                      initialValue: state.productId,
                       isExpanded: true,
                       decoration: const InputDecoration(
                         labelText: 'المنتج | Product',
                         isDense: true,
                       ),
                       items: [
-                        for (final p in _products)
+                        for (final p in state.products)
                           DropdownMenuItem<int>(
                             value: (p['id'] as num).toInt(),
                             child: Text('${p['name']}', overflow: TextOverflow.ellipsis),
                           ),
                       ],
                       onChanged: (v) {
-                        if (v != null) setState(() => _productId = v);
+                        if (v != null) cubit.selectProduct(v);
                       },
                     ),
                   ],
@@ -260,7 +215,7 @@ class _RunTestTabState extends State<RunTestTab> {
                     runSpacing: AppSpacing.md,
                     children: [
                       SizedBox(
-                        width: 260,
+                        width: 260.w,
                         child: TextField(
                           controller: _sampleName,
                           decoration: const InputDecoration(
@@ -270,7 +225,7 @@ class _RunTestTabState extends State<RunTestTab> {
                         ),
                       ),
                       SizedBox(
-                        width: 260,
+                        width: 260.w,
                         child: TextField(
                           controller: _resultText,
                           decoration: const InputDecoration(
@@ -281,9 +236,9 @@ class _RunTestTabState extends State<RunTestTab> {
                       ),
                     ],
                   ),
-                  if (_dynamicFields.isNotEmpty) ...[
+                  if (dynamicFields.isNotEmpty) ...[
                     const SizedBox(height: AppSpacing.md),
-                    for (final field in _dynamicFields)
+                    for (final field in dynamicFields)
                       Padding(
                         padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                         child: TextField(
@@ -298,9 +253,9 @@ class _RunTestTabState extends State<RunTestTab> {
                   const SizedBox(height: AppSpacing.lg),
                   AppButton(
                     label: AppStrings.runTest,
-                    icon: const Icon(Icons.play_arrow, size: 18),
-                    loading: _running,
-                    onPressed: _running ? null : _run,
+                    icon: Icon(Icons.play_arrow, size: 18.r),
+                    loading: state.running,
+                    onPressed: state.running ? null : _run,
                   ),
                 ],
               ),
@@ -327,7 +282,7 @@ class _ResultDialog extends StatelessWidget {
     return AlertDialog(
       title: const Text('نتيجة الاختبار | Test result'),
       content: SizedBox(
-        width: 480,
+        width: 480.w,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -348,12 +303,14 @@ class _ResultDialog extends StatelessWidget {
               ],
               if (rangeCheck != null) ...[
                 const SizedBox(height: AppSpacing.sm),
-                Row(
+                Wrap(
+                  spacing: AppSpacing.md,
+                  runSpacing: AppSpacing.sm,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text('الحدود | Range: '
                         '${rangeCheck['min'] ?? '...'} - ${rangeCheck['max'] ?? '...'} '
                         '${rangeCheck['unit'] ?? ''}'),
-                    const SizedBox(width: AppSpacing.md),
                     Text(
                       (rangeCheck['out_of_range'] == true)
                           ? 'خارج الحدود | Out of range'

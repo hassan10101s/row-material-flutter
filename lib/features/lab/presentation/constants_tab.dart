@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
@@ -9,55 +11,23 @@ import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../di/service_locator.dart';
 import '../data/lab_repo.dart';
+import 'cubit/constants_cubit.dart';
 
 /// Global formula constants management.
-class ConstantsTab extends StatefulWidget {
+class ConstantsTab extends StatelessWidget {
   const ConstantsTab({super.key});
 
-  @override
-  State<ConstantsTab> createState() => _ConstantsTabState();
-}
-
-class _ConstantsTabState extends State<ConstantsTab> {
-  final _repo = getIt<LabRepo>();
-  List<Map<String, dynamic>> _rows = [];
-  bool _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final rows = await _repo.listGlobalConstants();
-      if (!mounted) return;
-      setState(() {
-        _rows = rows;
-        _loading = false;
-      });
-    } on AppError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    }
-  }
-
-  Future<void> _openEditor([Map<String, dynamic>? constant]) async {
+  Future<void> _openEditor(BuildContext context, [Map<String, dynamic>? constant]) async {
+    final cubit = context.read<ConstantsCubit>();
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => _ConstantDialog(constant: constant),
     );
-    if (saved == true) _load();
+    if (saved == true) await cubit.load();
   }
 
-  Future<void> _delete(Map<String, dynamic> constant) async {
+  Future<void> _delete(BuildContext context, Map<String, dynamic> constant) async {
+    final cubit = context.read<ConstantsCubit>();
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -78,20 +48,20 @@ class _ConstantsTabState extends State<ConstantsTab> {
     );
     if (confirmed != true) return;
     try {
-      await _repo.deleteGlobalConstant((constant['id'] as num).toInt());
-      if (mounted) {
-        AppFeedback.success(context, 'تم الحذف | Deleted.');
-        _load();
-      }
+      await cubit.delete((constant['id'] as num).toInt());
+      if (!context.mounted) return;
+      AppFeedback.success(context, 'تم الحذف | Deleted.');
+      await cubit.load();
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.error(context, '$e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<ConstantsCubit>().state;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -102,17 +72,17 @@ class _ConstantsTabState extends State<ConstantsTab> {
             AppButton(
               small: true,
               label: 'إضافة ثابت | Add constant',
-              icon: const Icon(Icons.add, size: 16),
-              onPressed: () => _openEditor(),
+              icon: Icon(Icons.add, size: 16.r),
+              onPressed: () => _openEditor(context),
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        if (_loading) ...[
+        if (state.loading) ...[
           const Center(child: CircularProgressIndicator()),
-        ] else if (_error != null) ...[
-          Text(_error!, style: TextStyle(color: AppColors.danger)),
-        ] else if (_rows.isEmpty) ...[
+        ] else if (state.error != null) ...[
+          Text(state.error!, style: TextStyle(color: AppColors.danger)),
+        ] else if (state.rows.isEmpty) ...[
           const Text('لا توجد ثوابت | No constants'),
         ] else
           AppCard(
@@ -131,7 +101,7 @@ class _ConstantsTabState extends State<ConstantsTab> {
                     DataColumn(label: Text('')),
                   ],
                   rows: [
-                    for (final r in _rows)
+                    for (final r in state.rows)
                       DataRow(
                         cells: [
                           DataCell(Text('${r['name']}')),
@@ -147,14 +117,14 @@ class _ConstantsTabState extends State<ConstantsTab> {
                               IconButton(
                                 tooltip: AppStrings.edit,
                                 visualDensity: VisualDensity.compact,
-                                onPressed: () => _openEditor(r),
-                                icon: const Icon(Icons.edit_outlined, size: 18),
+                                onPressed: () => _openEditor(context, r),
+                                icon: Icon(Icons.edit_outlined, size: 18.r),
                               ),
                               IconButton(
                                 tooltip: AppStrings.delete,
                                 visualDensity: VisualDensity.compact,
-                                onPressed: () => _delete(r),
-                                icon: const Icon(Icons.delete_outline, size: 18),
+                                onPressed: () => _delete(context, r),
+                                icon: Icon(Icons.delete_outline, size: 18.r),
                               ),
                             ],
                           )),
@@ -235,7 +205,7 @@ class _ConstantDialogState extends State<_ConstantDialog> {
     return AlertDialog(
       title: Text(widget.constant == null ? 'إضافة ثابت | Add constant' : 'تعديل ثابت | Edit constant'),
       content: SizedBox(
-        width: 440,
+        width: 440.w,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -300,9 +270,9 @@ class _ConstantDialogState extends State<_ConstantDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
+              ? SizedBox(
+                  width: 18.r,
+                  height: 18.r,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : Text(AppStrings.save),

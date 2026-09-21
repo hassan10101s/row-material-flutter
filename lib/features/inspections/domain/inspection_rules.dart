@@ -1,3 +1,4 @@
+import '../../../core/constants/app_strings.dart';
 import '../../../core/domain/rules.dart';
 import '../../../core/utils/app_exceptions.dart';
 import 'inspection.dart';

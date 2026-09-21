@@ -1,5 +1,5 @@
-/// Small localization helper. The app UI is bilingual; screens call
-/// `t(ar, en)` where the active language decides which string to show.
+/// Small localization helper. The app UI shows one active language; screens
+/// call `t(ar, en)` where the active language decides which string to show.
 class AppText {
   static bool arabic = true;
 
@@ -21,6 +21,7 @@ class AppStrings {
   static String get lab => AppText.t('المختبر', 'Lab');
   static String get reports => AppText.t('التقارير', 'Reports');
   static String get settings => AppText.t('الإعدادات', 'Settings');
+  static String get reference => AppText.t('المرجعية', 'Reference');
   static String get login => AppText.t('تسجيل الدخول', 'Login');
   static String get logout => AppText.t('تسجيل الخروج', 'Logout');
   static String get welcome => AppText.t('أهلاً بك', 'Welcome');
@@ -41,6 +42,7 @@ class AppStrings {
   static String get shareWhatsapp => AppText.t('مشاركة واتساب', 'Share WhatsApp');
   static String get openPdfFolder => AppText.t('فتح مجلد PDF', 'Open PDF Folder');
   static String get preview => AppText.t('معاينة', 'Preview');
+  static String get toggleTheme => AppText.t('تبديل المظهر', 'Toggle theme');
 
   static String get inventory => AppText.t('المخزون', 'Inventory');
   static String get analyses => AppText.t('التحليلات', 'Analyses');

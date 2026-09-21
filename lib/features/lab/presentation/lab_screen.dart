@@ -1,10 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../di/service_locator.dart';
+import '../data/lab_repo.dart';
+import '../../reports/data/report_service.dart';
 import 'activity_tab.dart';
 import 'analyses_tab.dart';
 import 'constants_tab.dart';
+import 'cubit/activity_cubit.dart';
+import 'cubit/analyses_cubit.dart';
+import 'cubit/constants_cubit.dart';
+import 'cubit/inventory_cubit.dart';
+import 'cubit/lab_cubit.dart';
+import 'cubit/lab_reports_cubit.dart';
+import 'cubit/run_test_cubit.dart';
+import 'cubit/test_history_cubit.dart';
 import 'inventory_tab.dart';
 import 'lab_reports_tab.dart';
 import 'run_test_tab.dart';
@@ -19,32 +32,72 @@ class _LabTab {
 
 /// Lab center: inventory, analyses, run test, test history, constants,
 /// activity log and lab reports (port of Web LabView panels).
-class LabScreen extends StatefulWidget {
+class LabScreen extends StatelessWidget {
   const LabScreen({super.key});
 
   @override
-  State<LabScreen> createState() => _LabScreenState();
-}
-
-class _LabScreenState extends State<LabScreen> {
-  int _tab = 0;
-  int _historyTick = 0;
-
-  late final List<_LabTab> _tabs = [
-    _LabTab('المخزون | Inventory', Icons.inventory_2_outlined, const InventoryTab()),
-    _LabTab('التحليلات | Analyses', Icons.science_outlined, const AnalysesTab()),
-    _LabTab(
-        'تشغيل اختبار | Run Test',
-        Icons.play_circle_outline,
-        RunTestTab(onTestRun: () => setState(() => _historyTick++))),
-    _LabTab('سجل الفحوصات | Tests', Icons.history, TestHistoryTab(refreshTick: _historyTick)),
-    _LabTab('الثوابت | Constants', Icons.functions, const ConstantsTab()),
-    _LabTab('سجل النشاط | Activity', Icons.receipt_long_outlined, const ActivityTab()),
-    _LabTab('تقارير المختبر | Reports', Icons.description_outlined, const LabReportsTab()),
-  ];
-
-  @override
   Widget build(BuildContext context) {
+    final state = context.watch<LabCubit>().state;
+    final cubit = context.read<LabCubit>();
+    final repo = getIt<LabRepo>();
+    final tabs = <_LabTab>[
+      _LabTab(
+        AppText.t('المخزون', 'Inventory'),
+        Icons.inventory_2_outlined,
+        BlocProvider(
+          create: (_) => InventoryCubit(repo: repo)..load(),
+          child: const InventoryTab(),
+        ),
+      ),
+      _LabTab(
+        AppText.t('التحليلات', 'Analyses'),
+        Icons.science_outlined,
+        BlocProvider(
+          create: (_) => AnalysesCubit(repo: repo)..load(),
+          child: const AnalysesTab(),
+        ),
+      ),
+      _LabTab(
+        AppText.t('تشغيل اختبار', 'Run Test'),
+        Icons.play_circle_outline,
+        BlocProvider(
+          create: (_) => RunTestCubit(repo: repo)..load(),
+          child: RunTestTab(onTestRun: cubit.notifyTestRun),
+        ),
+      ),
+      _LabTab(
+        AppText.t('سجل الفحوصات', 'Tests'),
+        Icons.history,
+        BlocProvider(
+          create: (_) => TestHistoryCubit(repo: repo)..load(),
+          child: TestHistoryTab(refreshTick: state.historyTick),
+        ),
+      ),
+      _LabTab(
+        AppText.t('الثوابت', 'Constants'),
+        Icons.functions,
+        BlocProvider(
+          create: (_) => ConstantsCubit(repo: repo)..load(),
+          child: const ConstantsTab(),
+        ),
+      ),
+      _LabTab(
+        AppText.t('سجل النشاط', 'Activity'),
+        Icons.receipt_long_outlined,
+        BlocProvider(
+          create: (_) => ActivityCubit(repo: repo)..load(),
+          child: const ActivityTab(),
+        ),
+      ),
+      _LabTab(
+        AppText.t('تقارير المختبر', 'Reports'),
+        Icons.description_outlined,
+        BlocProvider(
+          create: (_) => LabReportsCubit(reports: getIt<ReportService>()),
+          child: const LabReportsTab(),
+        ),
+      ),
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -54,20 +107,20 @@ class _LabScreenState extends State<LabScreen> {
         ),
         const SizedBox(height: AppSpacing.md),
         SizedBox(
-          height: 46,
+          height: 46.h,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
             child: Row(
               children: [
-                for (var i = 0; i < _tabs.length; i++)
+                for (var i = 0; i < tabs.length; i++)
                   Padding(
                     padding: const EdgeInsets.only(left: AppSpacing.sm),
                     child: ChoiceChip(
-                      label: Text(_tabs[i].label),
-                      avatar: Icon(_tabs[i].icon, size: 18),
-                      selected: _tab == i,
-                      onSelected: (_) => setState(() => _tab = i),
+                      label: Text(tabs[i].label),
+                      avatar: Icon(tabs[i].icon, size: 18.r),
+                      selected: state.tab == i,
+                      onSelected: (_) => cubit.setTab(i),
                     ),
                   ),
               ],
@@ -77,7 +130,7 @@ class _LabScreenState extends State<LabScreen> {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.page),
-            child: IndexedStack(index: _tab, children: [for (final t in _tabs) t.child]),
+            child: IndexedStack(index: state.tab, children: [for (final t in tabs) t.child]),
           ),
         ),
       ],

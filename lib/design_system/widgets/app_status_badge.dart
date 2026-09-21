@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../tokens/app_colors.dart';
 
@@ -14,7 +15,7 @@ class AppStatusBadge extends StatelessWidget {
     final color = statusColorsPut(status);
     final bg = color.withValues(alpha: 0.12);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
       decoration: BoxDecoration(
         color: outline ? Colors.transparent : bg,
         borderRadius: BorderRadius.circular(999),
@@ -24,7 +25,7 @@ class AppStatusBadge extends StatelessWidget {
         statusLabel(status),
         style: TextStyle(
           color: color,
-          fontSize: 12,
+          fontSize: 12.spMax,
           fontWeight: FontWeight.w600,
         ),
       ),

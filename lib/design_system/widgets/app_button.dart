@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../tokens/app_colors.dart';
 
@@ -54,8 +55,8 @@ class AppButton extends StatelessWidget {
     }
     final child = loading
         ? SizedBox(
-            width: 18,
-            height: 18,
+            width: 18.r,
+            height: 18.r,
             child: CircularProgressIndicator(strokeWidth: 2, color: fg),
           )
         : Row(
@@ -64,13 +65,13 @@ class AppButton extends StatelessWidget {
             children: [
               if (icon != null) ...[
                 icon!,
-                const SizedBox(width: 8),
+                SizedBox(width: 8.w),
               ],
               if (label != null) Text(label!),
             ],
           );
     return SizedBox(
-      height: small ? 34 : 42,
+      height: (small ? 34 : 42).h,
       width: expanded ? double.infinity : null,
       child: ElevatedButton(
         onPressed: enabled ? onPressed : null,
@@ -81,9 +82,9 @@ class AppButton extends StatelessWidget {
           disabledBackgroundColor: bg.withValues(alpha: 0.5),
           disabledForegroundColor: fg.withValues(alpha: 0.9),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(small ? 8 : 10),
+            borderRadius: BorderRadius.circular((small ? 8 : 10).r),
           ),
-          padding: EdgeInsets.symmetric(horizontal: expanded ? 16 : 14),
+          padding: EdgeInsets.symmetric(horizontal: (expanded ? 16 : 14).w),
         ),
         child: child,
       ),

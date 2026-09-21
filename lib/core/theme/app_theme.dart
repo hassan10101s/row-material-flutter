@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../design_system/tokens/app_palette.dart';
 import '../../design_system/tokens/app_text_theme.dart';
@@ -38,7 +39,7 @@ class AppTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(12.r),
           side: BorderSide(color: palette.borderMuted),
         ),
       ),
@@ -54,11 +55,11 @@ class AppTheme {
         filled: true,
         fillColor: palette.surface,
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8.r),
           borderSide: BorderSide(color: palette.border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(8.r),
           borderSide: BorderSide(color: palette.primary, width: 1.6),
         ),
       ),
@@ -66,29 +67,29 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: palette.primary,
           foregroundColor: Colors.white,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           foregroundColor: palette.primary,
           side: BorderSide(color: palette.primary),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
         ),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         backgroundColor: palette.surfaceDeep,
         contentTextStyle: TextStyle(color: palette.textStrong),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10.r)),
       ),
       dialogTheme: DialogThemeData(
         backgroundColor: palette.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14.r)),
         titleTextStyle: TextStyle(
           color: palette.textStrong,
           fontFamily: AppTextTheme.cairoFontFamily,
-          fontSize: 18,
+          fontSize: 18.spMax,
           fontWeight: FontWeight.w700,
         ),
       ),
@@ -99,12 +100,12 @@ class AppTheme {
       dataTableTheme: DataTableThemeData(
         headingTextStyle: TextStyle(
           color: palette.textMuted,
-          fontSize: 13,
+          fontSize: 13.spMax,
           fontWeight: FontWeight.w600,
         ),
         dataTextStyle: TextStyle(
           color: palette.textStrong,
-          fontSize: 13.5,
+          fontSize: 13.5.spMax,
         ),
       ),
     );

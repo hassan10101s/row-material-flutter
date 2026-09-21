@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
@@ -11,72 +13,37 @@ import '../../../app/auth_gate.dart';
 import '../../../di/service_locator.dart';
 import '../core/formula_engine.dart' show inventoryUnits;
 import '../data/lab_repo.dart';
-
+import 'cubit/inventory_cubit.dart';
 /// Lab inventory tab (port of LabView inventory list + form).
-class InventoryTab extends StatefulWidget {
+class InventoryTab extends StatelessWidget {
   const InventoryTab({super.key});
-
-  @override
-  State<InventoryTab> createState() => _InventoryTabState();
-}
-
-class _InventoryTabState extends State<InventoryTab> {
-  final _repo = getIt<LabRepo>();
-  List<Map<String, dynamic>> _rows = [];
-  bool _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final rows = await _repo.listInventory();
-      if (!mounted) return;
-      setState(() {
-        _rows = rows;
-        _loading = false;
-      });
-    } on AppError catch (e) {
-      if (mounted) setState(() => _error = e.message);
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    }
-  }
-
-  Future<void> _openAdd() async {
+  Future<void> _openAdd(BuildContext context) async {
+    final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => const _InventoryDialog(),
     );
-    if (saved == true) _load();
+    if (saved == true) await cubit.load();
   }
-
-  Future<void> _openEdit(Map<String, dynamic> row) async {
+  Future<void> _openEdit(BuildContext context, Map<String, dynamic> row) async {
+    final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => _InventoryDialog(item: row),
     );
-    if (saved == true) _load();
+    if (saved == true) await cubit.load();
   }
-
-  Future<void> _openAdjust(Map<String, dynamic> row) async {
+  Future<void> _openAdjust(BuildContext context, Map<String, dynamic> row) async {
+    final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => _AdjustDialog(item: row),
     );
-    if (saved == true) _load();
+    if (saved == true) await cubit.load();
   }
-
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<InventoryCubit>().state;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -87,17 +54,17 @@ class _InventoryTabState extends State<InventoryTab> {
             AppButton(
               small: true,
               label: 'إضافة مادة | Add item',
-              icon: const Icon(Icons.add, size: 16),
-              onPressed: _openAdd,
+              icon: Icon(Icons.add, size: 16.r),
+              onPressed: () => _openAdd(context),
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        if (_loading) ...[
+        if (state.loading) ...[
           const Center(child: CircularProgressIndicator()),
-        ] else if (_error != null) ...[
-          Text(_error!, style: TextStyle(color: AppColors.danger)),
-        ] else if (_rows.isEmpty) ...[
+        ] else if (state.error != null) ...[
+          Text(state.error!, style: TextStyle(color: AppColors.danger)),
+        ] else if (state.rows.isEmpty) ...[
           const Text('لا توجد مواد | No inventory items'),
         ] else
           AppCard(
@@ -117,11 +84,13 @@ class _InventoryTabState extends State<InventoryTab> {
                     DataColumn(label: Text('')),
                   ],
                   rows: [
-                    for (final r in _rows)
+                    for (final r in state.rows)
                       DataRow(
                         cells: [
                           DataCell(Text('${r['name']}')),
-                          DataCell(Text(r['category'] == 'liquid' ? 'سائل | Liquid' : 'مسحوق | Powder')),
+                          DataCell(Text(r['category'] == 'liquid'
+                              ? 'سائل | Liquid'
+                              : 'مسحوق | Powder')),
                           DataCell(Text('${r['unit'] ?? ''}')),
                           DataCell(Text('${r['current_qty'] ?? 0}')),
                           DataCell(Text('${r['min_qty'] ?? 0}')),
@@ -132,14 +101,14 @@ class _InventoryTabState extends State<InventoryTab> {
                               IconButton(
                                 tooltip: 'تسوية الكمية | Adjust',
                                 visualDensity: VisualDensity.compact,
-                                onPressed: () => _openAdjust(r),
-                                icon: const Icon(Icons.swap_vert, size: 18),
+                                onPressed: () => _openAdjust(context, r),
+                                icon: Icon(Icons.swap_vert, size: 18.r),
                               ),
                               IconButton(
                                 tooltip: AppStrings.edit,
                                 visualDensity: VisualDensity.compact,
-                                onPressed: () => _openEdit(r),
-                                icon: const Icon(Icons.edit_outlined, size: 18),
+                                onPressed: () => _openEdit(context, r),
+                                icon: Icon(Icons.edit_outlined, size: 18.r),
                               ),
                             ],
                           )),
@@ -153,28 +122,24 @@ class _InventoryTabState extends State<InventoryTab> {
       ],
     );
   }
-
   Widget _statusCell(Map<String, dynamic> r) {
     final qty = (r['current_qty'] as num?)?.toDouble() ?? 0;
     final min = (r['min_qty'] as num?)?.toDouble() ?? 0;
     if (qty <= 0) {
-      return Text('نفد | Empty', style: TextStyle(color: AppColors.danger, fontSize: 12));
+      return Text('نفد | Empty', style: TextStyle(color: AppColors.danger, fontSize: 12.spMax));
     }
     if (qty < min) {
-      return Text('منخفض | Low', style: TextStyle(color: AppColors.partial, fontSize: 12));
+      return Text('منخفض | Low', style: TextStyle(color: AppColors.partial, fontSize: 12.spMax));
     }
-    return Text('متوفر | OK', style: TextStyle(color: AppColors.success, fontSize: 12));
+    return Text('متوفر | OK', style: TextStyle(color: AppColors.success, fontSize: 12.spMax));
   }
 }
-
 class _InventoryDialog extends StatefulWidget {
   final Map<String, dynamic>? item;
   const _InventoryDialog({this.item});
-
   @override
   State<_InventoryDialog> createState() => _InventoryDialogState();
 }
-
 class _InventoryDialogState extends State<_InventoryDialog> {
   final _repo = getIt<LabRepo>();
   late final TextEditingController _name =
@@ -188,7 +153,6 @@ class _InventoryDialogState extends State<_InventoryDialog> {
   late String _category = '${widget.item?['category'] ?? 'liquid'}';
   late String _unit = '${widget.item?['unit'] ?? 'mL'}';
   bool _saving = false;
-
   @override
   void dispose() {
     _name.dispose();
@@ -197,7 +161,6 @@ class _InventoryDialogState extends State<_InventoryDialog> {
     _description.dispose();
     super.dispose();
   }
-
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
@@ -228,13 +191,12 @@ class _InventoryDialogState extends State<_InventoryDialog> {
       if (mounted) AppFeedback.error(context, '$e');
     }
   }
-
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(widget.item == null ? 'إضافة مادة | Add item' : 'تعديل مادة | Edit item'),
       content: SizedBox(
-        width: 420,
+        width: 420.w,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -295,9 +257,9 @@ class _InventoryDialogState extends State<_InventoryDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
+              ? SizedBox(
+                  width: 18.r,
+                  height: 18.r,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : Text(AppStrings.save),
@@ -306,35 +268,29 @@ class _InventoryDialogState extends State<_InventoryDialog> {
     );
   }
 }
-
 class _AdjustDialog extends StatefulWidget {
   final Map<String, dynamic> item;
   const _AdjustDialog({required this.item});
-
   @override
   State<_AdjustDialog> createState() => _AdjustDialogState();
 }
-
 class _AdjustDialogState extends State<_AdjustDialog> {
   final _repo = getIt<LabRepo>();
   late final TextEditingController _delta =
       TextEditingController(text: '${widget.item['current_qty'] ?? 0}');
   final _reason = TextEditingController();
   bool _saving = false;
-
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
     if (user == null) return null;
     return {'id': user.id, 'username': user.username, 'full_name': user.fullName};
   }
-
   @override
   void dispose() {
     _delta.dispose();
     _reason.dispose();
     super.dispose();
   }
-
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
@@ -353,14 +309,13 @@ class _AdjustDialogState extends State<_AdjustDialog> {
       if (mounted) AppFeedback.error(context, '$e');
     }
   }
-
   @override
   Widget build(BuildContext context) {
     final current = '${widget.item['current_qty'] ?? 0}';
     return AlertDialog(
       title: const Text('تسوية الكمية | Adjust stock'),
       content: SizedBox(
-        width: 400,
+        width: 400.w,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -391,9 +346,9 @@ class _AdjustDialogState extends State<_AdjustDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
+              ? SizedBox(
+                  width: 18.r,
+                  height: 18.r,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : Text(AppStrings.save),

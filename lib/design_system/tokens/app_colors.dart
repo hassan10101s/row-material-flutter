@@ -24,10 +24,10 @@ class AppColors {
   static const Color lightBorderMuted = Color(0xFFE8ECF1);
 
   // Dark palette
-  static const Color darkBackground = Color(0xFF070B14);
-  static const Color darkSurface = Color(0xFF0F1626);
-  static const Color darkSurfaceSoft = Color(0xFF101A2E);
-  static const Color darkSurfaceDeep = Color(0xFF05070D);
+  static const Color darkBackground = Color(0xFF0F172A);
+  static const Color darkSurface = Color(0xFF1E293B);
+  static const Color darkSurfaceSoft = Color(0xFF1B2537);
+  static const Color darkSurfaceDeep = Color(0xFF0D1424);
   static const Color darkPrimary = Color(0xFF38BDF8);
   static const Color darkPrimaryDeep = Color(0xFF0EA5E9);
   static const Color darkAccent = Color(0xFF818CF8);
@@ -36,10 +36,10 @@ class AppColors {
   static const Color darkPartial = Color(0xFFFB923C);
   static const Color darkDanger = Color(0xFFF87171);
   static const Color darkInfo = Color(0xFF60A5FA);
-  static const Color darkTextStrong = Color(0xFFE7EDF5);
-  static const Color darkTextMuted = Color(0xFF8CA0B8);
-  static const Color darkBorder = Color(0xFF1E2B3F);
-  static const Color darkBorderMuted = Color(0xFF162238);
+  static const Color darkTextStrong = Color(0xFFF1F5F9);
+  static const Color darkTextMuted = Color(0xFF94A3B8);
+  static const Color darkBorder = Color(0xFF334155);
+  static const Color darkBorderMuted = Color(0xFF243147);
 
   // Active colors resolved by brightness
   static Color get background => brightness == Brightness.dark ? darkBackground : lightBackground;

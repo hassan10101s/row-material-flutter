@@ -1,7 +1,9 @@
+import 'package:equatable/equatable.dart';
+
 import '../../../core/utils/app_format.dart';
 
-/// StatusHistory entry for an inspection decision.
-class StatusHistoryRow {
+/// StatusHistoryRow — a versioned change entry for an inspection decision.
+class StatusHistoryRow extends Equatable {
   final int? id;
   final int inspectionId;
   final int version;
@@ -27,6 +29,21 @@ class StatusHistoryRow {
     required this.changedByName,
     required this.changedAt,
   });
+
+  @override
+  List<Object?> get props => [
+        id,
+        inspectionId,
+        version,
+        oldStatus,
+        newStatus,
+        changeReason,
+        followUpNote,
+        rejectedQuantity,
+        changedBy,
+        changedByName,
+        changedAt,
+      ];
 
   factory StatusHistoryRow.fromMap(Map<String, dynamic> m) => StatusHistoryRow(
         id: m['id'] as int?,

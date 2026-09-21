@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
@@ -6,50 +8,19 @@ import '../../../design_system/widgets/app_field.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../di/service_locator.dart';
 import '../../inspections/data/inspection_repo.dart';
+import '../../inspections/presentation/cubit/inspection_detail_cubit.dart';
+import '../../inspections/presentation/inspection_detail_screen.dart';
+import '../../reports/data/report_service.dart';
+import 'cubit/history_cubit.dart';
 
 /// Inspection history (port of Web HistoryView).
-class HistoryScreen extends StatefulWidget {
+class HistoryScreen extends StatelessWidget {
   const HistoryScreen({super.key});
 
   @override
-  State<HistoryScreen> createState() => _HistoryScreenState();
-}
-
-class _HistoryScreenState extends State<HistoryScreen> {
-  var _query = '';
-  List<Map<String, dynamic>> _rows = [];
-  var _loading = true;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final rows = await getIt<InspectionRepo>().list(query: _query);
-      if (!mounted) return;
-      setState(() {
-        _rows = rows;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = '$e';
-        _loading = false;
-      });
-    }
-  }
-
-  @override
   Widget build(BuildContext context) {
+    final state = context.watch<HistoryCubit>().state;
+    final cubit = context.read<HistoryCubit>();
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -61,23 +32,23 @@ class _HistoryScreenState extends State<HistoryScreen> {
           AppField(
             label: 'بحث | Search',
             hint: 'رمز الدخول، الخامة، المورد، رقم الشاحنة…',
-            onChanged: (v) => setState(() => _query = v),
+            onChanged: cubit.setQuery,
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (_loading)
+          if (state.loading)
             const Expanded(child: Center(child: CircularProgressIndicator()))
-          else if (_error != null)
+          else if (state.error != null)
             Expanded(
               child: AppEmptyState(
                 icon: Icons.error_outline,
                 title: 'تعذر التحميل',
-                subtitle: _error,
-                action: TextButton(onPressed: _load, child: const Text('إعادة المحاولة')),
+                subtitle: state.error,
+                action: TextButton(onPressed: cubit.load, child: const Text('إعادة المحاولة')),
               ),
             )
           else
             Expanded(
-              child: _rows.isEmpty
+              child: state.rows.isEmpty
                   ? const AppEmptyState(
                       icon: Icons.inventory_2_outlined,
                       title: 'لا توجد فحوصات بعد | No inspections yet',
@@ -98,7 +69,7 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                 DataColumn(label: Text('')),
                               ],
                               rows: [
-                                for (final r in _rows)
+                                for (final r in state.rows)
                                   DataRow(
                                     cells: [
                                       DataCell(Text('${r['entry_code'] ?? ''}')),
@@ -108,9 +79,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                       DataCell(AppStatusBadge('${r['decision_status'] ?? ''}')),
                                       DataCell(
                                         IconButton(
-                                          icon: const Icon(Icons.chevron_left, size: 18),
+                                          icon: Icon(Icons.chevron_left, size: 18.r),
                                           tooltip: 'عرض',
-                                          onPressed: () => _openDetail(r),
+                                          onPressed: () => _openDetail(context, r),
                                         ),
                                       ),
                                     ],
@@ -127,5 +98,22 @@ class _HistoryScreenState extends State<HistoryScreen> {
     );
   }
 
-  void _openDetail(Map<String, dynamic> row) {}
+  Future<void> _openDetail(BuildContext context, Map<String, dynamic> row) async {
+    final id = (row['id'] as num).toInt();
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => BlocProvider(
+          create: (c) => InspectionDetailCubit(
+            inspectionId: id,
+            repo: getIt<InspectionRepo>(),
+            reports: getIt<ReportService>(),
+          )..load(),
+          child: InspectionDetailScreen(inspectionId: id),
+        ),
+      ),
+    );
+    if (changed == true && context.mounted) {
+      context.read<HistoryCubit>().load();
+    }
+  }
 }

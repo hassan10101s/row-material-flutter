@@ -429,6 +429,36 @@ class DashboardRepo {
     }
     return cards;
   }
+
+  /// Dropdown options for materials and suppliers for dashboard filter bars.
+  Future<DashboardFilterOptions> filterOptions() async {
+    final db = await _db;
+    final matRows = await db.query('reference_materials',
+        columns: ['id', 'material_name', 'material_code'],
+        where: 'active = 1',
+        orderBy: 'material_name ASC');
+    final supRows = await db.rawQuery(
+        "SELECT DISTINCT supplier FROM inspections WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC");
+    return DashboardFilterOptions(
+      materials: [
+        {'id': 'ALL', 'name': 'جميع الخامات | All Materials'},
+        for (final r in matRows)
+          {'id': '${r['id']}', 'name': '${r['material_name']} (${r['material_code']})'}
+      ],
+      suppliers: [
+        {'id': 'ALL', 'name': 'جميع الموردين | All Suppliers'},
+        for (final r in supRows)
+          {'id': '${r['supplier']}', 'name': '${r['supplier']}'}
+      ],
+      statuses: const [
+        'ALL',
+        'APPROVED',
+        'CONDITIONAL_APPROVAL',
+        'PARTIAL_REJECTION',
+        'FULL_REJECTION',
+      ],
+    );
+  }
 }
 
 /// Dropdown options for dashboard filters.

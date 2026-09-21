@@ -1,16 +1,32 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/auth_gate.dart';
+import '../di/service_locator.dart';
+import '../features/auth/data/auth_repo.dart';
+import '../features/auth/presentation/cubit/login_cubit.dart';
+import '../features/auth/presentation/cubit/setup_cubit.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/presentation/setup_screen.dart';
+import '../features/dashboard/data/dashboard_repo.dart';
+import '../features/dashboard/presentation/cubit/dashboard_cubit.dart';
+import '../features/dashboard/presentation/cubit/dashboard_kpis_cubit.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
+import '../features/history/presentation/cubit/history_cubit.dart';
 import '../features/history/presentation/history_screen.dart';
+import '../features/inspections/data/inspection_repo.dart';
+import '../features/inspections/presentation/cubit/inspections_cubit.dart';
 import '../features/inspections/presentation/inspections_screen.dart';
+import '../features/lab/presentation/cubit/lab_cubit.dart';
 import '../features/lab/presentation/lab_screen.dart';
+import '../features/reference/data/reference_repo.dart';
+import '../features/reference/presentation/cubit/reference_cubit.dart';
 import '../features/reference/presentation/reference_screen.dart';
+import '../features/reports/data/report_service.dart';
+import '../features/reports/presentation/cubit/reports_cubit.dart';
 import '../features/reports/presentation/reports_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/shell/presentation/app_shell.dart';
@@ -38,40 +54,80 @@ class AppRouter {
     refreshListenable: _gate,
     redirect: _redirect,
     routes: [
-      GoRoute(path: AppRoutes.setup, builder: (c, s) => const SetupScreen()),
-      GoRoute(path: AppRoutes.login, builder: (c, s) => const LoginScreen()),
       GoRoute(
-        path: '/',
-        builder: (c, s) => AppShell(
-          child: _pageFor(s.uri.path),
+        path: AppRoutes.setup,
+        builder: (c, s) => BlocProvider(
+          create: (c) => SetupCubit(auth: getIt<AuthRepo>(), gate: _gate),
+          child: const SetupScreen(),
         ),
+      ),
+      GoRoute(
+        path: AppRoutes.login,
+        builder: (c, s) => BlocProvider(
+          create: (c) => LoginCubit(auth: getIt<AuthRepo>(), gate: _gate),
+          child: const LoginScreen(),
+        ),
+      ),
+      ShellRoute(
+        builder: (context, state, child) => AppShell(child: child),
         routes: [
           GoRoute(
-            path: 'dashboard',
-            builder: (c, s) => const DashboardScreen(),
+            path: AppRoutes.dashboard,
+            builder: (c, s) => MultiBlocProvider(
+              providers: [
+                BlocProvider(create: (c) => DashboardKpisCubit()),
+                BlocProvider(
+                  create: (c) => DashboardCubit(
+                    repo: getIt<DashboardRepo>(),
+                    kpis: c.read<DashboardKpisCubit>(),
+                  )..load(),
+                ),
+              ],
+              child: const DashboardScreen(),
+            ),
           ),
           GoRoute(
-            path: 'history',
-            builder: (c, s) => const HistoryScreen(),
+            path: AppRoutes.history,
+            builder: (c, s) => BlocProvider(
+              create: (c) =>
+                  HistoryCubit(repo: getIt<InspectionRepo>())..load(),
+              child: const HistoryScreen(),
+            ),
           ),
           GoRoute(
-            path: 'inspections',
-            builder: (c, s) => const InspectionsScreen(),
+            path: AppRoutes.inspections,
+            builder: (c, s) => BlocProvider(
+              create: (c) => InspectionsCubit(
+                repo: getIt<InspectionRepo>(),
+                reports: getIt<ReportService>(),
+              )..load(),
+              child: const InspectionsScreen(),
+            ),
           ),
           GoRoute(
-            path: 'reports',
-            builder: (c, s) => const ReportsScreen(),
+            path: AppRoutes.reports,
+            builder: (c, s) => BlocProvider(
+              create: (c) => ReportsCubit(repo: getIt<ReportService>()),
+              child: const ReportsScreen(),
+            ),
           ),
           GoRoute(
-            path: 'lab',
-            builder: (c, s) => const LabScreen(),
+            path: AppRoutes.lab,
+            builder: (c, s) => BlocProvider(
+              create: (c) => LabCubit(),
+              child: const LabScreen(),
+            ),
           ),
           GoRoute(
-            path: 'reference',
-            builder: (c, s) => const ReferenceScreen(),
+            path: AppRoutes.reference,
+            builder: (c, s) => BlocProvider(
+              create: (c) => ReferenceCubit(repo: getIt<ReferenceRepo>())
+                ..load(),
+              child: const ReferenceScreen(),
+            ),
           ),
           GoRoute(
-            path: 'settings',
+            path: AppRoutes.settings,
             builder: (c, s) => const SettingsScreen(),
           ),
         ],
@@ -95,26 +151,5 @@ class AppRouter {
     final adminOnly = path == AppRoutes.settings || path == AppRoutes.reference;
     if (adminOnly && !user.canSeeSettings) return AppRoutes.dashboard;
     return null;
-  }
-
-  static Widget _pageFor(String path) {
-    switch (path) {
-      case AppRoutes.dashboard:
-        return const DashboardScreen();
-      case AppRoutes.history:
-        return const HistoryScreen();
-      case AppRoutes.reports:
-        return const ReportsScreen();
-      case AppRoutes.lab:
-        return const LabScreen();
-      case AppRoutes.reference:
-        return const ReferenceScreen();
-      case AppRoutes.settings:
-        return const SettingsScreen();
-      case AppRoutes.inspections:
-        return const InspectionsScreen();
-      default:
-        return const DashboardScreen();
-    }
   }
 }

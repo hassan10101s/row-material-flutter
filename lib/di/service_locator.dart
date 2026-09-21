@@ -4,6 +4,7 @@ import 'package:get_it/get_it.dart';
 import '../app/auth_gate.dart';
 import '../core/app_paths.dart';
 import '../core/database/database_helper.dart';
+import '../core/locale/locale_service.dart';
 import '../core/security/local_secret.dart';
 import '../core/security/password_hash.dart';
 import '../core/services/seed_service.dart';
@@ -46,6 +47,8 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<SettingsRepo>(() => SettingsRepo(dbHelper: dbHelper, secret: secret))
     ..registerLazySingleton<ThemeService>(
         () => ThemeService(settings: getIt<SettingsRepo>()))
+    ..registerLazySingleton<LocaleService>(
+        () => LocaleService(settings: getIt<SettingsRepo>()))
     ..registerLazySingleton<ReferenceRepo>(() => ReferenceRepo(dbHelper: dbHelper))
     ..registerLazySingleton<InspectionRepo>(
         () => InspectionRepo(dbHelper: dbHelper, referenceRepo: getIt<ReferenceRepo>()))

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
@@ -25,20 +26,20 @@ class AppEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 56, color: AppColors.border),
+            Icon(icon, size: 56.r, color: AppColors.border),
             const SizedBox(height: AppSpacing.md),
             Text(
               title,
               textAlign: TextAlign.center,
               style: TextStyle(
-                  color: AppColors.textMuted, fontSize: 15, fontWeight: FontWeight.w600),
+                  color: AppColors.textMuted, fontSize: 15.spMax, fontWeight: FontWeight.w600),
             ),
             if (subtitle != null) ...[
               const SizedBox(height: AppSpacing.xs),
               Text(
                 subtitle!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
               ),
             ],
             if (action != null) ...[
@@ -66,13 +67,13 @@ class AppSectionHeader extends StatelessWidget {
       child: Row(
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 18, color: AppColors.primary),
+            Icon(icon, size: 18.r, color: AppColors.primary),
             const SizedBox(width: AppSpacing.sm),
           ],
           Expanded(
             child: Text(
               title,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
             ),
           ),
           ?trailing,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
@@ -59,9 +60,9 @@ class InfoItem extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+        Text(label, style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
         const SizedBox(height: AppSpacing.xxs),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        Text(value, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.spMax)),
       ],
     );
   }
@@ -134,7 +135,7 @@ class _DecisionDialogState extends State<DecisionDialog> {
     return AlertDialog(
       title: const Text('تحديث القرار | Update decision'),
       content: SizedBox(
-        width: 460,
+        width: 460.w,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -202,9 +203,9 @@ class _DecisionDialogState extends State<DecisionDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           child: _saving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
+? SizedBox(
+                  width: 18.r,
+                  height: 18.r,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : Text(AppStrings.save),

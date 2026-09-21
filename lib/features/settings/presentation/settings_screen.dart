@@ -1,9 +1,11 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
-
 import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/locale/locale_service.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -14,25 +16,25 @@ import '../../../di/service_locator.dart';
 import '../../../router/app_router.dart';
 import '../../auth/domain/user.dart';
 import '../../backup/data/backup_manager.dart';
-import '../../settings/data/settings_repo.dart';
+import 'cubit/database_settings_cubit.dart';
+import 'cubit/database_settings_state.dart';
+import 'cubit/general_settings_cubit.dart';
+import 'cubit/general_settings_state.dart';
+import 'cubit/users_cubit.dart';
 import 'migration_panel.dart';
-
+import '../data/settings_repo.dart';
 /// Settings (port of Web SettingsView: General / Export / Database / Users).
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
-
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
-
 class _SettingsScreenState extends State<SettingsScreen> {
   int _tab = 0;
-
   @override
   Widget build(BuildContext context) {
     final user = getIt<AuthGate>().currentUser;
     final canDev = user?.isDeveloper ?? false;
-
     return Padding(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -49,9 +51,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: AppSpacing.md),
           Expanded(
             child: switch (_tab) {
-              0 => const _GeneralPanel(),
-              1 => const _DatabasePanel(),
-              2 => const _UsersPanel(),
+              0 => BlocProvider(
+                  create: (c) =>
+                      GeneralSettingsCubit(repo: getIt<SettingsRepo>())..load(),
+                  child: const _GeneralPanel(),
+                ),
+              1 => BlocProvider(
+                  create: (c) =>
+                      DatabaseSettingsCubit(backup: getIt<BackupManager>()),
+                  child: const _DatabasePanel(),
+                ),
+              2 => BlocProvider(
+                  create: (c) => UsersCubit(repo: getIt<SettingsRepo>())..load(),
+                  child: const _UsersPanel(),
+                ),
               _ => const _ExportBackupsPanel(),
             },
           ),
@@ -60,18 +73,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
-
 class _SettingsTabs extends StatelessWidget {
   final int current;
   final bool devMode;
   final ValueChanged<int> onChange;
-
   const _SettingsTabs({
     required this.current,
     required this.devMode,
     required this.onChange,
   });
-
   @override
   Widget build(BuildContext context) {
     final tabs = <(String, String)>[
@@ -83,7 +93,6 @@ class _SettingsTabs extends StatelessWidget {
     }
     tabs.add(('المستخدمون | Users', 'إدارة الحسابات'));
     tabs.add(('التصدير | Export', 'نسخ احتياطية يدوية'));
-
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -103,104 +112,106 @@ class _SettingsTabs extends StatelessWidget {
     );
   }
 }
-
 class _GeneralPanel extends StatefulWidget {
   const _GeneralPanel();
-
   @override
   State<_GeneralPanel> createState() => _GeneralPanelState();
 }
-
 class _GeneralPanelState extends State<_GeneralPanel> {
-  final _dept = TextEditingController();
-  var _loading = true;
-  var _saving = false;
-
+  late final TextEditingController _dept;
   @override
   void initState() {
     super.initState();
-    _load();
+    _dept = TextEditingController(
+        text: context.read<GeneralSettingsCubit>().state.departmentLabel);
   }
-
-  Future<void> _load() async {
-    final repo = getIt<SettingsRepo>();
-    final label =
-        (await repo.getSettingValue('department_label'))?.trim().isNotEmpty == true
-            ? await repo.getSettingValue('department_label')
-            : 'Quality Assurance Department';
-    if (!mounted) return;
-    _dept.text = label ?? 'Quality Assurance Department';
-    setState(() => _loading = false);
+  @override
+  void dispose() {
+    _dept.dispose();
+    super.dispose();
   }
-
   Future<void> _save() async {
-    setState(() => _saving = true);
-    await getIt<SettingsRepo>()
-        .updateSettings({'department_label': _dept.text.trim()});
-    if (!mounted) return;
-    setState(() => _saving = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم الحفظ | Saved')),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      children: [
-        if (_loading)
-          const Padding(
-              padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
-        else ...[
-          const Text(
-            'إدارة عامة | General',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          AppField(
-            label: 'اسم القسم في التقارير | Department label',
-            controller: _dept,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          AppButton(
-            label: AppStrings.save,
-            loading: _saving,
-            onPressed: _saving ? null : _save,
-          ),
-        ],
-      ],
-    );
-  }
-}
-
-class _DatabasePanel extends StatefulWidget {
-  const _DatabasePanel();
-
-  @override
-  State<_DatabasePanel> createState() => _DatabasePanelState();
-}
-
-class _DatabasePanelState extends State<_DatabasePanel> {
-  var _busy = false;
-
-  Future<void> _export() async {
-    setState(() => _busy = true);
     try {
-      final result = await getIt<BackupManager>().exportDatabaseBackup();
+      await context.read<GeneralSettingsCubit>().save(_dept.text.trim());
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('تم إنشاء النسخة الاحتياطية | Backup created: ${result['path']}')),
+        const SnackBar(content: Text('تم الحفظ | Saved')),
       );
     } on AppError catch (e) {
-      if (mounted) _err(e.message);
+      if (mounted) _err(context, e.message);
     } catch (e) {
-      if (mounted) _err('$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) _err(context, '$e');
     }
   }
-
-  Future<void> _restore() async {
+  void _err(BuildContext context, String message) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message), backgroundColor: AppColors.danger));
+  }
+  @override
+  Widget build(BuildContext context) {
+    final state = context.watch<GeneralSettingsCubit>().state;
+    return BlocListener<GeneralSettingsCubit, GeneralSettingsState>(
+      listenWhen: (prev, curr) => prev.loading && !curr.loading,
+      listener: (context, state) => _dept.text = state.departmentLabel,
+      child: _Panel(
+        children: [
+          if (state.loading)
+            const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()))
+          else ...[
+            Text(
+              'إدارة عامة | General',
+              style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppField(
+              label: 'اسم القسم في التقارير | Department label',
+              controller: _dept,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'لغة الواجهة | Interface language',
+              style: TextStyle(fontSize: 14.spMax, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            DropdownButtonFormField<String>(
+              initialValue: getIt<LocaleService>().isArabic ? 'ar' : 'en',
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              items: const [
+                DropdownMenuItem(value: 'ar', child: Text('العربية')),
+                DropdownMenuItem(value: 'en', child: Text('English')),
+              ],
+              onChanged: (v) {
+                if (v == null) return;
+                getIt<LocaleService>().setLocale(Locale(v));
+              },
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppButton(
+              label: AppStrings.save,
+              loading: state.saving,
+              onPressed: state.saving ? null : _save,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+class _DatabasePanel extends StatelessWidget {
+  const _DatabasePanel();
+  Future<void> _export(BuildContext context) async {
+    final cubit = context.read<DatabaseSettingsCubit>();
+    if (cubit.state.busy) return;
+    await cubit.exportBackup();
+  }
+  Future<void> _restore(BuildContext context) async {
+    final cubit = context.read<DatabaseSettingsCubit>();
+    if (cubit.state.busy) return;
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['db'],
@@ -208,32 +219,23 @@ class _DatabasePanelState extends State<_DatabasePanel> {
     );
     final path = picked?.files.single.path;
     if (path == null) return;
-
-    final confirm = await _confirmRestore();
+    if (!context.mounted) return;
+    final confirm = await _confirmRestore(context);
     if (!confirm) return;
-
-    setState(() => _busy = true);
-    try {
-      await getIt<BackupManager>().restoreDatabaseBackup(path);
+    await cubit.restoreBackup(path);
+    if (!context.mounted) return;
+    if (cubit.state.error == null) {
       getIt<AuthGate>().auth.logout();
       getIt<AuthGate>().updated();
-      if (mounted) {
-        context.go(AppRoutes.login);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('تمت الاستعادة — سيتم تسجيل الخروج الآن | Restored, logging out')),
-        );
-      }
-    } on AppError catch (e) {
-      if (mounted) _err(e.message);
-    } catch (e) {
-      if (mounted) _err('$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      context.go(AppRoutes.login);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text('تمت الاستعادة — سيتم تسجيل الخروج الآن | Restored, logging out')),
+      );
     }
   }
-
-  Future<bool> _confirmRestore() async {
+  Future<bool> _confirmRestore(BuildContext context) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -244,64 +246,79 @@ class _DatabasePanelState extends State<_DatabasePanel> {
             'The current database will be replaced with the backup, after an automatic safety copy. '
             'You will be logged out.'),
         actions: [
-          TextButton(onPressed: () => Navigator.of(c).pop(false), child: const Text('إلغاء | Cancel')),
-          FilledButton(onPressed: () => Navigator.of(c).pop(true), child: const Text('استعادة | Restore')),
+          TextButton(
+              onPressed: () => Navigator.of(c).pop(false),
+              child: const Text('إلغاء | Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.of(c).pop(true),
+              child: const Text('استعادة | Restore')),
         ],
       ),
     );
     return result ?? false;
   }
-
-  void _err(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message), backgroundColor: AppColors.danger));
-  }
-
   @override
   Widget build(BuildContext context) {
-    return _Panel(
-      children: [
-        const Text(
-          'قاعدة البيانات | Database',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Text(
-          'نسخة احتياطية واستعادة قاعدة البيانات. تشمل الاستعادة ترقية تلقائية لهيكل النسخة القديمة.',
-          style: TextStyle(fontSize: 13, color: AppColors.textMuted),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        Wrap(
-          spacing: AppSpacing.md,
-          runSpacing: AppSpacing.md,
-          children: [
-            AppButton(
-              label: AppStrings.backup,
-              icon: const Icon(Icons.save_alt, size: 16),
-              loading: _busy,
-              onPressed: _busy ? null : _export,
-            ),
-            AppButton(
-              label: AppStrings.restore,
-              style: AppButtonStyle.secondary,
-              icon: const Icon(Icons.restore, size: 16),
-              loading: _busy,
-              onPressed: _busy ? null : _restore,
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        const Divider(),
-        const SizedBox(height: AppSpacing.lg),
-        const MigrationPanel(),
-      ],
+    final state = context.watch<DatabaseSettingsCubit>().state;
+    return BlocListener<DatabaseSettingsCubit, DatabaseSettingsState>(
+      listenWhen: (prev, curr) =>
+          (curr.error != null && curr.error != prev.error) ||
+          (curr.lastPath != null && curr.lastPath != prev.lastPath),
+      listener: (context, state) {
+        if (state.error != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(state.error!), backgroundColor: AppColors.danger),
+          );
+        } else if (state.lastPath != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+                content:
+                    Text('تم إنشاء النسخة الاحتياطية | Backup created: ${state.lastPath}')),
+          );
+        }
+      },
+      child: _Panel(
+        children: [
+          Text(
+            'قاعدة البيانات | Database',
+            style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            'نسخة احتياطية واستعادة قاعدة البيانات. تشمل الاستعادة ترقية تلقائية لهيكل النسخة القديمة.',
+            style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: AppSpacing.md,
+            runSpacing: AppSpacing.md,
+            children: [
+              AppButton(
+                label: AppStrings.backup,
+                icon: Icon(Icons.save_alt, size: 16.r),
+                loading: state.busy,
+                onPressed: state.busy ? null : () => _export(context),
+              ),
+              AppButton(
+                label: AppStrings.restore,
+                style: AppButtonStyle.secondary,
+                icon: Icon(Icons.restore, size: 16.r),
+                loading: state.busy,
+                onPressed: state.busy ? null : () => _restore(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          const Divider(),
+          const SizedBox(height: AppSpacing.lg),
+          const MigrationPanel(),
+        ],
+      ),
     );
   }
 }
-
 class _ExportBackupsPanel extends StatelessWidget {
   const _ExportBackupsPanel();
-
   @override
   Widget build(BuildContext context) {
     return const AppEmptyState(
@@ -311,31 +328,16 @@ class _ExportBackupsPanel extends StatelessWidget {
     );
   }
 }
-
 class _UsersPanel extends StatefulWidget {
   const _UsersPanel();
-
   @override
   State<_UsersPanel> createState() => _UsersPanelState();
 }
-
 class _UsersPanelState extends State<_UsersPanel> {
-  List<User> _users = [];
-  var _loading = true;
-  String? _error;
-
   final _username = TextEditingController();
   final _fullName = TextEditingController();
   final _password = TextEditingController();
-  var _role = 'Lab User';
-  var _busy = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
+  String _role = 'Lab User';
   @override
   void dispose() {
     _username.dispose();
@@ -343,48 +345,26 @@ class _UsersPanelState extends State<_UsersPanel> {
     _password.dispose();
     super.dispose();
   }
-
-  Future<void> _load() async {
-    try {
-      final rows = await getIt<SettingsRepo>().listUsers();
-      if (!mounted) return;
-      setState(() {
-        _users = rows;
-        _loading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = '$e';
-        _loading = false;
-      });
-    }
-  }
-
   Future<void> _create() async {
-    setState(() => _busy = true);
-    try {
-      await getIt<SettingsRepo>().createUser(
-        username: _username.text.trim(),
-        fullName: _fullName.text.trim(),
-        password: _password.text,
-        role: _role,
-      );
+    final cubit = context.read<UsersCubit>();
+    final ok = await cubit.createUser(
+      username: _username.text.trim(),
+      fullName: _fullName.text.trim(),
+      password: _password.text,
+      role: _role,
+    );
+    if (!mounted) return;
+    if (ok) {
       _username.clear();
       _fullName.clear();
       _password.clear();
-      await _load();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تمت الإضافة | User created')));
-      }
-    } catch (e) {
-      if (mounted) _err('$e');
-    } finally {
-      if (mounted) setState(() => _busy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تمت الإضافة | User created')));
+    } else if (cubit.state.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(cubit.state.error!), backgroundColor: AppColors.danger));
     }
   }
-
   Future<void> _delete(User user) async {
     if (user.isDeveloper) return;
     final ok = await showDialog<bool>(
@@ -402,41 +382,37 @@ class _UsersPanelState extends State<_UsersPanel> {
         ],
       ),
     );
-    if (ok != true) return;
-    try {
-      await getIt<SettingsRepo>().deleteUser(user.id!);
-      await _load();
-    } catch (e) {
-      if (mounted) _err('$e');
+    if (ok != true || !mounted) return;
+    final cubit = context.read<UsersCubit>();
+    final deleted = await cubit.deleteUser(user.id!);
+    if (!mounted || deleted) return;
+    if (cubit.state.error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(cubit.state.error!), backgroundColor: AppColors.danger));
     }
   }
-
-  void _err(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message), backgroundColor: AppColors.danger));
-  }
-
   @override
   Widget build(BuildContext context) {
+    final state = context.watch<UsersCubit>().state;
     final dev = getIt<AuthGate>().currentUser?.isDeveloper ?? false;
     return _Panel(
       children: [
-        const Text(
+        Text(
           'المستخدمون | Users',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+          style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: AppSpacing.md),
-        if (_loading)
+        if (state.loading)
           const Center(child: CircularProgressIndicator())
-        else if (_error != null)
-          Text(_error!, style: TextStyle(color: AppColors.danger))
+        else if (state.error != null)
+          Text(state.error!, style: TextStyle(color: AppColors.danger))
         else
           Card(
             child: Padding(
               padding: const EdgeInsets.all(8),
               child: Column(
                 children: [
-                  for (final u in _users)
+                  for (final u in state.users)
                     ListTile(
                       dense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 8),
@@ -447,16 +423,18 @@ class _UsersPanelState extends State<_UsersPanel> {
                                 ? AppColors.primary
                                 : AppColors.borderMuted,
                         child: Text(
-                          u.username.isEmpty ? '?' : u.username.substring(0, 1).toUpperCase(),
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          u.username.isEmpty
+                              ? '?'
+                              : u.username.substring(0, 1).toUpperCase(),
+                          style: TextStyle(color: Colors.white, fontSize: 14.spMax),
                         ),
                       ),
                       title: Text('${u.fullName} — ${u.role}'),
                       subtitle: Text('@${u.username}'),
                       trailing: u.isDeveloper
-                          ? Icon(Icons.lock, size: 16, color: AppColors.warning)
+                          ? Icon(Icons.lock, size: 16.r, color: AppColors.warning)
                           : IconButton(
-                              icon: const Icon(Icons.delete_outline, size: 18),
+                              icon: Icon(Icons.delete_outline, size: 18.r),
                               onPressed: () => _delete(u),
                             ),
                     ),
@@ -466,20 +444,26 @@ class _UsersPanelState extends State<_UsersPanel> {
           ),
         if (dev) ...[
           const SizedBox(height: AppSpacing.lg),
-          const Text(
+          Text(
             'إضافة مستخدم | Add user',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: AppSpacing.md),
           Wrap(
             spacing: AppSpacing.md,
             runSpacing: AppSpacing.md,
             children: [
-              SizedBox(width: 220, child: AppField(label: 'المستخدم | Username', controller: _username)),
-              SizedBox(width: 220, child: AppField(label: 'الاسم الكامل | Full name', controller: _fullName)),
-              SizedBox(width: 180, child: AppField(label: 'كلمة المرور | Password', controller: _password, obscure: true)),
               SizedBox(
-                width: 180,
+                  width: 220.w,
+                  child: AppField(label: 'المستخدم | Username', controller: _username)),
+              SizedBox(
+                  width: 220.w,
+                  child: AppField(label: 'الاسم الكامل | Full name', controller: _fullName)),
+              SizedBox(
+                  width: 180.w,
+                  child: AppField(label: 'كلمة المرور | Password', controller: _password, obscure: true)),
+              SizedBox(
+                width: 180.w,
                 child: DropdownButtonFormField<String>(
                   initialValue: _role,
                   decoration: const InputDecoration(labelText: 'الدور | Role', isDense: true),
@@ -492,11 +476,11 @@ class _UsersPanelState extends State<_UsersPanel> {
                 ),
               ),
               SizedBox(
-                height: 42,
+                height: 42.h,
                 child: AppButton(
                   label: AppStrings.save,
-                  loading: _busy,
-                  onPressed: _busy ? null : _create,
+                  loading: state.busy,
+                  onPressed: state.busy ? null : _create,
                 ),
               ),
             ],
@@ -506,11 +490,9 @@ class _UsersPanelState extends State<_UsersPanel> {
     );
   }
 }
-
 class _Panel extends StatelessWidget {
   final List<Widget> children;
   const _Panel({required this.children});
-
   @override
   Widget build(BuildContext context) {
     return Card(

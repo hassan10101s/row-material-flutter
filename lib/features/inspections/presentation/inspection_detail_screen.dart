@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import 'dart:convert';
-
+import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
-import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
@@ -11,95 +12,44 @@ import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
-import '../../../app/auth_gate.dart';
 import '../../../di/service_locator.dart';
-import '../../reports/data/report_service.dart';
-import '../data/inspection_repo.dart';
+import 'cubit/inspection_detail_cubit.dart';
 import 'inspection_widgets.dart';
-
 /// Inspection detail: results vs reference, status history, decision
 /// update and PDF export.
-class InspectionDetailScreen extends StatefulWidget {
+class InspectionDetailScreen extends StatelessWidget {
   final int inspectionId;
   const InspectionDetailScreen({super.key, required this.inspectionId});
-
-  @override
-  State<InspectionDetailScreen> createState() => _InspectionDetailScreenState();
-}
-
-class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
-  final _repo = getIt<InspectionRepo>();
-  final _reports = getIt<ReportService>();
-
-  Map<String, dynamic>? _inspection;
-  List<Map<String, dynamic>> _history = [];
-  bool _loading = true;
-  String? _error;
-  String _busy = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _exportPdf(BuildContext context, String kind) async {
     try {
-      final inspection = await _repo.getById(widget.inspectionId);
-      if (!mounted) return;
-      setState(() {
-        _inspection = inspection;
-        _history = List<Map<String, dynamic>>.from(inspection['status_history'] ?? []);
-        _loading = false;
-      });
+      final path = await context.read<InspectionDetailCubit>().exportPdf(kind);
+      if (!context.mounted) return;
+      AppFeedback.success(context, 'تم التصدير | Exported: $path');
     } on AppError catch (e) {
-      if (mounted) setState(() => _error = e.message);
+      if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+      if (context.mounted) AppFeedback.error(context, '$e');
     }
   }
-
-  Future<void> _exportPdf(String kind) async {
-    if (_busy.isNotEmpty) return;
-    setState(() => _busy = kind);
-    try {
-      final doc = kind == 'label'
-          ? await _reports.sampleLabelPdf(widget.inspectionId)
-          : await _reports.inspectionReport(widget.inspectionId);
-      final date = parseIsoDate('${_inspection?['inspection_date'] ?? ''}');
-      final file = await _reports.saveReport(doc, date: date);
-      if (!mounted) return;
-      AppFeedback.success(context, 'تم التصدير | Exported: ${file.path}');
-    } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
-    } catch (e) {
-      if (mounted) AppFeedback.error(context, '$e');
-    } finally {
-      if (mounted) setState(() => _busy = '');
-    }
-  }
-
-  Future<void> _openDecisionDialog() async {
-    final inspection = _inspection;
+  Future<void> _openDecisionDialog(BuildContext context) async {
+    final cubit = context.read<InspectionDetailCubit>();
+    final inspection = context.watch<InspectionDetailCubit>().state.inspection;
     if (inspection == null) return;
     final saved = await showDialog<bool>(
       context: context,
       builder: (_) => DecisionDialog(
-        inspectionId: widget.inspectionId,
+        inspectionId: inspectionId,
         inspection: inspection,
       ),
     );
     if (saved == true) {
-      await _load();
-      if (mounted) AppFeedback.success(context, 'تم تحديث القرار | Decision updated.');
+      await cubit.load();
+      if (context.mounted) {
+        AppFeedback.success(context, 'تم تحديث القرار | Decision updated.');
+      }
     }
   }
-
-  Future<void> _delete() async {
+  Future<void> _delete(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -119,35 +69,35 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
+    if (confirmed != true || !context.mounted) return;
     try {
-      await _repo.delete(widget.inspectionId);
-      if (mounted) {
-        AppFeedback.success(context, 'تم الحذف | Deleted.');
-        Navigator.of(context).pop(true);
-      }
+      await context.read<InspectionDetailCubit>().delete();
+      if (!context.mounted) return;
+      AppFeedback.success(context, 'تم الحذف | Deleted.');
+      Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.error(context, '$e');
     }
   }
-
   @override
   Widget build(BuildContext context) {
-    final inspection = _inspection;
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
+    final state = context.watch<InspectionDetailCubit>().state;
+    final cubit = context.read<InspectionDetailCubit>();
+    final inspection = state.inspection;
+    if (state.loading) return const Center(child: CircularProgressIndicator());
+    if (state.error != null) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(_error!, style: TextStyle(color: AppColors.danger)),
+            Text(state.error!, style: TextStyle(color: AppColors.danger)),
             const SizedBox(height: AppSpacing.md),
             AppButton(
               style: AppButtonStyle.secondary,
               label: 'إعادة المحاولة | Retry',
-              onPressed: _load,
+              onPressed: cubit.load,
             ),
           ],
         ),
@@ -156,48 +106,68 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
     if (inspection == null) {
       return const Center(child: Text('غير موجود | Not found'));
     }
-
     final samples = _sampleLabels(inspection);
     final user = getIt<AuthGate>().currentUser;
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(AppSpacing.page),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('${inspection['material_name']}',
-                        style: Theme.of(context).textTheme.headlineSmall),
-                    Text(
-                      '${inspection['entry_code']} — ${inspection['material_code']}',
-                      style: TextStyle(color: AppColors.textMuted),
-                    ),
-                  ],
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final title = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${inspection['material_name']}',
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.headlineSmall),
+                  Text(
+                    '${inspection['entry_code']} — ${inspection['material_code']}',
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: AppColors.textMuted),
+                  ),
+                ],
+              );
+              final actions = <Widget>[
+                AppStatusBadge('${inspection['decision_status']}'),
+                AppButton(
+                  style: AppButtonStyle.pdf,
+                  label: AppStrings.exportPdf,
+                  icon: Icon(Icons.picture_as_pdf, size: 18.r),
+                  loading: state.busy == 'report',
+                  onPressed: state.busy.isEmpty ? () => _exportPdf(context, 'report') : null,
                 ),
-              ),
-              AppStatusBadge('${inspection['decision_status']}'),
-              const SizedBox(width: AppSpacing.md),
-              AppButton(
-                style: AppButtonStyle.pdf,
-                label: AppStrings.exportPdf,
-                icon: const Icon(Icons.picture_as_pdf, size: 18),
-                loading: _busy == 'report',
-                onPressed: _busy.isEmpty ? () => _exportPdf('report') : null,
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              AppButton(
-                style: AppButtonStyle.secondary,
-                label: 'ملصق | Label',
-                icon: const Icon(Icons.label_outline, size: 18),
-                loading: _busy == 'label',
-                onPressed: _busy.isEmpty ? () => _exportPdf('label') : null,
-              ),
-            ],
+                AppButton(
+                  style: AppButtonStyle.secondary,
+                  label: 'ملصق | Label',
+                  icon: Icon(Icons.label_outline, size: 18.r),
+                  loading: state.busy == 'label',
+                  onPressed: state.busy.isEmpty ? () => _exportPdf(context, 'label') : null,
+                ),
+              ];
+              if (constraints.maxWidth >= 760) {
+                return Row(
+                  children: [
+                    Expanded(child: title),
+                    const SizedBox(width: AppSpacing.md),
+                    ...actions,
+                  ],
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  title,
+                  const SizedBox(height: AppSpacing.md),
+                  Wrap(
+                    spacing: AppSpacing.md,
+                    runSpacing: AppSpacing.sm,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: actions,
+                  ),
+                ],
+              );
+            },
           ),
           const SizedBox(height: AppSpacing.xl),
           Wrap(
@@ -244,26 +214,28 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
             samples: samples,
             numeric: true,
           ),
-          if (_history.isNotEmpty) ...[
+          if (state.history.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.md),
-            HistoryCard(history: _history),
+            HistoryCard(history: state.history),
           ],
           const SizedBox(height: AppSpacing.xl),
-          Row(
+          Wrap(
+            spacing: AppSpacing.md,
+            runSpacing: AppSpacing.sm,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               AppButton(
                 style: AppButtonStyle.accent,
                 label: 'تحديث القرار | Update decision',
-                icon: const Icon(Icons.gavel, size: 18),
-                onPressed: (user?.canEditInspections ?? false) ? _openDecisionDialog : null,
+                icon: Icon(Icons.gavel, size: 18.r),
+                onPressed: (user?.canEditInspections ?? false) ? () => _openDecisionDialog(context) : null,
               ),
-              const SizedBox(width: AppSpacing.md),
               if (user?.canEditUsers ?? false)
                 AppButton(
                   style: AppButtonStyle.danger,
                   label: AppStrings.delete,
-                  icon: const Icon(Icons.delete_outline, size: 18),
-                  onPressed: _delete,
+                  icon: Icon(Icons.delete_outline, size: 18.r),
+                  onPressed: () => _delete(context),
                 ),
             ],
           ),
@@ -271,8 +243,7 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
       ),
     );
   }
-
-  List<String> _sampleLabels(Map<String, dynamic> inspection) {
+  static List<String> _sampleLabels(Map<String, dynamic> inspection) {
     final names = _jsonList(inspection['sample_names']);
     final labels = names.isEmpty ? <String>['Result'] : [for (final n in names) '$n'];
     while (labels.length < 3) {
@@ -280,13 +251,11 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
     }
     return labels;
   }
-
-  Map<String, dynamic> _asMap(dynamic value) {
+  static Map<String, dynamic> _asMap(dynamic value) {
     if (value is Map) return Map<String, dynamic>.from(value);
     return const {};
   }
-
-  List<dynamic> _jsonList(dynamic value) {
+  static List<dynamic> _jsonList(dynamic value) {
     if (value == null) return const [];
     if (value is List) return value;
     try {
@@ -296,7 +265,6 @@ class _InspectionDetailScreenState extends State<InspectionDetailScreen> {
     }
   }
 }
-
 /// Results vs reference table.
 class ResultsCard extends StatelessWidget {
   final String title;
@@ -304,7 +272,6 @@ class ResultsCard extends StatelessWidget {
   final Map<String, dynamic> results;
   final List<String> samples;
   final bool numeric;
-
   const ResultsCard({
     super.key,
     required this.title,
@@ -313,7 +280,6 @@ class ResultsCard extends StatelessWidget {
     required this.samples,
     required this.numeric,
   });
-
   @override
   Widget build(BuildContext context) {
     if (reference.isEmpty) return const SizedBox.shrink();
@@ -336,22 +302,22 @@ class ResultsCard extends StatelessWidget {
               },
               defaultVerticalAlignment: TableCellVerticalAlignment.middle,
               children: [
-                const TableRow(
+                TableRow(
                   children: [
                     Padding(
                       padding: EdgeInsets.symmetric(vertical: 6),
                       child: Text('الخاصية | Parameter',
-                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.spMax)),
                     ),
                     Padding(
                       padding: EdgeInsets.symmetric(vertical: 6),
                       child: Text('المرجعية | Reference',
-                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.spMax)),
                     ),
                     Padding(
                       padding: EdgeInsets.symmetric(vertical: 6),
                       child: Text('النتيجة | Result',
-                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.spMax)),
                     ),
                     SizedBox(),
                   ],
@@ -367,7 +333,6 @@ class ResultsCard extends StatelessWidget {
       ),
     );
   }
-
   List<Widget> _rowFor(String param) {
     final ref = '${reference[param] ?? ''}';
     dynamic value = results[param];
@@ -376,21 +341,20 @@ class ResultsCard extends StatelessWidget {
         : value == null || '$value'.trim().isEmpty
             ? <dynamic>[]
             : <dynamic>[value];
-
     final cells = <Widget>[
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Text(param, style: const TextStyle(fontSize: 13)),
+        child: Text(param, style: TextStyle(fontSize: 13.spMax)),
       ),
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Text(ref,
-            style: TextStyle(color: AppColors.textMuted, fontSize: 13)),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax)),
       ),
       Padding(
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: values.isEmpty
-            ? Text('—', style: TextStyle(color: AppColors.textMuted, fontSize: 13))
+            ? Text('—', style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax))
             : Wrap(
                 spacing: AppSpacing.lg,
                 children: [
@@ -400,8 +364,8 @@ class ResultsCard extends StatelessWidget {
                       children: [
                         if (values.length > 1)
                           Text('${samples[i]} ',
-                              style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-                        Text('${values[i]}', style: const TextStyle(fontSize: 13)),
+                              style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
+                        Text('${values[i]}', style: TextStyle(fontSize: 13.spMax)),
                       ],
                     ),
                 ],
@@ -414,7 +378,6 @@ class ResultsCard extends StatelessWidget {
     ];
     return cells;
   }
-
   Widget _statusIcon(String ref, List<dynamic> values) {
     if (!numeric || ref.trim().isEmpty || values.isEmpty) {
       return const SizedBox();
@@ -422,17 +385,15 @@ class ResultsCard extends StatelessWidget {
     final anyFail = values.any((v) =>
         checkResultPass(reference: ref, value: '$v', numeric: true).pass == false);
     if (anyFail) {
-      return Icon(Icons.close, size: 16, color: AppColors.danger);
+      return Icon(Icons.close, size: 16.r, color: AppColors.danger);
     }
-    return Icon(Icons.check_circle_outline, size: 16, color: AppColors.success);
+    return Icon(Icons.check_circle_outline, size: 16.r, color: AppColors.success);
   }
 }
-
 /// Status-history timeline.
 class HistoryCard extends StatelessWidget {
   final List<Map<String, dynamic>> history;
   const HistoryCard({super.key, required this.history});
-
   @override
   Widget build(BuildContext context) {
     return AppCard(
@@ -451,7 +412,7 @@ class HistoryCard extends StatelessWidget {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.timeline, size: 16),
+                    Icon(Icons.timeline, size: 16.r),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: Wrap(
@@ -463,14 +424,14 @@ class HistoryCard extends StatelessWidget {
                           Text(
                             'النسخة ${row['version']} | v${row['version']}'
                             ' by ${row['changed_by_name']} — ${row['changed_at']}',
-                            style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
                           ),
                           if ('${row['change_reason'] ?? ''}'.trim().isNotEmpty)
                             Text('سبب: ${row['change_reason']}',
-                                style: const TextStyle(fontSize: 12)),
+                                style: TextStyle(fontSize: 12.spMax)),
                           if ('${row['follow_up_note'] ?? ''}'.trim().isNotEmpty)
                             Text('متابعة: ${row['follow_up_note']}',
-                                style: const TextStyle(fontSize: 12)),
+                                style: TextStyle(fontSize: 12.spMax)),
                         ],
                       ),
                     ),
