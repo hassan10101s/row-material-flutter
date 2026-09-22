@@ -60,7 +60,10 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
             leftIndex,
             (leftIndex + widget.rowsPerPage).clamp(0, widget.rows.length),
           );
-    final colWidth = widget.tableWidth / widget.headers.length;
+    // Header and data rows sit inside Padding(horizontal: AppSpacing.lg), so
+    // the columns must sum to tableWidth minus that padding or the Row overflows.
+    final colWidth =
+        (widget.tableWidth - 2 * AppSpacing.lg) / widget.headers.length;
 
     return AppCard(
       padding: EdgeInsets.zero,

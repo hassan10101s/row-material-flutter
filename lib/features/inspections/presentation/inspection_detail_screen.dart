@@ -33,7 +33,8 @@ class InspectionDetailScreen extends StatelessWidget {
   }
   Future<void> _openDecisionDialog(BuildContext context) async {
     final cubit = context.read<InspectionDetailCubit>();
-    final inspection = context.watch<InspectionDetailCubit>().state.inspection;
+    // Event handler — must not listen (watch) outside the widget tree.
+    final inspection = cubit.state.inspection;
     if (inspection == null) return;
     final saved = await showDialog<bool>(
       context: context,
