@@ -69,7 +69,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   }
   void _addSample() {
     if (_sampleCount >= 3) {
-      AppFeedback.error(context, 'الحد الأقصى 3 عينات | A maximum of 3 samples.');
+      AppFeedback.error(context, AppText.t('الحد الأقصى 3 عينات', 'A maximum of 3 samples.'));
       return;
     }
     setState(() {
@@ -108,21 +108,21 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   Future<void> _save() async {
     final state = context.read<InspectionFormCubit>().state;
     if (state.materialId == null) {
-      AppFeedback.error(context, 'يجب اختيار المادة | Material selection is required.');
+      AppFeedback.error(context, AppText.t('يجب اختيار المادة', 'Material selection is required.'));
       return;
     }
     if (_supplier.text.trim().length < 3) {
-      AppFeedback.error(context, 'اسم المورد مطلوب (3 أحرف على الأقل) | Supplier is required.');
+      AppFeedback.error(context, AppText.t('اسم المورد مطلوب (3 أحرف على الأقل)', 'Supplier is required.'));
       return;
     }
     if (_sampleTaker.text.trim().length < 3) {
       AppFeedback.error(context,
-          'اسم آخذ العينة مطلوب (3 أحرف على الأقل) | Sample taker is required.');
+        AppText.t('اسم آخذ العينة مطلوب (3 أحرف على الأقل)', 'Sample taker is required.'));
       return;
     }
     final user = getIt<AuthGate>().currentUser;
     if (user == null) {
-      AppFeedback.error(context, 'انتهت الجلسة | Session expired.');
+      AppFeedback.error(context, AppText.t('انتهت الجلسة', 'Session expired.'));
       return;
     }
     final payload = <String, dynamic>{
@@ -152,7 +152,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
         );
     if (!mounted) return;
     if (ok) {
-      AppFeedback.success(context, 'تم حفظ الفحص | Inspection saved.');
+      AppFeedback.success(context, AppText.t('تم حفظ الفحص', 'Inspection saved.'));
       Navigator.of(context).pop(true);
     }
   }
@@ -230,7 +230,7 @@ class _FormBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('فحص جديد | New Inspection', style: Theme.of(context).textTheme.headlineSmall),
+          Text(AppText.t('فحص جديد', 'New Inspection'), style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: AppSpacing.md),
           if (state.error != null) ...[
             Text(state.error!,
@@ -238,13 +238,13 @@ class _FormBody extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
           ],
           _Card(
-            title: 'البيانات الأساسية | Basic data',
+            title: AppText.t('البيانات الأساسية', 'Basic data'),
             children: [
               DropdownButtonFormField<int>(
                 initialValue: state.materialId,
                 isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'المادة | Material',
+                decoration: InputDecoration(
+                  labelText: AppText.t('المادة', 'Material'),
                   isDense: true,
                 ),
                 items: [
@@ -264,14 +264,14 @@ class _FormBody extends StatelessWidget {
                 children: [
                   Expanded(
                     child: AppField(
-                      label: 'تاريخ الفحص | Date (YYYY-MM-DD)',
+                      label: AppText.t('تاريخ الفحص', 'Date (YYYY-MM-DD)'),
                       controller: date,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.lg),
                   Expanded(
                     child: AppField(
-                      label: 'تاريخ الانتهاء | Expiry (YYYY-MM-DD)',
+                      label: AppText.t('تاريخ الانتهاء', 'Expiry (YYYY-MM-DD)'),
                       controller: expiry,
                     ),
                   ),
@@ -282,21 +282,21 @@ class _FormBody extends StatelessWidget {
                 children: [
                   Expanded(
                     child: AppField(
-                      label: 'المورد | Supplier',
+                      label: AppText.t('المورد', 'Supplier'),
                       controller: supplier,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.lg),
                   Expanded(
                     child: AppField(
-                      label: 'رقم الشاحنة | Truck no.',
+                      label: AppText.t('رقم الشاحنة', 'Truck no.'),
                       controller: truck,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.lg),
                   Expanded(
                     child: AppField(
-                      label: 'الكمية | Quantity',
+                      label: AppText.t('الكمية', 'Quantity'),
                       controller: qty,
                       keyboardType: TextInputType.numberWithOptions(decimal: true),
                     ),
@@ -308,7 +308,7 @@ class _FormBody extends StatelessWidget {
                 children: [
                   Expanded(
                     child: AppField(
-                      label: 'آخذ العينة | Sample taker',
+                      label: AppText.t('آخذ العينة', 'Sample taker'),
                       controller: sampleTaker,
                     ),
                   ),
@@ -318,13 +318,13 @@ class _FormBody extends StatelessWidget {
                       children: [
                         Expanded(
                           child: AppField(
-                            label: 'رقم القيد | Entry code',
+                            label: AppText.t('رقم القيد', 'Entry code'),
                             controller: entryCode,
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),
                         IconButton(
-                          tooltip: 'إعادة توليد | Regenerate',
+                          tooltip: AppText.t('إعادة توليد', 'Regenerate'),
                           onPressed: onRegenerateEntry,
                           icon: Icon(Icons.refresh, size: 20.r),
                         ),
@@ -337,7 +337,7 @@ class _FormBody extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.md),
           _Card(
-            title: 'العينات | Samples',
+            title: AppText.t('العينات', 'Samples'),
             children: [
               for (var i = 0; i < sampleCount; i++)
                 Padding(
@@ -346,14 +346,14 @@ class _FormBody extends StatelessWidget {
                     children: [
                       Expanded(
                         child: AppField(
-                          label: 'اسم العينة ${i + 1} | Sample #${i + 1}',
+                          label: AppText.t('اسم العينة ${i + 1}', 'Sample #${i + 1}'),
                           controller: sampleNames[i],
                         ),
                       ),
                       if (sampleCount > 1) ...[
                         const SizedBox(width: AppSpacing.sm),
                         IconButton(
-                          tooltip: 'إزالة | Remove',
+                          tooltip: AppText.t('إزالة', 'Remove'),
                           onPressed: () => onRemoveSample(i),
                           icon: Icon(Icons.close, size: 20.r),
                         ),
@@ -364,7 +364,7 @@ class _FormBody extends StatelessWidget {
               AppButton(
                 small: true,
                 style: AppButtonStyle.secondary,
-                label: 'إضافة عينة | Add Sample',
+                label: AppText.t('إضافة عينة', 'Add Sample'),
                 icon: Icon(Icons.add, size: 18.r),
                 onPressed: sampleCount >= 3 ? null : onAddSample,
               ),
@@ -373,34 +373,34 @@ class _FormBody extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           if (physical.isNotEmpty)
             _Card(
-              title: 'النتائج الفيزيائية | Physical results',
+              title: AppText.t('النتائج الفيزيائية', 'Physical results'),
               children: [_resultsGrid(physical)],
             ),
           if (chemical.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.md),
             _Card(
-              title: 'النتائج الكيميائية | Chemical results',
+              title: AppText.t('النتائج الكيميائية', 'Chemical results'),
               children: [_resultsGrid(chemical)],
             ),
           ],
           const SizedBox(height: AppSpacing.md),
           _Card(
-            title: 'قرار الجودة | Decision',
+            title: AppText.t('قرار الجودة', 'Decision'),
             children: [
               DropdownButtonFormField<String>(
                 initialValue: state.decision,
                 isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'القرار | Decision',
+                decoration: InputDecoration(
+                  labelText: AppText.t('القرار', 'Decision'),
                   isDense: true,
                 ),
-                items: const [
-                  DropdownMenuItem(value: 'APPROVED', child: Text('قبول نهائي | Approved')),
+                items: [
+                  DropdownMenuItem(value: 'APPROVED', child: Text(AppText.t('قبول نهائي', 'Approved'))),
                   DropdownMenuItem(
-                      value: 'CONDITIONAL_APPROVAL', child: Text('قبول مشروط | Conditional')),
+                      value: 'CONDITIONAL_APPROVAL', child: Text(AppText.t('قبول مشروط', 'Conditional'))),
                   DropdownMenuItem(
-                      value: 'PARTIAL_REJECTION', child: Text('رفض جزئي | Partial rejection')),
-                  DropdownMenuItem(value: 'FULL_REJECTION', child: Text('رفض كامل | Full rejection')),
+                      value: 'PARTIAL_REJECTION', child: Text(AppText.t('رفض جزئي', 'Partial rejection'))),
+                  DropdownMenuItem(value: 'FULL_REJECTION', child: Text(AppText.t('رفض كامل', 'Full rejection'))),
                 ],
                 onChanged: (value) {
                   if (value != null) {
@@ -411,7 +411,7 @@ class _FormBody extends StatelessWidget {
               const SizedBox(height: AppSpacing.md),
               if (state.decision == 'CONDITIONAL_APPROVAL') ...[
                 AppField(
-                  label: 'ملاحظة المتابعة | Follow-up note',
+                  label: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
                   controller: followUp,
                   maxLines: 3,
                 ),
@@ -419,7 +419,7 @@ class _FormBody extends StatelessWidget {
               ],
               if (state.decision == 'PARTIAL_REJECTION') ...[
                 AppField(
-                  label: 'الكمية المرفوضة | Rejected quantity',
+                  label: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
                   controller: rejectedQty,
                   keyboardType: TextInputType.numberWithOptions(decimal: true),
                 ),
@@ -427,7 +427,7 @@ class _FormBody extends StatelessWidget {
               ],
               if (state.decision == 'FULL_REJECTION' || state.decision == 'PARTIAL_REJECTION') ...[
                 AppField(
-                  label: 'سبب القرار | Decision reason',
+                  label: AppText.t('سبب القرار', 'Decision reason'),
                   controller: decisionReason,
                   maxLines: 3,
                 ),
@@ -471,7 +471,7 @@ class _FormBody extends StatelessWidget {
                 for (var i = 0; i < sampleCount; i++)
                   Expanded(
                     flex: 3,
-                    child: Text('عينة ${i + 1} | Sample #${i + 1}',
+                    child: Text(AppText.t('عينة ${i + 1}', 'Sample #${i + 1}'),
                         style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
                   ),
               ],

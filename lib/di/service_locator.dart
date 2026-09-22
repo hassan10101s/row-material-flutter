@@ -15,6 +15,7 @@ import '../features/dashboard/data/dashboard_repo.dart';
 import '../features/inspections/data/inspection_repo.dart';
 import '../features/lab/data/lab_repo.dart';
 import '../features/reference/data/reference_repo.dart';
+import '../features/reports/data/report_html_builder.dart';
 import '../features/reports/data/report_service.dart';
 import '../features/settings/data/settings_repo.dart';
 
@@ -44,15 +45,20 @@ Future<void> initServiceLocator() async {
 
   getIt
     ..registerLazySingleton(() => hasher)
-    ..registerLazySingleton<SettingsRepo>(() => SettingsRepo(dbHelper: dbHelper, secret: secret))
+    ..registerLazySingleton<SettingsRepo>(() => SettingsRepo(dbHelper: dbHelper, secret: secret, paths: getIt<AppPaths>()))
     ..registerLazySingleton<ThemeService>(
         () => ThemeService(settings: getIt<SettingsRepo>()))
     ..registerLazySingleton<LocaleService>(
         () => LocaleService(settings: getIt<SettingsRepo>()))
     ..registerLazySingleton<ReferenceRepo>(() => ReferenceRepo(dbHelper: dbHelper))
-    ..registerLazySingleton<InspectionRepo>(
-        () => InspectionRepo(dbHelper: dbHelper, referenceRepo: getIt<ReferenceRepo>()))
     ..registerLazySingleton<LabRepo>(() => LabRepo(dbHelper: dbHelper))
+    ..registerLazySingleton<ReportHtmlBuilder>(() => ReportHtmlBuilder(
+          settingsRepo: getIt<SettingsRepo>(),
+          labRepo: getIt<LabRepo>(),
+          secret: secret,
+        ))
+    ..registerLazySingleton<InspectionRepo>(
+        () => InspectionRepo(dbHelper: dbHelper, referenceRepo: getIt<ReferenceRepo>(), htmlBuilder: getIt<ReportHtmlBuilder>()))
     ..registerLazySingleton<DashboardRepo>(() => DashboardRepo(dbHelper: dbHelper))
     ..registerLazySingleton<SeedService>(() => SeedService(dbHelper: dbHelper))
     ..registerLazySingleton<AuthRepo>(

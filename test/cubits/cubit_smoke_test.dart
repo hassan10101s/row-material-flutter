@@ -388,6 +388,8 @@ void main() {
       final repo = _SettingsRepoMock();
       when(() => repo.getSettingValue('department_label'))
           .thenAnswer((_) async => 'QA Dept');
+      when(() => repo.getReportLogoPath()).thenAnswer((_) async => '');
+      when(() => repo.getReportLogoDataUri()).thenAnswer((_) async => '');
 
       final cubit = GeneralSettingsCubit(repo: repo);
       await cubit.load();

@@ -4,6 +4,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
+import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
@@ -42,30 +43,29 @@ class _ReportsScreenState extends State<ReportsScreen> {
           (curr.lastExport != null && curr.lastExport != prev.lastExport),
       listener: (context, state) {
         if (state.error != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.error!), backgroundColor: AppColors.danger),
-          );
+          AppFeedback.error(context, state.error!);
         } else if (state.lastExport != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('تم إنشاء التقرير | Report ready: ${state.lastExport}')),
+          AppFeedback.success(
+            context,
+            '${AppText.t('تم إنشاء التقرير', 'Report ready')}: ${state.lastExport}',
           );
         }
       },
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(AppSpacing.page),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('التقارير | Reports', style: Theme.of(context).textTheme.headlineSmall),
+            Text(AppText.t('التقارير', 'Reports'), style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: AppSpacing.md),
             _ReportCard(
               icon: Icons.today,
-              title: 'تقرير اليومي | Daily report',
+              title: AppText.t('تقرير اليومي', 'Daily report'),
               children: [
                 TextField(
                   controller: _date,
-                  decoration: const InputDecoration(
-                      labelText: 'التاريخ | Date (YYYY-MM-DD)', isDense: true),
+                      decoration: InputDecoration(
+                      labelText: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'), isDense: true),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppButton(
@@ -80,23 +80,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
             const SizedBox(height: AppSpacing.md),
             _ReportCard(
               icon: Icons.calendar_month,
-              title: 'التقرير الشهري | Monthly report',
+              title: AppText.t('التقرير الشهري', 'Monthly report'),
               children: [
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
                         controller: _month,
-                        decoration: const InputDecoration(
-                            labelText: 'الشهر | Month (1-12)', isDense: true),
+                        decoration: InputDecoration(
+                            labelText: AppText.t('الشهر', 'Month (1-12)'), isDense: true),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
                     Expanded(
                       child: TextField(
                         controller: _year,
-                        decoration: const InputDecoration(
-                            labelText: 'السنة | Year', isDense: true),
+                        decoration: InputDecoration(
+                            labelText: AppText.t('السنة', 'Year'), isDense: true),
                       ),
                     ),
                   ],
@@ -117,11 +117,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
             const SizedBox(height: AppSpacing.md),
             _ReportCard(
               icon: Icons.calendar_today,
-              title: 'التقرير السنوي | Yearly report',
+              title: AppText.t('التقرير السنوي', 'Yearly report'),
               children: [
                 TextField(
                   controller: _year,
-                  decoration: const InputDecoration(labelText: 'السنة | Year', isDense: true),
+                  decoration: InputDecoration(labelText: AppText.t('السنة', 'Year'), isDense: true),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppButton(

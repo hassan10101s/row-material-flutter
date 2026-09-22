@@ -255,7 +255,8 @@ void serviceGroup() {
     final referenceRepo = ReferenceRepo(dbHelper: _dbHelper);
     _service = ReportService(
       dbHelper: _dbHelper,
-      settingsRepo: SettingsRepo(dbHelper: _dbHelper, secret: secret),
+      settingsRepo: SettingsRepo(
+          dbHelper: _dbHelper, secret: secret, paths: _FakeAppPaths(tmp.path)),
       inspectionRepo: InspectionRepo(dbHelper: _dbHelper, referenceRepo: referenceRepo),
       labRepo: LabRepo(dbHelper: _dbHelper),
       secret: secret,

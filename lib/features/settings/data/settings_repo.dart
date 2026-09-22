@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/app_paths.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/security/password_hash.dart';
@@ -12,8 +13,9 @@ import '../../auth/domain/user.dart';
 class SettingsRepo {
   final DatabaseHelper dbHelper;
   final LocalSecret secret;
+  final AppPaths? paths;
 
-  SettingsRepo({required this.dbHelper, required this.secret});
+  SettingsRepo({required this.dbHelper, required this.secret, this.paths});
 
   Future<Map<String, dynamic>> getSettings() async {
     final db = await dbHelper.database;
@@ -36,13 +38,30 @@ class SettingsRepo {
   }
 
   /// Ensure the standard settings rows exist (port of
-  /// SettingsService.ensure_defaults from core/controller.py init).
+  /// SettingsService.ensure_defaults from core/services/settings.py:32-45).
   Future<void> ensureDefaults() async {
     final db = await dbHelper.database;
+    String? pdfExportDir;
+    String? exportRoot;
+    if (paths != null) {
+      try {
+        exportRoot = (await paths!.exportsRoot()).path;
+        pdfExportDir = (await paths!.defaultPdfDir()).path;
+      } catch (_) {
+        // Path defaults are best-effort; everything else still applies.
+      }
+    }
     final defaults = <String, String>{
+      'pdf_export_dir': ?pdfExportDir,
+      'export_root_path': ?exportRoot,
+      'whatsapp_launch_url': 'https://web.whatsapp.com/',
       'department_label': 'Quality Assurance Department',
       'usage_expiry_date': '',
-      'reference_seed_done': '',
+      'report_logo_path': '',
+      'reference_seed_done': '0',
+      'security_clock_tamper_flag': '0',
+      'security_max_seen_date': '',
+      'security_last_online_check': '',
     };
     final existing = <String>{};
     for (final r in await db.query('settings')) {
@@ -92,8 +111,21 @@ class SettingsRepo {
 
   Future<String?> getReportLogoPath() => getSettingValue('report_logo_path');
 
+  Future<String?> getReportLogoDataUri() => getSettingValue('report_logo_data_uri');
+
+  Future<void> setReportLogo(String path, String dataUri) async {
+    await updateSettings({
+      'report_logo_path': path,
+      'report_logo_data_uri': dataUri,
+    });
+  }
+
   Future<void> setReportLogoPath(String path) async {
     await updateSettings({'report_logo_path': path});
+  }
+
+  Future<void> clearReportLogo() async {
+    await updateSettings({'report_logo_path': '', 'report_logo_data_uri': ''});
   }
 
   // ── Users ────────────────────────────────────────────────
@@ -165,6 +197,21 @@ class SettingsRepo {
     final user = User.fromMap(rows.first);
     if (user.isDeveloper) {
       throw const AuthorizationError('Cannot delete the Developer account. | لا يمكن حذف حساب المطور.');
+    }
+    // Reject deletion while the user owns data (parity with auth.py:139-155)
+    // so referential integrity / audit identity is never lost.
+    final insp = await db
+        .rawQuery('SELECT COUNT(*) AS c FROM inspections WHERE created_by = ?', [id]);
+    if ((Sqflite.firstIntValue(insp) ?? 0) > 0) {
+      throw const ValidationError(
+          'Cannot delete user: they have existing inspection records. Reassign or delete inspections first. | لا يمكن حذف المستخدم: لديه سجلات فحوصات قائمة.');
+    }
+    final hist = await db.rawQuery(
+        'SELECT COUNT(*) AS c FROM inspection_status_history WHERE changed_by = ?',
+        [id]);
+    if ((Sqflite.firstIntValue(hist) ?? 0) > 0) {
+      throw const ValidationError(
+          'Cannot delete user: they have existing status history records. | لا يمكن حذف المستخدم: لديه سجلات في سجل القرارات.');
     }
     await db.delete('users', where: 'id = ?', whereArgs: [id]);
   }

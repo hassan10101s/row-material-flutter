@@ -445,7 +445,7 @@ Map<String, dynamic> _materialSupplierSectionData(
     'partial': sp,
     'rejected': sr,
     'approval_rate':
-        items.isEmpty ? 0.0 : (sa / items.length * 100).roundToDouble(),
+        items.isEmpty ? 0.0 : roundPct(sa / items.length * 100),
   };
 }
 
@@ -498,10 +498,10 @@ Map<String, dynamic> buildMonthlyContext(
   }
   final approvalRate = inspections.isEmpty
       ? 0.0
-      : (approvedCount / inspections.length * 100).roundToDouble();
+      : roundPct(approvedCount / inspections.length * 100);
   final rejectionRate = inspections.isEmpty
       ? 0.0
-      : ((rejectedCount + partialCount) / inspections.length * 100).roundToDouble();
+      : roundPct((rejectedCount + partialCount) / inspections.length * 100);
 
   final materialSections = <Map<String, dynamic>>[];
   materials.forEach((matName, matItems) {
@@ -543,7 +543,7 @@ Map<String, dynamic> buildMonthlyContext(
       'partial': mp,
       'rejected': mr,
       'approval_rate':
-          matItems.isEmpty ? 0.0 : (ma / matItems.length * 100).roundToDouble(),
+          matItems.isEmpty ? 0.0 : roundPct(ma / matItems.length * 100),
       'suppliers': matSupplierList,
     });
   });
@@ -612,7 +612,7 @@ Map<String, dynamic> buildMonthlyContext(
           'يوجد $conditionalCount فحص تم قبوله مشروطًا — جاري متابعة جميع المتطلبات المطلوبة وإغلاقها قبل نهاية الشهر.');
     }
     if (totalRejectedQty > 0 && totalQty > 0) {
-      final pct = (totalRejectedQty / totalQty * 100).roundToDouble();
+      final pct = roundPct(totalRejectedQty / totalQty * 100);
       if (pct > 15) {
         recommendations.add(
             'نسبة الكمية المرفوضة هذا الشهر هي ${pct.toStringAsFixed(1)}% والتي تتجاوز 15% — توصي بتحليل مفصل للأسباب وتنفيذ إجراءات تصحيحية لتجنب خسائر إضافية في الشهور القادمة.');
@@ -683,9 +683,9 @@ Map<String, dynamic> buildMonthlyContext(
       'approved': trendApp,
       'rejected': trendRej,
       'approval_rate':
-          trendCount == 0 ? 0.0 : (trendApp / trendCount * 100).roundToDouble(),
+          trendCount == 0 ? 0.0 : roundPct(trendApp / trendCount * 100),
       'rejection_rate':
-          trendCount == 0 ? 0.0 : (trendRej / trendCount * 100).roundToDouble(),
+          trendCount == 0 ? 0.0 : roundPct(trendRej / trendCount * 100),
       'total_qty': formatQuantity(trendQty),
       'is_current': tr['is_current'] == true,
     });
@@ -767,10 +767,10 @@ Map<String, dynamic> buildYearlyContext(
   }
   final approvalRate = inspections.isEmpty
       ? 0.0
-      : (approvedCount / inspections.length * 100).roundToDouble();
+      : roundPct(approvedCount / inspections.length * 100);
   final rejectionRate = inspections.isEmpty
       ? 0.0
-      : ((rejectedCount + partialCount) / inspections.length * 100).roundToDouble();
+      : roundPct((rejectedCount + partialCount) / inspections.length * 100);
 
   final materialSections = <Map<String, dynamic>>[];
   materials.forEach((matName, matItems) {
@@ -816,7 +816,7 @@ Map<String, dynamic> buildYearlyContext(
       'partial': mp,
       'rejected': mr,
       'approval_rate':
-          matItems.isEmpty ? 0.0 : (ma / matItems.length * 100).roundToDouble(),
+          matItems.isEmpty ? 0.0 : roundPct(ma / matItems.length * 100),
       'suppliers': matSupplierList,
     });
   });
@@ -866,10 +866,10 @@ Map<String, dynamic> buildYearlyContext(
       'rejected_qty': formatQuantity(mrj),
       'approval_rate': monthInspections.isEmpty
           ? 0.0
-          : (mApp / monthInspections.length * 100).roundToDouble(),
+          : roundPct(mApp / monthInspections.length * 100),
       'rejection_rate': monthInspections.isEmpty
           ? 0.0
-          : ((mPart + mRej) / monthInspections.length * 100).roundToDouble(),
+          : roundPct((mPart + mRej) / monthInspections.length * 100),
     });
   }
 
@@ -893,10 +893,10 @@ Map<String, dynamic> buildYearlyContext(
       'partial': qPartial,
       'rejected': qRejected,
       'approval_rate':
-          qTotal == 0 ? 0.0 : (qApproved / qTotal * 100).roundToDouble(),
+          qTotal == 0 ? 0.0 : roundPct(qApproved / qTotal * 100),
       'rejection_rate': qTotal == 0
           ? 0.0
-          : ((qPartial + qRejected) / qTotal * 100).roundToDouble(),
+          : roundPct((qPartial + qRejected) / qTotal * 100),
     });
   }
 
@@ -984,14 +984,14 @@ Map<String, dynamic> buildYearlyContext(
     }
 
     if (totalRejectedQty > 0 && totalQty > 0) {
-      final pct = (totalRejectedQty / totalQty * 100).roundToDouble();
+      final pct = roundPct(totalRejectedQty / totalQty * 100);
       if (pct > 10) {
         recommendations.add(
             'نسبة الكمية المرفوضة السنوية تبلغ ${pct.toStringAsFixed(1)}% من إجمالي الكميات — يمثل ذلك خسارة مادية كبيرة تستوجب تنفيذ برنامج تأهيل موردين متقدم.');
       }
     }
     if (conditionalCount > 0) {
-      final condPct = (conditionalCount / inspections.length * 100).roundToDouble();
+      final condPct = roundPct(conditionalCount / inspections.length * 100);
       recommendations.add(
           'تم تسجيل $conditionalCount قبول مشروط (${condPct.toStringAsFixed(1)}% من الإجمالي) — يُوصى بمتابعة جميع الشروط المعلقة وضمان إغلاقها وفق الجدول الزمني المحدد.');
     }

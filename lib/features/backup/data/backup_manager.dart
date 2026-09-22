@@ -294,6 +294,10 @@ class BackupManager {
 
       await dbHelper.database;
       await dbHelper.ensureSchema();
+      // Post-restore checkpoint parity with controller.py:340 (TRUNCATE so the
+      // restored file is not shadowed by stale WAL frames).
+      final restoredDb = await dbHelper.database;
+      await restoredDb.execute('PRAGMA wal_checkpoint(TRUNCATE)');
     } catch (e) {
       throw AppError('فشل استرداد قاعدة البيانات: $e');
     } finally {

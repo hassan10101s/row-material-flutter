@@ -4,10 +4,13 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import 'package:material_lab/core/l10n/app_localizations_x.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../design_system/animations/app_animations.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
+import '../../../design_system/widgets/app_status_badge.dart';
+import '../../../design_system/widgets/app_summary_card.dart';
 import 'cubit/dashboard_cubit.dart';
 import 'cubit/dashboard_kpis_cubit.dart';
 import 'cubit/dashboard_kpis_state.dart';
@@ -20,21 +23,23 @@ class DashboardScreen extends StatelessWidget {
     final state = context.watch<DashboardCubit>().state;
     final cubit = context.read<DashboardCubit>();
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(AppSpacing.page),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Hero Banner & Filters
-          _HeroBanner(
-            period: state.period,
-            selectedMaterial: state.selectedMaterial,
-            selectedSupplier: state.selectedSupplier,
-            selectedStatus: state.selectedStatus,
-            filterOptions: state.filterOptions,
-            onPeriodChange: cubit.setPeriod,
-            onMaterialChange: cubit.setMaterial,
-            onSupplierChange: cubit.setSupplier,
-            onStatusChange: cubit.setStatus,
+          AppEntrance(
+            child: _HeroBanner(
+              period: state.period,
+              selectedMaterial: state.selectedMaterial,
+              selectedSupplier: state.selectedSupplier,
+              selectedStatus: state.selectedStatus,
+              filterOptions: state.filterOptions,
+              onPeriodChange: cubit.setPeriod,
+              onMaterialChange: cubit.setMaterial,
+              onSupplierChange: cubit.setSupplier,
+              onStatusChange: cubit.setStatus,
+            ),
           ),
           const SizedBox(height: AppSpacing.lg),
           // Quick Action Buttons
@@ -48,24 +53,32 @@ class DashboardScreen extends StatelessWidget {
           else if (state.error != null)
             AppEmptyState(
               icon: Icons.error_outline,
-              title: 'تعذر تحميل اللوحة',
+              title: AppText.t('تعذر تحميل اللوحة', 'Failed to load dashboard'),
               subtitle: state.error!,
-              action: AppButton(label: 'إعادة المحاولة', onPressed: cubit.load),
+              action: AppButton(
+                label: AppText.t('إعادة المحاولة', 'Retry'),
+                onPressed: cubit.load,
+              ),
             )
           else ...[
             // Today KPIs Row
             BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
-              builder: (context, kpi) => _KpiRow(
-                todayInspections: kpi.todayInspections,
-                todayApproved: kpi.todayApproved,
-                todayRejected: kpi.todayRejected,
-                totalCount: kpi.totalCount,
+              builder: (context, kpi) => AppStagger(
+                interval: const Duration(milliseconds: 40),
+                children: [
+                  _KpiRow(
+                    todayInspections: kpi.todayInspections,
+                    todayApproved: kpi.todayApproved,
+                    todayRejected: kpi.todayRejected,
+                    totalCount: kpi.totalCount,
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
             if (state.summary != null) ...[
               // Period Decisions Overview Card
-              _DecisionsOverviewCard(summary: state.summary!),
+              AppEntrance(child: _DecisionsOverviewCard(summary: state.summary!)),
               const SizedBox(height: AppSpacing.lg),
               // Monthly Trend & Comparison Section
               _MonthlyTrendSection(summary: state.summary!),
@@ -103,13 +116,10 @@ class _HeroBanner extends StatelessWidget {
     required this.onSupplierChange,
     required this.onStatusChange,
   });
-  static const _statusLabels = {
-    'ALL': 'جميع الحالات | All Statuses',
-    'APPROVED': 'قبول نهائي | Approved',
-    'CONDITIONAL_APPROVAL': 'قبول مشروط | Conditional',
-    'PARTIAL_REJECTION': 'رفض جزئي | Partial',
-    'FULL_REJECTION': 'رفض كامل | Rejected',
-  };
+  String _statusLabel(String status) {
+    if (status == 'ALL') return AppText.t('جميع الحالات', 'All Statuses');
+    return statusLabel(status);
+  }
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -224,7 +234,7 @@ class _HeroBanner extends StatelessWidget {
                           value: selectedStatus,
                           items: [
                             for (final st in filterOptions!.statuses)
-                              {'id': st, 'name': _statusLabels[st] ?? st}
+                              {'id': st, 'name': _statusLabel(st)}
                           ],
                           onChanged: (v) => onStatusChange(v ?? 'ALL'),
                         ),
@@ -392,58 +402,14 @@ class _KpiRow extends StatelessWidget {
           runSpacing: AppSpacing.md,
           children: [
             for (final c in cards)
-              SizedBox(width: tile, child: _KpiCard(title: c.$1, value: c.$2, color: c.$3, icon: c.$4)),
+              SizedBox(
+                width: tile,
+                child: AppSummaryCard(
+                    label: c.$1, value: c.$2, color: c.$3, icon: c.$4),
+              ),
           ],
         );
       },
-    );
-  }
-}
-class _KpiCard extends StatelessWidget {
-  final String title;
-  final String value;
-  final Color color;
-  final IconData icon;
-  const _KpiCard(
-      {required this.title, required this.value, required this.color, required this.icon});
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: color, size: 26.r),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    value,
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineSmall
-                        ?.copyWith(color: color, fontWeight: FontWeight.bold),
-                  ),
-                  Text(
-                    title,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -664,7 +630,7 @@ class _MonthlyTrendRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Text(
-                '$total فحص — قبول: $rate%',
+                '$total ${AppText.t('فحص', 'inspections')} — ${AppText.t('قبول', 'approved')}: $rate%',
                 style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
               ),
             ],
@@ -696,7 +662,7 @@ class _InsightsAndRecommendationsSection extends StatelessWidget {
       children: [
         if (recommendations.isNotEmpty) ...[
           Text(
-            'التوصيات الإدارية | Recommendations',
+            AppText.t('التوصيات الإدارية', 'Recommendations'),
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -730,7 +696,7 @@ class _InsightsAndRecommendationsSection extends StatelessWidget {
         ],
         if (insightCards.isNotEmpty) ...[
           Text(
-            'التحليلات والتنبيهات | Insights',
+            AppText.t('التحليلات والتنبيهات', 'Insights'),
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -830,7 +796,7 @@ class _TopBreakdownSection extends StatelessWidget {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'أعلى الخامات فحوصات | Top Materials',
+                              AppText.t('أعلى الخامات فحوصات', 'Top Materials'),
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                             ),
@@ -839,13 +805,16 @@ class _TopBreakdownSection extends StatelessWidget {
                       ),
                       const SizedBox(height: AppSpacing.md),
                       if (topMaterials.isEmpty)
-                        Text('لا توجد فحوصات خامات', style: TextStyle(color: AppColors.textMuted))
+                        Text(AppText.t('لا توجد فحوصات خامات', 'No material inspections'),
+                            style: TextStyle(color: AppColors.textMuted))
                       else
                         for (final m in topMaterials) ...[
                           _TopItemProgress(
                             label: '${m['name']}',
-                            count: '${m['total']} فحص',
-                            rate: '${m['rate']}% قبول',
+                            count:
+                                '${m['total']} ${AppText.t('فحص', 'inspections')}',
+                            rate:
+                                '${m['rate']}% ${AppText.t('قبول', 'approved')}',
                             value: double.tryParse('${m['rate']}') ?? 0.0,
                             color: AppColors.primary,
                           ),
@@ -871,7 +840,7 @@ class _TopBreakdownSection extends StatelessWidget {
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'أعلى الموردين فحوصات | Top Suppliers',
+                              AppText.t('أعلى الموردين فحوصات', 'Top Suppliers'),
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
                             ),
@@ -880,13 +849,16 @@ class _TopBreakdownSection extends StatelessWidget {
                       ),
                       const SizedBox(height: AppSpacing.md),
                       if (topSuppliers.isEmpty)
-                        Text('لا توجد فحوصات موردين', style: TextStyle(color: AppColors.textMuted))
+                        Text(AppText.t('لا توجد فحوصات موردين', 'No supplier inspections'),
+                            style: TextStyle(color: AppColors.textMuted))
                       else
                         for (final s in topSuppliers) ...[
                           _TopItemProgress(
                             label: '${s['name']}',
-                            count: '${s['total']} فحص',
-                            rate: '${s['approvalRate']}% قبول',
+                            count:
+                                '${s['total']} ${AppText.t('فحص', 'inspections')}',
+                            rate:
+                                '${s['approvalRate']}% ${AppText.t('قبول', 'approved')}',
                             value: double.tryParse('${s['approvalRate']}') ?? 0.0,
                             color: AppColors.accent,
                           ),

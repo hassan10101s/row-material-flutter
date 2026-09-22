@@ -49,11 +49,11 @@ class InventoryTab extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text('المخزون | Inventory', style: Theme.of(context).textTheme.titleLarge),
+            Text(AppText.t('المخزون', 'Inventory'), style: Theme.of(context).textTheme.titleLarge),
             const Spacer(),
             AppButton(
               small: true,
-              label: 'إضافة مادة | Add item',
+              label: AppText.t('إضافة مادة', 'Add item'),
               icon: Icon(Icons.add, size: 16.r),
               onPressed: () => _openAdd(context),
             ),
@@ -65,7 +65,7 @@ class InventoryTab extends StatelessWidget {
         ] else if (state.error != null) ...[
           Text(state.error!, style: TextStyle(color: AppColors.danger)),
         ] else if (state.rows.isEmpty) ...[
-          const Text('لا توجد مواد | No inventory items'),
+          Text(AppText.t('لا توجد مواد', 'No inventory items')),
         ] else
           AppCard(
             padding: EdgeInsets.zero,
@@ -74,13 +74,13 @@ class InventoryTab extends StatelessWidget {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('الاسم | Name')),
-                    DataColumn(label: Text('النوع | Category')),
-                    DataColumn(label: Text('الوحدة | Unit')),
-                    DataColumn(label: Text('الكمية | Qty')),
-                    DataColumn(label: Text('الحد الأدنى | Min')),
-                    DataColumn(label: Text('الحالة | Status')),
+                  columns: [
+                    DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
+                    DataColumn(label: Text(AppText.t('النوع', 'Category'))),
+                    DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
+                    DataColumn(label: Text(AppText.t('الكمية', 'Qty'))),
+                    DataColumn(label: Text(AppText.t('الحد الأدنى', 'Min'))),
+                    DataColumn(label: Text(AppText.t('الحالة', 'Status'))),
                     DataColumn(label: Text('')),
                   ],
                   rows: [
@@ -89,8 +89,8 @@ class InventoryTab extends StatelessWidget {
                         cells: [
                           DataCell(Text('${r['name']}')),
                           DataCell(Text(r['category'] == 'liquid'
-                              ? 'سائل | Liquid'
-                              : 'مسحوق | Powder')),
+                              ? AppText.t('سائل', 'Liquid')
+                              : AppText.t('مسحوق', 'Powder'))),
                           DataCell(Text('${r['unit'] ?? ''}')),
                           DataCell(Text('${r['current_qty'] ?? 0}')),
                           DataCell(Text('${r['min_qty'] ?? 0}')),
@@ -99,7 +99,7 @@ class InventoryTab extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                tooltip: 'تسوية الكمية | Adjust',
+                                tooltip: AppText.t('تسوية الكمية', 'Adjust'),
                                 visualDensity: VisualDensity.compact,
                                 onPressed: () => _openAdjust(context, r),
                                 icon: Icon(Icons.swap_vert, size: 18.r),
@@ -126,12 +126,12 @@ class InventoryTab extends StatelessWidget {
     final qty = (r['current_qty'] as num?)?.toDouble() ?? 0;
     final min = (r['min_qty'] as num?)?.toDouble() ?? 0;
     if (qty <= 0) {
-      return Text('نفد | Empty', style: TextStyle(color: AppColors.danger, fontSize: 12.spMax));
+      return Text(AppText.t('نفد', 'Empty'), style: TextStyle(color: AppColors.danger, fontSize: 12.spMax));
     }
     if (qty < min) {
-      return Text('منخفض | Low', style: TextStyle(color: AppColors.partial, fontSize: 12.spMax));
+      return Text(AppText.t('منخفض', 'Low'), style: TextStyle(color: AppColors.partial, fontSize: 12.spMax));
     }
-    return Text('متوفر | OK', style: TextStyle(color: AppColors.success, fontSize: 12.spMax));
+    return Text(AppText.t('متوفر', 'OK'), style: TextStyle(color: AppColors.success, fontSize: 12.spMax));
   }
 }
 class _InventoryDialog extends StatefulWidget {

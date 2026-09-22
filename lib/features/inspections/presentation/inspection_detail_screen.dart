@@ -24,7 +24,7 @@ class InspectionDetailScreen extends StatelessWidget {
     try {
       final path = await context.read<InspectionDetailCubit>().exportPdf(kind);
       if (!context.mounted) return;
-      AppFeedback.success(context, 'تم التصدير | Exported: $path');
+      AppFeedback.success(context, '${AppText.t('تم التصدير', 'Exported')}: $path');
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
@@ -45,7 +45,7 @@ class InspectionDetailScreen extends StatelessWidget {
     if (saved == true) {
       await cubit.load();
       if (context.mounted) {
-        AppFeedback.success(context, 'تم تحديث القرار | Decision updated.');
+        AppFeedback.success(context, AppText.t('تم تحديث القرار', 'Decision updated.'));
       }
     }
   }
@@ -53,9 +53,10 @@ class InspectionDetailScreen extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('حذف الفحص | Delete inspection'),
-        content:
-            const Text('سيتم حذف الفحص نهائياً. هل أنت متأكد؟ | This removes the record permanently.'),
+        title: Text(AppText.t('حذف الفحص', 'Delete inspection')),
+        content: Text(AppText.t(
+          'سيتم حذف الفحص نهائياً. هل أنت متأكد؟',
+          'This removes the record permanently.')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -73,7 +74,7 @@ class InspectionDetailScreen extends StatelessWidget {
     try {
       await context.read<InspectionDetailCubit>().delete();
       if (!context.mounted) return;
-      AppFeedback.success(context, 'تم الحذف | Deleted.');
+      AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       Navigator.of(context).pop(true);
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
@@ -86,7 +87,15 @@ class InspectionDetailScreen extends StatelessWidget {
     final state = context.watch<InspectionDetailCubit>().state;
     final cubit = context.read<InspectionDetailCubit>();
     final inspection = state.inspection;
-    if (state.loading) return const Center(child: CircularProgressIndicator());
+    if (state.loading) {
+      return const SizedBox(
+        width: double.infinity,
+        child: Padding(
+          padding: EdgeInsets.all(AppSpacing.xxxl),
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
     if (state.error != null) {
       return Center(
         child: Column(
@@ -96,7 +105,7 @@ class InspectionDetailScreen extends StatelessWidget {
             const SizedBox(height: AppSpacing.md),
             AppButton(
               style: AppButtonStyle.secondary,
-              label: 'إعادة المحاولة | Retry',
+              label: AppText.t('إعادة المحاولة', 'Retry'),
               onPressed: cubit.load,
             ),
           ],
@@ -104,7 +113,7 @@ class InspectionDetailScreen extends StatelessWidget {
       );
     }
     if (inspection == null) {
-      return const Center(child: Text('غير موجود | Not found'));
+      return Center(child: Text(AppText.t('غير موجود', 'Not found')));
     }
     final samples = _sampleLabels(inspection);
     final user = getIt<AuthGate>().currentUser;
@@ -139,7 +148,7 @@ class InspectionDetailScreen extends StatelessWidget {
                 ),
                 AppButton(
                   style: AppButtonStyle.secondary,
-                  label: 'ملصق | Label',
+                  label: AppText.t('ملصق', 'Label'),
                   icon: Icon(Icons.label_outline, size: 18.r),
                   loading: state.busy == 'label',
                   onPressed: state.busy.isEmpty ? () => _exportPdf(context, 'label') : null,
@@ -175,32 +184,32 @@ class InspectionDetailScreen extends StatelessWidget {
             runSpacing: AppSpacing.sm,
             children: [
               InfoItem(
-                  label: 'تاريخ الفحص | Date', value: '${inspection['inspection_date']}'),
+                  label: AppText.t('تاريخ الفحص', 'Date'), value: '${inspection['inspection_date']}'),
               if ('${inspection['expiry_date'] ?? ''}'.trim().isNotEmpty)
                 InfoItem(
-                    label: 'تاريخ الانتهاء | Expiry', value: '${inspection['expiry_date']}'),
-              InfoItem(label: 'المورد | Supplier', value: '${inspection['supplier']}'),
+                      label: AppText.t('تاريخ الانتهاء', 'Expiry'), value: '${inspection['expiry_date']}'),
+                    InfoItem(label: AppText.t('المورد', 'Supplier'), value: '${inspection['supplier']}'),
               if ('${inspection['truck_number'] ?? ''}'.trim().isNotEmpty)
-                InfoItem(label: 'الشاحنة | Truck', value: '${inspection['truck_number']}'),
-              InfoItem(label: 'الكمية | Qty', value: '${inspection['quantity']}'),
+                InfoItem(label: AppText.t('الشاحنة', 'Truck'), value: '${inspection['truck_number']}'),
+              InfoItem(label: AppText.t('الكمية', 'Qty'), value: '${inspection['quantity']}'),
               InfoItem(
-                  label: 'آخذ العينة | Sample taker', value: '${inspection['sample_taken_by']}'),
+                  label: AppText.t('آخذ العينة', 'Sample taker'), value: '${inspection['sample_taken_by']}'),
               InfoItem(
-                  label: 'الأخصائي | Specialist', value: '${inspection['specialist_name']}'),
-              InfoItem(label: 'النسخة | Version', value: '${inspection['decision_version']}'),
+                    label: AppText.t('الأخصائي', 'Specialist'), value: '${inspection['specialist_name']}'),
+                  InfoItem(label: AppText.t('النسخة', 'Version'), value: '${inspection['decision_version']}'),
             ],
           ),
           if ('${inspection['decision_reason'] ?? ''}'.trim().isNotEmpty) ...[
             const SizedBox(height: AppSpacing.md),
-            Text('سبب القرار | Reason: ${inspection['decision_reason']}'),
+            Text('${AppText.t('سبب القرار', 'Reason')}: ${inspection['decision_reason']}'),
           ],
           if ('${inspection['follow_up_note'] ?? ''}'.trim().isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),
-            Text('ملاحظة المتابعة | Follow-up: ${inspection['follow_up_note']}'),
+            Text('${AppText.t('ملاحظة المتابعة', 'Follow-up')}: ${inspection['follow_up_note']}'),
           ],
           const SizedBox(height: AppSpacing.xl),
           ResultsCard(
-            title: 'النتائج الفيزيائية | Physical results',
+            title: AppText.t('النتائج الفيزيائية', 'Physical results'),
             reference: _asMap(inspection['physical_reference']),
             results: _asMap(inspection['physical_results']),
             samples: samples,
@@ -208,7 +217,7 @@ class InspectionDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.md),
           ResultsCard(
-            title: 'النتائج الكيميائية | Chemical results',
+            title: AppText.t('النتائج الكيميائية', 'Chemical results'),
             reference: _asMap(inspection['chemical_reference']),
             results: _asMap(inspection['chemical_results']),
             samples: samples,
@@ -226,7 +235,7 @@ class InspectionDetailScreen extends StatelessWidget {
             children: [
               AppButton(
                 style: AppButtonStyle.accent,
-                label: 'تحديث القرار | Update decision',
+                label: AppText.t('تحديث القرار', 'Update decision'),
                 icon: Icon(Icons.gavel, size: 18.r),
                 onPressed: (user?.canEditInspections ?? false) ? () => _openDecisionDialog(context) : null,
               ),
@@ -306,17 +315,17 @@ class ResultsCard extends StatelessWidget {
                   children: [
                     Padding(
                       padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('الخاصية | Parameter',
+                      child: Text(AppText.t('الخاصية', 'Parameter'),
                           style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.spMax)),
                     ),
                     Padding(
                       padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('المرجعية | Reference',
+                      child: Text(AppText.t('المرجعية', 'Reference'),
                           style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.spMax)),
                     ),
                     Padding(
                       padding: EdgeInsets.symmetric(vertical: 6),
-                      child: Text('النتيجة | Result',
+                      child: Text(AppText.t('النتيجة', 'Result'),
                           style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12.spMax)),
                     ),
                     SizedBox(),
@@ -403,7 +412,7 @@ class HistoryCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('سجل القرارات | Decision history',
+            Text(AppText.t('سجل القرارات', 'Decision history'),
                 style: const TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: AppSpacing.sm),
             for (final row in history)
@@ -422,8 +431,8 @@ class HistoryCard extends StatelessWidget {
                         children: [
                           AppStatusBadge('${row['new_status']}'),
                           Text(
-                            'النسخة ${row['version']} | v${row['version']}'
-                            ' by ${row['changed_by_name']} — ${row['changed_at']}',
+                            '${AppText.t('النسخة', 'v')} ${row['version']} by '
+                            '${row['changed_by_name']} — ${row['changed_at']}',
                             style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
                           ),
                           if ('${row['change_reason'] ?? ''}'.trim().isNotEmpty)

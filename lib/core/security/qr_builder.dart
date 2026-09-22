@@ -44,6 +44,12 @@ String buildQrPayloadText({
     }
   }
 
+  // Python's `or` also falls back on empty strings, not just nulls.
+  final rawBy = inspection['sample_taken_by'];
+  final by = rawBy is String && rawBy.trim().isNotEmpty
+      ? rawBy.trim()
+      : '${inspection['specialist_name'] ?? ''}'.trim();
+
   final payload = <String, dynamic>{
     'ec': inspection['entry_code'] ?? '',
     'm': inspection['material_name'] ?? '',
@@ -52,9 +58,7 @@ String buildQrPayloadText({
     's': inspection['supplier'] ?? '',
     't': inspection['truck_number'] ?? '',
     'q': inspection['quantity'] ?? '',
-    'by': inspection['sample_taken_by'] ??
-        inspection['specialist_name'] ??
-        '',
+    'by': by,
     'sn': inspection['sample_names'] ?? const [],
     'dec': latestDecision,
     'ph': physicalSummary,

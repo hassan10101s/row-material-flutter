@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
@@ -7,6 +8,7 @@ import '../../../core/constants/app_strings.dart';
 import '../../../core/locale/locale_service.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../di/service_locator.dart';
@@ -61,8 +63,9 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _openPdfFolder() async {
     // TODO: wire exportScience PDF folder later with ReportService.
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(AppText.t('فتح مجلد PDF قريباً', 'Opening PDF folder soon'))),
+    AppFeedback.info(
+      context,
+      AppText.t('فتح مجلد PDF قريباً', 'Opening PDF folder soon'),
     );
   }
 
@@ -92,9 +95,10 @@ class _AppShellState extends State<AppShell> {
       onOpenPdfFolder: _openPdfFolder,
     );
 
+    final Widget body;
     // Desktop / Large screen: sidebar on the right (first child in RTL Row).
     if (MediaQuery.sizeOf(context).width >= 720) {
-      return Scaffold(
+      body = Scaffold(
         backgroundColor: AppColors.background,
         body: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -120,40 +124,73 @@ class _AppShellState extends State<AppShell> {
           ],
         ),
       );
+    } else {
+      // Narrow screen: overlay drawer opened from topbar menu button.
+      body = Scaffold(
+        backgroundColor: AppColors.background,
+        body: Stack(
+          children: [
+            Column(
+              children: [
+                _TopBar(
+                    onMenu: () => setState(() => _navOpen = true),
+                    user: user,
+                    showMenuButton: true),
+                Expanded(child: widget.child),
+              ],
+            ),
+            if (_navOpen)
+              Positioned.fill(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.translucent,
+                        onTap: () => setState(() => _navOpen = false),
+                        child: ColoredBox(
+                          color: AppColors.surfaceDeep.withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: 280.w, child: Material(child: drawer)),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
     }
 
-    // Narrow screen: overlay drawer opened from topbar menu button.
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: Stack(
-        children: [
-          Column(
-            children: [
-              _TopBar(
-                  onMenu: () => setState(() => _navOpen = true),
-                  user: user,
-                  showMenuButton: true),
-              Expanded(child: widget.child),
-            ],
-          ),
-          if (_navOpen)
-            Positioned.fill(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.translucent,
-                      onTap: () => setState(() => _navOpen = false),
-                      child: const ColoredBox(color: Colors.black45),
-                    ),
-                  ),
-                  SizedBox(width: 280.w, child: Material(child: drawer)),
-                ],
-              ),
-            ),
-        ],
-      ),
+    return CallbackShortcuts(
+      bindings: _shortcuts(entries),
+      child: body,
     );
+  }
+
+  Map<ShortcutActivator, VoidCallback> _shortcuts(List<_NavEntry> entries) {
+    const digits = <LogicalKeyboardKey>[
+      LogicalKeyboardKey.digit0,
+      LogicalKeyboardKey.digit1,
+      LogicalKeyboardKey.digit2,
+      LogicalKeyboardKey.digit3,
+      LogicalKeyboardKey.digit4,
+      LogicalKeyboardKey.digit5,
+      LogicalKeyboardKey.digit6,
+      LogicalKeyboardKey.digit7,
+      LogicalKeyboardKey.digit8,
+      LogicalKeyboardKey.digit9,
+    ];
+    final bindings = <ShortcutActivator, VoidCallback>{};
+    for (var i = 0; i < entries.length && i + 1 < digits.length; i++) {
+      final path = entries[i].path;
+      bindings[SingleActivator(digits[i + 1], control: true)] = () {
+        if (mounted) context.go(path);
+      };
+    }
+    bindings[const SingleActivator(LogicalKeyboardKey.escape)] = () {
+      if (_navOpen) setState(() => _navOpen = false);
+    };
+    return bindings;
   }
 }
 
@@ -207,7 +244,7 @@ class _TopBar extends StatelessWidget {
               ),
             ),
             IconButton(
-              tooltip: '${AppStrings.toggleTheme}',
+              tooltip: AppStrings.toggleTheme,
               onPressed: () => getIt<ThemeService>().toggle(),
               icon: Icon(
                 getIt<ThemeService>().mode == ThemeMode.dark
@@ -266,7 +303,7 @@ class _Sidebar extends StatelessWidget {
                     children: [
                       Icon(Icons.science, size: 44.r, color: AppColors.primary),
                       const SizedBox(height: 8),
-                      Text('Material Lab',
+                      Text(AppStrings.appTitle,
                           style: Theme.of(context).textTheme.titleLarge),
                       Text(
                         AppStrings.tagline,

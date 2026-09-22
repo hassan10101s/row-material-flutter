@@ -1,0 +1,16 @@
+# graphify corpus hygiene — exclude build/engine/generated noise.
+# Parsed per gitignore spec (see graphify.detect.read_graphifyignore).
+build/
+windows/flutter/ephemeral/
+windows/flutter/generated_plugin_registrant.cc
+.dart_tool/
+.pub-cache/
+.pub/
+coverage/
+lib/l10n/generated/
+*.arb.bak
+graphify-out/
+*.db
+*.db-wal
+*.db-shm
+backups/

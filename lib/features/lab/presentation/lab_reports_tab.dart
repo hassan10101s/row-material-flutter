@@ -3,7 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
-import '../../../design_system/tokens/app_colors.dart';
+import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
@@ -41,22 +41,19 @@ class _LabReportsTabState extends State<LabReportsTab> {
           (curr.lastExport != null && curr.lastExport != prev.lastExport),
       listener: (context, state) {
         if (state.error != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(state.error!), backgroundColor: AppColors.danger),
-          );
+          AppFeedback.error(context, state.error!);
         } else if (state.lastExport != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('تم التصدير | Exported: ${state.lastExport}'),
-              backgroundColor: AppColors.success,
-            ),
+          AppFeedback.success(
+            context,
+            '${AppText.t('تم التصدير', 'Exported')}: ${state.lastExport}',
           );
         }
       },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('تقارير المختبر | Lab reports',
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+          Text(AppText.t('تقارير المختبر', 'Lab reports'),
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: AppSpacing.md),
           AppCard(
@@ -66,13 +63,13 @@ class _LabReportsTabState extends State<LabReportsTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('التقرير اليومي | Daily report',
+                  Text(AppText.t('التقرير اليومي', 'Daily report'),
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                   const SizedBox(height: AppSpacing.sm),
                   TextField(
                     controller: _date,
-                    decoration: const InputDecoration(
-                      labelText: 'التاريخ | Date (YYYY-MM-DD)',
+                    decoration: InputDecoration(
+                      labelText: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'),
                       isDense: true,
                     ),
                   ),
@@ -96,7 +93,7 @@ class _LabReportsTabState extends State<LabReportsTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('التقرير الشهري | Monthly report',
+                  Text(AppText.t('التقرير الشهري', 'Monthly report'),
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                   const SizedBox(height: AppSpacing.sm),
                   Row(
@@ -104,8 +101,8 @@ class _LabReportsTabState extends State<LabReportsTab> {
                       Expanded(
                         child: TextField(
                           controller: _month,
-                          decoration: const InputDecoration(
-                            labelText: 'الشهر | Month (1-12)',
+                          decoration: InputDecoration(
+                            labelText: AppText.t('الشهر', 'Month (1-12)'),
                             isDense: true,
                           ),
                         ),
@@ -114,8 +111,8 @@ class _LabReportsTabState extends State<LabReportsTab> {
                       Expanded(
                         child: TextField(
                           controller: _year,
-                          decoration: const InputDecoration(
-                            labelText: 'السنة | Year',
+                          decoration: InputDecoration(
+                            labelText: AppText.t('السنة', 'Year'),
                             isDense: true,
                           ),
                         ),
@@ -145,13 +142,13 @@ class _LabReportsTabState extends State<LabReportsTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('التقرير السنوي | Yearly report',
+                  Text(AppText.t('التقرير السنوي', 'Yearly report'),
                       style: const TextStyle(fontWeight: FontWeight.w700)),
                   const SizedBox(height: AppSpacing.sm),
                   TextField(
                     controller: _year,
-                    decoration: const InputDecoration(
-                      labelText: 'السنة | Year',
+                    decoration: InputDecoration(
+                      labelText: AppText.t('السنة', 'Year'),
                       isDense: true,
                     ),
                   ),
@@ -169,7 +166,8 @@ class _LabReportsTabState extends State<LabReportsTab> {
               ),
             ),
           ),
-        ],
+          ],
+        ),
       ),
     );
   }

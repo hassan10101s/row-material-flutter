@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
 
 /// Decision / status pill badge.
@@ -50,14 +51,14 @@ Color statusColorsPut(String status) {
 String statusLabel(String status) {
   switch (status) {
     case 'APPROVED':
-      return 'قبول نهائي | Approved';
+      return AppText.t('قبول نهائي', 'Approved');
     case 'CONDITIONAL_APPROVAL':
-      return 'قبول مشروط | Conditional';
+      return AppText.t('قبول مشروط', 'Conditional');
     case 'PARTIAL_REJECTION':
-      return 'رفض جزئي | Partial';
+      return AppText.t('رفض جزئي', 'Partial');
     case 'FULL_REJECTION':
-      return 'رفض كامل | Rejected';
+      return AppText.t('رفض كامل', 'Rejected');
     default:
-      return 'قيد الانتظار | Pending';
+      return AppText.t('قيد الانتظار', 'Pending');
   }
 }

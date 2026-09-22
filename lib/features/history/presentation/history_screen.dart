@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../../core/constants/app_strings.dart';
+import '../../../design_system/animations/app_animations.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
 import '../../../design_system/widgets/app_field.dart';
+import '../../../design_system/widgets/app_paginated_table.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../di/service_locator.dart';
 import '../../inspections/data/inspection_repo.dart';
@@ -22,75 +25,63 @@ class HistoryScreen extends StatelessWidget {
     final state = context.watch<HistoryCubit>().state;
     final cubit = context.read<HistoryCubit>();
     return Padding(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(AppSpacing.page),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('سجل الفحوصات | History',
+          Text(AppText.t('سجل الفحوصات', 'History'),
               style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: AppSpacing.md),
           AppField(
-            label: 'بحث | Search',
+            label: AppText.t('بحث', 'Search'),
             hint: 'رمز الدخول، الخامة، المورد، رقم الشاحنة…',
             onChanged: cubit.setQuery,
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (state.loading)
-            const Expanded(child: Center(child: CircularProgressIndicator()))
-          else if (state.error != null)
+          if (state.error != null)
             Expanded(
               child: AppEmptyState(
                 icon: Icons.error_outline,
-                title: 'تعذر التحميل',
+                title: AppText.t('تعذر التحميل', 'Failed to load'),
                 subtitle: state.error,
                 action: TextButton(onPressed: cubit.load, child: const Text('إعادة المحاولة')),
               ),
             )
           else
             Expanded(
-              child: state.rows.isEmpty
-                  ? const AppEmptyState(
-                      icon: Icons.inventory_2_outlined,
-                      title: 'لا توجد فحوصات بعد | No inspections yet',
-                    )
-                  : Card(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Scrollbar(
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: DataTable(
-                              columns: const [
-                                DataColumn(label: Text('رقم الدخول | Code')),
-                                DataColumn(label: Text('الخامة | Material')),
-                                DataColumn(label: Text('التاريخ | Date')),
-                                DataColumn(label: Text('المورد | Supplier')),
-                                DataColumn(label: Text('الحالة | Status')),
-                                DataColumn(label: Text('')),
-                              ],
-                              rows: [
-                                for (final r in state.rows)
-                                  DataRow(
-                                    cells: [
-                                      DataCell(Text('${r['entry_code'] ?? ''}')),
-                                      DataCell(Text('${r['material_name'] ?? ''}')),
-                                      DataCell(Text('${r['inspection_date'] ?? ''}')),
-                                      DataCell(Text('${r['supplier'] ?? '-'}')),
-                                      DataCell(AppStatusBadge('${r['decision_status'] ?? ''}')),
-                                      DataCell(
-                                        IconButton(
-                                          icon: Icon(Icons.chevron_left, size: 18.r),
-                                          tooltip: 'عرض',
-                                          onPressed: () => _openDetail(context, r),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                              ],
+              child: state.loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : state.rows.isEmpty
+                      ? AppEmptyState(
+                          icon: Icons.inventory_2_outlined,
+                          title: AppText.t('لا توجد فحوصات بعد', 'No inspections yet'),
+                        )
+                      : AppPaginatedTable(
+                      loading: state.loading,
+                      headers: [
+                        AppText.t('رقم الدخول', 'Code'),
+                        AppText.t('الخامة', 'Material'),
+                        AppText.t('التاريخ', 'Date'),
+                        AppText.t('المورد', 'Supplier'),
+                        AppText.t('الحالة', 'Status'),
+                        '',
+                      ],
+                      rows: [
+                        for (final r in state.rows)
+                          [
+                            Text('${r['entry_code'] ?? ''}'),
+                            Text('${r['material_name'] ?? ''}'),
+                            Text('${r['inspection_date'] ?? ''}'),
+                            Text('${r['supplier'] ?? '-'}'),
+                            AppStatusBadge('${r['decision_status'] ?? ''}'),
+                            IconButton(
+                              icon: Icon(Icons.chevron_left, size: 18.r),
+                              tooltip: AppText.t('عرض', 'View'),
+                              onPressed: () => _openDetail(context, r),
                             ),
-                          ),
-                        ),
-                      ),
+                          ],
+                      ],
+                      onRowTap: (index) => _openDetail(context, state.rows[index]),
                     ),
             ),
         ],
@@ -101,7 +92,7 @@ class HistoryScreen extends StatelessWidget {
   Future<void> _openDetail(BuildContext context, Map<String, dynamic> row) async {
     final id = (row['id'] as num).toInt();
     final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
+      AppPageRoute(
         builder: (_) => BlocProvider(
           create: (c) => InspectionDetailCubit(
             inspectionId: id,

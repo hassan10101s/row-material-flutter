@@ -27,6 +27,14 @@ class AppPaths {
     return exports;
   }
 
+  /// Port of paths.default_pdf_dir (export_dir / "pdfs").
+  Future<Directory> defaultPdfDir() async {
+    final exports = await exportsRoot();
+    final pdfs = Directory(p.join(exports.path, 'pdfs'));
+    await pdfs.create(recursive: true);
+    return pdfs;
+  }
+
   Future<String> secretFilePath() async {
     final dir = await appSupportRoot();
     await dir.create(recursive: true);

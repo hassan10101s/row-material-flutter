@@ -65,6 +65,7 @@ flutter:
     - assets/units.xlsx
     - assets/images/
     - assets/icons/
+    - assets/templates/
 
   fonts:
     - family: Cairo

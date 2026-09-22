@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:intl/intl.dart';
 
+import 'app_exceptions.dart';
+
 /// JSON helpers mirroring core/utils.py json_dumps / json_loads and number
 /// formatting used in reports.
 String jsonDumps(Object? value) => jsonEncode(value);
@@ -28,13 +30,41 @@ List<dynamic> jsonLoadsList(String? value, [List<dynamic> fallback = const []]) 
   return fallback;
 }
 
-/// Safe float parse matching _safe_float.
+/// Safe float parse matching _safe_float (core/utils.py:62-70): commas are
+/// treated as thousand separators and stripped before parsing.
 double? safeFloat(Object? value) {
   if (value == null) return null;
   if (value is num) return value.toDouble();
-  final s = value.toString().replaceAll(',', '.').trim();
+  final s = value.toString().replaceAll(',', '').trim();
   if (s.isEmpty) return null;
   return double.tryParse(s);
+}
+
+/// Round a percentage/ratio to one decimal place — port of Python
+/// `round(value, 1)` used across aggregation.py and report.py (e.g. 5/6 →
+/// 83.3, not 83).
+double roundPct(num x) => double.parse(x.toStringAsFixed(1));
+
+/// validate_non_negative_numeric_text port (core/utils.py:376-392):
+/// digits only (`\d+(\.\d+)?`), optional max length, optional emptiness.
+String validateNonNegativeNumericText(
+  String value,
+  String fieldLabel, {
+  bool allowEmpty = true,
+  int? maxLength,
+}) {
+  final text = value.trim();
+  if (text.isEmpty) {
+    if (allowEmpty) return '';
+    throw ValidationError('$fieldLabel is required.');
+  }
+  if (maxLength != null && text.length > maxLength) {
+    throw ValidationError('$fieldLabel must be at most $maxLength characters.');
+  }
+  if (!RegExp(r'^\d+(\.\d+)?$').hasMatch(text)) {
+    throw ValidationError('$fieldLabel must contain numbers only.');
+  }
+  return text;
 }
 
 /// format_quantity: port of core/utils.py — `{:.3f}` with thousands grouping.

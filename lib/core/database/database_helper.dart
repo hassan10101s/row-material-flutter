@@ -77,6 +77,9 @@ class DatabaseHelper {
           await db.execute('PRAGMA journal_mode=WAL');
           await db.execute('PRAGMA synchronous=NORMAL');
           await db.execute('PRAGMA busy_timeout=5000');
+          await db.execute('PRAGMA temp_store=MEMORY');
+          await db.execute('PRAGMA cache_size=-20000');
+          await db.execute('PRAGMA mmap_size=268435456');
         },
       ),
     );
@@ -93,10 +96,13 @@ class DatabaseHelper {
       options: OpenDatabaseOptions(
         version: 1,
         onConfigure: (db) async {
+          await db.execute('PRAGMA foreign_keys=ON');
           await db.execute('PRAGMA journal_mode=WAL');
           await db.execute('PRAGMA synchronous=NORMAL');
-          await db.execute('PRAGMA foreign_keys=ON');
           await db.execute('PRAGMA busy_timeout=5000');
+          await db.execute('PRAGMA temp_store=MEMORY');
+          await db.execute('PRAGMA cache_size=-20000');
+          await db.execute('PRAGMA mmap_size=268435456');
         },
         onCreate: (db, version) async {
           await _createSchema(db);

@@ -69,7 +69,7 @@ Map<String, dynamic> aggregateTotals(List<Map<String, dynamic>> inspections,
   final acceptedTotalCount = approved + conditional;
   final approvalRate = inspections.isEmpty
       ? 0.0
-      : ((acceptedTotalCount / inspections.length) * 100).roundToDouble();
+      : roundPct((acceptedTotalCount / inspections.length) * 100);
 
   return {
     'approved': approved,

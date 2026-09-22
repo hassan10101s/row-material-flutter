@@ -31,8 +31,8 @@ class ConstantsTab extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('حذف الثابت | Delete constant'),
-        content: Text('حذف "${constant['name']}"؟ | Delete this constant?'),
+        title: Text(AppText.t('حذف الثابت', 'Delete constant')),
+        content: Text('${AppText.t('حذف', 'Delete')} "${constant['name']}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -50,7 +50,7 @@ class ConstantsTab extends StatelessWidget {
     try {
       await cubit.delete((constant['id'] as num).toInt());
       if (!context.mounted) return;
-      AppFeedback.success(context, 'تم الحذف | Deleted.');
+      AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       await cubit.load();
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
@@ -67,11 +67,11 @@ class ConstantsTab extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text('الثوابت | Constants', style: Theme.of(context).textTheme.titleLarge),
+            Text(AppText.t('الثوابت', 'Constants'), style: Theme.of(context).textTheme.titleLarge),
             const Spacer(),
             AppButton(
               small: true,
-              label: 'إضافة ثابت | Add constant',
+              label: AppText.t('إضافة ثابت', 'Add constant'),
               icon: Icon(Icons.add, size: 16.r),
               onPressed: () => _openEditor(context),
             ),
@@ -83,7 +83,7 @@ class ConstantsTab extends StatelessWidget {
         ] else if (state.error != null) ...[
           Text(state.error!, style: TextStyle(color: AppColors.danger)),
         ] else if (state.rows.isEmpty) ...[
-          const Text('لا توجد ثوابت | No constants'),
+          Text(AppText.t('لا توجد ثوابت', 'No constants')),
         ] else
           AppCard(
             padding: EdgeInsets.zero,
@@ -92,12 +92,12 @@ class ConstantsTab extends StatelessWidget {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('الاسم | Name')),
-                    DataColumn(label: Text('الرمز | Symbol')),
-                    DataColumn(label: Text('القيمة | Value')),
-                    DataColumn(label: Text('الوحدة | Unit')),
-                    DataColumn(label: Text('نوع | Type')),
+                  columns: [
+                    DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
+                    DataColumn(label: Text(AppText.t('الرمز', 'Symbol'))),
+                    DataColumn(label: Text(AppText.t('القيمة', 'Value'))),
+                    DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
+                    DataColumn(label: Text(AppText.t('نوع', 'Type'))),
                     DataColumn(label: Text('')),
                   ],
                   rows: [
@@ -109,8 +109,8 @@ class ConstantsTab extends StatelessWidget {
                           DataCell(Text('${r['value_text'] ?? ''}')),
                           DataCell(Text('${r['unit'] ?? ''}')),
                           DataCell(Text((r['is_expression'] as num?)?.toInt() == 1
-                              ? 'تعبير | Expression'
-                              : 'قيمة | Value')),
+                              ? AppText.t('تعبير', 'Expression')
+                              : AppText.t('قيمة', 'Value'))),
                           DataCell(Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [

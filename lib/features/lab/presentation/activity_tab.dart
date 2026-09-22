@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_card.dart';
@@ -15,14 +16,14 @@ class ActivityTab extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('سجل النشاط | Activity log', style: Theme.of(context).textTheme.titleLarge),
+        Text(AppText.t('سجل النشاط', 'Activity log'), style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: AppSpacing.md),
         if (state.loading) ...[
           const Center(child: CircularProgressIndicator()),
         ] else if (state.error != null) ...[
           Text(state.error!, style: TextStyle(color: AppColors.danger)),
         ] else if (state.rows.isEmpty) ...[
-          const Text('لا يوجد نشاط | No activity yet'),
+          Text(AppText.t('لا يوجد نشاط', 'No activity yet')),
         ] else
           AppCard(
             padding: EdgeInsets.zero,

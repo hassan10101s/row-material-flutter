@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/database/database_helper.dart';
@@ -5,14 +6,23 @@ import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
 import '../../reference/data/reference_repo.dart';
+import '../../reports/data/report_html_builder.dart';
 import '../domain/inspection_rules.dart';
 
 /// Inspection repository (port of InspectionService).
 class InspectionRepo {
   final DatabaseHelper dbHelper;
   final ReferenceRepo referenceRepo;
+  /// Optional full HTML renderer (Phase 2). When null (tests), writes fall
+  /// back to the minimal preview snippet; when present, `report_html` is
+  /// regenerated after create/decision/data changes (refresh_report_html).
+  final ReportHtmlBuilder? htmlBuilder;
 
-  InspectionRepo({required this.dbHelper, required this.referenceRepo});
+  InspectionRepo({
+    required this.dbHelper,
+    required this.referenceRepo,
+    this.htmlBuilder,
+  });
 
   Future<Database> get _db => dbHelper.database;
 
@@ -226,7 +236,29 @@ class InspectionRepo {
       'created_at': timestamp,
       'updated_at': timestamp,
     });
+    await _refreshReportHtml(id);
     return getById(id);
+  }
+
+  /// Port of `InspectionService.refresh_report_html` — reload the full row
+  /// (with status history + injected lab tests), re-render the stored HTML and
+  /// persist it. Fails soft so report generation never blocks the mutation.
+  Future<void> _refreshReportHtml(int inspectionId) async {
+    final builder = htmlBuilder;
+    if (builder == null) return;
+    try {
+      final row = await getById(inspectionId);
+      final html = await builder.renderInspectionHtml(row);
+      final db = await _db;
+      await db.update(
+        'inspections',
+        {'report_html': html},
+        where: 'id = ?',
+        whereArgs: [inspectionId],
+      );
+    } catch (e, st) {
+      debugPrint('[inspections] report_html refresh failed for #$inspectionId: $e\n$st');
+    }
   }
 
   String _buildSnapshot(Map<String, dynamic> b) => jsonDumps({
@@ -385,6 +417,7 @@ class InspectionRepo {
         'changed_at': changedAt,
       });
     }
+    await _refreshReportHtml(inspectionId);
     return getById(inspectionId);
   }
 
@@ -431,6 +464,18 @@ class InspectionRepo {
     final truckNumber = truncateText(
         '${payload['truck_number'] ?? existing['truck_number'] ?? ''}', 10);
     final timestamp = nowIso();
+    // Rebuild the snapshot with the refreshed results/samples so the stored
+    // copy never drifts from the live columns (parity inspection.py:843-852).
+    final snapshot = _buildSnapshot({
+      'material_id': existing['material_id'],
+      'material_name': existing['material_name'],
+      'material_code': existing['material_code'],
+      'physical_reference': physicalRef,
+      'chemical_reference': chemicalRef,
+      'physical_results': physical,
+      'chemical_results': chemical,
+      'sample_names': sampleNames,
+    });
 
     await db.update(
       'inspections',
@@ -442,12 +487,14 @@ class InspectionRepo {
         'physical_results_json': jsonDumps(physical),
         'chemical_results_json': jsonDumps(chemical),
         'sample_names_json': jsonDumps(sampleNames),
+        'snapshot_json': snapshot,
         'updated_at': timestamp,
         'last_pdf_path': '',
       },
       where: 'id = ?',
       whereArgs: [inspectionId],
     );
+    await _refreshReportHtml(inspectionId);
     return getById(inspectionId);
   }
 

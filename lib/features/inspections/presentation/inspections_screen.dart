@@ -6,12 +6,13 @@ import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/animations/app_animations.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
-import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
+import '../../../design_system/widgets/app_paginated_table.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../di/service_locator.dart';
 import '../../reports/data/report_service.dart';
@@ -33,7 +34,7 @@ class InspectionsScreen extends StatelessWidget {
   const InspectionsScreen({super.key});
   Future<void> _newInspection(BuildContext context) async {
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
+      AppPageRoute(
         builder: (_) => BlocProvider(
           create: (c) => InspectionFormCubit(
             repo: getIt<InspectionRepo>(),
@@ -55,7 +56,7 @@ class InspectionsScreen extends StatelessWidget {
   }
   Future<void> _pushDetail(BuildContext context, int id) async {
     final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
+      AppPageRoute(
         builder: (_) => BlocProvider(
           create: (c) => InspectionDetailCubit(
             inspectionId: id,
@@ -73,10 +74,10 @@ class InspectionsScreen extends StatelessWidget {
       final path = await context.read<InspectionsCubit>().exportFollowUp();
       if (!context.mounted) return;
       if (path == null) {
-        AppFeedback.error(context, 'لا توجد فحوصات للتقرير | Nothing to report.');
+        AppFeedback.error(context, AppText.t('لا توجد فحوصات للتقرير', 'Nothing to report.'));
         return;
       }
-      AppFeedback.success(context, 'تم التصدير | Exported: $path');
+      AppFeedback.success(context, '${AppText.t('تم التصدير', 'Exported')}: $path');
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
@@ -93,7 +94,7 @@ class InspectionsScreen extends StatelessWidget {
       final date = parseIsoDate('${row['inspection_date'] ?? ''}');
       final file = await reports.saveReport(doc, date: date);
       if (!context.mounted) return;
-      AppFeedback.success(context, 'تم التصدير | Exported: ${file.path}');
+      AppFeedback.success(context, '${AppText.t('تم التصدير', 'Exported')}: ${file.path}');
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
@@ -118,7 +119,7 @@ class InspectionsScreen extends StatelessWidget {
               final search = TextField(
                 onChanged: cubit.setQuery,
                 decoration: InputDecoration(
-                  labelText: 'بحث | Search',
+                  labelText: AppText.t('بحث', 'Search'),
                   isDense: true,
                   prefixIcon: Icon(Icons.search, size: 20.r),
                 ),
@@ -129,12 +130,12 @@ class InspectionsScreen extends StatelessWidget {
                   child: DropdownButtonFormField<String>(
                     initialValue: state.status,
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'الحالة | Status',
+                    decoration: InputDecoration(
+                      labelText: AppText.t('الحالة', 'Status'),
                       isDense: true,
                     ),
                     items: [
-                      const DropdownMenuItem(value: '', child: Text('الكل | All')),
+                      DropdownMenuItem(value: '', child: Text(AppText.t('الكل', 'All'))),
                       for (final s in _allStatuses)
                         DropdownMenuItem(value: s, child: Text(statusLabel(s))),
                     ],
@@ -143,7 +144,7 @@ class InspectionsScreen extends StatelessWidget {
                 ),
                 AppButton(
                   icon: Icon(Icons.description_outlined, size: 18.r),
-                  label: 'تقرير متابعة | Follow-up',
+                  label: AppText.t('تقرير متابعة', 'Follow-up'),
                   style: AppButtonStyle.secondary,
                   loading: state.exporting,
                   onPressed: state.exporting ? null : () => _exportFollowUp(context),
@@ -185,97 +186,64 @@ class InspectionsScreen extends StatelessWidget {
           ] else if (state.error != null) ...[
             Text(state.error!, style: TextStyle(color: AppColors.danger)),
           ] else if (state.visible.isEmpty) ...[
-            const AppEmptyState(
+            AppEmptyState(
               icon: Icons.inventory_2_outlined,
-              title: 'لا توجد فحوصات | No inspections',
+              title: AppText.t('لا توجد فحوصات', 'No inspections'),
               subtitle: 'ابدأ بفحص جديد أو عدّل معايير البحث.',
             ),
           ] else
-            AppCard(
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: double.infinity,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: const [
-                      DataColumn(label: Text('رقم القيد | Entry')),
-                      DataColumn(label: Text('التاريخ | Date')),
-                      DataColumn(label: Text('المادة | Material')),
-                      DataColumn(label: Text('المورد | Supplier')),
-                      DataColumn(label: Text('الكمية | Qty')),
-                      DataColumn(label: Text('القرار | Decision')),
-                      DataColumn(label: Text(''), numeric: true),
-                    ],
-                    rows: [
-                      for (final r in state.visible)
-                        DataRow(
-                          onSelectChanged: (_) => _openDetail(context, r),
-                          cells: [
-                            DataCell(Text('${r['entry_code']}')),
-                            DataCell(Text(parseIsoToDisplay('${r['inspection_date']}') ?? '')),
-                            DataCell(
-                              Text('${r['material_name']}',
-                                  overflow: TextOverflow.ellipsis),
-                            ),
-                            DataCell(Text('${r['supplier']}',
-                                overflow: TextOverflow.ellipsis)),
-                            DataCell(Text('${r['quantity']}')),
-                            DataCell(AppStatusBadge('${r['decision_status']}')),
-                            DataCell(
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  _IconAction(
-                                    tooltip: 'تحديث القرار | Decision',
-                                    icon: Icons.gavel_outlined,
-                                    onTap: () => _openDecision(context, r),
-                                  ),
-                                  _IconAction(
-                                    tooltip: 'تصدير PDF | PDF',
-                                    icon: Icons.picture_as_pdf_outlined,
-                                    onTap: () => _exportOne(context, r, 'report'),
-                                  ),
-                                  _IconAction(
-                                    tooltip: 'ملصق | Label',
-                                    icon: Icons.label_outline,
-                                    onTap: () => _exportOne(context, r, 'label'),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
+            AppPaginatedTable(
+              headers: [
+                AppText.t('رقم القيد', 'Entry'),
+                AppText.t('التاريخ', 'Date'),
+                AppText.t('المادة', 'Material'),
+                AppText.t('المورد', 'Supplier'),
+                AppText.t('الكمية', 'Qty'),
+                AppText.t('القرار', 'Decision'),
+                '',
+              ],
+              rows: [
+                for (final r in state.visible)
+                  [
+                    Text('${r['entry_code']}'),
+                    Text(
+                        parseIsoToDisplay('${r['inspection_date']}') ?? ''),
+                    Text('${r['material_name']}',
+                        overflow: TextOverflow.ellipsis),
+                    Text('${r['supplier']}', overflow: TextOverflow.ellipsis),
+                    Text('${r['quantity']}'),
+                    AppStatusBadge('${r['decision_status']}'),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: AppText.t('تحديث القرار', 'Decision'),
+                          icon: Icon(Icons.gavel_outlined, size: 18.r),
+                          onPressed: () => _openDecision(context, r),
+                          visualDensity: VisualDensity.compact,
                         ),
-                    ],
-                  ),
-                ),
-              ),
+                        IconButton(
+                          tooltip: AppText.t('تصدير PDF', 'PDF'),
+                          icon: Icon(Icons.picture_as_pdf_outlined, size: 18.r),
+                          onPressed: () => _exportOne(context, r, 'report'),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        IconButton(
+                          tooltip: AppText.t('ملصق', 'Label'),
+                          icon: Icon(Icons.label_outline, size: 18.r),
+                          onPressed: () => _exportOne(context, r, 'label'),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
+                    ),
+                  ],
+              ],
+              onRowTap: (index) => _openDetail(context, state.visible[index]),
+              totalLabel:
+                  '${state.visible.length} ${AppText.t('فحص', 'inspections')}',
             ),
-          const SizedBox(height: AppSpacing.sm),
-          if (!state.loading && state.error == null)
-            Text('${state.visible.length} من ${state.rows.length} فحص | of inspections',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
         ],
       ),
-    );
-  }
-}
-class _IconAction extends StatelessWidget {
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onTap;
-  const _IconAction({
-    required this.tooltip,
-    required this.icon,
-    required this.onTap,
-  });
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      tooltip: tooltip,
-      onPressed: onTap,
-      icon: Icon(icon, size: 18.r),
-      visualDensity: VisualDensity.compact,
     );
   }
 }

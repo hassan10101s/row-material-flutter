@@ -133,7 +133,7 @@ class _DecisionDialogState extends State<DecisionDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('تحديث القرار | Update decision'),
+            title: Text(AppText.t('تحديث القرار', 'Update decision')),
       content: SizedBox(
         width: 460.w,
         child: SingleChildScrollView(
@@ -144,16 +144,15 @@ class _DecisionDialogState extends State<DecisionDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _status,
                 isExpanded: true,
-                decoration:
-                    const InputDecoration(labelText: 'القرار | Decision', isDense: true),
-                items: const [
-                  DropdownMenuItem(value: 'APPROVED', child: Text('قبول نهائي | Approved')),
-                  DropdownMenuItem(
-                      value: 'CONDITIONAL_APPROVAL', child: Text('قبول مشروط | Conditional')),
-                  DropdownMenuItem(
-                      value: 'PARTIAL_REJECTION', child: Text('رفض جزئي | Partial rejection')),
-                  DropdownMenuItem(
-                      value: 'FULL_REJECTION', child: Text('رفض كامل | Full rejection')),
+                        decoration: InputDecoration(labelText: AppText.t('القرار', 'Decision'), isDense: true),
+                        items: [
+                          DropdownMenuItem(value: 'APPROVED', child: Text(AppText.t('قبول نهائي', 'Approved'))),
+                    DropdownMenuItem(
+                      value: 'CONDITIONAL_APPROVAL', child: Text(AppText.t('قبول مشروط', 'Conditional'))),
+                    DropdownMenuItem(
+                      value: 'PARTIAL_REJECTION', child: Text(AppText.t('رفض جزئي', 'Partial rejection'))),
+                    DropdownMenuItem(
+                      value: 'FULL_REJECTION', child: Text(AppText.t('رفض كامل', 'Full rejection'))),
                 ],
                 onChanged: (v) {
                   if (v != null) setState(() => _status = v);
@@ -164,20 +163,20 @@ class _DecisionDialogState extends State<DecisionDialog> {
                 TextField(
                   controller: _followUp,
                   maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'ملاحظة المتابعة | Follow-up note',
-                    isDense: true,
-                  ),
+                          decoration: InputDecoration(
+                            labelText: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
+                            isDense: true,
+                          ),
                 ),
               ],
               if (_status == 'PARTIAL_REJECTION') ...[
                 const SizedBox(height: AppSpacing.md),
                 TextField(
                   controller: _rejected,
-                  decoration: const InputDecoration(
-                    labelText: 'الكمية المرفوضة | Rejected quantity',
-                    isDense: true,
-                  ),
+                          decoration: InputDecoration(
+                            labelText: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
+                            isDense: true,
+                          ),
                 ),
               ],
               if (_status == 'PARTIAL_REJECTION' || _status == 'FULL_REJECTION') ...[
@@ -185,10 +184,10 @@ class _DecisionDialogState extends State<DecisionDialog> {
                 TextField(
                   controller: _reason,
                   maxLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'سبب القرار | Decision reason',
-                    isDense: true,
-                  ),
+                          decoration: InputDecoration(
+                            labelText: AppText.t('سبب القرار', 'Decision reason'),
+                            isDense: true,
+                          ),
                 ),
               ],
             ],

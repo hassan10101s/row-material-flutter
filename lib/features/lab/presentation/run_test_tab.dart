@@ -49,17 +49,17 @@ class _RunTestTabState extends State<RunTestTab> {
   Future<void> _lookupEntry() async {
     final found = await context.read<RunTestCubit>().lookupEntry(_entryCode.text);
     if (!mounted) return;
-    if (!found) AppFeedback.error(context, 'كود الدخول غير موجود | Entry code not found.');
+    if (!found) AppFeedback.error(context, AppText.t('كود الدخول غير موجود', 'Entry code not found.'));
   }
 
   Future<void> _run() async {
     final state = context.read<RunTestCubit>().state;
     if (state.analysisId == null) {
-      AppFeedback.error(context, 'اختر التحليل | Select an analysis.');
+      AppFeedback.error(context, AppText.t('اختر التحليل', 'Select an analysis.'));
       return;
     }
     if (_sampleName.text.trim().isEmpty) {
-      AppFeedback.error(context, 'اسم العينة مطلوب | Sample name is required.');
+      AppFeedback.error(context, AppText.t('اسم العينة مطلوب', 'Sample name is required.'));
       return;
     }
     try {
@@ -115,7 +115,7 @@ class _RunTestTabState extends State<RunTestTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('تشغيل اختبار | Run a test', style: Theme.of(context).textTheme.titleLarge),
+        Text(AppText.t('تشغيل اختبار', 'Run a test'), style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: AppSpacing.md),
         if (state.loading) ...[
           const Center(child: CircularProgressIndicator()),
@@ -132,8 +132,8 @@ class _RunTestTabState extends State<RunTestTab> {
                   DropdownButtonFormField<int>(
                     initialValue: state.analysisId,
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'التحليل | Analysis',
+                    decoration: InputDecoration(
+                      labelText: AppText.t('التحليل', 'Analysis'),
                       isDense: true,
                     ),
                     items: [
@@ -152,14 +152,14 @@ class _RunTestTabState extends State<RunTestTab> {
                   DropdownButtonFormField<String>(
                     initialValue: state.sourceType,
                     isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'المصدر | Source',
+                    decoration: InputDecoration(
+                      labelText: AppText.t('المصدر', 'Source'),
                       isDense: true,
                     ),
-                    items: const [
+                    items: [
                       DropdownMenuItem(
-                          value: 'raw_material', child: Text('مادة خام | Raw material')),
-                      DropdownMenuItem(value: 'product', child: Text('منتج | Product')),
+                            value: 'raw_material', child: Text(AppText.t('مادة خام', 'Raw material'))),
+                          DropdownMenuItem(value: 'product', child: Text(AppText.t('منتج', 'Product'))),
                     ],
                     onChanged: (v) {
                       if (v != null) cubit.setSourceType(v);
@@ -172,8 +172,8 @@ class _RunTestTabState extends State<RunTestTab> {
                         Expanded(
                           child: TextField(
                             controller: _entryCode,
-                            decoration: const InputDecoration(
-                              labelText: 'رقم القيد | Entry code',
+                            decoration: InputDecoration(
+                              labelText: AppText.t('رقم القيد', 'Entry code'),
                               isDense: true,
                             ),
                           ),
@@ -181,20 +181,20 @@ class _RunTestTabState extends State<RunTestTab> {
                         const SizedBox(width: AppSpacing.sm),
                         OutlinedButton(
                           onPressed: _lookupEntry,
-                          child: const Text('بحث | Lookup'),
+                          child: Text(AppText.t('بحث', 'Lookup')),
                         ),
                       ],
                     ),
                     if (state.sourceName.isNotEmpty) ...[
                       const SizedBox(height: AppSpacing.sm),
-                      Text('المادة | Material: ${state.sourceName}'),
+                      Text('${AppText.t('المادة', 'Material')}: ${state.sourceName}'),
                     ],
                   ] else ...[
                     DropdownButtonFormField<int>(
                       initialValue: state.productId,
                       isExpanded: true,
-                      decoration: const InputDecoration(
-                        labelText: 'المنتج | Product',
+                      decoration: InputDecoration(
+                        labelText: AppText.t('المنتج', 'Product'),
                         isDense: true,
                       ),
                       items: [
@@ -218,8 +218,8 @@ class _RunTestTabState extends State<RunTestTab> {
                         width: 260.w,
                         child: TextField(
                           controller: _sampleName,
-                          decoration: const InputDecoration(
-                            labelText: 'اسم العينة | Sample name',
+                          decoration: InputDecoration(
+                            labelText: AppText.t('اسم العينة', 'Sample name'),
                             isDense: true,
                           ),
                         ),
@@ -228,8 +228,8 @@ class _RunTestTabState extends State<RunTestTab> {
                         width: 260.w,
                         child: TextField(
                           controller: _resultText,
-                          decoration: const InputDecoration(
-                            labelText: 'النتيجة اليدوية | Manual result (optional)',
+                          decoration: InputDecoration(
+                            labelText: AppText.t('النتيجة اليدوية', 'Manual result (optional)'),
                             isDense: true,
                           ),
                         ),
@@ -244,7 +244,7 @@ class _RunTestTabState extends State<RunTestTab> {
                         child: TextField(
                           controller: _controllerFor(field),
                           decoration: InputDecoration(
-                            labelText: '$field | Dynamic value',
+                            labelText: AppText.t(field, 'Dynamic value: $field'),
                             isDense: true,
                           ),
                         ),
@@ -280,7 +280,7 @@ class _ResultDialog extends StatelessWidget {
     final computed = result['computed'];
 
     return AlertDialog(
-      title: const Text('نتيجة الاختبار | Test result'),
+      title: Text(AppText.t('نتيجة الاختبار', 'Test result')),
       content: SizedBox(
         width: 480.w,
         child: SingleChildScrollView(
@@ -295,11 +295,11 @@ class _ResultDialog extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: AppSpacing.sm),
-              Text('العينة | Sample: ${test['sample_name'] ?? ''} — ${test['source_name'] ?? ''}',
+              Text('${AppText.t('العينة', 'Sample')}: ${test['sample_name'] ?? ''} — ${test['source_name'] ?? ''}',
                   style: TextStyle(color: AppColors.textMuted)),
               if (computed is Map) ...[
                 const SizedBox(height: AppSpacing.md),
-                Text('المعادلة | Formula: ${computed['expression'] ?? ''}'),
+                Text('${AppText.t('المعادلة', 'Formula')}: ${computed['expression'] ?? ''}'),
               ],
               if (rangeCheck != null) ...[
                 const SizedBox(height: AppSpacing.sm),
@@ -308,13 +308,13 @@ class _ResultDialog extends StatelessWidget {
                   runSpacing: AppSpacing.sm,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Text('الحدود | Range: '
+                    Text('${AppText.t('الحدود', 'Range')}: '
                         '${rangeCheck['min'] ?? '...'} - ${rangeCheck['max'] ?? '...'} '
                         '${rangeCheck['unit'] ?? ''}'),
                     Text(
                       (rangeCheck['out_of_range'] == true)
-                          ? 'خارج الحدود | Out of range'
-                          : 'ضمن الحدود | In range',
+                          ? AppText.t('خارج الحدود', 'Out of range')
+                          : AppText.t('ضمن الحدود', 'In range'),
                       style: TextStyle(
                         color: (rangeCheck['out_of_range'] == true)
                             ? AppColors.danger
@@ -327,7 +327,7 @@ class _ResultDialog extends StatelessWidget {
               ],
               if (consumption.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.md),
-                Text('الاستهلاك | Consumption',
+                Text(AppText.t('الاستهلاك', 'Consumption'),
                     style: const TextStyle(fontWeight: FontWeight.w700)),
                 for (final c in consumption.cast<Map>())
                   Padding(
@@ -344,7 +344,7 @@ class _ResultDialog extends StatelessWidget {
               ],
               if (lowStock.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.md),
-                Text('تنبيه مخزون | Low stock',
+                Text(AppText.t('تنبيه مخزون', 'Low stock'),
                     style: TextStyle(color: AppColors.danger, fontWeight: FontWeight.w700)),
                 for (final l in lowStock.cast<Map>())
                   Padding(
@@ -360,7 +360,7 @@ class _ResultDialog extends StatelessWidget {
       actions: [
         FilledButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('إغلاق | Close'),
+          child: Text(AppText.t('إغلاق', 'Close')),
         ),
       ],
     );

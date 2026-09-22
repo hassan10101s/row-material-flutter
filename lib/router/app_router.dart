@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/auth_gate.dart';
+import '../design_system/animations/app_animations.dart';
 import '../di/service_locator.dart';
 import '../features/auth/data/auth_repo.dart';
 import '../features/auth/presentation/cubit/login_cubit.dart';
@@ -56,16 +57,22 @@ class AppRouter {
     routes: [
       GoRoute(
         path: AppRoutes.setup,
-        builder: (c, s) => BlocProvider(
-          create: (c) => SetupCubit(auth: getIt<AuthRepo>(), gate: _gate),
-          child: const SetupScreen(),
+        pageBuilder: (c, s) => AppPage<SetupCubit>(
+          name: s.uri.path,
+          builder: (c) => BlocProvider(
+            create: (c) => SetupCubit(auth: getIt<AuthRepo>(), gate: _gate),
+            child: const SetupScreen(),
+          ),
         ),
       ),
       GoRoute(
         path: AppRoutes.login,
-        builder: (c, s) => BlocProvider(
-          create: (c) => LoginCubit(auth: getIt<AuthRepo>(), gate: _gate),
-          child: const LoginScreen(),
+        pageBuilder: (c, s) => AppPage<LoginCubit>(
+          name: s.uri.path,
+          builder: (c) => BlocProvider(
+            create: (c) => LoginCubit(auth: getIt<AuthRepo>(), gate: _gate),
+            child: const LoginScreen(),
+          ),
         ),
       ),
       ShellRoute(
@@ -73,62 +80,83 @@ class AppRouter {
         routes: [
           GoRoute(
             path: AppRoutes.dashboard,
-            builder: (c, s) => MultiBlocProvider(
-              providers: [
-                BlocProvider(create: (c) => DashboardKpisCubit()),
-                BlocProvider(
-                  create: (c) => DashboardCubit(
-                    repo: getIt<DashboardRepo>(),
-                    kpis: c.read<DashboardKpisCubit>(),
-                  )..load(),
-                ),
-              ],
-              child: const DashboardScreen(),
+            pageBuilder: (c, s) => AppPage<DashboardScreen>(
+              name: s.uri.path,
+              builder: (c) => MultiBlocProvider(
+                providers: [
+                  BlocProvider(create: (c) => DashboardKpisCubit()),
+                  BlocProvider(
+                    create: (c) => DashboardCubit(
+                      repo: getIt<DashboardRepo>(),
+                      kpis: c.read<DashboardKpisCubit>(),
+                    )..load(),
+                  ),
+                ],
+                child: const DashboardScreen(),
+              ),
             ),
           ),
           GoRoute(
             path: AppRoutes.history,
-            builder: (c, s) => BlocProvider(
-              create: (c) =>
-                  HistoryCubit(repo: getIt<InspectionRepo>())..load(),
-              child: const HistoryScreen(),
+            pageBuilder: (c, s) => AppPage<HistoryScreen>(
+              name: s.uri.path,
+              builder: (c) => BlocProvider(
+                create: (c) =>
+                    HistoryCubit(repo: getIt<InspectionRepo>())..load(),
+                child: const HistoryScreen(),
+              ),
             ),
           ),
           GoRoute(
             path: AppRoutes.inspections,
-            builder: (c, s) => BlocProvider(
-              create: (c) => InspectionsCubit(
-                repo: getIt<InspectionRepo>(),
-                reports: getIt<ReportService>(),
-              )..load(),
-              child: const InspectionsScreen(),
+            pageBuilder: (c, s) => AppPage<InspectionsScreen>(
+              name: s.uri.path,
+              builder: (c) => BlocProvider(
+                create: (c) => InspectionsCubit(
+                  repo: getIt<InspectionRepo>(),
+                  reports: getIt<ReportService>(),
+                )..load(),
+                child: const InspectionsScreen(),
+              ),
             ),
           ),
           GoRoute(
             path: AppRoutes.reports,
-            builder: (c, s) => BlocProvider(
-              create: (c) => ReportsCubit(repo: getIt<ReportService>()),
-              child: const ReportsScreen(),
+            pageBuilder: (c, s) => AppPage<ReportsScreen>(
+              name: s.uri.path,
+              builder: (c) => BlocProvider(
+                create: (c) => ReportsCubit(repo: getIt<ReportService>()),
+                child: const ReportsScreen(),
+              ),
             ),
           ),
           GoRoute(
             path: AppRoutes.lab,
-            builder: (c, s) => BlocProvider(
-              create: (c) => LabCubit(),
-              child: const LabScreen(),
+            pageBuilder: (c, s) => AppPage<LabScreen>(
+              name: s.uri.path,
+              builder: (c) => BlocProvider(
+                create: (c) => LabCubit(),
+                child: const LabScreen(),
+              ),
             ),
           ),
           GoRoute(
             path: AppRoutes.reference,
-            builder: (c, s) => BlocProvider(
-              create: (c) => ReferenceCubit(repo: getIt<ReferenceRepo>())
-                ..load(),
-              child: const ReferenceScreen(),
+            pageBuilder: (c, s) => AppPage<ReferenceScreen>(
+              name: s.uri.path,
+              builder: (c) => BlocProvider(
+                create: (c) => ReferenceCubit(repo: getIt<ReferenceRepo>())
+                  ..load(),
+                child: const ReferenceScreen(),
+              ),
             ),
           ),
           GoRoute(
             path: AppRoutes.settings,
-            builder: (c, s) => const SettingsScreen(),
+            pageBuilder: (c, s) => AppPage<SettingsScreen>(
+              name: s.uri.path,
+              builder: (c) => const SettingsScreen(),
+            ),
           ),
         ],
       ),

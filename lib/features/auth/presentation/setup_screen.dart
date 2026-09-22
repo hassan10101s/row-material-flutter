@@ -100,35 +100,38 @@ class _SetupScreenState extends State<SetupScreen> {
                     Icon(Icons.science, size: 44.r, color: AppColors.primary),
                     const SizedBox(height: AppSpacing.md),
                     Text(
-                      'إعداد النظام | System Setup',
+                      AppText.t('إعداد النظام', 'System Setup'),
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
                     const SizedBox(height: AppSpacing.xs),
                     Text(
-                      'أنشئ حساب المسؤول الأول وسيتم استيراد بيانات المراجع من Reference.xlsx تلقائياً.',
+                      AppText.t(
+                        'أنشئ حساب المسؤول الأول وسيتم استيراد بيانات المراجع من Reference.xlsx تلقائياً.',
+                        'Create the first administrator account. Reference data will be imported from Reference.xlsx automatically.',
+                      ),
                       textAlign: TextAlign.center,
                       style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
                     ),
                     const SizedBox(height: AppSpacing.lg),
                     AppField(
-                      label: 'الاسم الكامل | Full Name',
+                      label: AppText.t('الاسم الكامل', 'Full Name'),
                       controller: _fullName,
                     ),
                     const SizedBox(height: AppSpacing.md),
                     AppField(
-                      label: 'اسم المستخدم | Username',
+                      label: AppText.t('اسم المستخدم', 'Username'),
                       controller: _username,
                     ),
                     const SizedBox(height: AppSpacing.md),
                     AppField(
-                      label: 'كلمة المرور | Password',
+                      label: AppText.t('كلمة المرور', 'Password'),
                       controller: _password,
                       obscure: true,
                     ),
                     const SizedBox(height: AppSpacing.md),
                     AppField(
-                      label: 'تأكيد كلمة المرور | Confirm Password',
+                      label: AppText.t('تأكيد كلمة المرور', 'Confirm Password'),
                       controller: _confirm,
                       obscure: true,
                     ),
@@ -137,7 +140,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       onPressed: _pickExpiryDate,
                       icon: const Icon(Icons.event),
                       label: Text(_expiryDate == null
-                          ? AppText.t('تاريخ انتهاء الاستخدام | Usage Expiry …', 'Usage expiry date …')
+                          ? AppText.t('تاريخ انتهاء الاستخدام …', 'Usage expiry date …')
                           : '${AppText.t('تاريخ انتهاء الاستخدام', 'Usage expiry')}: $_expiryIso'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.textStrong,
@@ -154,7 +157,6 @@ class _SetupScreenState extends State<SetupScreen> {
                     const SizedBox(height: AppSpacing.lg),
                     AppButton(
                       label: AppText.t('إنشاء الحساب', 'Create Account'),
-                      expanded: true,
                       loading: state.busy,
                       onPressed: state.busy ? null : _submit,
                     ),

@@ -62,7 +62,8 @@ class ReferenceRepo {
       'chemical_reference': enrichedChemical,
       'active': raw['active'],
       'next_entry_code':
-          generateEntryCode('${raw['material_code']}', inspectionDate ?? todayIso()),
+          await generateEntryCode('${raw['material_code']}',
+              inspectionDate ?? todayIso()),
     };
     return material;
   }

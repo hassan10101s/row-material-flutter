@@ -20,4 +20,9 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
       safeEmit(state.copyWith(loading: false, error: '$e'));
     }
   }
+
+  Future<void> update(int id, {required String name, required String code}) async {
+    await repo.updateMaterial(id, materialName: name, materialCode: code);
+    await load();
+  }
 }

@@ -31,8 +31,8 @@ class AnalysesTab extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('حذف التحليل | Delete analysis'),
-        content: Text('حذف "${analysis['name']}"؟ | Delete this analysis?'),
+        title: Text(AppText.t('حذف التحليل', 'Delete analysis')),
+        content: Text('${AppText.t('حذف', 'Delete')} "${analysis['name']}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -50,7 +50,7 @@ class AnalysesTab extends StatelessWidget {
     try {
       await cubit.delete((analysis['id'] as num).toInt());
       if (!context.mounted) return;
-      AppFeedback.success(context, 'تم الحذف | Deleted.');
+      AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       await cubit.load();
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
@@ -67,11 +67,11 @@ class AnalysesTab extends StatelessWidget {
       children: [
         Row(
           children: [
-            Text('التحليلات | Analyses', style: Theme.of(context).textTheme.titleLarge),
+            Text(AppText.t('التحليلات', 'Analyses'), style: Theme.of(context).textTheme.titleLarge),
             const Spacer(),
             AppButton(
               small: true,
-              label: 'إضافة تحليل | Add analysis',
+              label: AppText.t('إضافة تحليل', 'Add analysis'),
               icon: Icon(Icons.add, size: 16.r),
               onPressed: () => _openEditor(context),
             ),
@@ -83,7 +83,7 @@ class AnalysesTab extends StatelessWidget {
         ] else if (state.error != null) ...[
           Text(state.error!, style: TextStyle(color: AppColors.danger)),
         ] else if (state.rows.isEmpty) ...[
-          const Text('لا توجد تحليلات | No analyses'),
+          Text(AppText.t('لا توجد تحليلات', 'No analyses')),
         ] else
           AppCard(
             padding: EdgeInsets.zero,
@@ -92,12 +92,12 @@ class AnalysesTab extends StatelessWidget {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('الاسم | Name')),
-                    DataColumn(label: Text('الوحدة | Unit')),
-                    DataColumn(label: Text('المعادلة | Formula')),
-                    DataColumn(label: Text('المواد | Items')),
-                    DataColumn(label: Text('الحقول | Fields')),
+                  columns: [
+                    DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
+                    DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
+                    DataColumn(label: Text(AppText.t('المعادلة', 'Formula'))),
+                    DataColumn(label: Text(AppText.t('المواد', 'Items'))),
+                    DataColumn(label: Text(AppText.t('الحقول', 'Fields'))),
                     DataColumn(label: Text('')),
                   ],
                   rows: [

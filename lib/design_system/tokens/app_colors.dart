@@ -18,6 +18,8 @@ class AppColors {
   static const Color lightPartial = Color(0xFFF97316);
   static const Color lightDanger = Color(0xFFEF4444);
   static const Color lightInfo = Color(0xFF3B82F6);
+  static const Color lightWhatsapp = Color(0xFF25D366);
+  static const Color lightPdf = Color(0xFFE11D48);
   static const Color lightTextStrong = Color(0xFF0F172A);
   static const Color lightTextMuted = Color(0xFF64748B);
   static const Color lightBorder = Color(0xFFD9E1EC);
@@ -36,6 +38,8 @@ class AppColors {
   static const Color darkPartial = Color(0xFFFB923C);
   static const Color darkDanger = Color(0xFFF87171);
   static const Color darkInfo = Color(0xFF60A5FA);
+  static const Color darkWhatsapp = Color(0xFF4ADE80);
+  static const Color darkPdf = Color(0xFFFB7185);
   static const Color darkTextStrong = Color(0xFFF1F5F9);
   static const Color darkTextMuted = Color(0xFF94A3B8);
   static const Color darkBorder = Color(0xFF334155);
@@ -54,6 +58,9 @@ class AppColors {
   static Color get partial => brightness == Brightness.dark ? darkPartial : lightPartial;
   static Color get danger => brightness == Brightness.dark ? darkDanger : lightDanger;
   static Color get info => brightness == Brightness.dark ? darkInfo : lightInfo;
+  static Color get whatsapp =>
+      brightness == Brightness.dark ? darkWhatsapp : lightWhatsapp;
+  static Color get pdf => brightness == Brightness.dark ? darkPdf : lightPdf;
   static Color get textStrong => brightness == Brightness.dark ? darkTextStrong : lightTextStrong;
   static Color get textMuted => brightness == Brightness.dark ? darkTextMuted : lightTextMuted;
   static Color get border => brightness == Brightness.dark ? darkBorder : lightBorder;

@@ -13,11 +13,15 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
     safeEmit(state.copyWith(loading: true));
     try {
       final label = await repo.getSettingValue('department_label');
+      final logoPath = await repo.getReportLogoPath();
+      final logoDataUri = await repo.getReportLogoDataUri();
       safeEmit(state.copyWith(
         loading: false,
         departmentLabel: label?.trim().isNotEmpty == true
             ? label!
             : 'Quality Assurance Department',
+        logoPath: logoPath ?? '',
+        logoDataUri: logoDataUri ?? '',
       ));
     } catch (e) {
       safeEmit(state.copyWith(
@@ -32,6 +36,35 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
     try {
       await repo.updateSettings({'department_label': departmentLabel});
       safeEmit(state.copyWith(saving: false, departmentLabel: departmentLabel));
+    } on AppError {
+      safeEmit(state.copyWith(saving: false));
+      rethrow;
+    } catch (_) {
+      safeEmit(state.copyWith(saving: false));
+      rethrow;
+    }
+  }
+
+  Future<void> saveLogo({required String path, required String dataUri}) async {
+    safeEmit(state.copyWith(saving: true));
+    try {
+      await repo.setReportLogo(path, dataUri);
+      safeEmit(
+          state.copyWith(saving: false, logoPath: path, logoDataUri: dataUri));
+    } on AppError {
+      safeEmit(state.copyWith(saving: false));
+      rethrow;
+    } catch (_) {
+      safeEmit(state.copyWith(saving: false));
+      rethrow;
+    }
+  }
+
+  Future<void> clearLogo() async {
+    safeEmit(state.copyWith(saving: true));
+    try {
+      await repo.clearReportLogo();
+      safeEmit(state.copyWith(saving: false, logoPath: '', logoDataUri: ''));
     } on AppError {
       safeEmit(state.copyWith(saving: false));
       rethrow;

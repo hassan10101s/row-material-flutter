@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="ar" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <title>Quality Control Report</title>
+    {% if base_url %}<base href="{{ base_url }}">{% endif %}
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <style>
+        :root {
+            --primary-color: #000000;
+            --secondary-color: #000000;
+            --accent-color: #000000;
+            --accent-light: #e2e8f0;
+            --accent-medium: #64748b;
+            --accent-dark: #000000;
+            --accent-glow: rgba(0, 0, 0, 0.08);
+            --border-color: #c6d1dc;
+            --border-light: #dde5ef;
+            --success-bg: #d1fae5;
+            --success-text: #065f46;
+            --warning-bg: #fff3cd;
+            --warning-text: #8a5a00;
+            --partial-bg: #ffedd5;
+            --partial-text: #9a3412;
+            --danger-bg: #fee2e2;
+            --danger-text: #991b1b;
+            --muted: #5a6b7d;
+            --surface: #ffffff;
+            --deep-navy: #000000;
+        }
+
+        @page {
+            size: A4;
+            margin: 1mm;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', 'IBM Plex Sans Arabic', "Segoe UI", Tahoma, sans-serif;
+            color: #1a2332;
+            background: #e8edf4;
+            line-height: 1.35;
+            padding: 4px;
+        }
+
+        .sheet {
+            position: relative;
+            max-width: 206mm;
+            min-height: calc(297mm - 18mm);
+            margin: 0 auto;
+            border: 2px solid var(--primary-color);
+            border-radius: 12px;
+            padding: 14px 16px;
+            background: #fff;
+            box-shadow:
+                0 0 0 1px rgba(15,40,71,0.06),
+                0 8px 40px rgba(7,21,40,0.10),
+                0 2px 8px rgba(7,21,40,0.06);
+        }
+
+        .sheet::before, .sheet::after {
+            content: '';
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .sheet::before {
+            top: -1px; right: -1px;
+            border-top: 4px solid var(--accent-color);
+            border-right: 4px solid var(--accent-color);
+            border-top-right-radius: 12px;
+        }
+        .sheet::after {
+            bottom: -1px; left: -1px;
+            border-bottom: 4px solid var(--accent-color);
+            border-left: 4px solid var(--accent-color);
+            border-bottom-left-radius: 12px;
+        }
+        .corner-bl, .corner-tr {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .corner-bl {
+            bottom: -1px; right: -1px;
+            border-bottom: 4px solid var(--accent-color);
+            border-right: 4px solid var(--accent-color);
+            border-bottom-right-radius: 12px;
+        }
+        .corner-tr {
+            top: -1px; left: -1px;
+            border-top: 4px solid var(--accent-color);
+            border-left: 4px solid var(--accent-color);
+            border-top-left-radius: 12px;
+        }
+
+        .watermark {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 72px;
+            font-weight: 800;
+            letter-spacing: 8px;
+            color: rgba(15,40,71,0.03);
+            transform: rotate(-30deg);
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .accent-strip {
+            height: 4px;
+            background: linear-gradient(90deg, transparent, var(--accent-color), var(--accent-medium), var(--accent-color), transparent);
+            border-radius: 4px;
+            margin-bottom: 12px;
+        }
+
+        .header {
+            display: block;
+            border-bottom: 2.5px solid var(--primary-color);
+            padding-bottom: 10px;
+            margin-bottom: 12px;
+            text-align: center;
+            position: relative;
+        }
+        .header::after {
+            content: '';
+            position: absolute;
+            bottom: -5px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 60px;
+            height: 8px;
+            background: var(--accent-color);
+            border-radius: 4px;
+        }
+        .header h1 {
+            color: var(--primary-color);
+            font-size: 21px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            margin-bottom: 2px;
+        }
+        .header p {
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 500;
+        }
+        .header-main { min-width: 0; text-align: center; }
+
+        .report-logo {
+            width: 68px; height: 68px;
+            object-fit: contain;
+            border: 2px solid var(--accent-light);
+            border-radius: 12px;
+            background: #fff;
+            padding: 5px;
+            display: block;
+            margin: 0 auto 8px;
+            box-shadow: 0 2px 10px var(--accent-glow);
+        }
+
+        .header-side {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 8px;
+        }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            border-radius: 999px;
+            padding: 7px 14px;
+            border: 1.5px solid var(--accent-light);
+            background: linear-gradient(135deg, #f0fdf4, #dcfce7);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--deep-navy);
+            min-width: 140px;
+            justify-content: center;
+            text-align: center;
+            box-shadow: 0 1px 6px var(--accent-glow);
+            transition: all 0.3s ease;
+        }
+
+        .badge.Approved, .badge.Conditional {
+            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+            border-color: #6ee7b7;
+            color: #065f46;
+        }
+        .badge.Partial {
+            background: linear-gradient(135deg, #ffedd5, #fed7aa);
+            border-color: #fdba74;
+            color: #9a3412;
+        }
+        .badge.Rejected {
+            background: linear-gradient(135deg, #fee2e2, #fecaca);
+            border-color: #fca5a5;
+            color: #991b1b;
+        }
+
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 7px;
+            margin-bottom: 12px;
+        }
+        .meta-card {
+            background: linear-gradient(145deg, #f8faff, #eef3fa);
+            border: 1px solid var(--border-light);
+            border-radius: 10px;
+            padding: 8px 9px;
+            min-height: 50px;
+            position: relative;
+            overflow: hidden;
+        }
+        .meta-card::before {
+            content: '';
+            position: absolute;
+            top: 0; right: 0;
+            width: 3px; height: 100%;
+            background: linear-gradient(180deg, var(--secondary-color), var(--accent-color));
+            border-radius: 0 10px 10px 0;
+        }
+        .meta-card .label {
+            display: block;
+            font-size: 9.5px;
+            color: var(--muted);
+            margin-bottom: 3px;
+            font-weight: 500;
+        }
+        .meta-card .value {
+            font-size: 12.5px;
+            font-weight: 700;
+            color: var(--primary-color);
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: normal;
+            word-break: break-word;
+            line-height: 1.4;
+        }
+
+        .sections {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .section {
+            border: 1px solid #cdd7e3;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fff;
+            box-shadow: 0 2px 12px rgba(7,21,40,0.05);
+        }
+        .section-title {
+            margin: 0;
+            padding: 9px 12px;
+            color: white;
+            font-size: 12px;
+            font-weight: 700;
+            text-align: center;
+            letter-spacing: 0.5px;
+            position: relative;
+        }
+        .section-title::after {
+            content: '';
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+        }
+        .section-physical {
+            background: linear-gradient(135deg, #000000 0%, #334155 100%);
+        }
+        .section-chemical {
+            background: linear-gradient(135deg, #000000 0%, #475569 100%);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+            font-size: 10.5px;
+            direction: ltr;
+        }
+        th, td {
+            border: 1px solid #dce4ed;
+            padding: 5px 6px;
+            text-align: left;
+            vertical-align: middle;
+        }
+        th {
+            background: linear-gradient(180deg, #edf3f8, #e2eaf3);
+            color: var(--primary-color);
+            font-weight: 800;
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .out-of-range {
+            color: var(--danger-text);
+            font-weight: 800;
+            background: linear-gradient(135deg, #fff1f2, #ffe4e6);
+        }
+        .out-of-range::before {
+            content: '\26A0';
+            font-size: 9px;
+            margin-left: 2px;
+        }
+        .param-cell {
+            font-weight: 800;
+            color: var(--primary-color);
+            background: #f8faff;
+        }
+        th.minmax-col,
+        td.minmax-col {
+            text-align: center;
+            font-weight: 500;
+            background: #fafbfd;
+            color: #7a8ba0;
+            font-size: 9.5px;
+        }
+        th.result-col {
+            background: linear-gradient(180deg, #ebf7f1, #dff3ea);
+            border-bottom-color: #b9dfcf;
+            text-align: center;
+            white-space: normal;
+        }
+        td.result-col {
+            text-align: center;
+            font-weight: 700;
+            color: #10263f;
+        }
+        td.result-col-odd {
+            background: linear-gradient(180deg, #fcfeff, #f5faff);
+        }
+        td.result-col-even {
+            background: linear-gradient(180deg, #f6fbff, #edf6ff);
+        }
+        .result-header-index {
+            display: block;
+            font-size: 8.8px;
+            color: #0f3e71;
+            letter-spacing: 0.4px;
+            font-weight: 800;
+        }
+        .result-header-name {
+            display: block;
+            margin-top: 1px;
+            font-size: 8.6px;
+            line-height: 1.25;
+            color: #1f3a5a;
+            font-weight: 700;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        td.result-col.out-of-range {
+            background: linear-gradient(135deg, #fff1f2, #ffe4e6);
+        }
+        .decision-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+            align-items: stretch;
+        }
+
+        .qr-box {
+            flex: 0 0 190px;
+            border: 1.5px solid var(--accent-light);
+            border-radius: 12px;
+            padding: 10px 8px 8px;
+            background: linear-gradient(160deg, #f0fdf4, #ecfdf5);
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            box-shadow: 0 2px 10px var(--accent-glow);
+        }
+        .qr-box::before {
+            content: '';
+            position: absolute;
+            top: 6px; left: 6px; right: 6px;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--accent-medium), transparent);
+        }
+        .qr-image {
+            width: 158px; height: 158px;
+            object-fit: contain;
+            border: 1.5px solid var(--accent-light);
+            border-radius: 10px;
+            background: #fff;
+            padding: 5px;
+            margin: 4px auto 6px;
+            display: block;
+        }
+        .qr-caption { font-size: 9.5px; color: var(--muted); font-weight: 500; }
+        .qr-warning { margin-top: 6px; font-size: 10px; color: #92400e; font-weight: 600; }
+
+        .notes-box {
+            flex: 1 1 0;
+            min-width: 0;
+            border: 1px solid #d7e0ea;
+            border-radius: 12px;
+            padding: 12px 14px;
+            background: linear-gradient(160deg, #ffffff, #f8faff);
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            box-shadow: 0 2px 12px rgba(7,21,40,0.05);
+            position: relative;
+            overflow: hidden;
+        }
+        .notes-box--centered {
+            justify-content: center;
+        }
+        .notes-box::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--secondary-color), var(--accent-color), var(--secondary-color));
+            border-radius: 12px 12px 0 0;
+        }
+
+        .decision-label {
+            font-size: 12px;
+            color: var(--primary-color);
+            margin-bottom: 6px;
+            font-weight: 800;
+        }
+        .decision-head { text-align: center; margin-bottom: 10px; }
+        .decision-value {
+            display: inline-block;
+            padding: 9px 20px;
+            border-radius: 12px;
+            font-weight: 800;
+            font-size: 15px;
+            letter-spacing: 0.5px;
+        }
+        .Approved {
+            background: linear-gradient(135deg, #d1fae5, #a7f3d0);
+            color: var(--success-text);
+            border: 1.5px solid #6ee7b7;
+            box-shadow: 0 2px 10px var(--accent-glow);
+        }
+        .Conditional {
+            background: linear-gradient(135deg, #d1fae5, #bbf7d0);
+            color: var(--success-text);
+            border: 1.5px solid #6ee7b7;
+            box-shadow: 0 2px 10px var(--accent-glow);
+        }
+        .Partial {
+            background: linear-gradient(135deg, #ffedd5, #fed7aa);
+            color: var(--partial-text);
+            border: 1.5px solid #fdba74;
+            box-shadow: 0 2px 10px rgba(224,122,24,0.12);
+        }
+        .Rejected {
+            background: linear-gradient(135deg, #fee2e2, #fecaca);
+            color: var(--danger-text);
+            border: 1.5px solid #fca5a5;
+            box-shadow: 0 2px 10px rgba(220,58,74,0.12);
+        }
+
+        .notes-box h3 {
+            font-size: 12px;
+            color: var(--primary-color);
+            text-align: center;
+            margin: 0 0 8px;
+            font-weight: 700;
+        }
+        .note-line {
+            margin: 4px 0;
+            font-size: 11px;
+            text-align: center;
+            line-height: 1.5;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+        }
+        .note-line strong { color: var(--secondary-color); }
+
+        .timeline-wrap {
+            margin-top: 10px;
+            padding: 10px 8px 8px;
+            border-top: 1px dashed #c4d0dd;
+            border-radius: 0 0 8px 8px;
+            background: linear-gradient(180deg, #f8fbff, #f0f5fc);
+        }
+        .status-timeline {
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            gap: 0;
+            overflow-x: auto;
+            overflow-y: hidden;
+            max-width: 100%;
+            padding: 3px 2px;
+        }
+        .status-timeline.is-multi-row {
+            overflow: visible;
+            flex-wrap: wrap;
+            row-gap: 10px;
+            column-gap: 0;
+            justify-content: center;
+        }
+        .status-timeline.is-multi-row .timeline-line { display: none; }
+        .status-timeline.is-multi-row .timeline-item { margin-bottom: 2px; }
+        .status-timeline.is-multi-row .timeline-node { width: 130px; }
+        .status-timeline.is-multi-row .timeline-dot {
+            width: 118px; height: 26px;
+            border-radius: 4px;
+            font-size: 8px; padding: 3px 6px; line-height: 1.2;
+        }
+        .status-timeline.is-multi-row .timeline-version { font-size: 7.5px; margin-bottom: 3px; padding: 1px 4px; }
+        .status-timeline.is-multi-row .timeline-status { margin-top: 4px; font-size: 8px; }
+        .status-timeline.is-multi-row .timeline-meta { font-size: 7.5px; }
+        .status-timeline.is-multi-row .timeline-reason { max-width: 128px; font-size: 7.5px; }
+
+        .timeline-item { display: flex; align-items: start; flex-shrink: 0; }
+        .timeline-node {
+            width: 150px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+        }
+        .timeline-dot {
+            width: 130px; height: 28px;
+            border-radius: 5px;
+            border: 2px solid #8ea4bb;
+            background: #fff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            font-size: 9.5px;
+            font-weight: 800;
+            line-height: 1.2;
+            padding: 3px 8px;
+            color: #334155;
+            box-shadow: 0 3px 10px rgba(15,23,42,0.08), 0 1px 2px rgba(15,23,42,0.04);
+        }
+        .timeline-dot.Approved,
+        .timeline-dot.Conditional {
+            border-color: var(--accent-color);
+            background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            color: var(--accent-dark);
+        }
+        .timeline-dot.Partial {
+            border-color: #e07a18;
+            background: linear-gradient(135deg, #fff7ed, #ffedd5);
+            color: #9a3412;
+        }
+        .timeline-dot.Rejected {
+            border-color: #dc3a4a;
+            background: linear-gradient(135deg, #fef2f2, #fee2e2);
+            color: #991b1b;
+        }
+        .timeline-version {
+            margin-bottom: 5px;
+            padding: 2px 8px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #ecfdf5, #d1fae5);
+            color: var(--accent-dark);
+            font-size: 9px;
+            font-weight: 800;
+            letter-spacing: 0.3px;
+        }
+        .timeline-status {
+            margin-top: 6px;
+            font-size: 9.5px;
+            font-weight: 700;
+            color: var(--secondary-color);
+            line-height: 1.2;
+        }
+        .timeline-meta { margin-top: 2px; font-size: 8.5px; color: #64748b; }
+        .timeline-reason {
+            margin-top: 3px;
+            font-size: 8.5px;
+            color: #1f2937;
+            line-height: 1.3;
+            max-width: 146px;
+            overflow-wrap: anywhere;
+            text-align: center;
+        }
+        .timeline-line {
+            width: 24px; height: 2.5px;
+            margin-top: 17px;
+            background: linear-gradient(90deg, var(--accent-medium), var(--accent-color));
+            border-radius: 10px;
+        }
+
+        .footer {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            margin-top: 12px;
+            text-align: center;
+        }
+        .signature-box {
+            flex: 1;
+            border-top: 1.5px solid var(--primary-color);
+            padding-top: 7px;
+            text-align: center;
+            font-size: 11px;
+            color: #334155;
+            font-weight: 500;
+        }
+        .signature-box strong { color: var(--primary-color); font-size: 12px; }
+        .audit-box {
+            flex: 1.3;
+            background: linear-gradient(145deg, #f0fdf4, #ecfdf5);
+            border: 1.5px dashed var(--accent-light);
+            border-radius: 10px;
+            padding: 9px 12px;
+            font-size: 9.5px;
+            color: var(--muted);
+            text-align: center;
+            line-height: 1.6;
+        }
+        .audit-box div { font-weight: 500; }
+
+        .accent-strip-bottom {
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--accent-color), var(--accent-medium), var(--accent-color), transparent);
+            border-radius: 3px;
+            margin-top: 10px;
+        }
+
+        @media print {
+            body { background: white; padding: 0; }
+            .sheet { box-shadow: none; border-width: 1.5px; max-width: none; }
+            .status-timeline {
+                overflow: visible !important;
+                flex-wrap: wrap;
+                row-gap: 10px;
+                column-gap: 0;
+                justify-content: center;
+            }
+            .status-timeline .timeline-line { display: none; }
+        }
+
+        @page { size: A4; margin: 9mm 8mm; }
+    </style>
+</head>
+<body dir="rtl">
+    <div class="sheet">
+        <div class="corner-tr"></div>
+        <div class="corner-bl"></div>
+        <div class="watermark">QUALITY CONTROL</div>
+
+        <div class="accent-strip"></div>
+
+        <div class="header">
+            <div class="header-main">
+                {% if report_logo_data_uri %}
+                <img class="report-logo" src="{{ report_logo_data_uri }}" alt="Report Logo">
+                {% endif %}
+                <h1>محضر فحص خامات | Raw Material Inspection Report</h1>
+                <p>{{ department_label or "Quality Control Department" }}</p>
+            </div>
+            <div class="header-side">
+                <div class="badge {{ decision_class }}">
+                    <span>Version {{ decision_version }}</span>
+                    <span>|</span>
+                    <span>{{ generated_at }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="meta-grid">
+            <div class="meta-card">
+                <span class="label">اسم الخامة | Material</span>
+                <span class="value">{{ material_name }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">كود الدخول | Entry Code</span>
+                <span class="value">{{ sample_number }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">تاريخ الفحص | Date</span>
+                <span class="value">{{ date }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">تاريخ انتهاء الصلاحية | Expiry Date</span>
+                <span class="value">{{ expiry_date }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">المورد | Supplier</span>
+                <span class="value">{{ supplier }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">رقم السيارة | Truck Number</span>
+                <span class="value">{{ truck_number }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">الكمية | Quantity (Ton)</span>
+                <span class="value">{{ quantity }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">اخذت العينة بواسطة | Sample Taken By</span>
+                <span class="value">{{ sample_taken_by }}</span>
+            </div>
+        </div>
+
+        <div class="sections">
+            <section class="section">
+                <h2 class="section-title section-physical">Physical Aspects / الفحص الظاهري</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Parameter</th>
+                            <th>Requirement</th>
+                            {% for sn in sample_names %}
+                            <th class="result-col">
+                                <span class="result-header-index">Result {{ loop.index }}</span>
+                                <span class="result-header-name">{{ sn }}</span>
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in physical_data %}
+                        <tr>
+                            <td class="param-cell">{{ item.name }}</td>
+                            <td>
+                                {{ item.req }}
+                            </td>
+                            {% for actual in item.actuals %}
+                            <td class="result-col {% if loop.index is odd %}result-col-odd{% else %}result-col-even{% endif %}{% if item.is_outs[loop.index0] %} out-of-range{% endif %}">{{ actual }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </section>
+
+            <section class="section">
+                <h2 class="section-title section-chemical">Chemical Analysis / التحليل الكيميائي</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Parameter</th>
+                            <th class="minmax-col">Min</th>
+                            {% for sn in sample_names %}
+                            <th class="result-col">
+                                <span class="result-header-index">Result {{ loop.index }}</span>
+                                <span class="result-header-name">{{ sn }}</span>
+                            </th>
+                            {% endfor %}
+                            <th class="minmax-col">Max</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in chemical_data %}
+                        <tr>
+                            <td class="param-cell">{{ item.name }}</td>
+                            <td class="minmax-col">{{ item.min_display }}</td>
+                            {% for actual in item.actuals %}
+                            <td class="result-col {% if loop.index is odd %}result-col-odd{% else %}result-col-even{% endif %}{% if item.is_outs[loop.index0] %} out-of-range{% endif %}">{{ actual }}</td>
+                            {% endfor %}
+                            <td class="minmax-col">{{ item.max_display }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </section>
+        </div>
+
+        <div class="decision-row">
+            <section class="qr-box">
+                <div class="decision-label">QR Code</div>
+                {% if qr_image_data_uri %}
+                <img class="qr-image" src="{{ qr_image_data_uri }}" alt="Inspection QR Code">
+                <div class="qr-caption">Scan to view report data</div>
+                {% if qr_warning %}
+                <div class="qr-warning">{{ qr_warning }}</div>
+                {% endif %}
+                {% else %}
+                <div class="qr-warning">{{ qr_warning or "QR is unavailable." }}</div>
+                {% endif %}
+            </section>
+
+            <section class="notes-box{% if not show_status_timeline %} notes-box--centered{% endif %}">
+                <div class="decision-head">
+                    <div class="decision-label">قرار الجودة  | QC Decision</div>
+                    <div class="decision-value {{ decision_class }}">{{ decision_label }}</div>
+                </div>
+                {% if show_decision_reason %}
+                <div class="note-line"><strong>سبب القرار | Reason:</strong> {{ decision_reason }}</div>
+                {% endif %}
+                {% if show_follow_up_note %}
+                <div class="note-line"><strong>ملاحظة المتابعة | Follow-up:</strong> {{ follow_up_note }}</div>
+                {% endif %}
+                {% if show_rejected_quantity %}
+                <div class="note-line"><strong>الكمية المرفوضة | Rejected Quantity:</strong> {{ rejected_quantity }} طن</div>
+                {% endif %}
+                {% if show_status_timeline %}
+                <div class="timeline-wrap">
+                    <div class="decision-label">تسلسل القرارات | Status Timeline</div>
+                    <div class="status-timeline{% if status_timeline|length > 4 %} is-multi-row{% endif %}">
+                        {% for step in status_timeline %}
+                        <div class="timeline-item">
+                            <div class="timeline-node">
+                                <div class="timeline-version">v{{ step.version or loop.index }}</div>
+                                <div class="timeline-dot {{ step.css_class }}">
+                                    {{ step.label_ar }}
+                                </div>
+                                <div class="timeline-status">{{ step.label_en }} / {{ step.label_ar }}</div>
+                                <div class="timeline-meta">
+                                    {{ step.changed_at or "-" }}
+                                </div>
+                                <div class="timeline-reason"><strong>سبب القرار | Reason:</strong> {{ step.reason }}</div>
+                            </div>
+                            {% if not loop.last %}
+                            <div class="timeline-line"></div>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </section>
+        </div>
+
+        <div class="accent-strip-bottom"></div>
+
+        <div class="footer">
+            <div class="signature-box">
+                Quality Specialist / أخصائي الجودة<br>
+                <strong>{{ quality_specialist_name }}</strong>
+            </div>
+
+            <div class="audit-box">
+                <div>Created By : {{ created_by_name }}</div>
+                <div>Last Updated: {{ updated_at }}</div>
+                <div>Reference Snapshot Stored: Yes</div>
+                <div>System Record ID: {{ inspection_id }}</div>
+            </div>
+
+            <div class="signature-box">
+                Approved By<br>
+                <strong>Quality Manager</strong>
+            </div>
+        </div>
+    </div>
+    <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
+        Powered by Material Lab
+    </div>
+</body>
+</html>

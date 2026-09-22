@@ -137,9 +137,18 @@ class AuthRepo {
     if (sealed.isEmpty) return;
     final secretKey = await secret.load();
     final (plain, ok) = unsealText(sealed, secretKey);
-    if (!ok) return;
-    final expiry = DateTime.tryParse(plain.trim());
-    if (expiry != null && DateTime.now().isAfter(expiry)) {
+    // A broken/wrong seal means the database was tampered with — treat it as
+    // expired (parity with settings.py:118-124 returning yesterday's date).
+    if (!ok) {
+      _currentUser = null;
+      throw const AuthorizationError(
+          'انتهت صلاحية استخدام النظام. يرجى الاتصال بالمطور.');
+    }
+    final text = plain.trim();
+    if (text.isEmpty) return;
+    final expiry = DateTime.tryParse(text);
+    // Invalid (non-date) text, like a tampered seal, is treated as expired.
+    if (expiry == null || DateTime.now().isAfter(expiry)) {
       _currentUser = null;
       throw const AuthorizationError(
           'Application license has expired. | انتهت صلاحية رخصة التطبيق.');

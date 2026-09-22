@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_card.dart';
@@ -33,7 +34,7 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('سجل فحوصات المختبر | Test history',
+        Text(AppText.t('سجل فحوصات المختبر', 'Test history'),
             style: Theme.of(context).textTheme.titleLarge),
         const SizedBox(height: AppSpacing.md),
         if (state.loading) ...[
@@ -41,7 +42,7 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
         ] else if (state.error != null) ...[
           Text(state.error!, style: TextStyle(color: AppColors.danger)),
         ] else if (state.rows.isEmpty) ...[
-          const Text('لا توجد فحوصات | No tests yet'),
+          Text(AppText.t('لا توجد فحوصات', 'No tests yet')),
         ] else
           AppCard(
             padding: EdgeInsets.zero,
@@ -50,14 +51,14 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: DataTable(
-                  columns: const [
-                    DataColumn(label: Text('التوقيت | Time')),
-                    DataColumn(label: Text('التحليل | Analysis')),
-                    DataColumn(label: Text('المصدر | Source')),
-                    DataColumn(label: Text('العينة | Sample')),
-                    DataColumn(label: Text('النتيجة | Result')),
-                    DataColumn(label: Text('الحدود | Range')),
-                    DataColumn(label: Text('حالة | State')),
+                  columns: [
+                    DataColumn(label: Text(AppText.t('التوقيت', 'Time'))),
+                    DataColumn(label: Text(AppText.t('التحليل', 'Analysis'))),
+                    DataColumn(label: Text(AppText.t('المصدر', 'Source'))),
+                    DataColumn(label: Text(AppText.t('العينة', 'Sample'))),
+                    DataColumn(label: Text(AppText.t('النتيجة', 'Result'))),
+                    DataColumn(label: Text(AppText.t('الحدود', 'Range'))),
+                    DataColumn(label: Text(AppText.t('حالة', 'State'))),
                   ],
                   rows: [
                     for (final r in state.rows)
@@ -90,9 +91,9 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
   Widget _rangeBadge(Map<String, dynamic> r) {
     final state = '${r['range_state'] ?? 'none'}';
     final (label, color) = switch (state) {
-      'out' => ('خارج الحدود | Out', AppColors.danger),
-      'in' => ('ضمن الحدود | In', AppColors.success),
-      _ => ('بدون | None', AppColors.textMuted),
+      'out' => (AppText.t('خارج الحدود', 'Out'), AppColors.danger),
+      'in' => (AppText.t('ضمن الحدود', 'In'), AppColors.success),
+      _ => (AppText.t('بدون', 'None'), AppColors.textMuted),
     };
     return Text(label, style: TextStyle(color: color, fontSize: 12.spMax));
   }
