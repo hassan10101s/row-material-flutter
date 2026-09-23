@@ -34,7 +34,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['db'],
-      dialogTitle: 'اختر ملف قاعدة البيانات | Pick a database file',
+      dialogTitle: 'اختر ملف قاعدة البيانات',
     );
     final path = picked?.files.single.path;
     if (path == null || !mounted) return;
@@ -64,7 +64,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('إلغاء | Cancel'),
+            child: const Text('إلغاء'),
           ),
           FilledButton(
             style: danger
@@ -97,15 +97,15 @@ class _MigrationPanelState extends State<MigrationPanel> {
   Future<void> _importCombined() async {
     final path = _combinedPath;
     if (path == null) {
-      AppFeedback.error(context, 'اختر قاعدة بيانات أولاً | Select a database first.');
+      AppFeedback.error(context, 'اختر قاعدة بيانات أولاً');
       return;
     }
     final ok = await _confirm(
-      title: 'استيراد المستخدمين والفحوصات | Import users & inspections',
+      title: 'استيراد المستخدمين والفحوصات',
       message: 'سيتم استيراد المستخدمين الجدد والفحوصات فقط من قاعدة البيانات المحددة. '
           'الخامات المطلوبة تُنشأ تلقائياً. لا تتأثر الإعدادات أو البيانات المرجعية الموجودة.\n'
           'Only new users and inspections will be imported. Required materials are auto-created.',
-      confirmText: 'استيراد | Import',
+      confirmText: 'استيراد',
       danger: false,
     );
     if (!ok) return;
@@ -124,15 +124,15 @@ class _MigrationPanelState extends State<MigrationPanel> {
   Future<void> _importUsers() async {
     final path = _usersPath;
     if (path == null) {
-      AppFeedback.error(context, 'اختر قاعدة بيانات أولاً | Select a database first.');
+      AppFeedback.error(context, 'اختر قاعدة بيانات أولاً');
       return;
     }
     final ok = await _confirm(
-      title: 'استيراد المستخدمين | Import users',
+      title: 'استيراد المستخدمين',
       message: 'سيتم نسخ المستخدمين من الملف المحدد إلى القاعدة المحلية. '
           'المستخدمون الموجودون مسبقاً لن يتأثروا.\n'
           'Existing users will not be affected.',
-      confirmText: 'استيراد | Import',
+      confirmText: 'استيراد',
       danger: false,
     );
     if (!ok) return;
@@ -159,15 +159,15 @@ class _MigrationPanelState extends State<MigrationPanel> {
   Future<void> _importMaterials() async {
     final path = _materialsPath;
     if (path == null) {
-      AppFeedback.error(context, 'اختر قاعدة بيانات أولاً | Select a database first.');
+      AppFeedback.error(context, 'اختر قاعدة بيانات أولاً');
       return;
     }
     final ok = await _confirm(
-      title: 'استيراد الخامات والوحدات | Import materials & units',
+      title: 'استيراد الخامات والوحدات',
       message: 'سيتم دمج الخامات والوحدات من قاعدة البيانات المحددة بشكل تراكمي (تحديث حسب الاسم). '
           'لن تتغير الإعدادات أو المسارات المحلية.\n'
           'Materials and units will be upserted by name. Settings stay unchanged.',
-      confirmText: 'استيراد | Import',
+      confirmText: 'استيراد',
       danger: false,
     );
     if (!ok) return;
@@ -211,12 +211,12 @@ class _MigrationPanelState extends State<MigrationPanel> {
             const SizedBox(width: AppSpacing.sm),
             OutlinedButton(
               onPressed: _busyKey != null ? null : () => _pick(pickKey),
-              child: const Text('اختيار | Browse'),
+              child: const Text('اختيار'),
             ),
             const SizedBox(width: AppSpacing.sm),
             AppButton(
               small: true,
-              label: 'استيراد | Import',
+              label: 'استيراد',
               icon: Icon(Icons.import_export, size: 16.r),
               loading: _busyKey == importKey,
               onPressed: _busyKey != null ? null : onImport,
@@ -233,7 +233,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'استيراد من قاعدة بيانات خارجية | Import from External DB',
+          'استيراد من قاعدة بيانات خارجية',
           style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: AppSpacing.sm),
@@ -243,7 +243,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
         ),
         const SizedBox(height: AppSpacing.lg),
         _row(
-          'مستخدمين وفحوصات | Users & inspections (required materials are auto-created)',
+          'مستخدمين وفحوصات',
           _combinedPath,
           'combined',
           'combined',
@@ -251,7 +251,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
         ),
         const SizedBox(height: AppSpacing.lg),
         _row(
-          'مستخدمين فقط | Users only (existing users will not be affected)',
+          'مستخدمين فقط',
           _usersPath,
           'users',
           'users',
@@ -259,7 +259,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
         ),
         const SizedBox(height: AppSpacing.lg),
         _row(
-          'خامات ووحدات | Materials & units (upsert by name)',
+          'خامات ووحدات',
           _materialsPath,
           'materials',
           'materials',

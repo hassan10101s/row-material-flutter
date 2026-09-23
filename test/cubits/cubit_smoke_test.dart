@@ -15,7 +15,6 @@ import 'package:material_lab/features/backup/data/backup_manager.dart';
 import 'package:material_lab/features/dashboard/data/dashboard_repo.dart';
 import 'package:material_lab/features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import 'package:material_lab/features/dashboard/presentation/cubit/dashboard_kpis_cubit.dart';
-import 'package:material_lab/features/history/presentation/cubit/history_cubit.dart';
 import 'package:material_lab/features/inspections/data/inspection_repo.dart';
 import 'package:material_lab/features/inspections/presentation/cubit/inspection_detail_cubit.dart';
 import 'package:material_lab/features/inspections/presentation/cubit/inspection_form_cubit.dart';
@@ -192,24 +191,6 @@ void main() {
     });
   });
 
-  group('HistoryCubit', () {
-    test('loads rows and applies the query filter via repo', () async {
-      final repo = _InspectionRepoMock();
-      when(() => repo.list(query: '')).thenAnswer((_) async => [{'entry_code': 'A'}]);
-      final cubit = HistoryCubit(repo: repo);
-      await cubit.load();
-      expect(cubit.state.rows, hasLength(1));
-
-      when(() => repo.list(query: 'abc')).thenAnswer((_) async => []);
-      cubit.setQuery('abc');
-      expect(cubit.state.query, 'abc');
-      await pumpEventQueue();
-      expect(cubit.state.rows, isEmpty);
-      verify(() => repo.list(query: 'abc')).called(1);
-      await cubit.close();
-    });
-  });
-
   group('InspectionsCubit', () {
     test('loads rows and filters by status client-side', () async {
       final repo = _InspectionRepoMock();
@@ -337,7 +318,7 @@ void main() {
   group('ReferenceCubit', () {
     test('loads the material catalog', () async {
       final repo = _ReferenceRepoMock();
-      when(() => repo.listMaterials())
+      when(() => repo.listAllMaterials())
           .thenAnswer((_) async => [{'material_name': 'Sugar'}]);
 
       final cubit = ReferenceCubit(repo: repo);
@@ -573,6 +554,8 @@ void main() {
           .thenAnswer((_) async => [
                 {'id': 1, 'analysis_name': 'pH'},
               ]);
+      when(() => repo.listConsumptionLog()).thenAnswer((_) async => []);
+      when(() => repo.listAnalyses()).thenAnswer((_) async => []);
 
       final cubit = TestHistoryCubit(repo: repo);
       await cubit.load();

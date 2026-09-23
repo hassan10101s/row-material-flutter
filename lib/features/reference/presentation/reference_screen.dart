@@ -3,18 +3,28 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
-import '../../../core/utils/app_exceptions.dart';
-import '../../../design_system/feedback/app_feedback.dart';
-import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
-import '../../../design_system/widgets/app_button.dart';
-import '../../../design_system/widgets/app_card.dart';
-import '../../../design_system/widgets/app_empty_state.dart';
-import '../../../design_system/widgets/app_field.dart';
-import '../../../design_system/widgets/app_skeleton.dart';
+import '../../../di/service_locator.dart';
+import '../../lab/data/lab_repo.dart';
+import '../data/reference_repo.dart';
+import 'cubit/params_cubit.dart';
+import 'cubit/products_cubit.dart';
 import 'cubit/reference_cubit.dart';
+import 'cubit/units_cubit.dart';
+import 'materials_tab.dart';
+import 'params_tab.dart';
+import 'products_tab.dart';
+import 'units_tab.dart';
 
-/// Reference materials manager (port of Web ReferenceAppView / MaterialsEditor).
+class _RefTab {
+  final String label;
+  final IconData icon;
+  final Widget child;
+  const _RefTab(this.label, this.icon, this.child);
+}
+
+/// Reference app shell — port of `ReferenceAppView` (web/src/57_reference_app.js):
+/// Reference Materials | Products | Chemical Parameters | Physical Aspects | Units.
 class ReferenceScreen extends StatefulWidget {
   const ReferenceScreen({super.key});
 
@@ -23,134 +33,90 @@ class ReferenceScreen extends StatefulWidget {
 }
 
 class _ReferenceScreenState extends State<ReferenceScreen> {
-  Future<void> _edit(Map<String, dynamic> material) async {
-    final cubit = context.read<ReferenceCubit>();
-    final id = (material['id'] as num).toInt();
-    final result = await showDialog<({String name, String code})>(
-      context: context,
-      builder: (c) => _EditMaterialDialog(
-        initialName: '${material['material_name'] ?? ''}',
-        initialCode: '${material['material_code'] ?? ''}',
-      ),
-    );
-    if (result == null || !mounted) return;
-    try {
-      await cubit.update(id, name: result.name, code: result.code);
-      if (mounted) AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved'));
-    } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
-    } catch (e) {
-      if (mounted) AppFeedback.error(context, '$e');
-    }
-  }
+  int _tab = 0;
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<ReferenceCubit>().state;
-    final cubit = context.read<ReferenceCubit>();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.page),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(AppStrings.reference,
-              style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: AppSpacing.md),
-          if (state.loading)
-            const AppSkeletonList(rows: 5)
-          else if (state.error != null)
-            AppEmptyState(
-              icon: Icons.error_outline,
-              title: AppText.t('تعذر التحميل', 'Failed to load'),
-              subtitle: state.error,
-              action: TextButton(onPressed: cubit.load, child: const Text('إعادة المحاولة')),
-            )
-          else if (state.materials.isEmpty)
-            AppEmptyState(
-              icon: Icons.book_outlined,
-              title: AppText.t('لا توجد خامات', 'No materials yet'),
-              subtitle: 'تُستورد المواد تلقائياً من Reference.xlsx عند التشغيل الأول.',
-            )
-          else
-            AppCard(
-              padding: EdgeInsets.zero,
-              child: Column(
-                children: [
-                  for (final r in state.materials)
-                    ListTile(
-                      dense: true,
-                      leading: Icon(Icons.science_outlined,
-                          size: 18, color: AppColors.primary),
-                      title: Text('${r['material_name'] ?? ''}'),
-                      subtitle: Text('${r['material_code'] ?? ''}'),
-                      trailing: IconButton(
-                        tooltip: AppText.t('تعديل', 'Edit'),
-                        icon: Icon(Icons.edit_outlined, size: 18.r),
-                        onPressed: () => _edit(r),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EditMaterialDialog extends StatefulWidget {
-  final String initialName;
-  final String initialCode;
-  const _EditMaterialDialog({
-    required this.initialName,
-    required this.initialCode,
-  });
-
-  @override
-  State<_EditMaterialDialog> createState() => _EditMaterialDialogState();
-}
-
-class _EditMaterialDialogState extends State<_EditMaterialDialog> {
-  late final TextEditingController _name;
-  late final TextEditingController _code;
-
-  @override
-  void initState() {
-    super.initState();
-    _name = TextEditingController(text: widget.initialName);
-    _code = TextEditingController(text: widget.initialCode);
-  }
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _code.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      backgroundColor: AppColors.surface,
-      title: Text(AppText.t('تعديل الخامة', 'Edit material'),
-          style: const TextStyle(fontSize: 18)),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AppField(label: AppText.t('اسم الخامة', 'Material name'), controller: _name),
-          const SizedBox(height: AppSpacing.md),
-          AppField(label: AppText.t('رمز الخامة', 'Material code'), controller: _code),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('إلغاء'),
+    final refRepo = getIt<ReferenceRepo>();
+    final labRepo = getIt<LabRepo>();
+    final tabs = <_RefTab>[
+      _RefTab(
+        AppText.t('المواد المرجعية', 'Materials'),
+        Icons.science_outlined,
+        BlocProvider(
+          create: (_) => ReferenceCubit(repo: refRepo)..load(),
+          child: const MaterialsTab(),
         ),
-        AppButton(
-          label: AppText.t('حفظ', 'Save'),
-          onPressed: () => Navigator.of(context)
-              .pop((name: _name.text.trim(), code: _code.text.trim())),
+      ),
+      _RefTab(
+        AppText.t('المنتجات', 'Products'),
+        Icons.inventory_2_outlined,
+        BlocProvider(
+          create: (_) => ProductsCubit(repo: labRepo)..load(),
+          child: const ProductsTab(),
+        ),
+      ),
+      _RefTab(
+        AppText.t('التحليل الكيميائي', 'Chemical'),
+        Icons.biotech_outlined,
+        BlocProvider(
+          create: (_) => ParamsCubit.chemical(repo: refRepo)..load(),
+          child: const ParamsTab(parameterType: 'chemical'),
+        ),
+      ),
+      _RefTab(
+        AppText.t('الفحص الظاهري', 'Physical'),
+        Icons.remove_red_eye_outlined,
+        BlocProvider(
+          create: (_) => ParamsCubit.physical(repo: refRepo)..load(),
+          child: const ParamsTab(parameterType: 'physical'),
+        ),
+      ),
+      _RefTab(
+        AppText.t('إعدادات الوحدات', 'Units'),
+        Icons.straighten_outlined,
+        BlocProvider(
+          create: (_) => UnitsCubit(repo: refRepo)..load(),
+          child: const UnitsTab(),
+        ),
+      ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding:
+              const EdgeInsets.fromLTRB(AppSpacing.page, AppSpacing.page, AppSpacing.page, 0),
+          child: Text(AppStrings.reference,
+              style: Theme.of(context).textTheme.headlineSmall),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        SizedBox(
+          height: 46.h,
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+            child: Row(
+              children: [
+                for (var i = 0; i < tabs.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.only(left: AppSpacing.sm),
+                    child: ChoiceChip(
+                      label: Text(tabs[i].label),
+                      avatar: Icon(tabs[i].icon, size: 18.r),
+                      selected: _tab == i,
+                      onSelected: (_) => setState(() => _tab = i),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.page),
+            child: IndexedStack(index: _tab, children: [for (final t in tabs) t.child]),
+          ),
         ),
       ],
     );

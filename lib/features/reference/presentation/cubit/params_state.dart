@@ -2,36 +2,32 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart' show immutable;
 
 @immutable
-class TestHistoryState extends Equatable {
+class ParamsState extends Equatable {
   final bool loading;
   final String? error;
   final List<Map<String, dynamic>> rows;
-  final List<Map<String, dynamic>> log;
-  final List<Map<String, dynamic>> analyses;
+  final List<Map<String, dynamic>> units;
 
-  const TestHistoryState({
+  const ParamsState({
     this.loading = true,
     this.error,
     this.rows = const [],
-    this.log = const [],
-    this.analyses = const [],
+    this.units = const [],
   });
 
-  TestHistoryState copyWith({
+  ParamsState copyWith({
     bool? loading,
     String? error,
     List<Map<String, dynamic>>? rows,
-    List<Map<String, dynamic>>? log,
-    List<Map<String, dynamic>>? analyses,
+    List<Map<String, dynamic>>? units,
   }) =>
-      TestHistoryState(
+      ParamsState(
         loading: loading ?? this.loading,
         error: error ?? this.error,
         rows: rows ?? this.rows,
-        log: log ?? this.log,
-        analyses: analyses ?? this.analyses,
+        units: units ?? this.units,
       );
 
   @override
-  List<Object?> get props => [loading, error, rows, log, analyses];
+  List<Object?> get props => [loading, error, rows, units];
 }

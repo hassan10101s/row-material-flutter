@@ -136,8 +136,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
             if (state.lastExportTitle != null) ...[
               const SizedBox(height: AppSpacing.md),
-              Text('آخر تصدير | Last export: ${state.lastExportTitle}',
-                  style: TextStyle(color: AppColors.success)),
+              Text('آخر تصدير: ${state.lastExportTitle}',
+                    style: TextStyle(color: AppColors.success)),
             ],
           ],
         ),

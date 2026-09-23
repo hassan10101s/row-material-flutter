@@ -35,7 +35,7 @@ Uint8List qrPngBytes(String payloadText, {int scale = 8, int border = 3}) {
   return (
     dataUri: 'data:image/png;base64,${base64Encode(png)}',
     warning: truncated
-        ? 'تحذير: تم اختزال محتوى الباركود لتناسب الحد الأقصى | Warning: QR content was truncated.'
+        ? 'تحذير: تم اختزال محتوى الباركود لتناسب الحد الأقصى'
         : '',
   );
 }

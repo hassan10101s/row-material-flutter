@@ -58,6 +58,18 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
     safeEmit(state.copyWith(decision: decision));
   }
 
+  /// Clears the selected material (returns the material picker to search mode).
+  void clearMaterial() {
+    safeEmit(state.copyWith(
+      materialId: null,
+      materialCode: '',
+      entryCode: '',
+      physicalReference: const {},
+      chemicalReference: const {},
+      refRevision: state.refRevision + 1,
+    ));
+  }
+
   /// Persists the inspection. Returns `true` when saved (caller navigates back).
   Future<bool> save(Map<String, dynamic> payload, UserContext userContext) async {
     safeEmit(state.copyWith(saving: true, error: null));

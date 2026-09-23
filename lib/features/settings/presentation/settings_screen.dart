@@ -8,7 +8,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
-import '../../../core/locale/locale_service.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/logo_encoding.dart';
 import '../../../design_system/feedback/app_feedback.dart';
@@ -46,7 +45,7 @@ return Padding(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('الإعدادات | Settings',
+          Text('الإعدادات',
               style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: AppSpacing.md),
           _SettingsTabs(
@@ -91,14 +90,14 @@ class _SettingsTabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tabs = <(String, String)>[
-      ('عام | General', 'الإعدادات العامة'),
-      ('قاعدة البيانات | Database', 'نسخ واستعادة'),
+      ('عام', 'الإعدادات العامة'),
+      ('قاعدة البيانات', 'نسخ واستعادة'),
     ];
     if (devMode) {
-      tabs.add(('الأمان | Security', '')); // dev-only: placeholder
+      tabs.add(('الأمان', '')); // dev-only: placeholder
     }
-    tabs.add(('المستخدمون | Users', 'إدارة الحسابات'));
-    tabs.add(('التصدير | Export', 'نسخ احتياطية يدوية'));
+    tabs.add(('المستخدمون', 'إدارة الحسابات'));
+    tabs.add(('التصدير', 'نسخ احتياطية يدوية'));
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -142,7 +141,7 @@ Future<void> _save() async {
     try {
       await context.read<GeneralSettingsCubit>().save(_dept.text.trim());
       if (!mounted) return;
-      AppFeedback.success(context, 'تم الحفظ | Saved');
+      AppFeedback.success(context, 'تم الحفظ');
     } on AppError catch (e) {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
@@ -156,7 +155,7 @@ Future<void> _save() async {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['png', 'jpg', 'jpeg'],
-      dialogTitle: 'اختر شعار التقرير | Pick a report logo',
+      dialogTitle: 'اختر شعار التقرير',
     );
     final path = picked?.files.single.path;
     if (path == null || !mounted) return;
@@ -164,17 +163,17 @@ Future<void> _save() async {
       final dataUri = encodeReportLogoDataUri(path);
       await context.read<GeneralSettingsCubit>().saveLogo(path: path, dataUri: dataUri);
       if (!mounted) return;
-      AppFeedback.success(context, 'تم حفظ الشعار | Logo saved');
+      AppFeedback.success(context, 'تم حفظ الشعار');
     } on AppError catch (e) {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (_) {
-      if (mounted) AppFeedback.error(context, 'تعذر قراءة الصورة | Could not read image');
+      if (mounted) AppFeedback.error(context, 'تعذر قراءة الصورة');
     }
   }
   Future<void> _removeLogo() async {
     await context.read<GeneralSettingsCubit>().clearLogo();
     if (!mounted) return;
-    AppFeedback.success(context, 'تمت إزالة الشعار | Logo removed');
+    AppFeedback.success(context, 'تمت إزالة الشعار');
   }
   @override
   Widget build(BuildContext context) {
@@ -190,41 +189,20 @@ Future<void> _save() async {
                 child: Center(child: CircularProgressIndicator()))
           else ...[
             Text(
-              'إدارة عامة | General',
+              'إدارة عامة',
               style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: AppSpacing.md),
 AppField(
-              label: 'اسم القسم في التقارير | Department label',
+              label: 'اسم القسم في التقارير',
               controller: _dept,
             ),
             const SizedBox(height: AppSpacing.md),
-            _ReportLogoSection(
+_ReportLogoSection(
               path: state.logoPath,
               dataUri: state.logoDataUri,
               onPick: _pickLogo,
               onRemove: _removeLogo,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              'لغة الواجهة | Interface language',
-              style: TextStyle(fontSize: 14.spMax, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            DropdownButtonFormField<String>(
-              initialValue: getIt<LocaleService>().isArabic ? 'ar' : 'en',
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              ),
-              items: const [
-                DropdownMenuItem(value: 'ar', child: Text('العربية')),
-                DropdownMenuItem(value: 'en', child: Text('English')),
-              ],
-              onChanged: (v) {
-                if (v == null) return;
-                getIt<LocaleService>().setLocale(Locale(v));
-              },
             ),
             const SizedBox(height: AppSpacing.md),
             AppButton(
@@ -256,7 +234,7 @@ class _ReportLogoSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'شعار التقرير | Report logo',
+          'شعار التقرير',
           style: TextStyle(fontSize: 14.spMax, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: AppSpacing.sm),
@@ -280,21 +258,21 @@ class _ReportLogoSection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  hasLogo ? path.split('\\').last.split('/').last : 'لا يوجد شعار | No logo',
+                  hasLogo ? path.split('\\').last.split('/').last : 'لا يوجد شعار',
                   style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Row(
                   children: [
                     AppButton(
-                      label: 'اختيار | Choose',
+                      label: 'اختيار',
                       icon: Icon(Icons.image_outlined, size: 16.r),
                       onPressed: onPick,
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     if (hasLogo)
                       AppButton(
-                        label: 'إزالة | Remove',
+                        label: 'إزالة',
                         style: AppButtonStyle.secondary,
                         icon: Icon(Icons.close, size: 16.r),
                         onPressed: onRemove,
@@ -331,7 +309,7 @@ class _DatabasePanel extends StatelessWidget {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['db'],
-      dialogTitle: 'اختر ملف النسخة الاحتياطية | Pick a backup file',
+      dialogTitle: 'اختر ملف النسخة الاحتياطية',
     );
     final path = picked?.files.single.path;
     if (path == null) return;
@@ -346,21 +324,21 @@ if (cubit.state.error == null) {
       context.go(AppRoutes.login);
       AppFeedback.info(
         context,
-        'تمت الاستعادة — سيتم تسجيل الخروج الآن | Restored, logging out',
+        'تمت الاستعادة — سيتم تسجيل الخروج الآن',
       );
     }
   }
   Future<bool> _confirmRestore(BuildContext context) {
     return showAppConfirm(
       context,
-      title: 'تأكيد الاستعادة | Confirm restore',
+      title: 'تأكيد الاستعادة',
       message:
           'سيتم استبدال قاعدة البيانات الحالية بالنسخة الاحتياطية بعد عمل نسخة أمان تلقائية. '
           'سيتم تسجيل الخروج بعد الاستعادة.\n'
           'The current database will be replaced with the backup, after an automatic safety copy. '
           'You will be logged out.',
-      confirmLabel: 'استعادة | Restore',
-      cancelLabel: 'إلغاء | Cancel',
+      confirmLabel: 'استعادة',
+      cancelLabel: 'إلغاء',
       danger: true,
       icon: Icons.restore,
     );
@@ -378,14 +356,14 @@ listener: (context, state) {
         } else if (state.lastPath != null) {
           AppFeedback.success(
             context,
-            'تم إنشاء النسخة الاحتياطية | Backup created: ${state.lastPath}',
+            'تم إنشاء النسخة الاحتياطية: ${state.lastPath}',
           );
         }
       },
       child: _Panel(
         children: [
           Text(
-            'قاعدة البيانات | Database',
+            'قاعدة البيانات',
             style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -428,7 +406,7 @@ class _ExportBackupsPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return const AppEmptyState(
       icon: Icons.folder_open,
-      title: 'نسخ احتياطية | Backups',
+      title: 'نسخ احتياطية',
       subtitle: 'تُنشأ النسخ الاحتياطية التلقائية يومياً في مجلد exports/backups.',
     );
   }
@@ -463,7 +441,7 @@ if (ok) {
       _username.clear();
       _fullName.clear();
       _password.clear();
-      AppFeedback.success(context, 'تمت الإضافة | User created');
+      AppFeedback.success(context, 'تمت الإضافة');
     } else if (cubit.state.error != null) {
       AppFeedback.error(context, cubit.state.error!);
     }
@@ -472,10 +450,10 @@ if (ok) {
     if (user.isDeveloper) return;
     final ok = await showAppConfirm(
       context,
-      title: 'حذف المستخدم | Delete user',
-      message: 'حذف ${user.fullName}؟ | Delete ${user.fullName}?',
-      confirmLabel: 'حذف | Delete',
-      cancelLabel: 'إلغاء | Cancel',
+      title: 'حذف المستخدم',
+      message: 'حذف ${user.fullName}؟',
+      confirmLabel: 'حذف',
+      cancelLabel: 'إلغاء',
       danger: true,
       icon: Icons.person_off_outlined,
     );
@@ -494,7 +472,7 @@ if (ok) {
     return _Panel(
       children: [
         Text(
-          'المستخدمون | Users',
+          'المستخدمون',
           style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: AppSpacing.md),
@@ -550,7 +528,7 @@ leading: Builder(builder: (context) {
         if (dev) ...[
           const SizedBox(height: AppSpacing.lg),
           Text(
-            'إضافة مستخدم | Add user',
+            'إضافة مستخدم',
             style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: AppSpacing.md),
@@ -560,18 +538,18 @@ leading: Builder(builder: (context) {
             children: [
               SizedBox(
                   width: 220.w,
-                  child: AppField(label: 'المستخدم | Username', controller: _username)),
+                  child: AppField(label: 'المستخدم', controller: _username)),
               SizedBox(
                   width: 220.w,
-                  child: AppField(label: 'الاسم الكامل | Full name', controller: _fullName)),
+                  child: AppField(label: 'الاسم الكامل', controller: _fullName)),
               SizedBox(
                   width: 180.w,
-                  child: AppField(label: 'كلمة المرور | Password', controller: _password, obscure: true)),
+                  child: AppField(label: 'كلمة المرور', controller: _password, obscure: true)),
               SizedBox(
                 width: 180.w,
                 child: DropdownButtonFormField<String>(
                   initialValue: _role,
-                  decoration: const InputDecoration(labelText: 'الدور | Role', isDense: true),
+                  decoration: const InputDecoration(labelText: 'الدور', isDense: true),
                   items: const [
                     DropdownMenuItem(value: 'Admin', child: Text('Admin')),
                     DropdownMenuItem(value: 'Lab User', child: Text('Lab User')),

@@ -441,12 +441,12 @@ class DashboardRepo {
         "SELECT DISTINCT supplier FROM inspections WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC");
     return DashboardFilterOptions(
       materials: [
-        {'id': 'ALL', 'name': 'جميع الخامات | All Materials'},
+        {'id': 'ALL', 'name': 'جميع الخامات'},
         for (final r in matRows)
           {'id': '${r['id']}', 'name': '${r['material_name']} (${r['material_code']})'}
       ],
       suppliers: [
-        {'id': 'ALL', 'name': 'جميع الموردين | All Suppliers'},
+        {'id': 'ALL', 'name': 'جميع الموردين'},
         for (final r in supRows)
           {'id': '${r['supplier']}', 'name': '${r['supplier']}'}
       ],

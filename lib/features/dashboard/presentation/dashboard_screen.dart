@@ -302,14 +302,14 @@ class _QuickActionsBar extends StatelessWidget {
             label: context.l10n.dashboard_new_inspection,
             icon: Icons.add_task,
             color: AppColors.primary,
-            onTap: () => context.go('/inspections'),
+            onTap: () => context.go('/inspection-new'),
           ),
           const SizedBox(width: 10),
           _ActionButton(
             label: context.l10n.dashboard_history,
             icon: Icons.history,
             color: AppColors.accent,
-            onTap: () => context.go('/history'),
+            onTap: () => context.go('/inspections'),
           ),
           const SizedBox(width: 10),
           _ActionButton(

@@ -16,15 +16,14 @@ import '../features/dashboard/data/dashboard_repo.dart';
 import '../features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import '../features/dashboard/presentation/cubit/dashboard_kpis_cubit.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
-import '../features/history/presentation/cubit/history_cubit.dart';
-import '../features/history/presentation/history_screen.dart';
 import '../features/inspections/data/inspection_repo.dart';
+import '../features/inspections/presentation/cubit/inspection_form_cubit.dart';
 import '../features/inspections/presentation/cubit/inspections_cubit.dart';
+import '../features/inspections/presentation/inspection_form_screen.dart';
 import '../features/inspections/presentation/inspections_screen.dart';
 import '../features/lab/presentation/cubit/lab_cubit.dart';
 import '../features/lab/presentation/lab_screen.dart';
 import '../features/reference/data/reference_repo.dart';
-import '../features/reference/presentation/cubit/reference_cubit.dart';
 import '../features/reference/presentation/reference_screen.dart';
 import '../features/reports/data/report_service.dart';
 import '../features/reports/presentation/cubit/reports_cubit.dart';
@@ -37,8 +36,8 @@ abstract final class AppRoutes {
   static const String setup = '/setup';
   static const String login = '/login';
   static const String dashboard = '/dashboard';
-  static const String history = '/history';
   static const String inspections = '/inspections';
+  static const String inspectionNew = '/inspection-new';
   static const String reports = '/reports';
   static const String lab = '/lab';
   static const String reference = '/reference';
@@ -97,13 +96,17 @@ class AppRouter {
             ),
           ),
           GoRoute(
-            path: AppRoutes.history,
-            pageBuilder: (c, s) => AppPage<HistoryScreen>(
+            path: AppRoutes.inspectionNew,
+            pageBuilder: (c, s) => AppPage<InspectionFormScreen>(
               name: s.uri.path,
               builder: (c) => BlocProvider(
-                create: (c) =>
-                    HistoryCubit(repo: getIt<InspectionRepo>())..load(),
-                child: const HistoryScreen(),
+                create: (c) => InspectionFormCubit(
+                  repo: getIt<InspectionRepo>(),
+                  reference: getIt<ReferenceRepo>(),
+                )..loadMaterials(),
+                child: InspectionFormScreen(
+                  onSaved: () => GoRouter.of(c).go(AppRoutes.inspections),
+                ),
               ),
             ),
           ),
@@ -144,11 +147,7 @@ class AppRouter {
             path: AppRoutes.reference,
             pageBuilder: (c, s) => AppPage<ReferenceScreen>(
               name: s.uri.path,
-              builder: (c) => BlocProvider(
-                create: (c) => ReferenceCubit(repo: getIt<ReferenceRepo>())
-                  ..load(),
-                child: const ReferenceScreen(),
-              ),
+              builder: (c) => const ReferenceScreen(),
             ),
           ),
           GoRoute(

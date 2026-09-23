@@ -203,7 +203,7 @@ class _ConstantDialogState extends State<_ConstantDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.constant == null ? 'إضافة ثابت | Add constant' : 'تعديل ثابت | Edit constant'),
+      title: Text(widget.constant == null ? 'إضافة ثابت' : 'تعديل ثابت'),
       content: SizedBox(
         width: 440.w,
         child: SingleChildScrollView(
@@ -212,12 +212,12 @@ class _ConstantDialogState extends State<_ConstantDialog> {
             children: [
               TextField(
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'الاسم | Name', isDense: true),
+                decoration: const InputDecoration(labelText: 'الاسم', isDense: true),
               ),
               TextField(
                 controller: _symbol,
                 decoration: const InputDecoration(
-                  labelText: 'الرمز | Symbol (A-Z, a-z, _)',
+                  labelText: 'الرمز',
                   isDense: true,
                 ),
               ),
@@ -226,7 +226,7 @@ class _ConstantDialogState extends State<_ConstantDialog> {
                   Expanded(
                     child: SwitchListTile(
                       contentPadding: EdgeInsets.zero,
-                      title: const Text('تعبير | Expression'),
+                      title: const Text('تعبير'),
                       value: _isExpression,
                       onChanged: (v) => setState(() => _isExpression = v),
                     ),
@@ -234,7 +234,7 @@ class _ConstantDialogState extends State<_ConstantDialog> {
                   Expanded(
                     child: TextField(
                       controller: _unit,
-                      decoration: const InputDecoration(labelText: 'الوحدة | Unit', isDense: true),
+                      decoration: const InputDecoration(labelText: 'الوحدة', isDense: true),
                     ),
                   ),
                 ],
@@ -244,19 +244,19 @@ class _ConstantDialogState extends State<_ConstantDialog> {
                   controller: _expression,
                   maxLines: 3,
                   decoration: const InputDecoration(
-                    labelText: 'المعادلة | Formula expression',
+                    labelText: 'المعادلة',
                     isDense: true,
                   ),
                 )
               else
                 TextField(
                   controller: _value,
-                  decoration: const InputDecoration(labelText: 'القيمة | Value', isDense: true),
+                  decoration: const InputDecoration(labelText: 'القيمة', isDense: true),
                 ),
               TextField(
                 controller: _description,
                 decoration:
-                    const InputDecoration(labelText: 'الوصف | Description', isDense: true),
+                    const InputDecoration(labelText: 'الوصف', isDense: true),
               ),
             ],
           ),

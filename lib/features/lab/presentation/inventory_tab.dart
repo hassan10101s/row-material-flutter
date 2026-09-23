@@ -194,7 +194,7 @@ class _InventoryDialogState extends State<_InventoryDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.item == null ? 'إضافة مادة | Add item' : 'تعديل مادة | Edit item'),
+      title: Text(widget.item == null ? 'إضافة مادة' : 'تعديل مادة'),
       content: SizedBox(
         width: 420.w,
         child: SingleChildScrollView(
@@ -203,15 +203,15 @@ class _InventoryDialogState extends State<_InventoryDialog> {
             children: [
               TextField(
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'الاسم | Name', isDense: true),
+                decoration: const InputDecoration(labelText: 'الاسم', isDense: true),
               ),
               DropdownButtonFormField<String>(
                 initialValue: _category,
                 decoration:
-                    const InputDecoration(labelText: 'النوع | Category', isDense: true),
+                    const InputDecoration(labelText: 'النوع', isDense: true),
                 items: const [
-                  DropdownMenuItem(value: 'liquid', child: Text('سائل | Liquid')),
-                  DropdownMenuItem(value: 'powder', child: Text('مسحوق | Powder')),
+                  DropdownMenuItem(value: 'liquid', child: Text('سائل')),
+                  DropdownMenuItem(value: 'powder', child: Text('مسحوق')),
                 ],
                 onChanged: (v) {
                   if (v != null) setState(() => _category = v);
@@ -220,7 +220,7 @@ class _InventoryDialogState extends State<_InventoryDialog> {
               DropdownButtonFormField<String>(
                 initialValue: _unit,
                 decoration:
-                    const InputDecoration(labelText: 'الوحدة | Unit', isDense: true),
+                    const InputDecoration(labelText: 'الوحدة', isDense: true),
                 items: [
                   for (final u in inventoryUnits)
                     DropdownMenuItem(value: u, child: Text(u)),
@@ -232,18 +232,18 @@ class _InventoryDialogState extends State<_InventoryDialog> {
               if (widget.item == null)
                 TextField(
                   controller: _qty,
-                  decoration: const InputDecoration(labelText: 'الكمية | Quantity', isDense: true),
+                  decoration: const InputDecoration(labelText: 'الكمية', isDense: true),
                 ),
               TextField(
                 controller: _min,
                 decoration:
-                    const InputDecoration(labelText: 'الحد الأدنى | Min quantity', isDense: true),
+                    const InputDecoration(labelText: 'الحد الأدنى', isDense: true),
               ),
               TextField(
                 controller: _description,
                 maxLines: 2,
                 decoration:
-                    const InputDecoration(labelText: 'الوصف | Description', isDense: true),
+                    const InputDecoration(labelText: 'الوصف', isDense: true),
               ),
             ],
           ),
@@ -313,7 +313,7 @@ class _AdjustDialogState extends State<_AdjustDialog> {
   Widget build(BuildContext context) {
     final current = '${widget.item['current_qty'] ?? 0}';
     return AlertDialog(
-      title: const Text('تسوية الكمية | Adjust stock'),
+      title: const Text('تسوية الكمية'),
       content: SizedBox(
         width: 400.w,
         child: Column(
@@ -326,14 +326,14 @@ class _AdjustDialogState extends State<_AdjustDialog> {
             TextField(
               controller: _delta,
               decoration: const InputDecoration(
-                labelText: 'الكمية الجديدة | New quantity',
+                labelText: 'الكمية الجديدة',
                 isDense: true,
               ),
             ),
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _reason,
-              decoration: const InputDecoration(labelText: 'السبب | Reason', isDense: true),
+              decoration: const InputDecoration(labelText: 'السبب', isDense: true),
             ),
           ],
         ),

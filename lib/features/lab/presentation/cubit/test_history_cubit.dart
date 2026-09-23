@@ -13,8 +13,17 @@ class TestHistoryCubit extends AppCubit<TestHistoryState> {
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));
     try {
-      final rows = await repo.listSampleTests();
-      safeEmit(state.copyWith(loading: false, rows: rows));
+      final results = await Future.wait<Object>([
+        repo.listSampleTests(),
+        repo.listConsumptionLog(),
+        repo.listAnalyses(),
+      ]);
+      safeEmit(state.copyWith(
+        loading: false,
+        rows: results[0] as List<Map<String, dynamic>>,
+        log: results[1] as List<Map<String, dynamic>>,
+        analyses: results[2] as List<Map<String, dynamic>>,
+      ));
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {

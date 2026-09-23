@@ -1113,8 +1113,8 @@ Map<String, dynamic> buildLabReportContext(
               'name': sourceName,
               'source_type': sourceType,
               'type_label': sourceType == 'product'
-                  ? 'منتج | Product'
-                  : 'خام | Raw',
+                  ? 'منتج'
+                  : 'خام',
               'count': 0,
               'out_count': 0,
               'rows': <Map<String, dynamic>>[],

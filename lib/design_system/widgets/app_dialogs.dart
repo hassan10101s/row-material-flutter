@@ -75,11 +75,11 @@ Future<bool> showAppConfirm(
                 children: [
                   TextButton(
                     onPressed: () => Navigator.of(c).pop(false),
-                    child: Text(cancelLabel ?? 'إلغاء | Cancel'),
+                    child: Text(cancelLabel ?? 'إلغاء'),
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   AppButton(
-                    label: confirmLabel ?? 'تأكيد | Confirm',
+                    label: confirmLabel ?? 'تأكيد',
                     style: danger ? AppButtonStyle.danger : AppButtonStyle.primary,
                     onPressed: () => Navigator.of(c).pop(true),
                   ),
@@ -148,7 +148,7 @@ Future<void> showAppAlert(
               Align(
                 alignment: Alignment.centerRight,
                 child: AppButton(
-                  label: okLabel ?? 'حسناً | OK',
+                  label: okLabel ?? 'حسناً',
                   style: AppButtonStyle.secondary,
                   onPressed: () => Navigator.of(c).pop(),
                 ),

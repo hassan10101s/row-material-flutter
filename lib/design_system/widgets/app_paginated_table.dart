@@ -64,6 +64,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     // the columns must sum to tableWidth minus that padding or the Row overflows.
     final colWidth =
         (widget.tableWidth - 2 * AppSpacing.lg) / widget.headers.length;
+    final bodyHeight = widget.height - 46 - 1 - 1 - 48;
 
     return AppCard(
       padding: EdgeInsets.zero,
@@ -72,29 +73,37 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _header(context, colWidth),
-            const Divider(height: 1),
             Expanded(
               child: ClipRect(
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   child: SizedBox(
                     width: widget.tableWidth,
-                    child: widget.loading
-                        ? _loadingBody()
-                        : pageRows.isEmpty
-                            ? _emptyBody()
-                            : ListView.builder(
-                                padding: EdgeInsets.zero,
-                                itemCount: pageRows.length,
-                                itemExtent: 52,
-                                itemBuilder: (context, index) {
-                                  final row = pageRows[index];
-                                  final realIndex = leftIndex + index;
-                                  return _dataRow(context, colWidth, row,
-                                      realIndex: realIndex);
-                                },
-                              ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        _header(context, colWidth),
+                        const Divider(height: 1),
+                        SizedBox(
+                          height: bodyHeight,
+                          child: widget.loading
+                              ? _loadingBody(bodyHeight)
+                              : pageRows.isEmpty
+                                  ? _emptyBody()
+                                  : ListView.builder(
+                                      padding: EdgeInsets.zero,
+                                      itemCount: pageRows.length,
+                                      itemExtent: 52,
+                                      itemBuilder: (context, index) {
+                                        final row = pageRows[index];
+                                        final realIndex = leftIndex + index;
+                                        return _dataRow(context, colWidth, row,
+                                            realIndex: realIndex);
+                                      },
+                                    ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -167,10 +176,10 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     );
   }
 
-  Widget _loadingBody() {
+  Widget _loadingBody(double height) {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-      itemCount: (widget.height / 52).floor().clamp(3, 10),
+      itemCount: (height / 52).floor().clamp(3, 10),
       itemBuilder: (context, index) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Container(
@@ -189,7 +198,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
       child: widget.empty ??
           AppEmptyState(
             icon: Icons.inbox_outlined,
-            title: 'لا توجد بيانات | No data',
+            title: 'لا توجد بيانات',
           ),
     );
   }

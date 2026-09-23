@@ -28,6 +28,7 @@ class AppTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: palette.background,
       fontFamily: AppTextTheme.cairoFontFamily,
+      fontFamilyFallback: const ['sans-serif', 'Segoe UI'],
       textTheme: AppTextTheme.build(),
       dividerTheme: DividerThemeData(
         color: palette.borderMuted,

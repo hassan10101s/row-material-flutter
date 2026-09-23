@@ -37,13 +37,10 @@ class _AppShellState extends State<AppShell> {
   List<_NavEntry> _navEntries(User user) {
     final entries = <_NavEntry>[
       _NavEntry('/dashboard', AppStrings.dashboard, Icons.dashboard_outlined),
-      _NavEntry('/history', AppStrings.inspections, Icons.history),
+      _NavEntry('/inspections', AppStrings.inspections, Icons.history),
       _NavEntry('/reports', AppStrings.reports, Icons.description_outlined),
       _NavEntry('/lab', AppStrings.lab, Icons.biotech_outlined),
     ];
-    if (user.canCreateInspection) {
-      entries.add(_NavEntry('/inspections', AppStrings.newInspection, Icons.add_task));
-    }
     if (user.canSeeSettings) {
       entries.add(_NavEntry('/reference', AppStrings.reference, Icons.book_outlined));
       entries.add(_NavEntry('/settings', AppStrings.settings, Icons.settings_outlined));
@@ -227,20 +224,6 @@ class _TopBar extends StatelessWidget {
                 '${AppStrings.appTitle} — ${user.fullName}',
                 style: Theme.of(context).textTheme.titleMedium,
                 overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            IconButton(
-              tooltip: getIt<LocaleService>().isArabic
-                  ? AppText.t('التبديل إلى الإنجليزية', 'Switch to English')
-                  : AppText.t('التبديل إلى العربية', 'Switch to Arabic'),
-              onPressed: () => getIt<LocaleService>().toggle(),
-              icon: Text(
-                getIt<LocaleService>().isArabic ? 'EN' : 'ع',
-                style: TextStyle(
-                  fontSize: 14.spMax,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primary,
-                ),
               ),
             ),
             IconButton(

@@ -112,18 +112,21 @@ class ReferenceRepo {
     final db = await _db;
     final existing = await getMaterialRaw(id);
     if (existing == null) throw const NotFoundError('Material not found.');
+    final cleanName = materialName.trim();
+    final cleanCode = materialCode.trim();
     final dup = await db.query('reference_materials',
-        where: 'material_name = ? AND id != ?', whereArgs: [materialName, id]);
+        where: 'material_name = ? AND id != ?',
+        whereArgs: [cleanName.isEmpty ? '${existing['material_name']}' : cleanName, id]);
     if (dup.isNotEmpty) {
-      throw ValidationError("Material '$materialName' already exists.");
+      throw ValidationError("Material '$cleanName' already exists.");
     }
     final physicalRef = physicalReference ??
         jsonLoads('${existing['physical_reference_json']}');
     final chemicalRef = chemicalReference ??
         jsonLoads('${existing['chemical_reference_json']}');
     await db.update('reference_materials', {
-      'material_name': materialName,
-      'material_code': materialCode,
+      'material_name': cleanName.isEmpty ? '${existing['material_name']}' : cleanName,
+      'material_code': cleanCode.isEmpty ? '${existing['material_code']}' : cleanCode,
       'physical_reference_json': jsonDumps(physicalRef),
       'chemical_reference_json': jsonDumps(chemicalRef),
       'active': 1,
