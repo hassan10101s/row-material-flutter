@@ -71,7 +71,10 @@ class _AppShellState extends State<AppShell> {
     final user = getIt<AuthGate>().currentUser;
     if (user == null) return const SizedBox.shrink();
     return ListenableBuilder(
-      listenable: getIt<LocaleService>(),
+      listenable: Listenable.merge([
+        getIt<LocaleService>(),
+        getIt<ThemeService>(),
+      ]),
       builder: (context, _) => _build(context, user),
     );
   }

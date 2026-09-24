@@ -123,6 +123,7 @@ class LabRepo {
     for (final key in allowed) {
       if (fields.containsKey(key)) updates[key] = fields[key];
     }
+
     if (updates.containsKey('name')) {
       final newName = '${updates['name'] ?? ''}'.trim();
       if (newName.isEmpty) throw ValidationError(AppErrors.materialNameRequired);
@@ -131,13 +132,16 @@ class LabRepo {
       if (dup != null) throw ValidationError(AppErrors.materialExists);
       updates['name'] = newName;
     }
+
     if (updates.containsKey('category') &&
         !inventoryCategories.contains(updates['category'])) {
       throw ValidationError(AppErrors.materialTypeInvalid);
     }
+
     if (updates.containsKey('unit') && !inventoryUnits.contains(updates['unit'])) {
       throw ValidationError(AppErrors.unitNotSupported);
     }
+    
     if (updates.containsKey('min_qty')) {
       updates['min_qty'] =
           (safeFloat(updates['min_qty']) ?? 0.0).clamp(0.0, double.infinity);
