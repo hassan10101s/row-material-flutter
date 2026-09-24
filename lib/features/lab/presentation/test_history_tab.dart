@@ -6,9 +6,14 @@ import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_button.dart';
+import '../../../di/service_locator.dart';
 import '../core/test_history_logic.dart';
+import '../data/lab_repo.dart';
+import 'cubit/run_test_cubit.dart';
 import 'cubit/test_history_cubit.dart';
 import 'cubit/test_history_state.dart';
+import 'run_test_tab.dart';
 
 /// Sample-tests history tab (port of Web TestHistoryPanel): search, period /
 /// analysis / source / chemical / range-state filters, chips, stats, sortable
@@ -92,6 +97,74 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
     });
   }
 
+  Future<void> _openNewTest() async {
+    await showDialog<void>(
+      context: context,
+      // Windows-like overlay: a large non-fullscreen surface floating over the
+      // app; tapping outside (or pressing the close button) returns to the main
+      // page. barrierDismissible is true by default.
+      builder: (dialogContext) => BlocProvider(
+        create: (_) => RunTestCubit(repo: getIt<LabRepo>())..load(),
+        child: Dialog(
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1040, maxHeight: 780),
+            child: Column(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceSoft,
+                    borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(4)),
+                    border: Border(
+                        bottom: BorderSide(color: AppColors.borderMuted)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.science_outlined,
+                          size: 20.r, color: AppColors.primary),
+                      const SizedBox(width: 10),
+                      Text(
+                        AppText.t('اختبار جديد', 'New Test'),
+                        style: TextStyle(
+                          fontSize: 16.spMax,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        tooltip: AppText.t('إغلاق', 'Close'),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.all(AppSpacing.lg),
+                    child: Align(
+                      alignment: Alignment.topCenter,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 920),
+                        child: RunTestTab(onTestRun: () {}),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (mounted) context.read<TestHistoryCubit>().load();
+  }
+
   String _sortMark(String key) {
     if (_sortKey != key) return '';
     return _sortDir > 0 ? ' \u25B2' : ' \u25BC';
@@ -155,11 +228,23 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
       chemicalOptions: chemOptions,
     );
 
-    return Column(
+    return SingleChildScrollView(
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(AppText.t('سجل تحاليل المختبر', 'Test history'),
-            style: Theme.of(context).textTheme.titleLarge),
+        Row(
+          children: [
+            Expanded(
+              child: Text(AppText.t('سجل تحاليل المختبر', 'Test history'),
+                  style: Theme.of(context).textTheme.titleLarge),
+            ),
+            AppButton(
+              label: 'اختبار جديد',
+              icon: Icon(Icons.add_circle_outline, size: 18.r),
+              onPressed: _openNewTest,
+            ),
+          ],
+        ),
         const SizedBox(height: AppSpacing.md),
         AppCard(
           padding: const EdgeInsets.all(AppSpacing.lg),
@@ -342,6 +427,7 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
           ),
         ],
       ],
+      ),
     );
   }
 
@@ -363,7 +449,9 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
       final children = <Widget>[
         _filterField(
           label: 'التصفية',
-          child: Row(
+          child: Wrap(
+            spacing: 4,
+            runSpacing: 4,
             children: [
               _modeButton('الكل', 'all'),
               _modeButton('24 ساعة', 'last24h'),
@@ -492,16 +580,16 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
         ),
       ];
       if (narrow) {
-        return Wrap(
-          spacing: AppSpacing.md,
-          runSpacing: AppSpacing.sm,
-          children: [for (final c in children) SizedBox(width: 300, child: c)],
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
         );
       }
       return Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final c in children) Expanded(child: Padding(padding: const EdgeInsets.only(left: AppSpacing.sm), child: c)),
+          for (final c in children)
+            Expanded(child: Padding(padding: const EdgeInsets.only(left: AppSpacing.sm), child: c)),
         ],
       );
     });

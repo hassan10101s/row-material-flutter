@@ -4,6 +4,7 @@ import 'package:excel/excel.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sqflite/sqflite.dart';
 
+import '../constants/app_errors.dart';
 import '../database/database_helper.dart';
 import '../utils/app_dates.dart';
 import '../utils/app_exceptions.dart';
@@ -42,7 +43,7 @@ class SeedService {
       ByteData bytes, String label) async {
     final excel = Excel.decodeBytes(bytes.buffer.asUint8List());
     if (excel.tables.isEmpty) {
-      throw ValidationError('No worksheet found in $label.');
+      throw ValidationError(AppErrors.seedNoWorksheet(label));
     }
     final table = excel.tables.values.first;
     final rows = table.rows;
@@ -68,8 +69,7 @@ class SeedService {
     ];
     final missing = _requiredColumns.difference(headers.toSet());
     if (missing.isNotEmpty) {
-      throw ValidationError(
-          'Reference.xlsx is missing required columns: ${missing.join(', ')}');
+      throw ValidationError(AppErrors.seedMissingColumns(missing.join(', ')));
     }
     final headerMap = {for (var i = 0; i < headers.length; i++) headers[i]: i};
     final timestamp = nowIso();

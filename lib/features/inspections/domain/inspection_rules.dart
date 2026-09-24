@@ -1,3 +1,4 @@
+import '../../../core/constants/app_errors.dart';
 import '../../../core/domain/rules.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
@@ -30,7 +31,7 @@ Map<String, dynamic> normalizeDecisionFields(Map<String, dynamic> d) {
 void validateDecisionFields(Map<String, dynamic> d) {
   final status = '${d['decision_status'] ?? ''}';
   if (!isDecisionStatus(status)) {
-    throw const ValidationError('Decision status is required.');
+    throw ValidationError(AppErrors.decisionStatusRequired);
   }
   final reason = '${d['decision_reason'] ?? ''}'.trim();
   final followUp = '${d['follow_up_note'] ?? ''}'.trim();
@@ -40,16 +41,14 @@ void validateDecisionFields(Map<String, dynamic> d) {
       status == 'PARTIAL_REJECTION' ||
       status == 'FULL_REJECTION';
   if (notApproved && reason.isEmpty) {
-    throw const ValidationError('سبب القرار مطلوب (يجب ادخال البيانات)');
+    throw ValidationError(AppErrors.decisionReasonRequired);
   }
   if (status == 'CONDITIONAL_APPROVAL' && followUp.isEmpty) {
-    throw const ValidationError(
-        'Follow-up note is required for conditional approval. | ملاحظة المتابعة مطلوبة في القبول المبدئي.');
+    throw ValidationError(AppErrors.followUpNoteRequired);
   }
   if (status == 'PARTIAL_REJECTION') {
     if (rejectedQty.isEmpty) {
-      throw const ValidationError(
-          'الكمية المرفوضة مطلوبة للرفض الجزئي (يجب ادخال الكمية).');
+      throw ValidationError(AppErrors.rejectedQtyRequired);
     }
     validateNonNegativeNumericText(rejectedQty, 'Rejected quantity',
         allowEmpty: false, maxLength: rejectedQuantityMaxLength);
@@ -58,7 +57,7 @@ void validateDecisionFields(Map<String, dynamic> d) {
       final rj = safeFloat(rejectedQty) ?? 0.0;
       final q = safeFloat(quantityValue) ?? 0.0;
       if (rj > q) {
-        throw const ValidationError('الكمية المرفوضة لا يمكن أن تتجاوز كمية الشحنة.');
+        throw ValidationError(AppErrors.rejectedQtyExceeds);
       }
     }
   } else if (rejectedQty.isNotEmpty) {
@@ -77,7 +76,7 @@ bool hasDecisionChange(Inspection existing, Map<String, dynamic> normalized) =>
 void ensureWithinMaxVersions(int version) {
   if (version >= maxDecisionVersions) {
     throw ValidationError(
-        'Reached maximum quality decision updates ($maxDecisionVersions times). | تم الوصول إلى الحد الأقصى من تحديثات قرار الجودة ($maxDecisionVersions مرات).');
+        AppErrors.maxDecisionUpdates(maxDecisionVersions));
   }
 }
 

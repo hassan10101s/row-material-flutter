@@ -13,23 +13,23 @@ class ActivityTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<ActivityCubit>().state;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(AppText.t('سجل النشاط', 'Activity log'), style: Theme.of(context).textTheme.titleLarge),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading) ...[
-          const Center(child: CircularProgressIndicator()),
-        ] else if (state.error != null) ...[
-          Text(state.error!, style: TextStyle(color: AppColors.danger)),
-        ] else if (state.rows.isEmpty) ...[
-          Text(AppText.t('لا يوجد نشاط', 'No activity yet')),
-        ] else
-          AppCard(
-            padding: EdgeInsets.zero,
-            child: SizedBox(
-              width: double.infinity,
-              child: SingleChildScrollView(
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(AppText.t('سجل النشاط', 'Activity log'), style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: AppSpacing.md),
+          if (state.loading) ...[
+            const Center(child: CircularProgressIndicator()),
+          ] else if (state.error != null) ...[
+            Text(state.error!, style: TextStyle(color: AppColors.danger)),
+          ] else if (state.rows.isEmpty) ...[
+            Text(AppText.t('لا يوجد نشاط', 'No activity yet')),
+          ] else
+            AppCard(
+              padding: EdgeInsets.zero,
+              child: SizedBox(
+                width: double.infinity,
                 child: Column(
                   children: [
                     for (final r in state.rows)
@@ -55,8 +55,8 @@ class ActivityTab extends StatelessWidget {
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

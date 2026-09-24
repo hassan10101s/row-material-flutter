@@ -21,7 +21,14 @@ class AppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final card = Container(
+    // The inner Material (transparent) gives children like ListTile /
+    // SwitchListTile a Material ancestor above the decoration, so their ink
+    // splashes and selected background stay visible.
+    final content = Material(
+      color: Colors.transparent,
+      child: onTap == null ? child : InkWell(onTap: onTap, child: child),
+    );
+    return Container(
       padding: padding,
       margin: margin,
       decoration: BoxDecoration(
@@ -36,9 +43,7 @@ class AppCard extends StatelessWidget {
           ),
         ],
       ),
-      child: child,
+      child: content,
     );
-    if (onTap == null) return card;
-    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(AppRadii.md), child: card);
   }
 }

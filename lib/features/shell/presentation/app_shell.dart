@@ -219,23 +219,33 @@ class _TopBar extends StatelessWidget {
               ),
               const SizedBox(width: 8),
             ],
-            Expanded(
+            const Spacer(),
+            _FloatingRound(
+              tooltip: AppStrings.toggleLanguage,
+              onPressed: () => getIt<LocaleService>().toggle(),
               child: Text(
-                '${AppStrings.appTitle} — ${user.fullName}',
-                style: Theme.of(context).textTheme.titleMedium,
-                overflow: TextOverflow.ellipsis,
+                getIt<LocaleService>().isArabic ? 'EN' : 'ع',
+                style: TextStyle(
+                  fontSize: 14.spMax,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.primary,
+                ),
               ),
             ),
-            IconButton(
+            const SizedBox(width: 8),
+            _FloatingRound(
               tooltip: AppStrings.toggleTheme,
               onPressed: () => getIt<ThemeService>().toggle(),
-              icon: Icon(
+              child: Icon(
                 getIt<ThemeService>().mode == ThemeMode.dark
                     ? Icons.light_mode_outlined
                     : Icons.dark_mode_outlined,
+                size: 20.r,
+                color: AppColors.primary,
               ),
             ),
-            if (user.isDeveloper)
+            if (user.isDeveloper) ...[
+              const SizedBox(width: 12),
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
                 decoration: BoxDecoration(
@@ -243,8 +253,10 @@ class _TopBar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text('Developer',
-                    style: TextStyle(fontSize: 12.spMax, color: AppColors.warning)),
+                    style:
+                        TextStyle(fontSize: 12.spMax, color: AppColors.warning)),
               ),
+            ],
           ],
         ),
       ),
@@ -377,6 +389,40 @@ class _Sidebar extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Circular floating toggle button used in the topbar (language + theme).
+class _FloatingRound extends StatelessWidget {
+  final String tooltip;
+  final Widget child;
+  final VoidCallback onPressed;
+
+  const _FloatingRound({
+    required this.tooltip,
+    required this.child,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: AppColors.surfaceSoft,
+        shape: const CircleBorder(),
+        elevation: 2,
+        shadowColor: Colors.black26,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.all(9),
+            child: child,
+          ),
+        ),
+      ),
     );
   }
 }

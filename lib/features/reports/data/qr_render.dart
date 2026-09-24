@@ -4,13 +4,14 @@ import 'dart:typed_data';
 import 'package:image/image.dart' as img;
 import 'package:qr/qr.dart';
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/utils/app_exceptions.dart';
 
 /// Port of core/utils.py generate_qr_data_uri (PNG bytes, ERROR_CORRECT_M,
 /// auto version selection matching python-qrcode fit=True).
 Uint8List qrPngBytes(String payloadText, {int scale = 8, int border = 3}) {
   if (payloadText.isEmpty) {
-    throw const AppError('QR payload is empty.');
+    throw AppError(AppErrors.qrPayloadEmpty);
   }
   final (png, _) =
       _renderQrPng(payloadText, scale: scale, border: border, throwOnFailure: true);
@@ -34,9 +35,7 @@ Uint8List qrPngBytes(String payloadText, {int scale = 8, int border = 3}) {
   }
   return (
     dataUri: 'data:image/png;base64,${base64Encode(png)}',
-    warning: truncated
-        ? 'تحذير: تم اختزال محتوى الباركود لتناسب الحد الأقصى'
-        : '',
+    warning: truncated ? AppErrors.qrTruncatedWarning : '',
   );
 }
 
@@ -58,7 +57,7 @@ Uint8List qrPngBytes(String payloadText, {int scale = 8, int border = 3}) {
   }
 
   if (throwOnFailure) {
-    throw const AppError('Data exceeds QR code capacity (version > 40)');
+    throw AppError(AppErrors.qrCapacityExceeded);
   }
   return (null, false);
 }

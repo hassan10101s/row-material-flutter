@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:intl/intl.dart';
 
+import '../constants/app_errors.dart';
 import 'app_exceptions.dart';
 
 /// JSON helpers mirroring core/utils.py json_dumps / json_loads and number
@@ -56,13 +57,13 @@ String validateNonNegativeNumericText(
   final text = value.trim();
   if (text.isEmpty) {
     if (allowEmpty) return '';
-    throw ValidationError('$fieldLabel is required.');
+    throw ValidationError(AppErrors.fieldRequired(fieldLabel));
   }
   if (maxLength != null && text.length > maxLength) {
-    throw ValidationError('$fieldLabel must be at most $maxLength characters.');
+    throw ValidationError(AppErrors.fieldMaxLength(fieldLabel, maxLength));
   }
   if (!RegExp(r'^\d+(\.\d+)?$').hasMatch(text)) {
-    throw ValidationError('$fieldLabel must contain numbers only.');
+    throw ValidationError(AppErrors.fieldNumbersOnly(fieldLabel));
   }
   return text;
 }

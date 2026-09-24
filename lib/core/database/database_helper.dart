@@ -91,7 +91,7 @@ class DatabaseHelper {
   }
 
   Future<Database> _open(String path) async {
-    return databaseFactory.openDatabase(
+    final db = await databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(
         version: 1,
@@ -112,6 +112,10 @@ class DatabaseHelper {
         },
       ),
     );
+    // Apply idempotent column/table guarantees on every open — returns on
+    // existing databases (fixed version 1) otherwise never see new columns.
+    await _runLegacyGuarantees(db);
+    return db;
   }
 
   /// Create the full schema. Idempotent (IF NOT EXISTS) so it can also be
@@ -356,8 +360,11 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         analysis_id INTEGER NOT NULL REFERENCES lab_analyses(id) ON DELETE CASCADE,
         dynamic_field TEXT NOT NULL,
-        inventory_id INTEGER NOT NULL REFERENCES lab_inventory(id),
+        inventory_id INTEGER REFERENCES lab_inventory(id),
         unit TEXT NOT NULL DEFAULT 'mL',
+        kind TEXT NOT NULL DEFAULT 'link',
+        fixed_value REAL,
+        list_values TEXT,
         created_at TEXT NOT NULL,
         UNIQUE(analysis_id, dynamic_field)
       )
@@ -409,6 +416,34 @@ class DatabaseHelper {
 
   /// Idempotent legacy-guard migrations matching sqlite_db.py pragmas/rules.
   Future<void> _runLegacyGuarantees(Database db) async {
+    // lab_field_chemical_links gained kind/fixed_value/list_values and a
+    // nullable inventory_id (value/list configs store inventory_id NULL).
+    // Rebuild the legacy NOT NULL FK table once.
+    final fclCols = await db.rawQuery('PRAGMA table_info(lab_field_chemical_links)');
+    if (fclCols.isNotEmpty && !fclCols.any((c) => c['name'] == 'kind')) {
+      await db.execute(
+          'ALTER TABLE lab_field_chemical_links RENAME TO lab_field_chemical_links_old');
+      await db.execute('''
+        CREATE TABLE lab_field_chemical_links (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          analysis_id INTEGER NOT NULL REFERENCES lab_analyses(id) ON DELETE CASCADE,
+          dynamic_field TEXT NOT NULL,
+          inventory_id INTEGER REFERENCES lab_inventory(id),
+          unit TEXT NOT NULL DEFAULT 'mL',
+          kind TEXT NOT NULL DEFAULT 'link',
+          fixed_value REAL,
+          list_values TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE(analysis_id, dynamic_field)
+        )
+      ''');
+      await db.execute('''
+        INSERT INTO lab_field_chemical_links (id, analysis_id, dynamic_field, inventory_id, unit, created_at)
+        SELECT id, analysis_id, dynamic_field, inventory_id, unit, created_at
+        FROM lab_field_chemical_links_old
+      ''');
+      await db.execute('DROP TABLE lab_field_chemical_links_old');
+    }
     await _ensureColumn(db, 'inspections', 'expiry_date', 'expiry_date TEXT');
     await _ensureColumn(db, 'inspections', 'specialist_name', "specialist_name TEXT NOT NULL DEFAULT ''");
     await _ensureColumn(db, 'inspections', 'decision_version', 'decision_version INTEGER NOT NULL DEFAULT 1');
@@ -427,6 +462,9 @@ class DatabaseHelper {
     await _ensureColumn(db, 'lab_products', 'active', 'active INTEGER NOT NULL DEFAULT 1');
     await _ensureColumn(db, 'lab_analyses', 'active', 'active INTEGER NOT NULL DEFAULT 1');
     await _ensureColumn(db, 'lab_inventory', 'category', "category TEXT CHECK(category IN ('liquid', 'powder'))");
+    await _ensureColumn(db, 'lab_field_chemical_links', 'kind', "kind TEXT NOT NULL DEFAULT 'link'");
+    await _ensureColumn(db, 'lab_field_chemical_links', 'fixed_value', 'fixed_value REAL');
+    await _ensureColumn(db, 'lab_field_chemical_links', 'list_values', 'list_values TEXT');
   }
 
   Future<void> _ensureColumn(Database db, String table, String column, String spec) async {

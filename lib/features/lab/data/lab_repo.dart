@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
@@ -15,7 +16,7 @@ class LabRepo {
 
   Future<Database> get _db => dbHelper.database;
 
-  // ── Low-level helpers ──────────────────────────────────────────────
+  // ── Low-level helpers ─────────────────────────────────────────
 
   Future<Map<String, dynamic>?> fetchOne(
       DatabaseExecutor? executor, String sql, [List<Object?>? args]) async {
@@ -39,7 +40,7 @@ class LabRepo {
     return (executor ?? await _db).rawInsert(sql, args);
   }
 
-  // ── Inspection resolution ─────────────────────────────────────────
+  // ── Inspection resolution ─────────────────────────────────────
 
   Future<Map<String, dynamic>?> resolveInspection(String entryCode) async {
     final code = entryCode.trim();
@@ -51,7 +52,7 @@ class LabRepo {
         [code]);
   }
 
-  // ── Inventory ─────────────────────────────────────────────────────
+  // ── Inventory ─────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listInventory({String? category}) async {
     final params = <Object?>[];
@@ -67,7 +68,7 @@ class LabRepo {
   Future<Map<String, dynamic>> getInventoryItem(int itemId) async {
     final row = await fetchOne(
         null, 'SELECT * FROM lab_inventory WHERE id = ?', [itemId]);
-    if (row == null) throw const NotFoundError('Inventory item was not found.');
+    if (row == null) throw NotFoundError(AppErrors.inventoryItemNotFound);
     return row;
   }
 
@@ -81,17 +82,17 @@ class LabRepo {
     Map<String, dynamic>? user,
   }) async {
     final cleanName = name.trim();
-    if (cleanName.isEmpty) throw const ValidationError('اسم المادة مطلوب.');
+    if (cleanName.isEmpty) throw ValidationError(AppErrors.materialNameRequired);
     if (!inventoryCategories.contains(category)) {
-      throw const ValidationError('نوع المادة يجب أن يكون liquid أو powder.');
+      throw ValidationError(AppErrors.materialTypeInvalid);
     }
     if (!inventoryUnits.contains(unit)) {
-      throw const ValidationError('الوحدة غير مدعومة.');
+      throw ValidationError(AppErrors.unitNotSupported);
     }
     final existing =
         await fetchOne(null, 'SELECT id FROM lab_inventory WHERE name = ?', [cleanName]);
     if (existing != null) {
-      throw const ValidationError('يوجد مادة بنفس الاسم بالفعل.');
+      throw ValidationError(AppErrors.materialExists);
     }
     final finalQty = (safeFloat(qty) ?? 0.0).clamp(0.0, double.infinity);
     final finalMinQty = (safeFloat(minQty) ?? 0.0).clamp(0.0, double.infinity);
@@ -124,18 +125,18 @@ class LabRepo {
     }
     if (updates.containsKey('name')) {
       final newName = '${updates['name'] ?? ''}'.trim();
-      if (newName.isEmpty) throw const ValidationError('اسم المادة مطلوب.');
+      if (newName.isEmpty) throw ValidationError(AppErrors.materialNameRequired);
       final dup = await fetchOne(null,
           'SELECT id FROM lab_inventory WHERE name = ? AND id != ?', [newName, itemId]);
-      if (dup != null) throw const ValidationError('يوجد مادة بنفس الاسم بالفعل.');
+      if (dup != null) throw ValidationError(AppErrors.materialExists);
       updates['name'] = newName;
     }
     if (updates.containsKey('category') &&
         !inventoryCategories.contains(updates['category'])) {
-      throw const ValidationError('نوع المادة يجب أن يكون liquid أو powder.');
+      throw ValidationError(AppErrors.materialTypeInvalid);
     }
     if (updates.containsKey('unit') && !inventoryUnits.contains(updates['unit'])) {
-      throw const ValidationError('الوحدة غير مدعومة.');
+      throw ValidationError(AppErrors.unitNotSupported);
     }
     if (updates.containsKey('min_qty')) {
       updates['min_qty'] =
@@ -191,7 +192,7 @@ class LabRepo {
         ''');
   }
 
-  // ── Products ─────────────────────────────────────────────────────
+  // ── Products ──────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listProducts() async {
     final rows = await fetchAll(
@@ -208,7 +209,7 @@ class LabRepo {
   Future<Map<String, dynamic>> getProduct(int productId) async {
     final row =
         await fetchOne(null, 'SELECT * FROM lab_products WHERE id = ?', [productId]);
-    if (row == null) throw const NotFoundError('Product was not found.');
+    if (row == null) throw NotFoundError(AppErrors.productNotFound);
     final product = Map<String, dynamic>.from(row);
     product['ranges'] = await getProductRanges(productId);
     return product;
@@ -237,7 +238,7 @@ class LabRepo {
             ''');
   }
 
-  // ── Material analysis ranges ─────────────────────────────────────
+  // ── Material analysis ranges ──────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listMaterialRanges() async {
     return fetchAll(null, '''
@@ -289,9 +290,9 @@ class LabRepo {
     Map<String, dynamic>? user,
   }) async {
     final cleanName = name.trim();
-    if (cleanName.isEmpty) throw const ValidationError('اسم المنتج مطلوب.');
+    if (cleanName.isEmpty) throw ValidationError(AppErrors.productNameRequired);
     final dup = await fetchOne(null, 'SELECT id FROM lab_products WHERE name = ?', [cleanName]);
-    if (dup != null) throw const ValidationError('يوجد منتج بنفس الاسم بالفعل.');
+    if (dup != null) throw ValidationError(AppErrors.productExists);
     final productId = await executeReturnId(null, '''
             INSERT INTO lab_products (name, category, description, created_by, created_at)
             VALUES (?, ?, ?, ?, ?)
@@ -305,7 +306,7 @@ class LabRepo {
     for (final item in ranges ?? []) {
       final analysisId = int.tryParse('${item['analysis_id'] ?? 0}') ?? 0;
       if (analysisId <= 0) {
-        throw const ValidationError('معرف التحليل مطلوب داخل النطاقات.');
+        throw ValidationError(AppErrors.analysisIdRangeRequired);
       }
       final minValue = item['min_value'];
       final maxValue = item['max_value'];
@@ -339,11 +340,11 @@ class LabRepo {
       }
     }
     if (updates.containsKey('name')) {
-      if (updates['name'] == '') throw const ValidationError('اسم المنتج مطلوب.');
+      if (updates['name'] == '') throw ValidationError(AppErrors.productNameRequired);
       final dup = await fetchOne(null,
           'SELECT id FROM lab_products WHERE name = ? AND id != ?',
           [updates['name'], productId]);
-      if (dup != null) throw const ValidationError('يوجد منتج بنفس الاسم بالفعل.');
+      if (dup != null) throw ValidationError(AppErrors.productExists);
     }
     if (updates.isNotEmpty) {
       final sets = updates.keys.map((key) => '$key = ?').join(', ');
@@ -381,7 +382,7 @@ class LabRepo {
     return {'archived': true};
   }
 
-  // ── Analyses ────────────────────────────────────────────────────
+  // ── Analyses ──────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listAnalyses() async {
     final rows = await fetchAll(
@@ -396,7 +397,7 @@ class LabRepo {
   Future<Map<String, dynamic>> getAnalysis(int analysisId) async {
     final row =
         await fetchOne(null, 'SELECT * FROM lab_analyses WHERE id = ?', [analysisId]);
-    if (row == null) throw const NotFoundError('Analysis was not found.');
+    if (row == null) throw NotFoundError(AppErrors.analysisNotFound);
     return _decorateAnalysis(row);
   }
 
@@ -412,13 +413,17 @@ class LabRepo {
   }
 
   Future<List<Map<String, dynamic>>> getFieldChemicalLinks(int analysisId) async {
-    return fetchAll(null, '''
+    final links = await fetchAll(null, '''
             SELECT lc.*, inv.name AS inventory_name, inv.unit AS inventory_unit
             FROM lab_field_chemical_links lc
-            JOIN lab_inventory inv ON inv.id = lc.inventory_id
+            LEFT JOIN lab_inventory inv ON inv.id = lc.inventory_id
             WHERE lc.analysis_id = ?
             ORDER BY lc.dynamic_field ASC
             ''', [analysisId]);
+    for (final link in links) {
+      link['list_values'] = jsonLoadsList('${link['list_values'] ?? ''}');
+    }
+    return links;
   }
 
   Future<void> saveFieldChemicalLinks(
@@ -428,19 +433,44 @@ class LabRepo {
     final seen = <String>{};
     for (final link in links ?? []) {
       final dynamicField = '${link['dynamic_field'] ?? ''}'.trim();
-      final inventoryId = int.tryParse('${link['inventory_id'] ?? 0}') ?? 0;
-      if (dynamicField.isEmpty || inventoryId == 0) continue;
+      if (dynamicField.isEmpty) continue;
       final key = '$analysisId|$dynamicField';
       if (seen.contains(key)) continue;
       seen.add(key);
-      final unit = '${link['unit'] ?? ''}'.trim().isEmpty
-          ? 'mL'
-          : '${link['unit']}'.trim();
-      await execute(null, '''
+      final kind = '${link['kind'] ?? 'link'}'.trim().isEmpty
+          ? 'link'
+          : '${link['kind']}'.trim();
+      if (kind == 'link') {
+        final inventoryId = int.tryParse('${link['inventory_id'] ?? 0}') ?? 0;
+        if (inventoryId == 0) continue;
+        final unit = '${link['unit'] ?? ''}'.trim().isEmpty
+            ? 'mL'
+            : '${link['unit']}'.trim();
+        await execute(null, '''
                 INSERT INTO lab_field_chemical_links
-                    (analysis_id, dynamic_field, inventory_id, unit, created_at)
-                VALUES (?, ?, ?, ?, ?)
-                ''', [analysisId, dynamicField, inventoryId, unit, nowIso()]);
+                    (analysis_id, dynamic_field, kind, inventory_id, unit, fixed_value, list_values, created_at)
+                VALUES (?, ?, ?, ?, ?, NULL, NULL, ?)
+                ''', [analysisId, dynamicField, kind, inventoryId, unit, nowIso()]);
+      } else if (kind == 'value') {
+        final value = safeFormulaFloat(link['fixed_value']);
+        if (value == null) continue;
+        await execute(null, '''
+                INSERT INTO lab_field_chemical_links
+                    (analysis_id, dynamic_field, kind, inventory_id, unit, fixed_value, list_values, created_at)
+                VALUES (?, ?, ?, NULL, 'mL', ?, NULL, ?)
+                ''', [analysisId, dynamicField, kind, value, nowIso()]);
+      } else if (kind == 'list') {
+        final values = <Object?>[
+          for (final v in (link['list_values'] as List?) ?? const <Object?>[])
+            if (safeFormulaFloat(v) != null) safeFormulaFloat(v),
+        ];
+        if (values.isEmpty) continue;
+        await execute(null, '''
+                INSERT INTO lab_field_chemical_links
+                    (analysis_id, dynamic_field, kind, inventory_id, unit, fixed_value, list_values, created_at)
+                VALUES (?, ?, ?, NULL, 'mL', NULL, ?, ?)
+                ''', [analysisId, dynamicField, kind, jsonDumps(values), nowIso()]);
+      }
     }
   }
 
@@ -466,9 +496,9 @@ class LabRepo {
     List<Map<String, dynamic>>? fieldChemicalLinks,
   }) async {
     final cleanName = name.trim();
-    if (cleanName.isEmpty) throw const ValidationError('اسم التحليل مطلوب.');
+    if (cleanName.isEmpty) throw ValidationError(AppErrors.analysisNameRequired);
     final dup = await fetchOne(null, 'SELECT id FROM lab_analyses WHERE name = ?', [cleanName]);
-    if (dup != null) throw const ValidationError('يوجد تحليل بنفس الاسم بالفعل.');
+    if (dup != null) throw ValidationError(AppErrors.analysisExists);
     final cleanUnit = unit.trim();
     final finalUnit = cleanUnit.isEmpty ? '%' : cleanUnit;
     final fields = [
@@ -576,7 +606,7 @@ class LabRepo {
     return {'archived': true};
   }
 
-  // ── Global constants ─────────────────────────────────────────────
+  // ── Global constants ──────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listGlobalConstants() async {
     return fetchAll(
@@ -589,10 +619,10 @@ class LabRepo {
       Map<String, dynamic> payload) async {
     final cid = payload['id'];
     final name = '${payload['name'] ?? ''}'.trim();
-    if (name.isEmpty) throw const ValidationError('اسم الثابت مطلوب.');
+    if (name.isEmpty) throw ValidationError(AppErrors.constantNameRequired);
     final symbol = '${payload['symbol'] ?? name}'.trim();
     if (symbol.isEmpty || !RegExp(_symbolRe).hasMatch(symbol)) {
-      throw const ValidationError('رمز الثابت يجب أن يبدأ بحرف (A-Z, a-z أو _).');
+      throw ValidationError(AppErrors.constantSymbolInvalid);
     }
     final valueText = '${payload['value_text'] ?? ''}';
     final unit = '${payload['unit'] ?? ''}'.trim();
@@ -603,17 +633,17 @@ class LabRepo {
     final maxValue = _optFloat(payload['max_value']);
     final precision = _optInt(payload['precision']);
     if (precision != null && !(precision >= 0 && precision <= 12)) {
-      throw const ValidationError('الدقة يجب أن تكون بين 0 و 12.');
+      throw ValidationError(AppErrors.constantPrecisionRange);
     }
     if (isExpression == 1) {
-      if (expression.isEmpty) throw const ValidationError('الثابت المشتق يتطلب تعبيراً.');
+      if (expression.isEmpty) throw ValidationError(AppErrors.constantDerivedExprRequired);
       try {
         parseFormula(expression);
       } on ValidationError catch (exc) {
-        throw ValidationError('تعبير الثابت غير صالح: ${exc.message}');
+        throw ValidationError(AppErrors.constantExprInvalid(exc.message));
       }
     } else if (valueText.isEmpty || parseNumber(valueText) == null) {
-      throw const ValidationError('قيمة الثابت يجب أن تكون رقماً.');
+      throw ValidationError(AppErrors.constantValueNumeric);
     }
     final now = nowIso();
     Map<String, dynamic>? row;
@@ -633,7 +663,7 @@ class LabRepo {
           'SELECT * FROM lab_constants WHERE id = ? AND is_global = 1', [int.parse('$cid')]);
     } else {
       final dup = await fetchOne(null, 'SELECT id FROM lab_constants WHERE name = ?', [name]);
-      if (dup != null) throw const ValidationError('يوجد ثابت بنفس الاسم بالفعل.');
+      if (dup != null) throw ValidationError(AppErrors.constantExists);
       final id = await executeReturnId(null, '''
                 INSERT INTO lab_constants
                     (name, symbol, value_text, unit, unit_dim, is_expression, expression,
@@ -645,14 +675,14 @@ class LabRepo {
       ]);
       row = await fetchOne(null, 'SELECT * FROM lab_constants WHERE id = ?', [id]);
     }
-    if (row == null) throw const NotFoundError('Global constant was not found.');
+    if (row == null) throw NotFoundError(AppErrors.constantNotFound);
     return row;
   }
 
   Future<Map<String, dynamic>> deleteGlobalConstant(int constantId) async {
     final row = await fetchOne(
         null, 'SELECT id FROM lab_constants WHERE id = ? AND is_global = 1', [constantId]);
-    if (row == null) throw const NotFoundError('Global constant was not found.');
+    if (row == null) throw NotFoundError(AppErrors.constantNotFound);
     await execute(null, 'DELETE FROM lab_constants WHERE id = ?', [constantId]);
     return {'deleted': true};
   }
@@ -670,7 +700,7 @@ class LabRepo {
   Map<String, dynamic> _mapOf(Object? v) =>
       v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
 
-  // ── Setup / default analyses ─────────────────────────────────────
+  // ── Setup / default analyses ──────────────────────────────────
 
   Future<bool> needsSetup() async {
     final row =
@@ -691,7 +721,7 @@ class LabRepo {
           name: name, category: inventoryCategoryForUnit(unit), unit: unit, qty: 0.0, minQty: 0.0);
       final row = await fetchOne(null, 'SELECT id FROM lab_inventory WHERE name = ?', [name]);
       if (row == null) {
-        throw const ValidationError('Failed to create inventory item.');
+        throw ValidationError(AppErrors.failedCreateInventory);
       }
       inventoryMap[key] = int.parse('${row['id']}');
     }
@@ -751,7 +781,7 @@ class LabRepo {
     }
   }
 
-  // ── Sample tests ─────────────────────────────────────────────────
+  // ── Sample tests ──────────────────────────────────────────────
 
   Future<Map<String, dynamic>> runSampleTest({
     required int analysisId,
@@ -763,12 +793,13 @@ class LabRepo {
     Map<String, dynamic>? dynamicValues,
     Map<String, dynamic>? user,
     String entryCode = '',
+    bool manualResult = false,
   }) async {
     final db = await _db;
     return db.transaction((txn) async {
       final analysis = await _decorateAnalysisTx(txn, analysisId);
       if (!sourceTypes.contains(sourceType)) {
-        throw const ValidationError('نوع المصدر يجب أن يكون raw_material أو product.');
+        throw ValidationError(AppErrors.sourceTypeInvalid);
       }
       var cleanSampleName = sampleName.trim();
       var cleanSourceName = sourceName.trim();
@@ -779,7 +810,7 @@ class LabRepo {
             txn, 'SELECT id, material_id, material_name, material_code, inspection_date FROM inspections WHERE entry_code = ?',
             [cleanEntryCode]);
         if (inspection == null) {
-          throw ValidationError('كود الدخول غير موجود في سجل الدخول: $cleanEntryCode');
+          throw ValidationError(AppErrors.entryCodeNotFound(cleanEntryCode));
         }
         resolvedSourceRefId = inspection['material_id'] != null
             ? int.parse('${inspection['material_id']}')
@@ -791,14 +822,14 @@ class LabRepo {
                 .trim();
       }
       if (cleanSampleName.isEmpty || cleanSourceName.isEmpty) {
-        throw const ValidationError('اسم العينة واسم المصدر مطلوبان.');
+        throw ValidationError(AppErrors.sampleAndSourceRequired);
       }
 
       final safeDynamics = dynamicValues ?? {};
       final formulaData = _mapOf(analysis['formula']);
       final formulaExpr = '${formulaData['expression'] ?? ''}'.trim();
       Map<String, dynamic>? computed;
-      if (formulaExpr.isNotEmpty) {
+      if (formulaExpr.isNotEmpty && !manualResult) {
         final values = <String, Object?>{};
         for (final item in analysis['items'] as List? ?? []) {
           final m = item as Map<String, dynamic>;
@@ -807,6 +838,14 @@ class LabRepo {
         }
         for (final e in safeDynamics.entries) {
           if (e.key.trim().isNotEmpty) values[e.key.trim()] = e.value;
+        }
+        for (final link in analysis['field_chemical_links'] as List? ?? const []) {
+          final lm = link as Map<String, dynamic>;
+          final field = '${lm['dynamic_field'] ?? ''}'.trim();
+          if (field.isEmpty) continue;
+          if ('${lm['kind'] ?? 'link'}' == 'value') {
+            values[field] = lm['fixed_value'];
+          }
         }
         try {
           final resultValue = evaluateFormula(
@@ -822,7 +861,7 @@ class LabRepo {
             'used_values': values,
           };
         } on ValidationError catch (error) {
-          throw ValidationError('Formula error: ${error.message}');
+          throw ValidationError(AppErrors.formulaError(error.message));
         }
       }
 
@@ -853,6 +892,7 @@ class LabRepo {
       }
       for (final link in analysis['field_chemical_links'] as List? ?? []) {
         final lm = link as Map<String, dynamic>;
+        if ('${lm['kind'] ?? 'link'}' != 'link') continue;
         final field = '${lm['dynamic_field'] ?? ''}'.trim();
         final qtyInput = safeFloat(safeDynamics[field]);
         final inventoryId = int.tryParse('${lm['inventory_id'] ?? 0}') ?? 0;
@@ -869,6 +909,29 @@ class LabRepo {
       final consumption = <Map<String, dynamic>>[];
       final lowStock = <Map<String, dynamic>>[];
       final timestamp = nowIso();
+
+      final shortages = <String>[];
+      for (final item in requested.entries) {
+        final state = item.value;
+        final inventory = state['inventory'] as Map<String, dynamic>;
+        final requestedQty = state['qty'] as double;
+        if (requestedQty <= 0) continue;
+        final availableQty =
+            (safeFloat(inventory['current_qty']) ?? 0.0).clamp(0.0, double.infinity).toDouble();
+        if (availableQty + 1e-9 < requestedQty) {
+          shortages.add(AppErrors.insufficientStockItem(
+            inventory['name'],
+            _fmtQty(requestedQty),
+            _fmtQty(availableQty),
+            inventory['unit'],
+          ));
+        }
+      }
+      if (shortages.isNotEmpty) {
+        throw ValidationError(
+            '${AppErrors.insufficientStock}\n${shortages.join('\n')}');
+      }
+
       for (final item in requested.entries) {
         final state = item.value;
         final inventory = state['inventory'] as Map<String, dynamic>;
@@ -962,9 +1025,15 @@ class LabRepo {
     return double.tryParse('$v'.trim());
   }
 
+  String _fmtQty(double value) {
+    final rounded = (value * 1000).round() / 1000;
+    final text = '$rounded';
+    return text.endsWith('.0') ? text.substring(0, text.length - 2) : text;
+  }
+
   Future<Map<String, dynamic>> _decorateAnalysisTx(DatabaseExecutor txn, int analysisId) async {
     final row = await fetchOne(txn, 'SELECT * FROM lab_analyses WHERE id = ?', [analysisId]);
-    if (row == null) throw const NotFoundError('Analysis was not found.');
+    if (row == null) throw NotFoundError(AppErrors.analysisNotFound);
     final analysis = Map<String, dynamic>.from(row);
     analysis['items'] = await fetchAll(txn, '''
             SELECT 
@@ -981,16 +1050,19 @@ class LabRepo {
     analysis['field_chemical_links'] = await fetchAll(txn, '''
             SELECT lc.*, inv.name AS inventory_name, inv.unit AS inventory_unit
             FROM lab_field_chemical_links lc
-            JOIN lab_inventory inv ON inv.id = lc.inventory_id
+            LEFT JOIN lab_inventory inv ON inv.id = lc.inventory_id
             WHERE lc.analysis_id = ?
             ORDER BY lc.dynamic_field ASC
             ''', [analysisId]);
+    for (final link in analysis['field_chemical_links'] as List) {
+      link['list_values'] = jsonLoadsList('${link['list_values'] ?? ''}');
+    }
     return analysis;
   }
 
   Future<Map<String, dynamic>> getInventoryItemTx(DatabaseExecutor txn, int itemId) async {
     final row = await fetchOne(txn, 'SELECT * FROM lab_inventory WHERE id = ?', [itemId]);
-    if (row == null) throw const NotFoundError('Inventory item was not found.');
+    if (row == null) throw NotFoundError(AppErrors.inventoryItemNotFound);
     return row;
   }
 
@@ -1002,7 +1074,7 @@ class LabRepo {
             JOIN lab_analyses a ON a.id = t.analysis_id
             WHERE t.id = ?
             ''', [testId]);
-    if (row == null) throw const NotFoundError('Test was not found.');
+    if (row == null) throw NotFoundError(AppErrors.testNotFound);
     final result = Map<String, dynamic>.from(row);
     result['dynamic_values'] =
         jsonLoads('${result.remove('dynamic_values_json') ?? ''}');
@@ -1017,7 +1089,7 @@ class LabRepo {
             JOIN lab_analyses a ON a.id = t.analysis_id
             WHERE t.id = ?
             ''', [testId]);
-    if (row == null) throw const NotFoundError('Test was not found.');
+    if (row == null) throw NotFoundError(AppErrors.testNotFound);
     final result = Map<String, dynamic>.from(row);
     result['dynamic_values'] =
         jsonLoads('${result.remove('dynamic_values_json') ?? ''}');
@@ -1058,7 +1130,7 @@ class LabRepo {
     return result;
   }
 
-  // ── Test range / out-of-range enrichment ─────────────────────────
+  // ── Test range / out-of-range enrichment ──────────────────────
 
   Map<int, Map<int, Map<String, Object?>>>? _productRangeCache;
   Map<int, Map<int, Map<String, Object?>>>? _materialRangeCache;
@@ -1143,7 +1215,7 @@ class LabRepo {
     _materialRangeCache = materialMap;
   }
 
-  // ── Lab test report data ─────────────────────────────────────────
+  // ── Lab test report data ──────────────────────────────────────
 
   Future<Map<String, dynamic>> buildLabTestReportData({
     required String reportType,
@@ -1155,14 +1227,14 @@ class LabRepo {
     int? sourceRefId,
   }) async {
     if (!['daily', 'monthly', 'yearly'].contains(reportType)) {
-      throw const ValidationError('Report type must be daily, monthly or yearly.');
+      throw ValidationError(AppErrors.reportTypeInvalid);
     }
     final params = <Object?>[];
     final where = <String>[];
     String periodLabel;
     if (reportType == 'daily') {
       if (dateStr == null || dateStr.trim().isEmpty) {
-        throw const ValidationError('التاريخ مطلوب للتقرير اليومي.');
+        throw ValidationError(AppErrors.dailyReportDateRequired);
       }
       where.add("date(t.tested_at) = ?");
       final d = dateStr.trim();
@@ -1170,14 +1242,14 @@ class LabRepo {
       periodLabel = 'التقرير اليومي - $dateStr';
     } else if (reportType == 'monthly') {
       if (month == null || month == 0 || year == null || year == 0) {
-        throw const ValidationError('الشهر والسنة مطلوبان للتقرير الشهري.');
+        throw ValidationError(AppErrors.monthlyReportDateRequired);
       }
       where.add("strftime('%Y-%m', t.tested_at) = ?");
       params.add('${year.toString().padLeft(4, '0')}-${month.toString().padLeft(2, '0')}');
       periodLabel = 'التقرير الشهري - $month/$year';
     } else {
       if (year == null || year == 0) {
-        throw const ValidationError('السنة مطلوبة للتقرير السنوي.');
+        throw ValidationError(AppErrors.yearlyReportDateRequired);
       }
       where.add("strftime('%Y', t.tested_at) = ?");
       params.add(year);
@@ -1220,7 +1292,7 @@ class LabRepo {
     };
   }
 
-  // ── Consumption log / adjustments / activity ─────────────────────
+  // ── Consumption log / adjustments / activity ──────────────────
 
   Future<List<Map<String, dynamic>>> listConsumptionLog() async {
     return fetchAll(null, '''
@@ -1317,7 +1389,7 @@ class LabRepo {
     return entries.take(limit).toList();
   }
 
-  // ── Dashboard summary ────────────────────────────────────────────
+  // ── Dashboard summary ─────────────────────────────────────────
 
   List<String> _lastMonthKeys(DateTime now) {
     final keys = <String>[];
@@ -1404,7 +1476,7 @@ class LabRepo {
     };
   }
 
-  // ── Test lookup / injection ──────────────────────────────────────
+  // ── Test lookup / injection ───────────────────────────────────
 
   Future<List<Map<String, dynamic>>> findTestsForAnalysisAndSource(
       int analysisId, String sourceType, int sourceRefId) async {
@@ -1462,7 +1534,7 @@ class LabRepo {
     return inspection;
   }
 
-  // ── Shared worksheet ─────────────────────────────────────────────
+  // ── Shared worksheet ──────────────────────────────────────────
 
   Future<Map<int, double>> worksheetConsumptionMap(
     Map<String, dynamic> analysis,
@@ -1604,7 +1676,7 @@ class LabRepo {
     final analysisRows =
         await exec.rawQuery('SELECT * FROM lab_analyses WHERE id IN ($qmarks)', ids);
     if (analysisRows.length != ids.length) {
-      throw const NotFoundError('Analysis was not found.');
+      throw NotFoundError(AppErrors.analysisNotFound);
     }
     final analyses = <int, Map<String, dynamic>>{
       for (final r in analysisRows) int.parse('${r['id']}'): Map<String, dynamic>.from(r),
@@ -1624,17 +1696,23 @@ class LabRepo {
     final linkRows = await exec.rawQuery('''
             SELECT lc.*, inv.name AS inventory_name, inv.unit AS inventory_unit
             FROM lab_field_chemical_links lc
-            JOIN lab_inventory inv ON inv.id = lc.inventory_id
+            LEFT JOIN lab_inventory inv ON inv.id = lc.inventory_id
             WHERE lc.analysis_id IN ($qmarks)
             ORDER BY lc.dynamic_field ASC
             ''', ids);
     final itemsByAnalysis = <int, List<Map<String, dynamic>>>{};
     for (final r in itemRows) {
-      itemsByAnalysis.putIfAbsent(int.parse('${r['analysis_id']}'), () => []).add(Map<String, dynamic>.from(r));
+      itemsByAnalysis
+          .putIfAbsent(int.parse('${r['analysis_id']}'), () => [])
+          .add(Map<String, dynamic>.from(r));
     }
     final linksByAnalysis = <int, List<Map<String, dynamic>>>{};
     for (final r in linkRows) {
-      linksByAnalysis.putIfAbsent(int.parse('${r['analysis_id']}'), () => []).add(Map<String, dynamic>.from(r));
+      final link = Map<String, dynamic>.from(r);
+      link['list_values'] = jsonLoadsList('${link['list_values'] ?? ''}');
+      linksByAnalysis
+          .putIfAbsent(int.parse('${link['analysis_id']}'), () => [])
+          .add(link);
     }
     for (final id in ids) {
       analyses[id]!['items'] = itemsByAnalysis[id] ?? <Map<String, dynamic>>[];
@@ -1654,7 +1732,7 @@ class LabRepo {
     };
     final missing = ids.where((id) => !found.containsKey(id)).toList();
     if (missing.isNotEmpty) {
-      throw const NotFoundError('Inventory item was not found.');
+      throw NotFoundError(AppErrors.inventoryItemNotFound);
     }
     return found;
   }
@@ -1737,6 +1815,7 @@ class LabRepo {
         }
         for (final link in analysis['field_chemical_links'] as List? ?? []) {
           final lm = link as Map<String, dynamic>;
+          if ('${lm['kind'] ?? 'link'}' != 'link') continue;
           if (lm['dynamic_field'] != null && lm['inventory_id'] != null) {
             consumptionInventoryIds.add(int.parse('${lm['inventory_id']}'));
           }
@@ -1767,7 +1846,7 @@ class LabRepo {
               'SELECT id, material_id, material_name, material_code, inspection_date FROM inspections WHERE entry_code = ?',
               [entryCode]);
           if (inspection == null) {
-            throw ValidationError('كود الدخول غير موجود في سجل الدخول: $entryCode');
+            throw ValidationError(AppErrors.entryCodeNotFound(entryCode));
           }
           if (inspection['material_id'] != null) {
             sourceRefId = int.parse('${inspection['material_id']}');
@@ -1782,7 +1861,7 @@ class LabRepo {
         if (rawRowId != null && '$rawRowId'.trim().isNotEmpty) {
           final existing = await fetchOne(
               txn, 'SELECT id FROM lab_worksheet WHERE id = ?', [int.parse('$rawRowId')]);
-          if (existing == null) throw const NotFoundError('Worksheet row not found.');
+          if (existing == null) throw NotFoundError(AppErrors.worksheetRowNotFound);
           await execute(txn, '''
                             UPDATE lab_worksheet SET source_type = ?, source_ref_id = ?,
                                 source_name = ?, sample_number = ?, entry_code = ?, updated_by = ?, updated_at = ?
@@ -1880,13 +1959,13 @@ class LabRepo {
     return db.transaction((txn) async {
       final row = await fetchOne(
           txn, 'SELECT * FROM lab_worksheet WHERE id = ?', [rowId]);
-      if (row == null) throw const NotFoundError('Worksheet row was not found.');
+      if (row == null) throw NotFoundError(AppErrors.worksheetRowNotFound);
       if ('${row['status'] ?? 'ACTIVE'}' == 'VOIDED') {
-        throw const ValidationError('تم إلغاء هذا الصف بالفعل.');
+        throw ValidationError(AppErrors.rowAlreadyCancelled);
       }
       final cleanReason = reason.trim();
       if (cleanReason.isEmpty) {
-        throw const ValidationError('سبب الإلغاء مطلوب للحفاظ على سجل التدقيق.');
+        throw ValidationError(AppErrors.cancelReasonRequired);
       }
       final timestamp = nowIso();
       final userId = user == null ? null : int.parse('${user['id']}');
@@ -1928,13 +2007,13 @@ class LabRepo {
       }
       await execute(txn, '''
                 UPDATE lab_worksheet SET status = 'VOIDED', void_reason = ?,
-                   voided_by = ?, voided_at = ?, updated_by = ?, updated_at = ? WHERE id = ?
+                  voided_by = ?, voided_at = ?, updated_by = ?, updated_at = ? WHERE id = ?
                 ''', [cleanReason, userId, timestamp, userId, timestamp, rowId]);
       return {'voided': true, 'reversed_entries': reversedCount};
     });
   }
 
-  // ── Formula serialization helpers ───────────────────────────────
+  // ── Formula serialization helpers ─────────────────────────────
 
   Map<String, dynamic> loadFormula(String raw) => normalizeFormulaValue(jsonLoads(raw, {}));
 }

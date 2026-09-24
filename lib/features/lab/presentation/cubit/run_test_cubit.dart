@@ -69,6 +69,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
     required String resultText,
     required Map<String, dynamic> dynamicValues,
     required String entryCode,
+    bool manualResult = false,
     Map<String, dynamic>? user,
   }) async {
     safeEmit(state.copyWith(running: true, error: null));
@@ -86,6 +87,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
         dynamicValues: dynamicValues,
         user: user,
         entryCode: state.sourceType == 'raw_material' ? entryCode.trim() : '',
+        manualResult: manualResult,
       );
     } finally {
       safeEmit(state.copyWith(running: false));

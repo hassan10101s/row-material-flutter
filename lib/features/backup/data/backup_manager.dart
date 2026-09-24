@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
@@ -88,7 +89,7 @@ class BackupManager {
         '${check.first.values.first}'.trim().toLowerCase() == 'ok';
   }
 
-  // ── Validation / pre-flight ───────────────────────────────────────
+  // ── Validation / pre-flight ───────────────────────────────────
 
   /// Validate that a file is a readable backup with the required schema.
   Future<void> validateBackupDatabase(String backupPath) async {
@@ -96,15 +97,13 @@ class BackupManager {
     try {
       conn = await _openReadOnly(backupPath);
       if (!await _integrityOk(conn)) {
-        throw const ValidationError(
-            'ملف النسخة الاحتياطية تالف (فشل فحص السلامة integrity check).');
+        throw ValidationError(AppErrors.backupIntegrityFail);
       }
 
       final tables = await _tableNames(conn);
       final missingTables = backupRequiredTables.difference(tables).toList()..sort();
       if (missingTables.isNotEmpty) {
-        throw ValidationError(
-            'ملف النسخة الاحتياطية غير صالح: الجداول المطلوبة ناقصة: ${missingTables.join(', ')}');
+        throw ValidationError(AppErrors.backupMissingTables(missingTables.join(', ')));
       }
 
       for (final entry in backupRequiredColumns.entries) {
@@ -112,14 +111,13 @@ class BackupManager {
         final missingCols = entry.value.difference(cols).toList()..sort();
         if (missingCols.isNotEmpty) {
           throw ValidationError(
-              "ملف النسخة الاحتياطية قديم جداً أو غير متوافق مع هذا الإصدار: "
-              "جدول '${entry.key}' ينقصه الأعمدة: ${missingCols.join(', ')}");
+              AppErrors.backupSchemaTooOld(entry.key, missingCols.join(', ')));
         }
       }
     } on ValidationError {
       rethrow;
     } catch (e) {
-      throw ValidationError('ملف النسخة الاحتياطية تالف أو غير قابل للقراءة: $e');
+      throw ValidationError(AppErrors.backupUnreadable(e));
     } finally {
       await conn?.close();
     }
@@ -134,15 +132,13 @@ class BackupManager {
     try {
       await dbHelper.applySchemaToArbitraryFile(migrated);
     } catch (e) {
-      throw AppError(
-          'تعذر ترقية النسخة الاحتياطية إلى بنية النسخة الحالية من البرنامج: $e');
+      throw AppError(AppErrors.backupUpgradeFailed(e));
     }
     Database? conn;
     try {
       conn = await _openReadOnly(migrated);
       if (!await _integrityOk(conn)) {
-        throw const AppError(
-            'فشل التحقق من سلامة النسخة الاحتياطية بعد الترقية التلقائية.');
+        throw AppError(AppErrors.backupIntegrityAfterUpgrade);
       }
     } finally {
       await conn?.close();
@@ -157,31 +153,27 @@ class BackupManager {
       conn = await _openReadOnly(sourcePath);
       final tables = await _tableNames(conn);
       if (!tables.contains('reference_materials')) {
-        throw const ValidationError(
-            'Invalid materials database: missing reference_materials table.');
+        throw ValidationError(AppErrors.invalidMaterialsDb);
       }
       if (!tables.contains('parameters')) {
-        throw const ValidationError(
-            'Invalid materials database: missing parameters table.');
+        throw ValidationError(AppErrors.invalidParamsDb);
       }
       final materialCols = await _columnNames(conn, 'reference_materials');
       final missingMaterials = materialsTableRequiredColumns.difference(materialCols).toList()..sort();
       if (missingMaterials.isNotEmpty) {
-        throw ValidationError(
-            'Incompatible materials table (missing: ${missingMaterials.join(', ')}).');
+        throw ValidationError(AppErrors.incompatibleMaterialsTable(missingMaterials.join(', ')));
       }
       final paramCols = await _columnNames(conn, 'parameters');
       final missingParams = parametersTableRequiredColumns.difference(paramCols).toList()..sort();
       if (missingParams.isNotEmpty) {
-        throw ValidationError(
-            'Incompatible parameters table (missing: ${missingParams.join(', ')}).');
+        throw ValidationError(AppErrors.incompatibleParamsTable(missingParams.join(', ')));
       }
     } finally {
       await conn?.close();
     }
   }
 
-  // ── Export / restore ─────────────────────────────────────────────
+  // ── Export / restore ──────────────────────────────────────────
 
   /// Export a full backup of the live database. Mirrors
   /// controller.export_database_backup (VACUUM INTO achieves the same
@@ -199,8 +191,7 @@ class BackupManager {
       backupPath = p.join(dir.path, 'material_lab_backup_${fileTimestamp()}.db');
     }
     if (await _sameFile(backupPath, livePath)) {
-      throw const ValidationError(
-          'Backup path must be different from the active database path.');
+      throw ValidationError(AppErrors.backupPathMustDiffer);
     }
 
     final target = File(backupPath);
@@ -214,7 +205,7 @@ class BackupManager {
     try {
       checkDb = await _openReadOnly(backupPath);
       if (!await _integrityOk(checkDb)) {
-        throw const AppError('Backup was created but integrity verification failed.');
+        throw AppError(AppErrors.backupVerifiedFail);
       }
     } finally {
       await checkDb?.close();
@@ -275,7 +266,7 @@ class BackupManager {
   Future<Map<String, dynamic>> restoreDatabaseBackup(String backupPath) async {
     final livePath = await dbHelper.databasePath;
     if (await _sameFile(backupPath, livePath)) {
-      throw const ValidationError('Selected file is already the active database.');
+      throw ValidationError(AppErrors.restoreActiveDbSelected);
     }
     await validateBackupDatabase(backupPath);
 
@@ -299,7 +290,7 @@ class BackupManager {
       final restoredDb = await dbHelper.database;
       await restoredDb.execute('PRAGMA wal_checkpoint(TRUNCATE)');
     } catch (e) {
-      throw AppError('فشل استرداد قاعدة البيانات: $e');
+      throw AppError(AppErrors.backupRestoreFailed(e));
     } finally {
       await cleanupTempRoot(tempRoot);
     }
@@ -307,12 +298,11 @@ class BackupManager {
       'restored': true,
       'path': backupPath,
       'message':
-          'تم استرداد قاعدة البيانات بنجاح (مع ترقية تلقائية للنسخ القديمة إلى '
-          'البنية الحالية). سيتم تسجيل الخروج الآن.',
+          'تم استرداد قاعدة البيانات بنجاح (مع ترقية تلقائية للنسخ القديمة إلى البنية الحالية). سيتم تسجيل الخروج الآن.',
     };
   }
 
-  // ── Cross-database import (migration wizard) ─────────────────────
+  // ── Cross-database import (migration wizard) ──────────────────
 
   /// Copy users from a source database. Legacy (no-pepper) hashes are kept and
   /// auto-upgrade to V2 on next login.
@@ -341,8 +331,7 @@ class BackupManager {
       const required = {'username', 'full_name', 'password_hash', 'role', 'created_at'};
       final missing = required.difference(cols).toList()..sort();
       if (missing.isNotEmpty) {
-        throw ValidationError(
-            'Source database users table is missing columns: ${missing.join(', ')}');
+        throw ValidationError(AppErrors.usersTableMissingColumns(missing.join(', ')));
       }
 
       final hasIsActive = cols.contains('is_active');
@@ -674,8 +663,7 @@ class BackupManager {
             parameterRows.isNotEmpty ? (parameterRows.length - createdParameters) : 0,
         'target_path': livePath,
         'message':
-            'تم تحديث $materialCount خامة و $parameterCount وحدة/متطلب '
-            'بدون تغيير الإعدادات أو المسارات المحلية.',
+            'تم تحديث $materialCount خامة و $parameterCount وحدة/متطلب بدون تغيير الإعدادات أو المسارات المحلية.',
       };
     } finally {
       await source?.close();

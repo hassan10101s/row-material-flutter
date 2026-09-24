@@ -10,7 +10,7 @@ class AppText {
 
 /// Central bilingual strings.
 class AppStrings {
-  static String get appTitle => AppText.t('مختبر المواد الخام', 'Raw Material Lab');
+  static String get appTitle => AppText.t('مختبر المواد', 'Material Lab');
   static String get tagline => AppText.t(
       'نظام فحص ومراقبة جودة المواد الخام', 'Raw Material Inspection & QC System');
 
@@ -43,6 +43,7 @@ class AppStrings {
   static String get openPdfFolder => AppText.t('فتح مجلد PDF', 'Open PDF Folder');
   static String get preview => AppText.t('معاينة', 'Preview');
   static String get toggleTheme => AppText.t('تبديل المظهر', 'Toggle theme');
+  static String get toggleLanguage => AppText.t('تبديل اللغة', 'Switch language');
 
   static String get inventory => AppText.t('المخزون', 'Inventory');
   static String get analyses => AppText.t('التحليلات', 'Analyses');

@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/app_paths.dart';
+import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/security/password_hash.dart';
@@ -87,7 +88,7 @@ class SettingsRepo {
     return row == null ? null : '${row['value']}';
   }
 
-  // ── Usage expiry (sealed) ────────────────────────────────
+  // ── Usage expiry (sealed) ─────────────────────────────────────
 
   Future<String?> readUsageExpiry() async {
     final value = await getSettingValue('usage_expiry_date');
@@ -107,7 +108,7 @@ class SettingsRepo {
     await updateSettings({'usage_expiry_date': sealed});
   }
 
-  // ── Logo ─────────────────────────────────────────────────
+  // ── Logo ──────────────────────────────────────────────────────
 
   Future<String?> getReportLogoPath() => getSettingValue('report_logo_path');
 
@@ -128,7 +129,7 @@ class SettingsRepo {
     await updateSettings({'report_logo_path': '', 'report_logo_data_uri': ''});
   }
 
-  // ── Users ────────────────────────────────────────────────
+  // ── Users ─────────────────────────────────────────────────────
 
   Future<List<User>> listUsers() async {
     final db = await dbHelper.database;
@@ -145,11 +146,11 @@ class SettingsRepo {
     required String role,
   }) async {
     final db = await dbHelper.database;
-    if (username.trim().isEmpty) throw const ValidationError('Username is required.');
+    if (username.trim().isEmpty) throw ValidationError(AppErrors.usernameRequired);
     final existing = await db
         .query('users', where: 'username = ?', whereArgs: [username.trim()]);
     if (existing.isNotEmpty) {
-      throw const ValidationError('Username already exists. | اسم المستخدم موجود مسبقاً.');
+      throw ValidationError(AppErrors.usernameExists);
     }
     final hash = await _hashPassword(password, isDeveloper: role == 'Developer');
     final id = await db.insert('users', {
@@ -173,10 +174,10 @@ class SettingsRepo {
   }) async {
     final db = await dbHelper.database;
     final existing = await db.query('users', where: 'id = ?', whereArgs: [id]);
-    if (existing.isEmpty) throw const NotFoundError('User not found.');
+    if (existing.isEmpty) throw NotFoundError(AppErrors.userNotFound);
     final user = User.fromMap(existing.first);
     if (user.isDeveloper && (role != null && role != 'Developer' || isActive == false)) {
-      throw const AuthorizationError('Cannot modify the Developer account. | لا يمكن تعديل حساب المطور.');
+      throw AuthorizationError(AppErrors.cannotModifyDeveloper);
     }
     final updates = <String, dynamic>{};
     if (fullName != null) updates['full_name'] = fullName.trim();
@@ -196,22 +197,20 @@ class SettingsRepo {
     if (rows.isEmpty) return;
     final user = User.fromMap(rows.first);
     if (user.isDeveloper) {
-      throw const AuthorizationError('Cannot delete the Developer account. | لا يمكن حذف حساب المطور.');
+      throw AuthorizationError(AppErrors.cannotDeleteDeveloper);
     }
     // Reject deletion while the user owns data (parity with auth.py:139-155)
     // so referential integrity / audit identity is never lost.
     final insp = await db
         .rawQuery('SELECT COUNT(*) AS c FROM inspections WHERE created_by = ?', [id]);
     if ((Sqflite.firstIntValue(insp) ?? 0) > 0) {
-      throw const ValidationError(
-          'Cannot delete user: they have existing inspection records. Reassign or delete inspections first. | لا يمكن حذف المستخدم: لديه سجلات فحوصات قائمة.');
+      throw ValidationError(AppErrors.userIdHasInspectionRecords);
     }
     final hist = await db.rawQuery(
         'SELECT COUNT(*) AS c FROM inspection_status_history WHERE changed_by = ?',
         [id]);
     if ((Sqflite.firstIntValue(hist) ?? 0) > 0) {
-      throw const ValidationError(
-          'Cannot delete user: they have existing status history records. | لا يمكن حذف المستخدم: لديه سجلات في سجل القرارات.');
+      throw ValidationError(AppErrors.userIdHasStatusHistoryRecords);
     }
     await db.delete('users', where: 'id = ?', whereArgs: [id]);
   }

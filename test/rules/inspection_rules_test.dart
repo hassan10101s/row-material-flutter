@@ -98,7 +98,7 @@ void main() {
         expect(
           () => validateDecisionFields(d),
           throwsA(predicate<ValidationError>(
-              (e) => e.message.contains('numbers only'))),
+              (e) => e.message.contains('أرقام فقط'))),
           reason: '$status accepted a non-numeric rejected_quantity',
         );
       }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
@@ -142,7 +143,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
 
       if (widget.materialId != null) {
         final raw = await _refRepo.getMaterialRaw(widget.materialId!);
-        if (raw == null) throw const NotFoundError('Material not found.');
+        if (raw == null) throw NotFoundError(AppErrors.materialNotFound);
         initialName = '${raw['material_name'] ?? ''}';
         initialCode = '${raw['material_code'] ?? ''}';
         final physMap = jsonLoads('${raw['physical_reference_json']}');
@@ -542,7 +543,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
                             const SizedBox(height: AppSpacing.sm),
                             Text(
                               AppText.t(
-                                'تُحمّل البارامترات افتراضياً من جدول التحاليل؛ يمكنك أيضاً إضافة المزيد من القائمة أو حذف غير المطلوب.',
+                                'تُحمَّل البارامترات افتراضياً من جدول التحاليل؛ يمكنك أيضاً إضافة المزيد من القائمة أو حذف غير المطلوب.',
                                 'Parameters are loaded from the analyses list by default; you can add more or remove unwanted ones.',
                               ),
                               style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),

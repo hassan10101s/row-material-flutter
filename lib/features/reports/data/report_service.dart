@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/utils/app_dates.dart';
@@ -119,7 +120,7 @@ class ReportService {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
-  // ── Inspection report (single record) ────────────────────────────
+  // ── Inspection report (single record) ─────────────────────────
 
   /// Port of export_pdf: single inspection report. Filename matches Python:
   /// `{material_name}_{entry_code}.pdf`.
@@ -141,7 +142,7 @@ class ReportService {
     );
   }
 
-  // ── Sample label ─────────────────────────────────────────────────
+  // ── Sample label ──────────────────────────────────────────────
 
   /// Port of export_label_pdf: 10×5cm sample label.
   Future<ReportDoc> sampleLabelPdf(int inspectionId) async {
@@ -164,9 +165,9 @@ class ReportService {
   /// Port of export_batch_labels: up to 100 labels on A4 pages.
   Future<ReportDoc> batchLabelsPdf(List<int> inspectionIds) async {
     final ids = inspectionIds.toSet().toList();
-    if (ids.isEmpty) throw const ValidationError('حدد سجلات واحدة على الأقل.');
+    if (ids.isEmpty) throw ValidationError(AppErrors.batchLabelsSelectAtLeastOne);
     if (ids.length > 100) {
-      throw const ValidationError('الحد الأقصى 100 ملصق في المرة الواحدة.');
+      throw ValidationError(AppErrors.batchLabelsMax100);
     }
     final inspections = <Map<String, dynamic>>[];
     for (final id in ids) {
@@ -186,15 +187,14 @@ class ReportService {
     );
   }
 
-  // ── Period reports ───────────────────────────────────────────────
+  // ── Period reports ────────────────────────────────────────────
 
-  /// Daily report for a calendar day (00:00 → 23:59).
+  /// Daily report for a calendar day (00:00 →' 23:59).
   Future<ReportDoc> dailyReport(String dateStr) async {
-    if (dateStr.trim().isEmpty) throw const AppError('التاريخ مطلوب');
+    if (dateStr.trim().isEmpty) throw AppError(AppErrors.dailyDateRequired);
     final parsed = DateTime.tryParse(dateStr.trim());
     if (parsed == null) {
-      throw const ValidationError(
-          'صيغة التاريخ غير صحيحة. استخدم الشكل YYYY-MM-DD.');
+      throw ValidationError(AppErrors.dateFormatInvalid);
     }
     final day = dateStr.trim().substring(0, 10);
     final nextDayIso = _dateOnlyIso(DateTime(parsed.year, parsed.month, parsed.day + 1));
@@ -273,7 +273,7 @@ class ReportService {
     String shiftLabel = '',
   }) async {
     final ids = inspectionIds.toSet().toList();
-    if (ids.isEmpty) throw const AppError('قائمة الفحوصات مطلوبة');
+    if (ids.isEmpty) throw AppError(AppErrors.inspectionsListRequired);
     final placeholders = List.filled(ids.length, '?').join(', ');
     final inspections = await _querySummaries(
       'WHERE id IN ($placeholders) ORDER BY inspection_date DESC, id DESC',
@@ -292,11 +292,11 @@ class ReportService {
     return ReportDoc(
       filename: 'تقرير_المتابعة_${day}_${fileTimestamp()}.pdf',
       bytes: bytes,
-      title: 'تقرير المتابعة - $day',
+      title: 'التقرير اليومي - $day',
     );
   }
 
-  // ── Lab tests report ─────────────────────────────────────────────
+  // ── Lab tests report ──────────────────────────────────────────
 
   /// Daily/monthly/yearly lab-tests report (delegates data fetching to
   /// LabRepo.buildLabTestReportData, port of lab.py).
@@ -310,7 +310,7 @@ class ReportService {
     int? sourceRefId,
   }) async {
     if (!const ['daily', 'monthly', 'yearly'].contains(type)) {
-      throw const ValidationError('Report type must be daily, monthly or yearly.');
+      throw ValidationError(AppErrors.reportTypeInvalid);
     }
     final data = await labRepo.buildLabTestReportData(
       reportType: type,
@@ -347,7 +347,7 @@ class ReportService {
     );
   }
 
-  // ── Disk output (parity with controller._get_export_dir) ─────────
+  // ── Disk output (parity with controller._get_export_dir) ────────
 
   /// Resolve the export folder: settings `export_root_path` or app exports
   /// root, optionally under `{year}/{month}/{day}` and a `labels` subfolder.

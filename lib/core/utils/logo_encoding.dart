@@ -1,9 +1,10 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:image/image.dart' as img;
 
+import '../constants/app_errors.dart';
 import 'app_exceptions.dart';
 
 /// Top width (px) used when scaling a report logo down before encoding.
@@ -16,13 +17,12 @@ const int appLogoMaxWidth = 400;
 /// the `report_logo_data_uri` setting.
 String encodeReportLogoDataUri(String path) {
   final file = File(path);
-  if (!file.existsSync()) throw const NotFoundError('Report logo not found.');
+  if (!file.existsSync()) throw NotFoundError(AppErrors.logoNotFound);
   final bytes = file.readAsBytesSync();
-  if (bytes.isEmpty) throw const ValidationError('Report logo file is empty.');
+  if (bytes.isEmpty) throw ValidationError(AppErrors.logoEmpty);
   final decoded = img.decodeImage(bytes);
   if (decoded == null) {
-    throw const ValidationError(
-        'Unsupported image format. Use PNG or JPEG. | صيغة غير مدعومة. استخدم PNG أو JPEG.');
+    throw ValidationError(AppErrors.logoFormat);
   }
   var image = decoded;
   if (image.width > appLogoMaxWidth) {

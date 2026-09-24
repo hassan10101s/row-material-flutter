@@ -16,11 +16,9 @@ import 'cubit/constants_cubit.dart';
 import 'cubit/inventory_cubit.dart';
 import 'cubit/lab_cubit.dart';
 import 'cubit/lab_reports_cubit.dart';
-import 'cubit/run_test_cubit.dart';
 import 'cubit/test_history_cubit.dart';
 import 'inventory_tab.dart';
 import 'lab_reports_tab.dart';
-import 'run_test_tab.dart';
 import 'test_history_tab.dart';
 
 class _LabTab {
@@ -55,14 +53,6 @@ class LabScreen extends StatelessWidget {
         BlocProvider(
           create: (_) => AnalysesCubit(repo: repo)..load(),
           child: const AnalysesTab(),
-        ),
-      ),
-      _LabTab(
-        AppText.t('تشغيل اختبار', 'Run Test'),
-        Icons.play_circle_outline,
-        BlocProvider(
-          create: (_) => RunTestCubit(repo: repo)..load(),
-          child: RunTestTab(onTestRun: cubit.notifyTestRun),
         ),
       ),
       _LabTab(

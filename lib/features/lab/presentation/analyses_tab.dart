@@ -10,7 +10,8 @@ import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../di/service_locator.dart';
-import '../core/formula_engine.dart' show inventoryUnits, validateFormula;
+import '../core/formula_engine.dart'
+    show inventoryUnits, safeFormulaFloat, unitDimOf, validateFormula;
 import '../data/lab_repo.dart';
 import 'cubit/analyses_cubit.dart';
 
@@ -162,7 +163,8 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       text: '${widget.analysis?['formula'] is Map ? (widget.analysis?['formula'] as Map)['expression'] : ''}');
   final _newFieldController = TextEditingController();
   final List<TextEditingController> _fieldControllers = [];
-  final List<Map<String, dynamic>?> _fieldLinks = [];
+  final List<Map<String, dynamic>> _fieldLinks = [];
+  final List<Map<String, dynamic>> _consumedItems = [];
   List<Map<String, dynamic>> _inventory = [];
   int _linkPicker = -1;
   bool _saving = false;
@@ -186,9 +188,38 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     ]);
     for (final f in fields) {
       _fieldControllers.add(TextEditingController(text: f));
-      _fieldLinks.add(links[f]);
+      _fieldLinks.add(_decodeFieldConfig(links[f]));
+    }
+    for (final item in (widget.analysis?['items'] as List?) ?? const []) {
+      if (item is Map) {
+        final m = Map<String, dynamic>.from(item);
+        m['qtyCtrl'] =
+            TextEditingController(text: _fmtNum(item['qty_per_sample']));
+        _consumedItems.add(m);
+      }
     }
     _loadInventory();
+  }
+
+  Map<String, dynamic> _decodeFieldConfig(Map<String, dynamic>? row) {
+    if (row == null) return {'kind': 'none'};
+    final kind = '${row['kind'] ?? 'link'}';
+    final cfg = <String, dynamic>{'kind': kind};
+    if (kind == 'link') {
+      cfg['inventory_id'] = row['inventory_id'];
+      cfg['inventory_name'] = row['inventory_name'] ?? '';
+      cfg['unit'] = row['unit'] ?? 'mL';
+    } else if (kind == 'value') {
+      cfg['fixed_value'] = safeFormulaFloat(row['fixed_value']);
+    } else if (kind == 'list') {
+      cfg['list_values'] = [
+        for (final v in row['list_values'] is List
+            ? row['list_values'] as List
+            : const [])
+          '$v',
+      ];
+    }
+    return cfg;
   }
 
   Future<void> _loadInventory() async {
@@ -196,6 +227,12 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       final items = await _repo.listInventory();
       if (mounted) setState(() => _inventory = items);
     } catch (_) {}
+  }
+
+  void _disposeFieldEditors(int index) {
+    final cfg = _fieldLinks[index];
+    (cfg['valueCtrl'] as TextEditingController?)?.dispose();
+    (cfg['listAddCtrl'] as TextEditingController?)?.dispose();
   }
 
   @override
@@ -207,6 +244,13 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     _newFieldController.dispose();
     for (final c in _fieldControllers) {
       c.dispose();
+    }
+    for (final cfg in _fieldLinks) {
+      (cfg['valueCtrl'] as TextEditingController?)?.dispose();
+      (cfg['listAddCtrl'] as TextEditingController?)?.dispose();
+    }
+    for (final item in _consumedItems) {
+      (item['qtyCtrl'] as TextEditingController?)?.dispose();
     }
     super.dispose();
   }
@@ -223,12 +267,6 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       for (final f in _fieldList)
         if (f.isNotEmpty) (label: '$f (حقل)', value: f),
     ];
-    for (final i in widget.analysis?['items'] as List? ?? const []) {
-      if (i is Map) {
-        final n = '${i['inventory_name'] ?? ''}'.trim();
-        if (n.isNotEmpty) tokens.add((label: '$n (مادة)', value: n));
-      }
-    }
     for (final n in _existingConstants?.keys ?? const <String>[]) {
       if (n.trim().isNotEmpty) tokens.add((label: '$n (ثابت)', value: n));
     }
@@ -282,16 +320,56 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
 
   Future<void> _save() async {
     setState(() => _saving = true);
-    final links = <Map<String, dynamic>>[
-      for (var i = 0; i < _fieldControllers.length; i++)
-        if (_fieldLinks[i] != null &&
-            _fieldLinks[i]!['inventory_id'] != null &&
-            (_fieldLinks[i]!['inventory_id'] as num? ?? 0) > 0)
-          {
-            'dynamic_field': _fieldList[i],
-            'inventory_id': _fieldLinks[i]!['inventory_id'],
-            'unit': _fieldLinks[i]!['unit'] ?? 'mL',
-          },
+    final links = <Map<String, dynamic>>[];
+    for (var i = 0; i < _fieldControllers.length; i++) {
+      final cfg = _fieldLinks[i];
+      final field = _fieldList[i];
+      final kind = '${cfg['kind'] ?? 'none'}';
+      if (kind == 'link') {
+        final id = int.tryParse('${cfg['inventory_id'] ?? 0}') ?? 0;
+        if (id > 0) {
+          links.add({
+            'dynamic_field': field,
+            'kind': 'link',
+            'inventory_id': id,
+            'unit': cfg['unit'] ?? 'mL',
+          });
+        }
+      } else if (kind == 'value') {
+        final v = safeFormulaFloat(cfg['fixed_value']);
+        if (v != null) {
+          links.add({
+            'dynamic_field': field,
+            'kind': 'value',
+            'inventory_id': 0,
+            'fixed_value': v,
+          });
+        }
+      } else if (kind == 'list') {
+        final values = <num>[
+          for (final s in (cfg['list_values'] as List?) ?? const [])
+            if (safeFormulaFloat(s) != null) safeFormulaFloat(s)!,
+        ];
+        if (values.isNotEmpty) {
+          links.add({
+            'dynamic_field': field,
+            'kind': 'list',
+            'inventory_id': 0,
+            'list_values': values,
+          });
+        }
+      }
+    }
+    final consumedItems = <Map<String, dynamic>>[
+      for (final item in _consumedItems)
+        {
+          'inventory_id':
+              int.tryParse('${item['inventory_id'] ?? 0}') ?? 0,
+          'qty_per_sample': safeFormulaFloat(
+                  (item['qtyCtrl'] as TextEditingController).text) ??
+              0,
+          'unit': '${item['unit'] ?? 'g'}',
+        },
     ];
     try {
       if (widget.analysis == null) {
@@ -301,6 +379,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
           description: _description.text,
           dynamicFields: _fieldList,
           formula: _formula.text.trim(),
+          items: consumedItems,
           fieldChemicalLinks: links,
         );
       } else {
@@ -310,6 +389,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
           description: _description.text,
           dynamicFields: _fieldList,
           formula: _formula.text.trim(),
+          items: consumedItems,
           fieldChemicalLinks: links,
         );
       }
@@ -328,13 +408,14 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     if (name.isEmpty) return;
     setState(() {
       _fieldControllers.add(TextEditingController(text: name));
-      _fieldLinks.add(null);
+      _fieldLinks.add({'kind': 'none'});
       _newFieldController.clear();
     });
   }
 
   void _removeField(int index) {
     setState(() {
+      _disposeFieldEditors(index);
       _fieldControllers[index].dispose();
       _fieldControllers.removeAt(index);
       _fieldLinks.removeAt(index);
@@ -342,9 +423,98 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     });
   }
 
+  String _kindOf(int index) => '${_fieldLinks[index]['kind'] ?? 'none'}';
+
+  void _setFieldKind(int index, String kind) {
+    setState(() {
+      final prev = _kindOf(index);
+      if (prev == kind) return;
+      _disposeFieldEditors(index);
+      final cfg = <String, dynamic>{'kind': kind};
+      if (kind == 'link') cfg['unit'] = 'mL';
+      if (kind == 'list') cfg['list_values'] = <String>['2', '5', '10'];
+      _fieldLinks[index] = cfg;
+      _linkPicker = -1;
+    });
+  }
+
+  Widget _kindChips(int index) {
+    final kind = _kindOf(index);
+    return Wrap(
+      spacing: 4,
+      children: [
+        _kindChip(index, 'none', kind, 'بدون'),
+        _kindChip(index, 'link', kind, 'رابط'),
+        _kindChip(index, 'value', kind, 'قيمة'),
+        _kindChip(index, 'list', kind, 'قائمة'),
+      ],
+    );
+  }
+
+  Widget _fieldSummaryChip(int index) {
+    final kind = _kindOf(index);
+    if (kind == 'value') {
+      final v = safeFormulaFloat(_fieldLinks[index]['fixed_value']);
+      return v == null
+          ? const SizedBox.shrink()
+          : _stateChip(Icons.pin_outlined, '= $v', AppColors.info);
+    }
+    if (kind == 'list') {
+      final n =
+          ((_fieldLinks[index]['list_values'] as List?) ?? const []).length;
+      return n == 0
+          ? const SizedBox.shrink()
+          : _stateChip(Icons.view_list_outlined, 'قائمة ($n)', AppColors.accent);
+    }
+    if (kind == 'link') {
+      final id = int.tryParse('${_fieldLinks[index]['inventory_id'] ?? 0}') ?? 0;
+      final name = '${_fieldLinks[index]['inventory_name'] ?? ''}';
+      return id <= 0
+          ? const SizedBox.shrink()
+          : _stateChip(Icons.link_outlined, name, AppColors.success);
+    }
+    return const SizedBox.shrink();
+  }
+
+  Widget _stateChip(IconData icon, String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13.r, color: color),
+          const SizedBox(width: 4),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 130),
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                  fontSize: 11.spMax, color: color, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _kindChip(int index, String value, String current, String label) {
+    return ChoiceChip(
+      visualDensity: VisualDensity.compact,
+      label: Text(label, style: TextStyle(fontSize: 12.spMax)),
+      selected: current == value,
+      onSelected: (_) => _setFieldKind(index, value),
+    );
+  }
+
   Widget _linkSummary(int index) {
-    final link = _fieldLinks[index];
-    if (link == null) {
+    final cfg = _fieldLinks[index];
+    if (int.tryParse('${cfg['inventory_id'] ?? 0}') == null ||
+        (int.tryParse('${cfg['inventory_id'] ?? 0}') ?? 0) <= 0) {
       return ActionChip(
         visualDensity: VisualDensity.compact,
         avatar: Icon(Icons.link, size: 14.r),
@@ -352,8 +522,8 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         onPressed: () => setState(() => _linkPicker = _linkPicker == index ? -1 : index),
       );
     }
-    final name = '${link['inventory_name'] ?? ''}';
-    final unit = '${link['unit'] ?? ''}';
+    final name = '${cfg['inventory_name'] ?? ''}';
+    final unit = '${cfg['unit'] ?? ''}';
     return InputChip(
       visualDensity: VisualDensity.compact,
       avatar: Icon(Icons.link, size: 14.r),
@@ -362,7 +532,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
           style: TextStyle(fontSize: 12.spMax)),
       onPressed: () => setState(() => _linkPicker = _linkPicker == index ? -1 : index),
       onDeleted: () => setState(() {
-        _fieldLinks[index] = null;
+        _fieldLinks[index] = {'kind': 'link', 'unit': 'mL'};
         _linkPicker = -1;
       }),
     );
@@ -376,8 +546,8 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
             style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
       );
     }
-    final current = _fieldLinks[index];
-    final selectedId = current == null ? null : int.tryParse('${current['inventory_id']}');
+    final cfg = _fieldLinks[index];
+    final selectedId = int.tryParse('${cfg['inventory_id'] ?? ''}');
     return Container(
       margin: const EdgeInsets.only(top: 4),
       padding: const EdgeInsets.all(8),
@@ -388,7 +558,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('استهلاك تلقائي',
+          Text('ربط بمادة المخزون (استهلاك تلقائي)',
               style: TextStyle(
                   color: AppColors.textMuted, fontSize: 11.spMax)),
           const SizedBox(height: 6),
@@ -407,10 +577,11 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
             ],
             onChanged: (v) => setState(() {
               if (v == null) {
-                _fieldLinks[index] = null;
+                _fieldLinks[index] = {'kind': 'link', 'unit': 'mL'};
               } else {
                 final inv = _inventory.firstWhere((e) => '${e['id']}' == '$v');
                 _fieldLinks[index] = {
+                  'kind': 'link',
                   'inventory_id': v,
                   'inventory_name': '${inv['name']}',
                   'unit': '${inv['unit'] ?? 'mL'}',
@@ -418,10 +589,13 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               }
             }),
           ),
-          if (_fieldLinks[index] != null) ...[
+          if (_kindOf(index) == 'link' &&
+              (int.tryParse('${_fieldLinks[index]['inventory_id'] ?? 0}') ??
+                      0) >
+                  0) ...[
             const SizedBox(height: 6),
             DropdownButtonFormField<String>(
-              initialValue: '${_fieldLinks[index]!['unit'] ?? 'mL'}',
+              initialValue: '${_fieldLinks[index]['unit'] ?? 'mL'}',
               isExpanded: true,
               decoration: const InputDecoration(
                   labelText: 'وحدة الاستهلاك', isDense: true),
@@ -430,13 +604,312 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                   DropdownMenuItem<String>(value: u, child: Text(u)),
               ],
               onChanged: (u) => setState(() {
-                _fieldLinks[index] = {..._fieldLinks[index]!}..['unit'] = u;
+                _fieldLinks[index] = {..._fieldLinks[index]}..['unit'] = u;
               }),
             ),
+            if (unitDimOf('${_fieldLinks[index]['unit'] ?? 'mL'}') !=
+                unitDimOf('${_inventory
+                    .firstWhere((e) => '${e['id']}' ==
+                        '${_fieldLinks[index]['inventory_id']}')
+                    ['unit'] ?? ''}')) ...[
+              const SizedBox(height: 4),
+              Text(
+                'تنبيه: وحدة الاستهلاك لا تطابق وحدة المادة، الكمية قد تُستهلك بقيمة رقمية مباشرة.',
+                style: TextStyle(
+                    color: AppColors.warning, fontSize: 11.spMax),
+              ),
+            ],
           ],
         ],
       ),
     );
+  }
+
+  TextEditingController _valueCtrl(int index) {
+    final cfg = _fieldLinks[index];
+    var c = cfg['valueCtrl'] as TextEditingController?;
+    if (c == null) {
+      final v = cfg['fixed_value'];
+      c = TextEditingController(text: v == null ? '' : '$v');
+      cfg['valueCtrl'] = c;
+    }
+    return c;
+  }
+
+  Widget _valuePanel(int index) {
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSoft,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('قيمة ثابتة تستخدم في المعادلة',
+              style: TextStyle(
+                  color: AppColors.textMuted, fontSize: 11.spMax)),
+          const SizedBox(height: 6),
+          TextField(
+            controller: _valueCtrl(index),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (t) {
+              _fieldLinks[index]['fixed_value'] = safeFormulaFloat(t);
+            },
+            decoration: const InputDecoration(
+                labelText: 'قيمة ثابتة', isDense: true),
+          ),
+        ],
+      ),
+    );
+  }
+
+  TextEditingController _listAddCtrl(int index) {
+    final cfg = _fieldLinks[index];
+    var c = cfg['listAddCtrl'] as TextEditingController?;
+    if (c == null) {
+      c = TextEditingController();
+      cfg['listAddCtrl'] = c;
+    }
+    return c;
+  }
+
+  void _addListValue(int index) {
+    final c = _listAddCtrl(index);
+    final v = c.text.trim();
+    if (v.isEmpty) return;
+    setState(() {
+      (_fieldLinks[index]['list_values'] as List<String>).add(v);
+      c.clear();
+    });
+  }
+
+  Widget _listPanel(int index) {
+    final values = (_fieldLinks[index]['list_values'] as List<String>?) ?? [];
+    return Container(
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSoft,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('قيم متعددة — يختار المستخدم قيمة لكل اختبار',
+              style: TextStyle(
+                  color: AppColors.textMuted, fontSize: 11.spMax)),
+          if (values.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (var i = 0; i < values.length; i++)
+                  InputChip(
+                    visualDensity: VisualDensity.compact,
+                    avatar: Icon(Icons.tag, size: 14.r),
+                    label: Text(values[i],
+                        style: TextStyle(fontSize: 12.spMax)),
+                    onDeleted: () => setState(() => values.removeAt(i)),
+                  ),
+              ],
+            ),
+          ],
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _listAddCtrl(index),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (_) => setState(() {}),
+                  decoration: const InputDecoration(
+                      labelText: 'قيمة...', isDense: true),
+                ),
+              ),
+              const SizedBox(width: 6),
+              AppButton(
+                small: true,
+                label: 'إضافة',
+                icon: Icon(Icons.add, size: 14.r),
+                onPressed: () => _addListValue(index),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _consumptionCard() {
+    return Container(
+      margin: const EdgeInsets.only(top: AppSpacing.sm),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppColors.surfaceSoft, AppColors.surface],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.science_outlined,
+                  size: 16.r, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  AppText.t('المواد المستهلكة تلقائياً', 'Auto-consumed chemicals'),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13.spMax,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          if (_consumedItems.isEmpty)
+            Text(
+              AppText.t('لا توجد مواد مستهلكة بعد', 'No consumed chemicals yet'),
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+            )
+          else
+            for (final item in _consumedItems) _itemEditor(item),
+          const SizedBox(height: 4),
+          _addItemRow(),
+        ],
+      ),
+    );
+  }
+
+  Widget _itemEditor(Map<String, dynamic> item) {
+    final ctrl = item['qtyCtrl'] as TextEditingController;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Icon(Icons.biotech, size: 14.r, color: AppColors.accent),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              '${item['inventory_name'] ?? ''}',
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12.5.spMax,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 84,
+            child: TextField(
+              controller: ctrl,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              style: TextStyle(fontSize: 12.5.spMax),
+              decoration: const InputDecoration(
+                labelText: 'الكمية',
+                isDense: true,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 76,
+            child: DropdownButtonFormField<String>(
+              initialValue: '${item['unit'] ?? 'g'}',
+              isExpanded: true,
+              isDense: true,
+              decoration: const InputDecoration(isDense: true),
+              style: TextStyle(fontSize: 12.spMax),
+              items: [
+                for (final u in inventoryUnits)
+                  DropdownMenuItem<String>(value: u, child: Text(u)),
+              ],
+              onChanged: (u) {
+                if (u != null) setState(() => item['unit'] = u);
+              },
+            ),
+          ),
+          IconButton(
+            tooltip: AppText.t('حذف المادة', 'Remove chemical'),
+            visualDensity: VisualDensity.compact,
+            onPressed: () => setState(() {
+              _consumedItems.remove(item);
+              ctrl.dispose();
+            }),
+            icon: Icon(Icons.close, size: 16.r, color: AppColors.textMuted),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _addItemRow() {
+    if (_inventory.isEmpty) return const SizedBox.shrink();
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: ActionChip(
+        avatar: Icon(Icons.add, size: 14.r),
+        label: Text(AppText.t('إضافة مادة مستهلكة', 'Add consumed chemical'),
+            style: TextStyle(fontSize: 12.spMax)),
+        onPressed: _pickInventoryItem,
+      ),
+    );
+  }
+
+  Future<void> _pickInventoryItem() async {
+    if (_inventory.isEmpty) return;
+    final selected = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text(AppText.t('اختر مادة مستهلكة', 'Pick consumed chemical')),
+        children: [
+          for (final inv in _inventory)
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(dialogContext).pop(inv),
+              child: Row(
+                children: [
+                  Icon(Icons.science_outlined,
+                      size: 16.r, color: AppColors.accent),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text('${inv['name']} (${inv['unit'] ?? ''})',
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final id = int.tryParse('${selected['id']}') ?? 0;
+    if (_consumedItems.any((e) => '${e['inventory_id']}' == '$id')) return;
+    setState(() {
+      _consumedItems.add({
+        'inventory_id': id,
+        'inventory_name': '${selected['name'] ?? ''}',
+        'unit': '${selected['unit'] ?? 'g'}',
+        'qtyCtrl': TextEditingController(text: '1'),
+      });
+    });
+  }
+
+  String _fmtNum(Object? v) {
+    final d = safeFormulaFloat(v);
+    if (d == null) return '0';
+    return d == d.roundToDouble() ? d.toInt().toString() : '$d';
   }
 
   @override
@@ -444,7 +917,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     return AlertDialog(
       title: Text(widget.analysis == null ? 'إضافة تحليل' : 'تعديل تحليل'),
       content: SizedBox(
-        width: 460.w,
+        width: 720.w,
         child: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -471,40 +944,72 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               ),
               const SizedBox(height: 4),
               Text(
-                'لكل حقل اسم ووحدة استهلاك، ويمكن ربطه بمادة من المخزون لتُستهلك تلقائياً بقيمة الخانة.',
+                'لكل حقل حدد كيف تُملأ قيمته: مرتبط بمادة من المخزون (تُستهلك تلقائياً)، أو قيمة ثابتة تدخل في المعادلة، أو قائمة قيم يختار منها المستخدم.',
                 style: TextStyle(
                     color: AppColors.textMuted, fontSize: 11.spMax),
               ),
               const SizedBox(height: 8),
               for (var i = 0; i < _fieldControllers.length; i++) ...[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _fieldControllers[i],
-                        onChanged: (_) => setState(() {}),
-                        decoration: InputDecoration(
-                          labelText: 'حقل ${i + 1}',
-                          isDense: true,
-                        ),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceSoft,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.borderMuted),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          Icon(Icons.tune, size: 16.r,
+                              color: AppColors.textMuted),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: TextField(
+                              controller: _fieldControllers[i],
+                              onChanged: (_) => setState(() {}),
+                              decoration: InputDecoration(
+                                labelText: 'اسم الحقل ${i + 1}',
+                                isDense: true,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          _fieldSummaryChip(i),
+                          IconButton(
+                            tooltip: 'حذف الحقل',
+                            visualDensity: VisualDensity.compact,
+                            onPressed: _fieldControllers.length > 1
+                                ? () => _removeField(i)
+                                : null,
+                            icon: const Icon(Icons.close, size: 18),
+                          ),
+                        ],
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    _linkSummary(i),
-                    IconButton(
-                      tooltip: 'حذف الحقل',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: _fieldControllers.length > 1
-                          ? () => _removeField(i)
-                          : null,
-                      icon: const Icon(Icons.close, size: 18),
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: _kindChips(i),
+                      ),
+                      if (_kindOf(i) == 'link') ...[
+                        if (_linkPicker == i)
+                          _linkPanel(i)
+                        else
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: _linkSummary(i),
+                          ),
+                      ] else if (_kindOf(i) == 'value')
+                        _valuePanel(i)
+                      else if (_kindOf(i) == 'list')
+                        _listPanel(i),
+                    ],
+                  ),
                 ),
-                if (_linkPicker == i) _linkPanel(i),
                 if (i < _fieldControllers.length - 1)
-                  const SizedBox(height: 6),
+                  const SizedBox(height: 8),
               ],
               const SizedBox(height: 6),
               Row(
@@ -602,6 +1107,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                               color: AppColors.textMuted, fontSize: 12.spMax),
                         ),
                 ),
+              _consumptionCard(),
             ],
           ),
         ),

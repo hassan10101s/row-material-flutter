@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/security/password_hash.dart';
@@ -64,7 +65,7 @@ class AuthRepo {
   }) async {
     final db = await dbHelper.database;
     if (!await needsSetup()) {
-      throw const AuthorizationError('Setup has already been completed.');
+      throw AuthorizationError(AppErrors.setupAlreadyCompleted);
     }
     final normalizedRole = role == 'Developer' ? 'Developer' : 'Admin';
     final hash = await hasher.buildHash(password);
@@ -72,7 +73,7 @@ class AuthRepo {
     final existing = await db
         .query('users', where: 'username = ?', whereArgs: [username]);
     if (existing.isNotEmpty) {
-      throw ValidationError('Username already exists. | اسم المستخدم موجود مسبقاً.');
+      throw ValidationError(AppErrors.usernameExists);
     }
     final id = await db.insert('users', {
       'username': username.trim(),
@@ -106,15 +107,15 @@ class AuthRepo {
     final db = await dbHelper.database;
     final rows = await db.query('users', where: 'username = ?', whereArgs: [username]);
     if (rows.isEmpty) {
-      throw const AuthorizationError('Invalid username or password. | اسم المستخدم أو كلمة المرور غير صحيحة.');
+      throw AuthorizationError(AppErrors.invalidCredentials);
     }
     final user = User.fromMap(rows.first);
     if (!user.isActive) {
-      throw const AuthorizationError('Account is disabled. | الحساب معطل.');
+      throw AuthorizationError(AppErrors.accountDisabled);
     }
     final ok = await hasher.verify(password, user.passwordHash ?? '');
     if (!ok) {
-      throw const AuthorizationError('Invalid username or password. | اسم المستخدم أو كلمة المرور غير صحيحة.');
+      throw AuthorizationError(AppErrors.invalidCredentials);
     }
     await _checkUsageExpiry(user);
     // Upgrade legacy hash if needed.
@@ -141,8 +142,7 @@ class AuthRepo {
     // expired (parity with settings.py:118-124 returning yesterday's date).
     if (!ok) {
       _currentUser = null;
-      throw const AuthorizationError(
-          'انتهت صلاحية استخدام النظام. يرجى الاتصال بالمطور.');
+      throw AuthorizationError(AppErrors.licenseSystemExpired);
     }
     final text = plain.trim();
     if (text.isEmpty) return;
@@ -150,8 +150,7 @@ class AuthRepo {
     // Invalid (non-date) text, like a tampered seal, is treated as expired.
     if (expiry == null || DateTime.now().isAfter(expiry)) {
       _currentUser = null;
-      throw const AuthorizationError(
-          'Application license has expired. | انتهت صلاحية رخصة التطبيق.');
+      throw AuthorizationError(AppErrors.licenseAppExpired);
     }
   }
 

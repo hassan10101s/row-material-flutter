@@ -1,5 +1,6 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/domain/rules.dart';
 import '../../../core/utils/app_dates.dart';
@@ -15,7 +16,7 @@ class ReferenceRepo {
 
   Future<Database> get _db => dbHelper.database;
 
-  // ── Materials ────────────────────────────────────────────
+  // ── Materials ─────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listMaterials() async {
     final db = await _db;
@@ -43,7 +44,7 @@ class ReferenceRepo {
       int id, {String? inspectionDate}) async {
     final rows = await _params();
     final raw = await getMaterialRaw(id);
-    if (raw == null) throw const NotFoundError('Material not found.');
+    if (raw == null) throw NotFoundError(AppErrors.materialNotFound);
     final physical = jsonLoads('${raw['physical_reference_json']}');
     final chemicalMap = jsonLoads('${raw['chemical_reference_json']}');
     final enrichedPhysical = <String, dynamic>{};
@@ -81,13 +82,13 @@ class ReferenceRepo {
     Map<String, dynamic> chemicalReference = const {},
     Map<String, dynamic> units = const {},
   }) async {
-    if (materialName.trim().isEmpty) throw const ValidationError('Material name is required.');
-    if (materialCode.trim().isEmpty) throw const ValidationError('Material code is required.');
+    if (materialName.trim().isEmpty) throw ValidationError(AppErrors.referenceMaterialNameRequired);
+    if (materialCode.trim().isEmpty) throw ValidationError(AppErrors.referenceMaterialCodeRequired);
     final db = await _db;
     final existing = await db.query('reference_materials',
         where: 'material_name = ?', whereArgs: [materialName.trim()]);
     if (existing.isNotEmpty) {
-      throw ValidationError("Material '${materialName.trim()}' already exists.");
+      throw ValidationError(AppErrors.referenceMaterialExists(materialName.trim()));
     }
     final id = await db.insert('reference_materials', {
       'material_name': materialName.trim(),
@@ -111,14 +112,14 @@ class ReferenceRepo {
   }) async {
     final db = await _db;
     final existing = await getMaterialRaw(id);
-    if (existing == null) throw const NotFoundError('Material not found.');
+    if (existing == null) throw NotFoundError(AppErrors.materialNotFound);
     final cleanName = materialName.trim();
     final cleanCode = materialCode.trim();
     final dup = await db.query('reference_materials',
         where: 'material_name = ? AND id != ?',
         whereArgs: [cleanName.isEmpty ? '${existing['material_name']}' : cleanName, id]);
     if (dup.isNotEmpty) {
-      throw ValidationError("Material '$cleanName' already exists.");
+      throw ValidationError(AppErrors.referenceMaterialExists(cleanName));
     }
     final physicalRef = physicalReference ??
         jsonLoads('${existing['physical_reference_json']}');
@@ -160,7 +161,7 @@ class ReferenceRepo {
     await batch.commit(noResult: true);
   }
 
-  // ── Entry code ───────────────────────────────────────────
+  // ── Entry code ────────────────────────────────────────────────
 
   Future<String> generateEntryCode(String materialCode, String inspectionDate) async {
     final db = await _db;
@@ -177,7 +178,7 @@ class ReferenceRepo {
     return '$prefix${(maxSeq + 1).toString().padLeft(3, '0')}';
   }
 
-  // ── Parameters ───────────────────────────────────────────
+  // ── Parameters ────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listParameters({String? parameterType}) async {
     final db = await _db;
@@ -194,9 +195,9 @@ class ReferenceRepo {
   Future<void> upsertParameter(String name, String unit, {String parameterType = 'chemical'}) async {
     final db = await _db;
     final trimmed = name.trim();
-    if (trimmed.isEmpty) throw const ValidationError('Parameter name is required.');
+    if (trimmed.isEmpty) throw ValidationError(AppErrors.parameterNameRequired);
     if (parameterType != 'chemical' && parameterType != 'physical') {
-      throw const ValidationError("parameter_type must be 'chemical' or 'physical'.");
+      throw ValidationError(AppErrors.parameterTypeInvalid);
     }
     await db.insert(
       'parameters',
@@ -215,7 +216,7 @@ class ReferenceRepo {
     await db.delete('parameters', where: 'parameter_name = ?', whereArgs: [name]);
   }
 
-  // ── Lab units ────────────────────────────────────────────
+  // ── Lab units ─────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listUnits() async {
     final db = await _db;
@@ -227,7 +228,7 @@ class ReferenceRepo {
   Future<void> upsertUnit(String symbol, {String name = '', String dimension = ''}) async {
     final db = await _db;
     final trimmed = symbol.trim();
-    if (trimmed.isEmpty) throw const ValidationError('Unit symbol is required.');
+    if (trimmed.isEmpty) throw ValidationError(AppErrors.unitSymbolRequired);
     await db.insert(
       'lab_units',
       {
@@ -246,7 +247,7 @@ class ReferenceRepo {
     await db.delete('lab_units', where: 'symbol = ?', whereArgs: [symbol]);
   }
 
-  // ── Enrichment ───────────────────────────────────────────
+  // ── Enrichment ────────────────────────────────────────────────
 
   static Map<String, dynamic> decisionMetaOfRow(
       String status, Map<String, dynamic> row) {

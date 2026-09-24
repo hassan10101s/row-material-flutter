@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
 
@@ -195,8 +196,8 @@ Map<String, dynamic> resolveConstants(
     final u = '${desc['unit'] ?? ''}'.trim().toLowerCase();
     final dim = unitDimOf(u);
     if (targetDim.isNotEmpty && dim.isNotEmpty && dim != 'count' && targetDim != dim) {
-      throw ValidationError(
-          "Constant '${desc['symbol'] ?? ''}' unit '$u' does not match expected dimension '$targetDim'.");
+      throw ValidationError(AppErrors.formulaUnitDimMismatch(
+          desc['symbol'] ?? '', u, targetDim));
     }
     if (targetDim.isNotEmpty && targetDim != 'count' && dim.isNotEmpty && dim != 'count') {
       return unitBaseValue(baseValue, u);
@@ -211,7 +212,7 @@ Map<String, dynamic> resolveConstants(
   while (pending.isNotEmpty) {
     rounds++;
     if (rounds > maxRounds) {
-      throw const ValidationError('Circular dependency in derived constants.');
+      throw ValidationError(AppErrors.formulaCircularDependency);
     }
     var progressed = false;
     for (final symbol in pending.toList()) {
@@ -220,7 +221,7 @@ Map<String, dynamic> resolveConstants(
       if ((desc['is_expression'] as Object?) == 1 || desc['is_expression'] is bool && desc['is_expression'] == true) {
         final expr = '${desc['expression'] ?? ''}'.trim();
         if (expr.isEmpty) {
-          throw ValidationError("Derived constant '$symbol' has no expression.");
+          throw ValidationError(AppErrors.formulaDerivedNoExpression(symbol));
         }
         final tree = FormulaParser.parse(expr);
         final used =
@@ -240,23 +241,23 @@ Map<String, dynamic> resolveConstants(
         try {
           result = FormulaEvaluator.eval(tree, values: vals);
         } on ValidationError catch (exc) {
-          throw ValidationError("Error evaluating derived constant '$symbol': ${exc.message}");
+          throw ValidationError(AppErrors.formulaEvalError(symbol, exc.message));
         }
         value = convertDim(desc, _toNum(result));
       } else {
         final num = _numericOf(desc);
         if (num == null) {
-          throw ValidationError("Missing value for constant '$symbol'.");
+          throw ValidationError(AppErrors.formulaMissingConstantValue(symbol));
         }
         value = convertDim(desc, num);
       }
       final lo = desc['min_value'];
       final hi = desc['max_value'];
       if (lo != null && value < safeFormulaFloat(lo)!) {
-        throw ValidationError("Constant '$symbol' ($value) is below minimum ($lo).");
+        throw ValidationError(AppErrors.formulaBelowMin(symbol, value, lo));
       }
       if (hi != null && value > safeFormulaFloat(hi)!) {
-        throw ValidationError("Constant '$symbol' ($value) is above maximum ($hi).");
+        throw ValidationError(AppErrors.formulaAboveMax(symbol, value, hi));
       }
       final prec = desc['precision'];
       if (prec != null) {
@@ -269,8 +270,7 @@ Map<String, dynamic> resolveConstants(
     }
     if (!progressed) {
       final unresolved = pending.toList()..sort();
-      throw ValidationError(
-          'Could not resolve constant(s), check missing/cyclic expressions: ${unresolved.join(', ')}');
+      throw ValidationError(AppErrors.formulaResolveFailed(unresolved.join(', ')));
     }
   }
 
@@ -280,7 +280,7 @@ Map<String, dynamic> resolveConstants(
         if (!resolved.containsKey(v) && v.toLowerCase() != 'true' && v.toLowerCase() != 'false') v
     ];
     if (missing.isNotEmpty) {
-      throw ValidationError('Missing values for: ${missing.join(', ')}');
+      throw ValidationError(AppErrors.formulaMissingValues(missing.join(', ')));
     }
   }
   return resolved;
@@ -288,7 +288,7 @@ Map<String, dynamic> resolveConstants(
 
 double _toNum(Object? value) {
   final v = safeFormulaFloat(value);
-  if (v == null) throw const ValidationError('Formula result is not numeric.');
+  if (v == null) throw ValidationError(AppErrors.formulaResultNotNumeric);
   return v;
 }
 
@@ -302,7 +302,7 @@ double evaluateFormula(String expression,
     Map<String, dynamic>? constants,
     String targetUnit = ''}) {
   final expr = expression.trim();
-  if (expr.isEmpty) throw const ValidationError('Formula is empty.');
+  if (expr.isEmpty) throw ValidationError(AppErrors.formulaEmpty);
   final resolved =
       resolveConstants(constants ?? const {}, targetUnit: targetUnit);
   final tree = FormulaParser.parse(expr);
@@ -391,10 +391,10 @@ class FormulaParser {
     var expr = expression.replaceAll(RegExp(r'(?<=\d),(?=\d)'), '.');
     expr = expr.replaceAll('^', '**');
     final p = FormulaParser(expr);
-    if (expr.trim().isEmpty) throw const ValidationError('Formula is empty.');
+    if (expr.trim().isEmpty) throw ValidationError(AppErrors.formulaEmpty);
     final tree = p._parseOr();
     if (!p._atEnd) {
-      throw ValidationError('Invalid formula syntax.');
+      throw ValidationError(AppErrors.formulaInvalidSyntax);
     }
     _validate(tree);
     return tree;
@@ -436,11 +436,7 @@ class FormulaParser {
     _ws();
     if (_pos + op.length <= _src.length &&
         _src.substring(_pos, _pos + op.length) == op) {
-      final next = _pos + op.length;
-      if (next < _src.length && RegExp(r'[A-Za-z0-9_]').hasMatch(_src[next])) {
-        return false;
-      }
-      _pos = next;
+      _pos += op.length;
       _ws();
       return true;
     }
@@ -552,14 +548,14 @@ class FormulaParser {
 
   Expr _parseAtom() {
     _ws();
-    if (_atEnd) throw const ValidationError('Invalid formula syntax.');
+    if (_atEnd) throw ValidationError(AppErrors.formulaInvalidSyntax);
     final ch = _src[_pos];
     if (ch == '(') {
       _pos++;
       final inner = _parseOr();
       _ws();
       if (_atEnd || _src[_pos] != ')') {
-        throw const ValidationError('Invalid formula syntax.');
+        throw ValidationError(AppErrors.formulaInvalidSyntax);
       }
       _pos++;
       _ws();
@@ -571,7 +567,7 @@ class FormulaParser {
     if (RegExp(r'[A-Za-z_]').hasMatch(ch)) {
       return _parseNameOrCall();
     }
-    throw const ValidationError('Invalid formula syntax.');
+    throw ValidationError(AppErrors.formulaInvalidSyntax);
   }
 
   double _parseNumber() {
@@ -581,7 +577,7 @@ class FormulaParser {
     }
     final text = _src.substring(start, _pos);
     final value = double.tryParse(text);
-    if (value == null) throw const ValidationError('Invalid number in formula.');
+    if (value == null) throw ValidationError(AppErrors.formulaInvalidNumber);
     _ws();
     return value;
   }
@@ -593,7 +589,7 @@ class FormulaParser {
     }
     final name = _src.substring(start, _pos);
     if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(name)) {
-      throw ValidationError('Invalid name in formula: $name');
+      throw ValidationError(AppErrors.formulaInvalidName(name));
     }
     _ws();
     if (!_atEnd && _src[_pos] == '(') {
@@ -606,7 +602,7 @@ class FormulaParser {
         while (true) {
           args.add(_parseOr());
           _ws();
-          if (_atEnd) throw const ValidationError('Invalid formula syntax.');
+          if (_atEnd) throw ValidationError(AppErrors.formulaInvalidSyntax);
           if (_src[_pos] == ',') {
             _pos++;
             continue;
@@ -615,12 +611,12 @@ class FormulaParser {
             _pos++;
             break;
           }
-          throw const ValidationError('Invalid formula syntax.');
+          throw ValidationError(AppErrors.formulaInvalidSyntax);
         }
       }
       _ws();
       if (!_funcMap.containsKey(name)) {
-        throw ValidationError('Unsupported function in formula: $name');
+        throw ValidationError(AppErrors.formulaUnsupportedFunction(name));
       }
       return CallExpr(name, args);
     }
@@ -636,11 +632,11 @@ class FormulaParser {
     switch (node) {
       case NameExpr n:
         if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(n.name)) {
-          throw ValidationError('Invalid name in formula: ${n.name}');
+          throw ValidationError(AppErrors.formulaInvalidName(n.name));
         }
       case CallExpr c:
         if (!_funcMap.containsKey(c.name)) {
-          throw ValidationError('Unsupported function in formula: ${c.name}');
+          throw ValidationError(AppErrors.formulaUnsupportedFunction(c.name));
         }
         for (final a in c.args) {
           _validate(a);
@@ -681,12 +677,12 @@ class FormulaEvaluator {
         if (v != null) {
           final d = safeFormulaFloat(v);
           if (d != null) return d;
-          throw ValidationError('Missing value for field: ${name.name}');
+          throw ValidationError(AppErrors.formulaMissingFieldValue(name.name));
         }
         if (constants != null && constants.containsKey(name.name)) {
           return constants[name.name]!;
         }
-        throw ValidationError('Missing value for field: ${name.name}');
+        throw ValidationError(AppErrors.formulaMissingFieldValue(name.name));
       case BinExpr b:
         final l = eval(b.left, values: values, constants: constants);
         final r = eval(b.right, values: values, constants: constants);
@@ -700,18 +696,18 @@ class FormulaEvaluator {
           case '*':
             return ld * rd;
           case '/':
-            if (rd == 0) throw const ValidationError('Division by zero in formula.');
+            if (rd == 0) throw ValidationError(AppErrors.formulaDivisionByZero);
             return ld / rd;
           case '%':
             return ld % rd;
           case '**':
             final result = math.pow(ld, rd);
             if (result.isInfinite || result.isNaN) {
-              throw ValidationError('Invalid power expression ($ld ** $rd).');
+              throw ValidationError(AppErrors.formulaInvalidPower(ld, rd));
             }
             return result.toDouble();
         }
-        throw const ValidationError('Unsupported operator in formula.');
+        throw ValidationError(AppErrors.formulaUnsupportedOperator);
       case UnaryExpr u:
         final v = _toNum(eval(u.operand, values: values, constants: constants));
         return u.op == '-' ? -v : v;
@@ -759,7 +755,7 @@ class FormulaEvaluator {
         final args = [for (final a in c.args) _toNum(eval(a, values: values, constants: constants))];
         final result = _callFunction(c.name, args);
         if (result.isInfinite || result.isNaN) {
-          throw ValidationError('Invalid arguments for function ${c.name}.');
+          throw ValidationError(AppErrors.formulaInvalidArguments(c.name));
         }
         return result;
     }
@@ -787,7 +783,7 @@ class FormulaEvaluator {
       case 'exp':
         return math.exp(args.first);
     }
-    throw ValidationError('Unsupported function: $name');
+    throw ValidationError(AppErrors.formulaUnsupportedFunction(name));
   }
 }
 

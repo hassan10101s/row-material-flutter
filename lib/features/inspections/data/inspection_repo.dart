@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:sqflite/sqflite.dart';
 
+import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
@@ -26,7 +27,7 @@ class InspectionRepo {
 
   Future<Database> get _db => dbHelper.database;
 
-  // ── Normalization helpers ────────────────────────────────
+  // ── Normalization helpers ─────────────────────────────────────
 
   static List<String> normalizeSampleNames(dynamic raw) {
     var names = <String>[];
@@ -37,7 +38,7 @@ class InspectionRepo {
       ];
     }
     if (names.length > 3) {
-      throw const ValidationError('A maximum of 3 samples are allowed.');
+      throw ValidationError(AppErrors.inspectionMaxSamples);
     }
     if (names.isEmpty) names = ['Result'];
     return names;
@@ -104,7 +105,7 @@ class InspectionRepo {
     return out;
   }
 
-  // ── Base payload ─────────────────────────────────────────
+  // ── Base payload ──────────────────────────────────────────────
 
   Future<Map<String, dynamic>> buildBasePayload(
     Map<String, dynamic> payload,
@@ -112,7 +113,7 @@ class InspectionRepo {
     bool validateDecision = true,
   }) async {
     final materialId = int.tryParse('${payload['material_id'] ?? 0}') ?? 0;
-    if (materialId == 0) throw const ValidationError('Material selection is required.');
+    if (materialId == 0) throw ValidationError(AppErrors.materialSelectionRequired);
     final material = await referenceRepo.getMaterial(materialId,
         inspectionDate: '${payload['inspection_date'] ?? todayIso()}');
     if ((material['active'] as num?) != 1) {
@@ -138,11 +139,11 @@ class InspectionRepo {
     final sampleTakenBy =
         '${payload['sample_taken_by'] ?? payload['specialist_name'] ?? ''}'.trim();
     if (sampleTakenBy.length < 3) {
-      throw const ValidationError('Sample taker name must be at least 3 characters.');
+      throw ValidationError(AppErrors.sampleTakerMin3);
     }
     final supplier = '${payload['supplier'] ?? ''}'.trim();
     if (supplier.length < 3) {
-      throw const ValidationError('Supplier name must be at least 3 characters.');
+      throw ValidationError(AppErrors.supplierMin3);
     }
     final quantity = normalizeNonNegativeNumericText('${payload['quantity'] ?? ''}',
         'Quantity', allowEmpty: true);
@@ -189,7 +190,7 @@ class InspectionRepo {
     return {};
   }
 
-  // ── Create ───────────────────────────────────────────────
+  // ── Create ────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> create(Map<String, dynamic> payload, UserContext user) async {
     final db = await _db;
@@ -197,7 +198,7 @@ class InspectionRepo {
     final existing = await db
         .query('inspections', where: 'entry_code = ?', whereArgs: [base['entry_code']]);
     if (existing.isNotEmpty) {
-      throw const ValidationError('Generated entry code already exists. Please retry.');
+      throw ValidationError(AppErrors.entryCodeAlreadyExists);
     }
     final timestamp = nowIso();
     base['decision_version'] = 1;
@@ -277,7 +278,7 @@ class InspectionRepo {
     return '<html><body><h3>Material Lab</h3><p>$name</p></body></html>';
   }
 
-  // ── List / Get ───────────────────────────────────────────
+  // ── List / Get ────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> list({
     String query = '',
@@ -319,7 +320,7 @@ class InspectionRepo {
   Future<Map<String, dynamic>> getById(int id) async {
     final db = await _db;
     final rows = await db.query('inspections', where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) throw const NotFoundError('Inspection not found.');
+    if (rows.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
     final serialized = serializeInspectionRow(Map<String, dynamic>.from(rows.first));
     serialized['status_history'] = await getStatusHistory(id);
     return serialized;
@@ -352,13 +353,13 @@ class InspectionRepo {
     });
   }
 
-  // ── Status update ────────────────────────────────────────
+  // ── Status update ─────────────────────────────────────────────
 
   Future<Map<String, dynamic>> updateStatus(
       int inspectionId, Map<String, dynamic> payload, UserContext user) async {
     final db = await _db;
     final existingRaw = await db.query('inspections', where: 'id = ?', whereArgs: [inspectionId]);
-    if (existingRaw.isEmpty) throw const NotFoundError('Inspection not found.');
+    if (existingRaw.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
     final existing = serializeInspectionRow(Map<String, dynamic>.from(existingRaw.first));
 
     ensureWithinMaxVersions(existing['decision_version'] as int? ?? 1);
@@ -379,7 +380,7 @@ class InspectionRepo {
         normalized['decision_reason'] == '${existing['decision_reason'] ?? ''}' &&
         normalized['follow_up_note'] == '${existing['follow_up_note'] ?? ''}' &&
         normalized['rejected_quantity'] == '${existing['rejected_quantity'] ?? ''}';
-    if (unchanged) throw const ValidationError('No decision change detected.');
+    if (unchanged) throw ValidationError(AppErrors.noDecisionChange);
 
     final statusChanged = normalized['decision_status'] != '${existing['decision_status']}';
     final changedAt = nowIso();
@@ -421,13 +422,13 @@ class InspectionRepo {
     return getById(inspectionId);
   }
 
-  // ── Data update ──────────────────────────────────────────
+  // ── Data update ───────────────────────────────────────────────
 
   Future<Map<String, dynamic>> update(
       int inspectionId, Map<String, dynamic> payload, UserContext user) async {
     final db = await _db;
     final existingRaw = await db.query('inspections', where: 'id = ?', whereArgs: [inspectionId]);
-    if (existingRaw.isEmpty) throw const NotFoundError('Inspection not found.');
+    if (existingRaw.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
     final existing = serializeInspectionRow(Map<String, dynamic>.from(existingRaw.first));
 
     final physicalRef = Map<String, dynamic>.from(existing['physical_reference'] ?? {});
@@ -450,12 +451,12 @@ class InspectionRepo {
     final supplier =
         '${payload['supplier'] ?? existing['supplier'] ?? ''}'.trim();
     if (supplier.length < 3) {
-      throw const ValidationError('Supplier name must be at least 3 characters.');
+      throw ValidationError(AppErrors.supplierMin3);
     }
     final sampleTakenBy =
         '${payload['sample_taken_by'] ?? existing['sample_taken_by'] ?? ''}'.trim();
     if (sampleTakenBy.length < 3) {
-      throw const ValidationError('Sample taker name must be at least 3 characters.');
+      throw ValidationError(AppErrors.sampleTakerMin3);
     }
 
     final quantity = normalizeNonNegativeNumericText(
@@ -527,15 +528,15 @@ String normalizeNonNegativeNumericText(
   final s = value.trim();
   if (s.isEmpty) {
     if (allowEmpty) return '';
-    throw ValidationError('$label: value is required.');
+    throw ValidationError(AppErrors.fieldValueRequired(label));
   }
   if (maxLength != null && s.length > maxLength) {
-    throw ValidationError('$label exceeds max length.');
+    throw ValidationError(AppErrors.fieldExceedsMaxLength(label));
   }
   final cleaned = s.replaceAll(',', '.');
   final n = double.tryParse(cleaned);
   if (n == null || n < 0) {
-    throw ValidationError('$label must be a non-negative number.');
+    throw ValidationError(AppErrors.fieldNonNegative(label));
   }
   return s;
 }
