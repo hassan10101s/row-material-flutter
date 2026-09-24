@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -8,13 +10,18 @@ import 'app_empty_state.dart';
 
 /// Data table with a pinned header, vertical scrolling body, optional
 /// horizontal scroll and built-in pagination.
+///
+/// Columns stretch to the available width, weighted by [AppPaginatedTable
+/// .columnFlex] (or equally when omitted). Below [AppPaginatedTable
+/// .minTableWidth] the table scrolls horizontally instead of squeezing.
 class AppPaginatedTable extends StatefulWidget {
   final List<String> headers;
   final List<List<Widget>> rows;
   final void Function(int index)? onRowTap;
   final int rowsPerPage;
-  final double tableWidth;
   final double height;
+  final double minTableWidth;
+  final List<double>? columnFlex;
   final Widget? empty;
   final String? totalLabel;
   final bool loading;
@@ -26,8 +33,9 @@ class AppPaginatedTable extends StatefulWidget {
     required this.rows,
     this.onRowTap,
     this.rowsPerPage = 10,
-    this.tableWidth = 920,
     this.height = 470,
+    this.minTableWidth = 640,
+    this.columnFlex,
     this.empty,
     this.totalLabel,
     this.loading = false,
@@ -44,8 +52,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
   int get _pageCount =>
       (widget.rows.length / widget.rowsPerPage).ceil().clamp(1, 1 << 31);
 
-  int get _effectivePage =>
-      _page.clamp(0, _pageCount - 1);
+  int get _effectivePage => _page.clamp(0, _pageCount - 1);
 
   void _changePage(int delta) {
     setState(() => _page = (_effectivePage + delta).clamp(0, _pageCount - 1));
@@ -60,11 +67,6 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
             leftIndex,
             (leftIndex + widget.rowsPerPage).clamp(0, widget.rows.length),
           );
-    // Header and data rows sit inside Padding(horizontal: AppSpacing.lg), so
-    // the columns must sum to tableWidth minus that padding or the Row overflows.
-    final colWidth =
-        (widget.tableWidth - 2 * AppSpacing.lg) / widget.headers.length;
-    final bodyHeight = widget.height - 46 - 1 - 1 - 48;
 
     return AppCard(
       padding: EdgeInsets.zero,
@@ -74,38 +76,48 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Expanded(
-              child: ClipRect(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(
-                    width: widget.tableWidth,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _header(context, colWidth),
-                        const Divider(height: 1),
-                        SizedBox(
-                          height: bodyHeight,
-                          child: widget.loading
-                              ? _loadingBody(bodyHeight)
-                              : pageRows.isEmpty
-                                  ? _emptyBody()
-                                  : ListView.builder(
-                                      padding: EdgeInsets.zero,
-                                      itemCount: pageRows.length,
-                                      itemExtent: 52,
-                                      itemBuilder: (context, index) {
-                                        final row = pageRows[index];
-                                        final realIndex = leftIndex + index;
-                                        return _dataRow(context, colWidth, row,
-                                            realIndex: realIndex);
-                                      },
-                                    ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final scrollable =
+                      constraints.maxWidth < widget.minTableWidth;
+                  final width = scrollable
+                      ? widget.minTableWidth
+                      : constraints.maxWidth;
+                  final widths = _columnWidths(width);
+                  final table = Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _header(context, widths),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: widget.loading
+                            ? _loadingBody()
+                            : pageRows.isEmpty
+                            ? _emptyBody()
+                            : ListView.builder(
+                                padding: EdgeInsets.zero,
+                                itemCount: pageRows.length,
+                                itemExtent: 52,
+                                itemBuilder: (context, index) {
+                                  final row = pageRows[index];
+                                  final realIndex = leftIndex + index;
+                                  return _dataRow(
+                                    context,
+                                    widths,
+                                    row,
+                                    realIndex: realIndex,
+                                  );
+                                },
+                              ),
+                      ),
+                    ],
+                  );
+                  if (!scrollable) return table;
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(width: widget.minTableWidth, child: table),
+                  );
+                },
               ),
             ),
             const Divider(height: 1),
@@ -116,26 +128,46 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     );
   }
 
-  Widget _header(BuildContext context, double colWidth) {
+  /// Column widths in logical px for the given total table width.
+  List<double> _columnWidths(double totalWidth) {
+    final usable = math.max(0.0, totalWidth - 2 * AppSpacing.lg);
+    final flex = List<double>.filled(widget.headers.length, 1.0);
+    if (widget.columnFlex != null) {
+      for (
+        var i = 0;
+        i < math.min(widget.headers.length, widget.columnFlex!.length);
+        i++
+      ) {
+        final f = widget.columnFlex![i];
+        if (f > 0) flex[i] = f;
+      }
+    }
+    final sum = flex.fold<double>(0, (a, b) => a + b);
+    return [for (final f in flex) usable * f / sum];
+  }
+
+  Widget _header(BuildContext context, List<double> widths) {
     return Container(
       height: 46,
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       color: AppColors.surfaceSoft,
       child: Row(
         children: [
-          for (final h in widget.headers)
+          for (var i = 0; i < widget.headers.length; i++)
             SizedBox(
-              width: colWidth,
+              width: widths[i],
               child: Padding(
-                padding: const EdgeInsets.only(
-                    right: AppSpacing.sm, left: AppSpacing.sm),
-                child: Text(
-                  h,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12.spMax,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textMuted,
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: Text(
+                    widget.headers[i],
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.spMax,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textMuted,
+                    ),
                   ),
                 ),
               ),
@@ -147,8 +179,11 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
   }
 
   Widget _dataRow(
-      BuildContext context, double colWidth, List<Widget> row,
-      {required int realIndex}) {
+    BuildContext context,
+    List<double> widths,
+    List<Widget> row, {
+    required int realIndex,
+  }) {
     return InkWell(
       onTap: widget.onRowTap == null ? null : () => widget.onRowTap!(realIndex),
       child: SizedBox(
@@ -157,15 +192,17 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
           child: Row(
             children: [
-              for (final cell in row)
+              for (var i = 0; i < row.length; i++)
                 SizedBox(
-                  width: colWidth,
+                  width: i < widths.length ? widths[i] : 120,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm, vertical: 4),
+                      horizontal: AppSpacing.sm,
+                      vertical: 4,
+                    ),
                     child: Align(
                       alignment: AlignmentDirectional.centerStart,
-                      child: cell,
+                      child: row[i],
                     ),
                   ),
                 ),
@@ -176,10 +213,10 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     );
   }
 
-  Widget _loadingBody(double height) {
+  Widget _loadingBody() {
     return ListView.builder(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-      itemCount: (height / 52).floor().clamp(3, 10),
+      itemCount: 6,
       itemBuilder: (context, index) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Container(
@@ -195,11 +232,9 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
 
   Widget _emptyBody() {
     return Center(
-      child: widget.empty ??
-          AppEmptyState(
-            icon: Icons.inbox_outlined,
-            title: 'لا توجد بيانات',
-          ),
+      child:
+          widget.empty ??
+          AppEmptyState(icon: Icons.inbox_outlined, title: 'لا توجد بيانات'),
     );
   }
 
@@ -229,7 +264,9 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
           ),
           IconButton(
             tooltip: appTextOf(context, 'التالي', 'Next'),
-            onPressed: _effectivePage < _pageCount - 1 ? () => _changePage(1) : null,
+            onPressed: _effectivePage < _pageCount - 1
+                ? () => _changePage(1)
+                : null,
             icon: const Icon(Icons.chevron_right),
             visualDensity: VisualDensity.compact,
           ),

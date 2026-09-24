@@ -23,12 +23,14 @@ import 'cubit/inspections_cubit.dart';
 import '../../reference/data/reference_repo.dart';
 import 'inspection_detail_screen.dart';
 import 'inspection_form_screen.dart';
+
 const _allStatuses = [
   'APPROVED',
   'CONDITIONAL_APPROVAL',
   'PARTIAL_REJECTION',
   'FULL_REJECTION',
 ];
+
 /// Inspections ledger: search, filter, create, PDFs and follow-up report.
 class InspectionsScreen extends StatelessWidget {
   const InspectionsScreen({super.key});
@@ -44,16 +46,27 @@ class InspectionsScreen extends StatelessWidget {
         ),
       ),
     );
-    if (saved == true && context.mounted) context.read<InspectionsCubit>().load();
+    if (saved == true && context.mounted) {
+      context.read<InspectionsCubit>().load();
+    }
   }
-  Future<void> _openDetail(BuildContext context, Map<String, dynamic> row) async {
+
+  Future<void> _openDetail(
+    BuildContext context,
+    Map<String, dynamic> row,
+  ) async {
     final id = (row['id'] as num).toInt();
     await _pushDetail(context, id);
   }
-  Future<void> _openDecision(BuildContext context, Map<String, dynamic> row) async {
+
+  Future<void> _openDecision(
+    BuildContext context,
+    Map<String, dynamic> row,
+  ) async {
     final id = (row['id'] as num).toInt();
     await _pushDetail(context, id);
   }
+
   Future<void> _pushDetail(BuildContext context, int id) async {
     final changed = await Navigator.of(context).push<bool>(
       AppPageRoute(
@@ -67,24 +80,38 @@ class InspectionsScreen extends StatelessWidget {
         ),
       ),
     );
-    if (changed == true && context.mounted) context.read<InspectionsCubit>().load();
+    if (changed == true && context.mounted) {
+      context.read<InspectionsCubit>().load();
+    }
   }
+
   Future<void> _exportFollowUp(BuildContext context) async {
     try {
       final path = await context.read<InspectionsCubit>().exportFollowUp();
       if (!context.mounted) return;
       if (path == null) {
-        AppFeedback.error(context, AppText.t('لا توجد فحوصات للتقرير', 'Nothing to report.'));
+        AppFeedback.error(
+          context,
+          AppText.t('لا توجد فحوصات للتقرير', 'Nothing to report.'),
+        );
         return;
       }
-      AppFeedback.success(context, '${AppText.t('تم التصدير', 'Exported')}: $path');
+      AppFeedback.success(
+        context,
+        '${AppText.t('تم التصدير', 'Exported')}: $path',
+      );
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       if (context.mounted) AppFeedback.error(context, '$e');
     }
   }
-  Future<void> _exportOne(BuildContext context, Map<String, dynamic> row, String kind) async {
+
+  Future<void> _exportOne(
+    BuildContext context,
+    Map<String, dynamic> row,
+    String kind,
+  ) async {
     final id = (row['id'] as num).toInt();
     try {
       final reports = getIt<ReportService>();
@@ -94,13 +121,17 @@ class InspectionsScreen extends StatelessWidget {
       final date = parseIsoDate('${row['inspection_date'] ?? ''}');
       final file = await reports.saveReport(doc, date: date);
       if (!context.mounted) return;
-      AppFeedback.success(context, '${AppText.t('تم التصدير', 'Exported')}: ${file.path}');
+      AppFeedback.success(
+        context,
+        '${AppText.t('تم التصدير', 'Exported')}: ${file.path}',
+      );
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       if (context.mounted) AppFeedback.error(context, '$e');
     }
   }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<InspectionsCubit>().state;
@@ -112,7 +143,10 @@ class InspectionsScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(AppStrings.inspections, style: Theme.of(context).textTheme.headlineSmall),
+          Text(
+            AppStrings.inspections,
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
           const SizedBox(height: AppSpacing.md),
           LayoutBuilder(
             builder: (context, constraints) {
@@ -135,7 +169,10 @@ class InspectionsScreen extends StatelessWidget {
                       isDense: true,
                     ),
                     items: [
-                      DropdownMenuItem(value: '', child: Text(AppText.t('الكل', 'All'))),
+                      DropdownMenuItem(
+                        value: '',
+                        child: Text(AppText.t('الكل', 'All')),
+                      ),
                       for (final s in _allStatuses)
                         DropdownMenuItem(value: s, child: Text(statusLabel(s))),
                     ],
@@ -147,7 +184,9 @@ class InspectionsScreen extends StatelessWidget {
                   label: AppText.t('تقرير متابعة', 'Follow-up'),
                   style: AppButtonStyle.secondary,
                   loading: state.exporting,
-                  onPressed: state.exporting ? null : () => _exportFollowUp(context),
+                  onPressed: state.exporting
+                      ? null
+                      : () => _exportFollowUp(context),
                 ),
                 if (canCreate)
                   AppButton(
@@ -193,6 +232,7 @@ class InspectionsScreen extends StatelessWidget {
             ),
           ] else
             AppPaginatedTable(
+              columnFlex: const [1.0, 1.15, 2.6, 1.8, 0.95, 1.25, 1.4],
               headers: [
                 AppText.t('رقم القيد', 'Entry'),
                 AppText.t('التاريخ', 'Date'),
@@ -206,10 +246,11 @@ class InspectionsScreen extends StatelessWidget {
                 for (final r in state.visible)
                   [
                     Text('${r['entry_code']}'),
+                    Text(parseIsoToDisplay('${r['inspection_date']}') ?? ''),
                     Text(
-                        parseIsoToDisplay('${r['inspection_date']}') ?? ''),
-                    Text('${r['material_name']}',
-                        overflow: TextOverflow.ellipsis),
+                      '${r['material_name']}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                     Text('${r['supplier']}', overflow: TextOverflow.ellipsis),
                     Text('${r['quantity']}'),
                     AppStatusBadge('${r['decision_status']}'),
@@ -221,18 +262,33 @@ class InspectionsScreen extends StatelessWidget {
                           icon: Icon(Icons.gavel_outlined, size: 18.r),
                           onPressed: () => _openDecision(context, r),
                           visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 30,
+                            minHeight: 30,
+                          ),
                         ),
                         IconButton(
                           tooltip: AppText.t('تصدير PDF', 'PDF'),
                           icon: Icon(Icons.picture_as_pdf_outlined, size: 18.r),
                           onPressed: () => _exportOne(context, r, 'report'),
                           visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 30,
+                            minHeight: 30,
+                          ),
                         ),
                         IconButton(
                           tooltip: AppText.t('ملصق', 'Label'),
                           icon: Icon(Icons.label_outline, size: 18.r),
                           onPressed: () => _exportOne(context, r, 'label'),
                           visualDensity: VisualDensity.compact,
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(
+                            minWidth: 30,
+                            minHeight: 30,
+                          ),
                         ),
                       ],
                     ),
