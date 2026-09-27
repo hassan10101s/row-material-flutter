@@ -195,6 +195,15 @@ class AppErrors {
 
   static String get setupAlreadyCompleted =>
       AppText.t('تم إعداد النظام بالفعل.', 'Setup has already been completed.');
+  static String get notAuthorizedForOperation => AppText.t(
+      'لا تملك صلاحية تنفيذ هذه العملية (العملية غير مسموحة لدورك).',
+      'You are not allowed to perform this action (the operation is not permitted for your role).');
+  static String get privilegedOperationNeedsConnection => AppText.t(
+      'تتطلب هذه العملية اتصالاً بالإنترنت وجلسة دخول حديثة. أعد الاتصال وحاول مرة أخرى (أو راجع صلاحياتك).',
+      'This action requires an internet connection and a fresh sign-in. Reconnect and try again (or check your role).');
+  static String get accountReadOnlyDevice => AppText.t(
+      'هذا الجهاز للقراءة فقط ولا يمكنه حفظ التعديلات (الجلسة غير مسموحة بالكتابة).',
+      'This device is read-only and cannot save changes (the session is not allowed to write).');
   static String get usernameRequired =>
       AppText.t('اسم المستخدم مطلوب.', 'Username is required.');
   static String get usernameExists =>

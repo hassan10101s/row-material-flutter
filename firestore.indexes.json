@@ -1,0 +1,25 @@
+{
+  "indexes": [],
+  "fieldOverrides": [
+    {
+      "collectionGroup": "samples",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "qualityChecks",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "labResults",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "labConfig",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    }
+  ]
+}

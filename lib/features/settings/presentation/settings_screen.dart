@@ -5,11 +5,15 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../design_system/widgets/app_skeleton.dart';
 import 'package:go_router/go_router.dart';
+
 import '../../../app/auth_gate.dart';
+import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/logo_encoding.dart';
+
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -19,125 +23,158 @@ import '../../../design_system/widgets/app_empty_state.dart';
 import '../../../design_system/widgets/app_field.dart';
 import '../../../di/service_locator.dart';
 import '../../../router/app_router.dart';
-import '../../auth/domain/user.dart';
 import '../../backup/data/backup_manager.dart';
+import '../../../core/sync/sync_engine.dart';
+import '../../members/presentation/leave_organization_section.dart';
+import '../../members/presentation/members_screen.dart';
+import '../../sync/presentation/sync_screen.dart';
 import 'cubit/database_settings_cubit.dart';
 import 'cubit/database_settings_state.dart';
 import 'cubit/general_settings_cubit.dart';
 import 'cubit/general_settings_state.dart';
-import 'cubit/users_cubit.dart';
 import 'migration_panel.dart';
 import '../data/settings_repo.dart';
-/// Settings (port of Web SettingsView: General / Export / Database / Users).
+
+/// Deep-linkable Settings sections, reachable as `/settings?tab=<key>`.
+enum SettingsTab {
+  general('general', 'عام', 'الإعدادات العامة'),
+  database('database', 'قاعدة البيانات', 'نسخ واستعادة'),
+  members('members', 'الأعضاء', 'إدارة حسابات المؤسسة'),
+  sync('sync', 'المزامنة', 'حالة المزامنة والتعارضات'),
+  export('export', 'التصدير', 'نسخ احتياطية يدوية');
+
+  const SettingsTab(this.key, this.label, this.subtitle);
+
+  final String key;
+  final String label;
+  final String subtitle;
+
+  static SettingsTab fromKey(String? key) => SettingsTab.values.firstWhere(
+    (tab) => tab.key == key,
+    orElse: () => SettingsTab.general,
+  );
+}
+
+/// Settings (port of Web SettingsView: General / Database / Members / Sync /
+/// Export). Members and Sync used to be top-level sidebar destinations; they
+/// are sections of this screen now.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.initialTab = SettingsTab.general});
+
+  final SettingsTab initialTab;
+
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
+
 class _SettingsScreenState extends State<SettingsScreen> {
-  int _tab = 0;
+  late SettingsTab _tab = widget.initialTab;
+
+  @override
+  void didUpdateWidget(covariant SettingsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialTab != oldWidget.initialTab) {
+      _tab = widget.initialTab;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final user = getIt<AuthGate>().currentUser;
-    final canDev = user?.isDeveloper ?? false;
-return Padding(
+    return Padding(
       padding: const EdgeInsets.all(AppSpacing.page),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('الإعدادات',
-              style: Theme.of(context).textTheme.headlineSmall),
+          Text('الإعدادات', style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: AppSpacing.md),
           _SettingsTabs(
             current: _tab,
-            devMode: canDev,
-            onChange: (i) => setState(() => _tab = i),
+            onChange: (tab) => setState(() => _tab = tab),
           ),
           const SizedBox(height: AppSpacing.md),
-          Expanded(
-            child: switch (_tab) {
-              0 => BlocProvider(
-                  create: (c) =>
-                      GeneralSettingsCubit(repo: getIt<SettingsRepo>())..load(),
-                  child: const _GeneralPanel(),
-                ),
-              1 => BlocProvider(
-                  create: (c) =>
-                      DatabaseSettingsCubit(backup: getIt<BackupManager>()),
-                  child: const _DatabasePanel(),
-                ),
-              2 => BlocProvider(
-                  create: (c) => UsersCubit(repo: getIt<SettingsRepo>())..load(),
-                  child: const _UsersPanel(),
-                ),
-              _ => const _ExportBackupsPanel(),
-            },
-          ),
+          Expanded(child: _body()),
         ],
       ),
     );
   }
+
+  Widget _body() => switch (_tab) {
+    SettingsTab.general => BlocProvider(
+      create: (c) => GeneralSettingsCubit(repo: getIt<SettingsRepo>())..load(),
+      child: const _GeneralPanel(),
+    ),
+    SettingsTab.database => BlocProvider(
+      create: (c) => DatabaseSettingsCubit(
+        backup: getIt<BackupManager>(),
+        engine: getIt<SyncEngine>(),
+      ),
+      child: const _DatabasePanel(),
+    ),
+    SettingsTab.members => const _MembersPanel(),
+    SettingsTab.sync => const SyncScreen(embedded: true),
+    SettingsTab.export => const _ExportBackupsPanel(),
+  };
 }
+
+/// Every section is always listed. A `lab` or `viewer` member cannot manage the
+/// roster, but they must still see their own membership and be able to leave,
+/// so the tab is never hidden from them.
 class _SettingsTabs extends StatelessWidget {
-  final int current;
-  final bool devMode;
-  final ValueChanged<int> onChange;
-  const _SettingsTabs({
-    required this.current,
-    required this.devMode,
-    required this.onChange,
-  });
+  const _SettingsTabs({required this.current, required this.onChange});
+
+  final SettingsTab current;
+  final ValueChanged<SettingsTab> onChange;
+
   @override
   Widget build(BuildContext context) {
-    final tabs = <(String, String)>[
-      ('عام', 'الإعدادات العامة'),
-      ('قاعدة البيانات', 'نسخ واستعادة'),
-    ];
-    if (devMode) {
-      tabs.add(('الأمان', '')); // dev-only: placeholder
-    }
-    tabs.add(('المستخدمون', 'إدارة الحسابات'));
-    tabs.add(('التصدير', 'نسخ احتياطية يدوية'));
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       children: [
-        for (var i = 0; i < tabs.length; i++)
-          ChoiceChip(
-            selected: current == i,
-            label: Text(tabs[i].$1),
-            onSelected: (_) => onChange(i),
-selectedColor: AppColors.primary,
-            backgroundColor: AppColors.surface,
-            labelStyle: TextStyle(
-              color: current == i
-                  ? Theme.of(context).colorScheme.onPrimary
-                  : AppColors.textStrong,
+        for (final tab in SettingsTab.values)
+          Tooltip(
+            message: tab.subtitle,
+            child: ChoiceChip(
+              selected: current == tab,
+              label: Text(tab.label),
+              onSelected: (_) => onChange(tab),
+              selectedColor: AppColors.primary,
+              backgroundColor: AppColors.surface,
+              labelStyle: TextStyle(
+                color: current == tab
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : AppColors.textStrong,
+              ),
             ),
           ),
       ],
     );
   }
 }
+
 class _GeneralPanel extends StatefulWidget {
   const _GeneralPanel();
   @override
   State<_GeneralPanel> createState() => _GeneralPanelState();
 }
+
 class _GeneralPanelState extends State<_GeneralPanel> {
   late final TextEditingController _dept;
   @override
   void initState() {
     super.initState();
     _dept = TextEditingController(
-        text: context.read<GeneralSettingsCubit>().state.departmentLabel);
+      text: context.read<GeneralSettingsCubit>().state.departmentLabel,
+    );
   }
+
   @override
   void dispose() {
     _dept.dispose();
     super.dispose();
   }
-Future<void> _save() async {
+
+  Future<void> _save() async {
     try {
       await context.read<GeneralSettingsCubit>().save(_dept.text.trim());
       if (!mounted) return;
@@ -148,9 +185,11 @@ Future<void> _save() async {
       if (mounted) _err(context, '$e');
     }
   }
+
   void _err(BuildContext context, String message) {
     AppFeedback.error(context, message);
   }
+
   Future<void> _pickLogo() async {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
@@ -161,7 +200,10 @@ Future<void> _save() async {
     if (path == null || !mounted) return;
     try {
       final dataUri = encodeReportLogoDataUri(path);
-      await context.read<GeneralSettingsCubit>().saveLogo(path: path, dataUri: dataUri);
+      await context.read<GeneralSettingsCubit>().saveLogo(
+        path: path,
+        dataUri: dataUri,
+      );
       if (!mounted) return;
       AppFeedback.success(context, 'تم حفظ الشعار');
     } on AppError catch (e) {
@@ -170,11 +212,13 @@ Future<void> _save() async {
       if (mounted) AppFeedback.error(context, 'تعذر قراءة الصورة');
     }
   }
+
   Future<void> _removeLogo() async {
     await context.read<GeneralSettingsCubit>().clearLogo();
     if (!mounted) return;
     AppFeedback.success(context, 'تمت إزالة الشعار');
   }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<GeneralSettingsCubit>().state;
@@ -183,22 +227,17 @@ Future<void> _save() async {
       listener: (context, state) => _dept.text = state.departmentLabel,
       child: _Panel(
         children: [
-          if (state.loading)
-            const Padding(
-                padding: EdgeInsets.all(24),
-                child: Center(child: CircularProgressIndicator()))
+          if (state.loading && state.departmentLabel.isEmpty)
+            const AppSkeletonList(rows: 3, lines: 2, height: 220)
           else ...[
             Text(
               'إدارة عامة',
               style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: AppSpacing.md),
-AppField(
-              label: 'اسم القسم في التقارير',
-              controller: _dept,
-            ),
+            AppField(label: 'اسم القسم في التقارير', controller: _dept),
             const SizedBox(height: AppSpacing.md),
-_ReportLogoSection(
+            _ReportLogoSection(
               path: state.logoPath,
               dataUri: state.logoDataUri,
               onPick: _pickLogo,
@@ -216,6 +255,7 @@ _ReportLogoSection(
     );
   }
 }
+
 class _ReportLogoSection extends StatelessWidget {
   final String path;
   final String dataUri;
@@ -258,8 +298,13 @@ class _ReportLogoSection extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  hasLogo ? path.split('\\').last.split('/').last : 'لا يوجد شعار',
-                  style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
+                  hasLogo
+                      ? path.split('\\').last.split('/').last
+                      : 'لا يوجد شعار',
+                  style: TextStyle(
+                    fontSize: 13.spMax,
+                    color: AppColors.textMuted,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Row(
@@ -286,16 +331,18 @@ class _ReportLogoSection extends StatelessWidget {
       ],
     );
   }
+
   Widget _placeholder() => Container(
-        width: 96.r,
-        height: 48.r,
-        color: AppColors.borderMuted,
-        alignment: Alignment.center,
-        child: Icon(Icons.image_outlined, size: 20.r, color: AppColors.textMuted),
-      );
+    width: 96.r,
+    height: 48.r,
+    color: AppColors.borderMuted,
+    alignment: Alignment.center,
+    child: Icon(Icons.image_outlined, size: 20.r, color: AppColors.textMuted),
+  );
   Uint8List get _logoBytes =>
       base64Decode(dataUri.substring(dataUri.indexOf(',') + 1));
 }
+
 class _DatabasePanel extends StatelessWidget {
   const _DatabasePanel();
   Future<void> _export(BuildContext context) async {
@@ -303,6 +350,7 @@ class _DatabasePanel extends StatelessWidget {
     if (cubit.state.busy) return;
     await cubit.exportBackup();
   }
+
   Future<void> _restore(BuildContext context) async {
     final cubit = context.read<DatabaseSettingsCubit>();
     if (cubit.state.busy) return;
@@ -318,16 +366,30 @@ class _DatabasePanel extends StatelessWidget {
     if (!confirm) return;
     await cubit.restoreBackup(path);
     if (!context.mounted) return;
-if (cubit.state.error == null) {
-      getIt<AuthGate>().auth.logout();
+    if (cubit.state.error == null) {
+      // A restore replaces the database underneath the session: sign out and
+      // let the auth flow rebuild the per-organization binding (plan P11.2).
+      await getIt<AuthGate>().auth.signOut();
       getIt<AuthGate>().updated();
-      context.go(AppRoutes.login);
-      AppFeedback.info(
-        context,
-        'تمت الاستعادة — سيتم تسجيل الخروج الآن',
-      );
+      if (context.mounted) context.go(AppRoutes.login);
+      if (!context.mounted) return;
+      // Never let a restore look silently complete: anything the reconciliation
+      // had to flag is stated in the message (plan §14-P11.2).
+      AppFeedback.info(context, _restoreMessage(cubit.state));
     }
   }
+
+  static String _restoreMessage(DatabaseSettingsState state) {
+    final notes = <String>[
+      if (state.restoreConflicts > 0)
+        '${state.restoreConflicts} سجل مُنشأ تعارضاً لأنه غير موجود في النسخة',
+      if (state.restoreRequeued > 0)
+        '${state.restoreRequeued} سجل أُعيد إلى قائمة المزامنة لإرساله',
+    ];
+    if (notes.isEmpty) return 'تمت الاستعادة — سيتم تسجيل الخروج الآن';
+    return 'تمت الاستعادة — ${notes.join('، ')}. سيتم تسجيل الخروج الآن';
+  }
+
   Future<bool> _confirmRestore(BuildContext context) {
     return showAppConfirm(
       context,
@@ -343,14 +405,16 @@ if (cubit.state.error == null) {
       icon: Icons.restore,
     );
   }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<DatabaseSettingsCubit>().state;
     return BlocListener<DatabaseSettingsCubit, DatabaseSettingsState>(
       listenWhen: (prev, curr) =>
           (curr.error != null && curr.error != prev.error) ||
-          (curr.lastPath != null && curr.lastPath != prev.lastPath),
-listener: (context, state) {
+          (curr.lastPath != null && curr.lastPath != prev.lastPath) ||
+          (curr.restored && !prev.restored),
+      listener: (context, state) {
         if (state.error != null) {
           AppFeedback.error(context, state.error!);
         } else if (state.lastPath != null) {
@@ -400,6 +464,7 @@ listener: (context, state) {
     );
   }
 }
+
 class _ExportBackupsPanel extends StatelessWidget {
   const _ExportBackupsPanel();
   @override
@@ -407,182 +472,77 @@ class _ExportBackupsPanel extends StatelessWidget {
     return const AppEmptyState(
       icon: Icons.folder_open,
       title: 'نسخ احتياطية',
-      subtitle: 'تُنشأ النسخ الاحتياطية التلقائية يومياً في مجلد exports/backups.',
+      subtitle:
+          'تُنشأ النسخ الاحتياطية التلقائية يومياً في مجلد exports/backups.',
     );
   }
 }
-class _UsersPanel extends StatefulWidget {
-  const _UsersPanel();
-  @override
-  State<_UsersPanel> createState() => _UsersPanelState();
-}
-class _UsersPanelState extends State<_UsersPanel> {
-  final _username = TextEditingController();
-  final _fullName = TextEditingController();
-  final _password = TextEditingController();
-  String _role = 'Lab User';
-  @override
-  void dispose() {
-    _username.dispose();
-    _fullName.dispose();
-    _password.dispose();
-    super.dispose();
-  }
-  Future<void> _create() async {
-    final cubit = context.read<UsersCubit>();
-    final ok = await cubit.createUser(
-      username: _username.text.trim(),
-      fullName: _fullName.text.trim(),
-      password: _password.text,
-      role: _role,
-    );
-    if (!mounted) return;
-if (ok) {
-      _username.clear();
-      _fullName.clear();
-      _password.clear();
-      AppFeedback.success(context, 'تمت الإضافة');
-    } else if (cubit.state.error != null) {
-      AppFeedback.error(context, cubit.state.error!);
-    }
-  }
-  Future<void> _delete(User user) async {
-    if (user.isDeveloper) return;
-    final ok = await showAppConfirm(
-      context,
-      title: 'حذف المستخدم',
-      message: 'حذف ${user.fullName}؟',
-      confirmLabel: 'حذف',
-      cancelLabel: 'إلغاء',
-      danger: true,
-      icon: Icons.person_off_outlined,
-    );
-    if (!ok || !mounted) return;
-    final cubit = context.read<UsersCubit>();
-    final deleted = await cubit.deleteUser(user.id!);
-    if (!mounted || deleted) return;
-    if (cubit.state.error != null) {
-      AppFeedback.error(context, cubit.state.error!);
-    }
-  }
+
+/// Members live in Settings now (they used to be a top-level destination).
+///
+/// The content is role-adaptive: a role with `users.read` (owner, quality
+/// manager) gets the full roster with invite / activate / change role /
+/// remove plus the co-owner shortcut, while a `lab` or `viewer` member gets
+/// only their own membership and the leave action — they hold no `users.*`
+/// permission, and hiding the tab from them would leave no way out.
+class _MembersPanel extends StatelessWidget {
+  const _MembersPanel();
+
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<UsersCubit>().state;
-    final dev = getIt<AuthGate>().currentUser?.isDeveloper ?? false;
-    return _Panel(
-      children: [
-        Text(
-          'المستخدمون',
-          style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading)
-          const Center(child: CircularProgressIndicator())
-        else if (state.error != null)
-          Text(state.error!, style: TextStyle(color: AppColors.danger))
-        else
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Column(
-                children: [
-                  for (final u in state.users)
-                    ListTile(
-                      dense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-leading: Builder(builder: (context) {
-                        final isNeutral = !u.isDeveloper && !u.canSeeSettings;
-                        return CircleAvatar(
-                          backgroundColor: u.isDeveloper
-                              ? AppColors.warning
-                              : u.canSeeSettings
-                                  ? AppColors.primary
-                                  : AppColors.borderMuted,
-                          child: Text(
-                            u.username.isEmpty
-                                ? '?'
-                                : u.username.substring(0, 1).toUpperCase(),
-                            style: TextStyle(
-                              color: isNeutral
-                                  ? AppColors.textStrong
-                                  : Colors.white,
-                              fontSize: 14.spMax,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        );
-                      }),
-                      title: Text('${u.fullName} — ${u.role}'),
-                      subtitle: Text('@${u.username}'),
-                      trailing: u.isDeveloper
-                          ? Icon(Icons.lock, size: 16.r, color: AppColors.warning)
-                          : IconButton(
-                              icon: Icon(Icons.delete_outline, size: 18.r),
-                              onPressed: () => _delete(u),
-                            ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        if (dev) ...[
-          const SizedBox(height: AppSpacing.lg),
-          Text(
-            'إضافة مستخدم',
-            style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Wrap(
-            spacing: AppSpacing.md,
-            runSpacing: AppSpacing.md,
-            children: [
-              SizedBox(
-                  width: 220.w,
-                  child: AppField(label: 'المستخدم', controller: _username)),
-              SizedBox(
-                  width: 220.w,
-                  child: AppField(label: 'الاسم الكامل', controller: _fullName)),
-              SizedBox(
-                  width: 180.w,
-                  child: AppField(label: 'كلمة المرور', controller: _password, obscure: true)),
-              SizedBox(
-                width: 180.w,
-                child: DropdownButtonFormField<String>(
-                  initialValue: _role,
-                  decoration: const InputDecoration(labelText: 'الدور', isDense: true),
-                  items: const [
-                    DropdownMenuItem(value: 'Admin', child: Text('Admin')),
-                    DropdownMenuItem(value: 'Lab User', child: Text('Lab User')),
-                    DropdownMenuItem(value: 'Viewer', child: Text('Viewer')),
-                  ],
-                  onChanged: (v) => setState(() => _role = v ?? 'Lab User'),
-                ),
-              ),
-              SizedBox(
-                height: 42.h,
-                child: AppButton(
-                  label: AppStrings.save,
-                  loading: state.busy,
-                  onPressed: state.busy ? null : _create,
-                ),
-              ),
-            ],
-          ),
-        ],
+    final gate = getIt<AuthGate>();
+    if (gate.canWrite(Permission.usersRead)) {
+      return const MembersScreen(embedded: true);
+    }
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: const [
+        LeaveOrganizationSection(),
+        SizedBox(height: AppSpacing.md),
+        _MembersReadOnlyNote(),
       ],
     );
   }
 }
+
+class _MembersReadOnlyNote extends StatelessWidget {
+  const _MembersReadOnlyNote();
+
+  @override
+  Widget build(BuildContext context) {
+    final role = getIt<AuthGate>().role;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.warning.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        AppText.t(
+          'دورك الحالي (${AppRoles.label(role)}) لا يعرض قائمة الأعضاء. '
+              'تواصل مع مدير المؤسسة إن احتجت صلاحية إضافية.',
+          'Your role (${AppRoles.label(role)}) cannot view the member roster. '
+              'Ask an organization owner if you need more access.',
+        ),
+        style: TextStyle(color: AppColors.warning, fontSize: 12.spMax),
+      ),
+    );
+  }
+}
+
 class _Panel extends StatelessWidget {
   final List<Widget> children;
   const _Panel({required this.children});
   @override
   Widget build(BuildContext context) {
     return Card(
-      child: Padding(padding: const EdgeInsets.all(20), child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: children,
-      )),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        ),
+      ),
     );
   }
 }

@@ -74,7 +74,16 @@ class _AppButtonState extends State<AppButton> {
                 widget.icon!,
                 SizedBox(width: 8.w),
               ],
-              if (widget.label != null) Text(widget.label!),
+              if (widget.label != null)
+                // Flexible so a long translation (or a wide fallback font)
+                // wraps inside the button instead of overflowing the Row.
+                Flexible(
+                  child: Text(
+                    widget.label!,
+                    textAlign: TextAlign.center,
+                    softWrap: true,
+                  ),
+                ),
             ],
           );
     return MouseRegion(

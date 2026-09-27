@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../design_system/widgets/app_skeleton.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -60,9 +61,10 @@ class InventoryTab extends StatelessWidget {
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        if (state.loading) ...[
-          const Center(child: CircularProgressIndicator()),
-        ] else if (state.error != null) ...[
+        if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
+          if (state.loading && state.rows.isEmpty) ...[
+            const AppSkeletonList(rows: 6, lines: 3, height: 380),
+          ] else if (state.error != null) ...[
           Text(state.error!, style: TextStyle(color: AppColors.danger)),
         ] else if (state.rows.isEmpty) ...[
           Text(AppText.t('لا توجد مواد', 'No inventory items')),

@@ -67,20 +67,4 @@ const String developerPasswordHashAlgo = 'pbkdf2_sha256_v2_dev';
 const int developerPasswordHashRounds = 780000;
 const String sealedTextPrefix = 'enc1:';
 
-const String defaultAdminUsername = 'hassan10101s';
-
-/// Usage expiry offset used when no expiry is set (developer signed installations).
-const Duration usageExpiryGrace = Duration(days: 3650);
-
-/// Roles that can manage settings.
-bool canManageSettings(String role) =>
-    role == 'Developer' || role == 'Admin';
-
-/// Roles that can edit inspections / run labs.
-bool canEditInspections(String role) =>
-    role == 'Developer' || role == 'Admin' || role == 'Lab User';
-
-/// Whether a role can edit other users.
-bool canEditUsers(String role) => role == 'Developer';
-
 bool isDecisionStatus(String status) => decisionCodes.contains(status);

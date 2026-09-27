@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../design_system/widgets/app_skeleton.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -101,14 +102,8 @@ class InspectionDetailScreen extends StatelessWidget {
     final cubit = context.read<InspectionDetailCubit>();
     final inspection = state.inspection;
     Widget body;
-    if (state.loading) {
-      body = const SizedBox(
-        width: double.infinity,
-        child: Padding(
-          padding: EdgeInsets.all(AppSpacing.xxxl),
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      );
+    if (state.loading && inspection == null) {
+      body = const AppSkeletonList(rows: 6, lines: 3, height: 440);
     } else if (state.error != null) {
       body = Center(
         child: Column(

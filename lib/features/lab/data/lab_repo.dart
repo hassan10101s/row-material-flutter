@@ -787,6 +787,9 @@ class LabRepo {
 
   // ── Sample tests ──────────────────────────────────────────────
 
+  /// [exec] lets the offline-first facade (P7.3) run the very same SQL inside
+  /// the transaction that also writes `sync_queue` and `audit_logs`; when it is
+  /// null this method owns its transaction, exactly as before.
   Future<Map<String, dynamic>> runSampleTest({
     required int analysisId,
     required String sourceType,
@@ -798,9 +801,49 @@ class LabRepo {
     Map<String, dynamic>? user,
     String entryCode = '',
     bool manualResult = false,
+    DatabaseExecutor? exec,
   }) async {
+    if (exec != null) {
+      return _runSampleTestIn(exec,
+          analysisId: analysisId,
+          sourceType: sourceType,
+          sourceRefId: sourceRefId,
+          sourceName: sourceName,
+          sampleName: sampleName,
+          resultText: resultText,
+          dynamicValues: dynamicValues,
+          user: user,
+          entryCode: entryCode,
+          manualResult: manualResult);
+    }
     final db = await _db;
-    return db.transaction((txn) async {
+    return db.transaction((txn) => _runSampleTestIn(txn,
+        analysisId: analysisId,
+        sourceType: sourceType,
+        sourceRefId: sourceRefId,
+        sourceName: sourceName,
+        sampleName: sampleName,
+        resultText: resultText,
+        dynamicValues: dynamicValues,
+        user: user,
+        entryCode: entryCode,
+        manualResult: manualResult));
+  }
+
+  Future<Map<String, dynamic>> _runSampleTestIn(
+    DatabaseExecutor txn, {
+    required int analysisId,
+    required String sourceType,
+    int? sourceRefId,
+    required String sourceName,
+    required String sampleName,
+    String resultText = '',
+    Map<String, dynamic>? dynamicValues,
+    Map<String, dynamic>? user,
+    String entryCode = '',
+    bool manualResult = false,
+  }) async {
+    {
       final analysis = await _decorateAnalysisTx(txn, analysisId);
       if (!sourceTypes.contains(sourceType)) {
         throw ValidationError(AppErrors.sourceTypeInvalid);
@@ -1020,7 +1063,7 @@ class LabRepo {
         'range_check': rangeCheck,
         'computed': computed,
       };
-    });
+    }
   }
 
   num? _numOf(Object? v) {
@@ -1796,10 +1839,21 @@ class LabRepo {
     return _serializeWorksheet(null);
   }
 
+  /// [exec] lets the offline-first facade (P7.3) run the very same SQL inside
+  /// the transaction that also writes `sync_queue` and `audit_logs`; when it is
+  /// null this method owns its transaction, exactly as before.
   Future<Map<String, dynamic>> saveWorksheet(
-      List<Map<String, dynamic>> rows, Map<String, dynamic>? user) async {
+      List<Map<String, dynamic>> rows, Map<String, dynamic>? user,
+      {DatabaseExecutor? exec}) async {
+    if (exec != null) return _saveWorksheetIn(exec, rows, user);
     final db = await _db;
-    return db.transaction((txn) async {
+    return db.transaction((txn) => _saveWorksheetIn(txn, rows, user));
+  }
+
+  Future<Map<String, dynamic>> _saveWorksheetIn(
+      DatabaseExecutor txn, List<Map<String, dynamic>> rows,
+      Map<String, dynamic>? user) async {
+    {
       final userId = user == null ? null : int.parse('${user['id']}');
       final timestamp = nowIso();
 
@@ -1951,7 +2005,7 @@ class LabRepo {
         'low_stock': lowResult,
         'rows': await _serializeWorksheet(txn),
       };
-    });
+    }
   }
 
   Future<Map<String, dynamic>> deleteWorksheetRow({

@@ -1,22 +1,22 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/app_paths.dart';
-import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
-import '../../../core/security/password_hash.dart';
 import '../../../core/security/seal_codec.dart';
-import '../../../core/utils/app_dates.dart';
-import '../../../core/utils/app_exceptions.dart';
-import '../../auth/domain/user.dart';
 
-/// Settings + user management repository.
+/// Settings repository (organization scoped).
+///
+/// User management moved to `features/members` in V2: members are owned by
+/// Firestore and mirrored into the local `users` table, they are never created
+/// or edited from the settings screen.
 class SettingsRepo {
   final DatabaseHelper dbHelper;
   final LocalSecret secret;
   final AppPaths? paths;
 
   SettingsRepo({required this.dbHelper, required this.secret, this.paths});
+
 
   Future<Map<String, dynamic>> getSettings() async {
     final db = await dbHelper.database;
@@ -127,97 +127,5 @@ class SettingsRepo {
 
   Future<void> clearReportLogo() async {
     await updateSettings({'report_logo_path': '', 'report_logo_data_uri': ''});
-  }
-
-  // ── Users ─────────────────────────────────────────────────────
-
-  Future<List<User>> listUsers() async {
-    final db = await dbHelper.database;
-    final rows = await db.query('users',
-        orderBy: 'CASE role WHEN \'Developer\' THEN 0 WHEN \'Admin\' THEN 1 '
-            'WHEN \'Lab User\' THEN 2 ELSE 3 END, username COLLATE NOCASE');
-    return rows.map(User.fromMap).toList();
-  }
-
-  Future<User> createUser({
-    required String username,
-    required String fullName,
-    required String password,
-    required String role,
-  }) async {
-    final db = await dbHelper.database;
-    if (username.trim().isEmpty) throw ValidationError(AppErrors.usernameRequired);
-    final existing = await db
-        .query('users', where: 'username = ?', whereArgs: [username.trim()]);
-    if (existing.isNotEmpty) {
-      throw ValidationError(AppErrors.usernameExists);
-    }
-    final hash = await _hashPassword(password, isDeveloper: role == 'Developer');
-    final id = await db.insert('users', {
-      'username': username.trim(),
-      'full_name': fullName.trim(),
-      'password_hash': hash,
-      'role': role,
-      'is_active': 1,
-      'created_at': nowIso(),
-    });
-    return User(id: id, username: username.trim(), fullName: fullName.trim(),
-        role: role, createdAt: nowIso());
-  }
-
-  Future<void> updateUser({
-    required int id,
-    String? fullName,
-    String? role,
-    bool? isActive,
-    String? newPassword,
-  }) async {
-    final db = await dbHelper.database;
-    final existing = await db.query('users', where: 'id = ?', whereArgs: [id]);
-    if (existing.isEmpty) throw NotFoundError(AppErrors.userNotFound);
-    final user = User.fromMap(existing.first);
-    if (user.isDeveloper && (role != null && role != 'Developer' || isActive == false)) {
-      throw AuthorizationError(AppErrors.cannotModifyDeveloper);
-    }
-    final updates = <String, dynamic>{};
-    if (fullName != null) updates['full_name'] = fullName.trim();
-    if (role != null) updates['role'] = role;
-    if (isActive != null) updates['is_active'] = isActive ? 1 : 0;
-    if (newPassword != null && newPassword.isNotEmpty) {
-      updates['password_hash'] = await _hashPassword(newPassword,
-          isDeveloper: (role ?? user.role) == 'Developer');
-    }
-    if (updates.isEmpty) return;
-    await db.update('users', updates, where: 'id = ?', whereArgs: [id]);
-  }
-
-  Future<void> deleteUser(int id) async {
-    final db = await dbHelper.database;
-    final rows = await db.query('users', where: 'id = ?', whereArgs: [id]);
-    if (rows.isEmpty) return;
-    final user = User.fromMap(rows.first);
-    if (user.isDeveloper) {
-      throw AuthorizationError(AppErrors.cannotDeleteDeveloper);
-    }
-    // Reject deletion while the user owns data (parity with auth.py:139-155)
-    // so referential integrity / audit identity is never lost.
-    final insp = await db
-        .rawQuery('SELECT COUNT(*) AS c FROM inspections WHERE created_by = ?', [id]);
-    if ((Sqflite.firstIntValue(insp) ?? 0) > 0) {
-      throw ValidationError(AppErrors.userIdHasInspectionRecords);
-    }
-    final hist = await db.rawQuery(
-        'SELECT COUNT(*) AS c FROM inspection_status_history WHERE changed_by = ?',
-        [id]);
-    if ((Sqflite.firstIntValue(hist) ?? 0) > 0) {
-      throw ValidationError(AppErrors.userIdHasStatusHistoryRecords);
-    }
-    await db.delete('users', where: 'id = ?', whereArgs: [id]);
-  }
-
-  Future<String> _hashPassword(String password, {required bool isDeveloper}) async {
-    final key = await secret.load();
-    final hasher = PasswordHasher(pepper: String.fromCharCodes(key));
-    return hasher.buildHash(password, isDeveloper: isDeveloper);
   }
 }

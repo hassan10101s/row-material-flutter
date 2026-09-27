@@ -30,6 +30,8 @@ excel · pdf/printing · qr_flutter ([sqleq `qr`](https://pub.dev/packages/qr))
 ```bash
 flutter pub get
 flutter run -d windows
+flutter build windows --release
+flutter run -d windows --dart-define-from-file=tool/firebase/dev.json
 ```
 
 Assets bundled with the app seed `Reference.xlsx` + `units.xlsx` on first run.

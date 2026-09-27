@@ -1,19 +1,39 @@
 import 'package:flutter/foundation.dart' show immutable;
 import 'package:equatable/equatable.dart';
 
-/// Login form state: submission busy flag and error message.
+/// The four display cases of the login screen (plan §8.1 / P2.4):
+/// idle · signing-in · error · firebase-unavailable.
+enum LoginStatus { idle, signingIn, firebaseUnavailable, error }
+
 @immutable
 class LoginState extends Equatable {
-  final bool busy;
+  const LoginState({
+    this.status = LoginStatus.idle,
+    this.error,
+    this.missingConfiguration = const [],
+  });
+
+  final LoginStatus status;
   final String? error;
 
-  const LoginState({this.busy = false, this.error});
+  /// Non-empty when Firebase could not be initialized (dart-define missing).
+  final List<String> missingConfiguration;
 
-  LoginState copyWith({bool? busy, String? error}) => LoginState(
-        busy: busy ?? this.busy,
-        error: error ?? this.error,
+  bool get busy => status == LoginStatus.signingIn;
+
+  bool get needsConfiguration => status == LoginStatus.firebaseUnavailable;
+
+  LoginState copyWith({
+    LoginStatus? status,
+    String? error,
+    List<String>? missingConfiguration,
+  }) =>
+      LoginState(
+        status: status ?? this.status,
+        error: error,
+        missingConfiguration: missingConfiguration ?? this.missingConfiguration,
       );
 
   @override
-  List<Object?> get props => [busy, error];
+  List<Object?> get props => [status, error, missingConfiguration];
 }

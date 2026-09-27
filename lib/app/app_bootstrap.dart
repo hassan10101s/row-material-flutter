@@ -1,35 +1,58 @@
 import 'package:flutter/material.dart' show debugPrint;
 
-import '../core/services/seed_service.dart';
+import '../core/firebase/firebase_bootstrap.dart';
+import '../core/sync/sync_engine.dart';
 import '../di/service_locator.dart';
-import '../features/auth/data/auth_repo.dart';
-import '../features/backup/data/backup_manager.dart';
-import '../features/lab/data/lab_repo.dart';
-import '../features/settings/data/settings_repo.dart';
+import 'auth_gate.dart';
+import '../features/auth/data/auth_repository.dart';
 
-/// Startup sequence mirroring MaterialLabController.__init__
-/// (core/controller.py): DB schema, settings defaults, one-time
-/// reference/units import, lab default analyses, optional auto backup.
+/// Startup sequence (plan §8.1 + §6.5).
+///
+/// ```
+/// boot → FirebaseBootstrap
+///      → restoreSession()          (online: users/{uid} · offline: session cache)
+///      → bindOrg(orgId)            (per-organization database, then the seeds
+///                                   below run against it, then the sync engine)
+///      → SyncEngine.start()
+/// ```
+/// Everything after [FirebaseBootstrap.initialize] is safe without Firebase: the
+/// app degrades to the cached session or to the `needsBootstrap` state.
 Future<void> appBootstrap() async {
   await initServiceLocator();
 
-  final settings = getIt<SettingsRepo>();
-  await settings.ensureDefaults();
+  final auth = getIt<AuthRepository>();
+  await registerOrganizationBinder(auth);
 
-  final seed = getIt<SeedService>();
-  await seed.ensureInitialImport();
+  // Keep the shell + router guards in sync with the auth state stream
+  // (sign-in, sign-out, organization switch, refresh failures).
+  getIt<AuthGate>().start();
 
-  final lab = getIt<LabRepo>();
-  await lab.ensureDefaultAnalyses();
+  final state = await auth.restoreSession();
+  debugPrint('[bootstrap] auth state: ${state.name}');
 
-  final backup = getIt<BackupManager>();
-  await backup.autoBackup();
+  if (state == AuthState.needsBootstrap) {
+    debugPrint('[bootstrap] firebase missing: ${getIt<FirebaseBootstrapResult>().missingKeys}');
+    return;
+  }
 
-  debugPrint('[bootstrap] database, seeds and defaults ready');
+  if (state == AuthState.ready) {
+    startSyncEngine();
+  }
 }
 
-/// Sign out and clear in-memory session after a database restore.
+/// Runs the per-organization side effects. The callback itself lives in
+/// `registerOrganizationBinder` (service_locator) so the repository never has
+/// to import a feature module.
+void startSyncEngine() => getIt<SyncEngine>().start();
+
+/// Sign out and clear the in-memory session after a database restore.
 Future<void> resetAfterRestore() async {
-  final auth = getIt<AuthRepo>();
-  auth.logout();
+  final auth = getIt<AuthRepository>();
+  await auth.signOut();
+}
+
+/// Local → remote calls are impossible after a sign-out.
+bool get isWritableSession {
+  final auth = getIt<AuthRepository>();
+  return auth.state == AuthState.ready;
 }

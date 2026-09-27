@@ -190,10 +190,11 @@ Future<void> zoneSeedDatabase() async {
     'imported_at': nowIso(),
   });
   await db.insert('users', {
-    'username': 'inspector',
+    'id': 1,
+    'email': 'inspector@lab.test',
     'full_name': 'Ahmed Ali',
-    'password_hash': 'x',
-    'role': 'inspector',
+    'role': 'admin',
+    'status': 'active',
     'created_at': nowIso(),
   });
   await db.insert('inspections', {

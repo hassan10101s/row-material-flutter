@@ -50,3 +50,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Machine-local secrets. The template (empty values) is committed so the asset
+# declaration always resolves; the real values are added to a copy.
+assets/**/*.local.json
+# Real Firebase keys for local `flutter run` (see tool/firebase/README.md).
+tool/firebase/dev.json
+tool/firebase/*.env

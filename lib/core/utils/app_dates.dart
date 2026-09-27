@@ -1,11 +1,13 @@
 /// Date/time helpers mirroring core/utils.py (now_iso, today_iso, parse).
 library;
 
-String nowIso() {
-  final now = DateTime.now();
-  return '${_pad2(now.year)}-${_pad2(now.month)}-${_pad2(now.day)} '
-      '${_pad2(now.hour)}:${_pad2(now.minute)}:${_pad2(now.second)}';
-}
+String nowIso() => nowIsoAt(DateTime.now());
+
+/// Same format as [nowIso] but for an arbitrary instant (used by the sync
+/// backoff scheduling).
+String nowIsoAt(DateTime when) =>
+    '${_pad2(when.year)}-${_pad2(when.month)}-${_pad2(when.day)} '
+    '${_pad2(when.hour)}:${_pad2(when.minute)}:${_pad2(when.second)}';
 
 String todayIso() {
   final now = DateTime.now();

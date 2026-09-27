@@ -20,6 +20,7 @@ class BackupManager {
     'reference_materials',
     'inspections',
     'settings',
+    'sync_metadata',
   };
 
   static const Map<String, Set<String>> backupRequiredColumns = {
@@ -30,9 +31,11 @@ class BackupManager {
       'physical_reference_json',
       'chemical_reference_json',
     },
-    'users': {'id', 'username', 'password_hash', 'role'},
+    // V2 roster: no `username` / `password_hash` anymore (identity is remote).
+    'users': {'id', 'email', 'role', 'status'},
     'inspections': {'id', 'entry_code', 'material_id', 'inspection_date'},
     'settings': {'key', 'value'},
+    'sync_metadata': {'key', 'value'},
   };
 
   static const Set<String> materialsTableRequiredColumns = {
@@ -51,14 +54,14 @@ class BackupManager {
     'imported_at',
   };
 
-  static const String _legacyHashPrefix = 'pbkdf2_sha256\$';
-  static const String _v2HashPrefix = 'pbkdf2_sha256_v2\$';
-
   /// Keep at most this many auto-backups (controller.py `_perform_auto_backup`).
   static const int _autoBackupRetention = 5;
 
   Future<Database> _openReadOnly(String path) async {
-    DatabaseHelper.ensureDesktopFactory();
+    // The FFI factory is installed once at DI time (`service_locator.dart` ->
+    // `_databaseHelper`). It is deliberately *not* re-installed here: that
+    // reassigns a global while databases are open, which sqflite warns about
+    // and which repeated auto-backups would otherwise trigger on every call.
     return databaseFactory.openDatabase(
       path,
       options: OpenDatabaseOptions(readOnly: true),
@@ -304,110 +307,31 @@ class BackupManager {
 
   // ── Cross-database import (migration wizard) ──────────────────
 
-  /// Copy users from a source database. Legacy (no-pepper) hashes are kept and
-  /// auto-upgrade to V2 on next login.
+  /// **Disabled in V2** (plan §14-P1.8 / §12.2): identity now lives in
+  /// Firebase, so there is nothing to import from a legacy source database.
+  ///
+  /// The migration panel shows [usersImportDisabledMessage] instead. Importing
+  /// local password hashes into the roster would resurrect the exact
+  /// vulnerability V2 removes, and Firebase UIDs cannot be invented locally.
   Future<Map<String, dynamic>> pullUsersFromSourceDb({
     required String sourceDbPath,
     String developerName = '',
   }) async {
-    final livePath = await dbHelper.databasePath;
     const emptyResult = {
       'users_copied': 0,
       'users_skipped': 0,
       'legacy_count': 0,
       'v2_count': 0,
+      'disabled': true,
+      'message': usersImportDisabledMessage,
     };
-    if (await _sameFile(sourceDbPath, livePath)) return emptyResult;
-
-    final db = await dbHelper.database;
-    Database? source;
-    var copied = 0, skipped = 0, legacyCount = 0, v2Count = 0;
-    try {
-      source = await _openReadOnly(sourceDbPath);
-      final tables = await _tableNames(source);
-      if (!tables.contains('users')) return emptyResult;
-
-      final cols = await _columnNames(source, 'users');
-      const required = {'username', 'full_name', 'password_hash', 'role', 'created_at'};
-      final missing = required.difference(cols).toList()..sort();
-      if (missing.isNotEmpty) {
-        throw ValidationError(AppErrors.usersTableMissingColumns(missing.join(', ')));
-      }
-
-      final hasIsActive = cols.contains('is_active');
-      final sourceUsers = hasIsActive
-          ? await source.rawQuery(
-              'SELECT username, full_name, password_hash, role, is_active, created_at FROM users')
-          : await source.rawQuery(
-              'SELECT username, full_name, password_hash, role, created_at FROM users');
-
-      final existingRows = await db.rawQuery('SELECT username FROM users');
-      final pending = existingRows.map((r) => '${r['username']}').toSet();
-
-      final rowsToInsert = <Map<String, Object?>>[];
-      for (final user in sourceUsers) {
-        final username = '${user['username'] ?? ''}'.trim();
-        if (username.isEmpty) {
-          skipped++;
-          continue;
-        }
-        if (username == developerName) {
-          skipped++;
-          continue;
-        }
-        if (pending.contains(username)) {
-          skipped++;
-          continue;
-        }
-        pending.add(username);
-        final hash = '${user['password_hash'] ?? ''}';
-        if (hash.isEmpty) {
-          skipped++;
-          continue;
-        }
-        if (hash.startsWith(_legacyHashPrefix)) {
-          legacyCount++;
-        } else if (hash.startsWith(_v2HashPrefix)) {
-          v2Count++;
-        }
-        final fullName = '${user['full_name'] ?? username}'.trim();
-        var role = '${user['role'] ?? 'Lab User'}'.trim();
-        if (role == 'Developer') role = 'Admin';
-        var isActive = 1;
-        if (hasIsActive) {
-          final rawActive = user['is_active'];
-          if (rawActive != null) {
-            final parsed = int.tryParse('$rawActive');
-            if (parsed != null) isActive = parsed;
-          }
-        }
-        rowsToInsert.add({
-          'username': username,
-          'full_name': fullName,
-          'password_hash': hash,
-          'role': role,
-          'is_active': isActive,
-          'created_at': '${user['created_at'] ?? nowIso()}'.trim(),
-        });
-      }
-      if (rowsToInsert.isNotEmpty) {
-        final batch = db.batch();
-        for (final row in rowsToInsert) {
-          batch.insert('users', row, conflictAlgorithm: ConflictAlgorithm.ignore);
-        }
-        await batch.commit(noResult: true);
-        copied = rowsToInsert.length;
-      }
-    } finally {
-      await source?.close();
-    }
-    return {
-      'users_copied': copied,
-      'users_skipped': skipped,
-      'legacy_count': legacyCount,
-      'v2_count': v2Count,
-    };
+    return emptyResult;
   }
+
+  static const String usersImportDisabledMessage =
+      'استيراد المستخدمين معطّل في النسخة الثانية: الهوية أصبحت عبر Google/Firebase. '
+      'أضف الأعضاء من شاشة "الأعضاء" (Members) داخل التطبيق، وسيتم ربط كل بريد '
+      'بحسابه تلقائيًا عند أول تسجيل دخول.';
 
   /// Copy inspections (and their status history) from a source database,
   /// creating missing reference materials. Returns the number of inspections
@@ -434,9 +358,11 @@ class BackupManager {
       final existingCodes = (await db.rawQuery('SELECT entry_code FROM inspections'))
           .map((r) => '${r['entry_code']}')
           .toSet();
-      final userRows = await db.rawQuery('SELECT id, username FROM users');
-      final usernamesToId = <String, int>{
-        for (final r in userRows) '${r['username']}': int.parse('${r['id']}'),
+      // V2: `created_by` is assigned to the current member (the session user),
+      // because legacy usernames no longer exist in the roster.
+      final userRows = await db.rawQuery('SELECT id, email FROM users');
+      final emailsToId = <String, int>{
+        for (final r in userRows) '${r['email']}': int.parse('${r['id']}'),
       };
       final materialRows =
           await db.rawQuery('SELECT id, material_name FROM reference_materials');
@@ -492,7 +418,7 @@ class BackupManager {
             final materialName = '${insp['material_name'] ?? 'Unknown'}'.trim();
             final materialId = materialNameToId[materialName]!;
             final createdByName = '${insp['created_by_name'] ?? ''}'.trim();
-            final createdBy = usernamesToId[createdByName] ?? 1;
+            final createdBy = emailsToId[createdByName] ?? 1;
             final dv = insp['decision_version'];
 
             final newId = await txn.insert('inspections', {
@@ -535,7 +461,7 @@ class BackupManager {
             final newId = idMap[oldId];
             if (newId == null) continue;
             final changedByName = '${hist['changed_by_name'] ?? ''}'.trim();
-            final changedBy = usernamesToId[changedByName] ?? 1;
+            final changedBy = emailsToId[changedByName] ?? 1;
             final ver = hist['version'];
             await txn.insert('inspection_status_history', {
               'inspection_id': newId,

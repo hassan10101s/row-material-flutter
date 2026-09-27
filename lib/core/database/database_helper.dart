@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -12,35 +13,117 @@ class DatabaseHelper {
   DatabaseHelper(this.paths);
 
   final AppPaths paths;
+
+  /// The one live connection. There is deliberately no second read-only
+  /// handle: sqflite's single-instance cache is keyed by path only, so an extra
+  /// `openDatabase(readOnly: true)` returns this same object and `close()` would
+  /// shut it down twice. See [readDatabase].
   Database? _db;
-  Database? _readDb;
 
   /// Initialize the FFI database factory for desktop platforms.
+  ///
+  /// Idempotent on purpose. `databaseFactory` is a **global** in the sqflite
+  /// packages and reassigning it is not free: sqflite prints "You are changing
+  /// sqflite default factory" and warns that the new value becomes the default
+  /// *for all operations*, including ones already in flight on a handle opened
+  /// through the previous factory. It must therefore happen exactly once, at DI
+  /// time, before any database is opened.
   static void ensureDesktopFactory() {
+    if (_desktopFactoryReady) return;
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
     }
+    _desktopFactoryReady = true;
   }
+
+  static bool _desktopFactoryReady = false;
+
+  /// Test hook: allow [ensureDesktopFactory] to run again.
+  static void resetDesktopFactoryForTesting() => _desktopFactoryReady = false;
 
   Future<String> get databasePath async => paths.databasePath();
 
-  Future<Database> get database async {
-    if (_db != null) return _db!;
-    final path = await paths.databasePath();
-    final created = await _open(path);
-    _db = created;
-    _readDb = await databaseFactory.openDatabase(
-      path,
-      options: OpenDatabaseOptions(readOnly: true),
-    );
-    return created;
+  /// Bind the process to an organization: closes the current connection and
+  /// re-opens `%APPDATA%\MaterialLab\orgs\<orgId>\material_lab.db` (plan §D3).
+  ///
+  /// Returns the resolved database path. Calling it twice with the same id is a
+  /// no-op, so a router rebuild never re-creates the file.
+  Future<String> bindOrg(String? orgId) async {
+    final normalized = (orgId == null || orgId.isEmpty) ? null : orgId;
+    if (paths.orgId == normalized && _db != null) return databasePath;
+    await close();
+    paths.orgId = normalized;
+    await database;
+    return databasePath;
   }
 
-  Future<Database> get readDatabase async {
-    if (_readDb != null) return _readDb!;
-    await database;
-    return _readDb!;
+  /// The organization currently bound (null ⇒ not bound yet).
+  String? get boundOrgId => paths.orgId;
+
+  /// The live connection.
+  ///
+  /// [_ensureOpen] is a *synchronisation* point, not a guarantee: a close that
+  /// lands between "the open finished" and "hand the handle over" can still
+  /// empty `_db`, because `close()` nulls the field synchronously and only then
+  /// awaits the handle's own shutdown. Returning `_db!` there produced
+  /// `Null check operator used on a null value` deep inside whichever service
+  /// lost its connection, naming neither the service nor the cause.
+  ///
+  /// Re-driving the open closes that window: the second pass sees `_closing`,
+  /// waits for the close to settle, and opens against the new handle.
+  Future<Database> get database async {
+    while (true) {
+      await _ensureOpen();
+      final db = _db;
+      if (db != null) return db;
+      // A close overtook us; `_ensureOpen` now waits for it and re-opens.
+    }
+  }
+
+  /// The per-organization database, for read-only callers (reports).
+  ///
+  /// This deliberately returns the **same** handle as [database]. A second
+  /// `openDatabase(..., readOnly: true)` does *not* create a second connection:
+  /// sqflite's single-instance cache is keyed by path only
+  /// (`factory_mixin.dart` -> `databaseOpenHelpers[path]`), with `readOnly`
+  /// ignored, so the extra open handed back the identical object.
+  ///
+  /// That made [close] close one connection twice, and the second close raced
+  /// the first: every holder that had memoized the handle (the sync queue via
+  /// `_resolved`, the sync engine) kept pointing at a closed database and threw
+  /// `DatabaseException(error database_closed)`, while the writes queued behind
+  /// `closeDatabase`'s per-path lock produced the
+  /// `Warning database has been locked for 0:00:10` spam.
+  Future<Database> get readDatabase async => database;
+
+  /// In-flight open, used to make opening single-flight.
+  Future<void>? _opening;
+
+  /// In-flight close. A caller that resolves [database] while a close is in
+  /// flight must wait for it: `close()` awaits `_db.close()`, and the field
+  /// still points at that handle until the await returns, so without this a
+  /// caller would receive an already-closed database.
+  Future<void>? _closing;
+
+  /// Open the connection exactly once, no matter how many callers race.
+  ///
+  /// [_closing] is awaited *first*: a close empties `_db` synchronously and only
+  /// then awaits the handle's own shutdown, so a caller that skipped the close
+  /// would be handed nothing (or a dying connection) for the whole duration of
+  /// that await. Once the close settles, the open is re-driven from scratch.
+  Future<void> _ensureOpen() {
+    final closing = _closing;
+    if (closing != null) {
+      return closing.then((_) => _ensureOpen());
+    }
+    if (_db != null) return Future<void>.value();
+    return _opening ??= _openLive().whenComplete(() => _opening = null);
+  }
+
+  Future<void> _openLive() async {
+    final path = await paths.databasePath();
+    _db = await _open(path);
   }
 
   Future<void> rebuild() async {
@@ -50,12 +133,62 @@ class DatabaseHelper {
 
   /// Close and drop both open connections (used before replacing the live file
   /// during restore).
+  ///
+  /// Every listener registered with [onDatabaseClosed] is notified: a class that
+  /// memoized the connection (the sync queue, the sync metadata) would otherwise
+  /// keep reading and writing the file that was just closed - which, after a
+  /// restore or an organization switch, is not the file the app is bound to.
   Future<void> close() async {
-    await _db?.close();
-    await _readDb?.close();
-    _db = null;
-    _readDb = null;
+    // Serialise closes: a second concurrent close would race the first on the
+    // same handle. `_ensureOpen` waits on `_closing`, so nobody receives the
+    // handle while it is being shut.
+    final pending = _closing;
+    if (pending != null) return pending;
+
+    final completer = Completer<void>();
+    _closing = completer.future;
+    try {
+      // An open may still be in flight (bindOrg -> close -> open). Wait for it,
+      // or `_open` would assign a fresh handle after this method nulled it.
+      final opening = _opening;
+      if (opening != null) {
+        try {
+          await opening;
+        } on Object {
+          // A failed open has nothing to close.
+        }
+      }
+      // One connection only: `readDatabase` is the same handle (see its docs).
+      final db = _db;
+      _db = null;
+      _opening = null;
+      if (db != null) {
+        try {
+          await db.close();
+        } on Object {
+          // Closing an already-closed database must not abort the close.
+        }
+      }
+      for (final listener in List<void Function()>.from(_closeListeners)) {
+        try {
+          listener();
+        } on Object {
+          // A listener must never block the close itself.
+        }
+      }
+      completer.complete();
+    } on Object catch (e, st) {
+      completer.completeError(e, st);
+      rethrow;
+    } finally {
+      _closing = null;
+    }
   }
+
+  /// Notified after [close] - the cached connection is gone.
+  void onDatabaseClosed(void Function() listener) => _closeListeners.add(listener);
+
+  final List<void Function()> _closeListeners = [];
 
   /// Re-run the full idempotent schema on the live database: creates any
   /// missing tables, indexes and legacy columns (parity with Python
@@ -121,17 +254,7 @@ class DatabaseHelper {
   /// Create the full schema. Idempotent (IF NOT EXISTS) so it can also be
   /// used to fill any missing tables after a restore.
   Future<void> _createSchema(Database db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT NOT NULL UNIQUE,
-        full_name TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        role TEXT NOT NULL,
-        is_active INTEGER NOT NULL DEFAULT 1,
-        created_at TEXT NOT NULL
-      )
-    ''');
+    await db.execute(_usersTableV2);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS reference_materials (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -382,8 +505,138 @@ class DatabaseHelper {
     ''');
 
     await _createIndexes(db);
+    await _createSyncTables(db);
     await _runLegacyGuarantees(db);
   }
+
+  /// V2 `users` = organization roster (identity lives in Firebase, never a
+  /// local password). Mirrors `organizations/{o}/members/{m}` remotely.
+  static const String _usersTableV2 = '''
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY,
+      uid TEXT UNIQUE,
+      member_id TEXT,
+      email TEXT NOT NULL,
+      full_name TEXT NOT NULL DEFAULT '',
+      role TEXT NOT NULL DEFAULT 'viewer',
+      status TEXT NOT NULL DEFAULT 'invited',
+      permissions_json TEXT NOT NULL DEFAULT '[]',
+      display_name TEXT,
+      photo_url TEXT,
+      version INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT '',
+      updated_by TEXT,
+      remote_version INTEGER NOT NULL DEFAULT 0,
+      remote_synced_at TEXT,
+      sync_state TEXT NOT NULL DEFAULT 'local',
+      deleted_at TEXT,
+      created_at TEXT NOT NULL DEFAULT ''
+    )
+  ''';
+
+  /// Sync bookkeeping tables (plan §6.4, DDL verbatim).
+  Future<void> _createSyncTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        local_ref INTEGER,
+        operation TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        base_version INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        retry_count INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        last_error TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_queue_entity
+        ON sync_queue(entity_type, entity_id)
+        WHERE status IN ('pending','in_flight','blocked')
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_sync_queue_ready
+        ON sync_queue(status, next_attempt_at, id)
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_conflicts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        direction TEXT NOT NULL,
+        local_payload TEXT,
+        remote_payload TEXT,
+        detected_at TEXT NOT NULL,
+        resolution TEXT,
+        resolved_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS device_registry (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        platform TEXT NOT NULL,
+        os_version TEXT,
+        app_version TEXT,
+        role TEXT NOT NULL,
+        read_only INTEGER NOT NULL DEFAULT 0,
+        registered_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        last_write_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT,
+        user_name TEXT,
+        organization_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        details_json TEXT,
+        device_id TEXT NOT NULL,
+        occurred_at TEXT NOT NULL,
+        synced INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id, id)');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(occurred_at DESC, id DESC)');
+  }
+
+  /// Tables mirrored to Firestore and the columns that make that possible
+  /// (plan §6.5). `organization_id` is deliberately absent: isolation is
+  /// physical (one file per organization).
+  static const List<String> syncedTables = [
+    'inspections',
+    'inspection_status_history',
+    'lab_sample_tests',
+    'users',
+    'lab_analyses',
+    'lab_analysis_items',
+    'lab_field_chemical_links',
+    'lab_constants',
+    'lab_products',
+    'lab_product_analyses',
+    'lab_material_analyses',
+    'lab_units',
+    // The audit outbox is never pulled back, but its rows are pushed as
+    // `organizations/{orgId}/auditLogs` documents, so `SyncQueue.markDone`
+    // stamps the same per-row bookkeeping on them.
+    'audit_logs',
+  ];
 
   Future<void> _createIndexes(Database db) async {
     await db.execute(
@@ -465,6 +718,118 @@ class DatabaseHelper {
     await _ensureColumn(db, 'lab_field_chemical_links', 'kind', "kind TEXT NOT NULL DEFAULT 'link'");
     await _ensureColumn(db, 'lab_field_chemical_links', 'fixed_value', 'fixed_value REAL');
     await _ensureColumn(db, 'lab_field_chemical_links', 'list_values', 'list_values TEXT');
+
+    // V2: identity + sync bookkeeping.
+    await _migrateUsersTable(db);
+    await _createSyncTables(db);
+    for (final table in syncedTables) {
+      // The per-row sync version mirrored from the Firestore envelope
+      // (`remoteToLocalRow` writes it on every pull). `users` and
+      // `inspection_status_history` already declared it; `decision_version`
+      // on `inspections` is the *business* approval counter and stays
+      // separate, so a normal edit does not look like a version bump.
+      await _ensureColumn(db, table, 'version', 'version INTEGER NOT NULL DEFAULT 1');
+      await _ensureColumn(db, table, 'remote_version', 'remote_version INTEGER NOT NULL DEFAULT 0');
+      await _ensureColumn(db, table, 'remote_synced_at', 'remote_synced_at TEXT');
+      await _ensureColumn(
+          db, table, 'sync_state', "sync_state TEXT NOT NULL DEFAULT 'local'");
+      await _ensureColumn(db, table, 'deleted_at', 'deleted_at TEXT');
+    }
+    await _ensureUnknownUserRow(db);
+  }
+
+  /// Reserved `users` row with `id = 0` (plan §6.6, D2).
+  ///
+  /// `inspections.created_by` and `inspection_status_history.changed_by` stay
+  /// `INTEGER NOT NULL REFERENCES users(id)`, but a document pulled from
+  /// another device carries the *Firebase uid* of the author, not a local id.
+  /// When that member has not been mirrored on this device yet, the pull
+  /// stores `0` - so the row has to exist, otherwise every pull of a sample
+  /// written elsewhere dies on the foreign key.
+  Future<void> _ensureUnknownUserRow(Database db) async {
+    final existing = await db.query('users', where: 'id = 0', limit: 1);
+    if (existing.isNotEmpty) return;
+    await db.insert('users', {
+      'id': 0,
+      'uid': null,
+      'email': 'unknown@local.invalid',
+      'full_name': 'Unknown user',
+      'role': 'viewer',
+      'status': 'disabled',
+      'permissions_json': '[]',
+      'version': 1,
+      'updated_at': '',
+      'created_at': '',
+    });
+  }
+
+  /// One-time rebuild of the pre-V2 `users` table (plan §6.6).
+  ///
+  /// Legacy rows kept their `username`/`password_hash`/`is_active` columns; the
+  /// new table is email/UID based. `PRAGMA foreign_keys=OFF` + `integrity_check`
+  /// guard the migration, all inside one transaction.
+  Future<void> _migrateUsersTable(Database db) async {
+    final cols = await db.rawQuery('PRAGMA table_info(users)');
+    if (cols.isEmpty) {
+      await db.execute(_usersTableV2);
+      return;
+    }
+    final names = cols.map((c) => '${c['name']}').toSet();
+    if (!names.contains('password_hash') && !names.contains('username')) {
+      // Already V2 (or freshly created): only make sure it exists.
+      await db.execute(_usersTableV2);
+      return;
+    }
+
+    await db.execute('PRAGMA foreign_keys=OFF');
+    // Without legacy_alter_table, RENAME rewrites the REFERENCES clauses of
+    // other tables (inspections.created_by → users_legacy_v1).
+    await db.execute('PRAGMA legacy_alter_table=ON');
+    try {
+      await db.transaction((txn) async {
+        await txn.execute('ALTER TABLE users RENAME TO users_legacy_v1');
+        await txn.execute(_usersTableV2);
+        final hasIsActive = names.contains('is_active');
+        final rows = await txn.rawQuery('SELECT * FROM users_legacy_v1');
+        var nextId = 1;
+        for (final row in rows) {
+          final email = '${row['username'] ?? ''}'.trim();
+          final role = switch ('${row['role'] ?? ''}') {
+            'Admin' || 'Developer' => 'admin',
+            'Lab User' => 'lab',
+            'Quality Manager' => 'quality_manager',
+            _ => 'viewer',
+          };
+          final status = hasIsActive && (row['is_active'] as num?)?.toInt() == 0
+              ? 'disabled'
+              : 'active';
+          await txn.insert('users', {
+            'id': nextId,
+            'uid': null,
+            'member_id': null,
+            'email': email.isEmpty ? 'legacy_$nextId@local.invalid' : email,
+            'full_name': '${row['full_name'] ?? ''}',
+            'role': role,
+            'status': status,
+            'permissions_json': '[]',
+            'version': 1,
+            'updated_at': '${row['created_at'] ?? ''}',
+            'created_at': '${row['created_at'] ?? ''}',
+            'sync_state': 'local',
+          });
+          nextId++;
+        }
+        await txn.execute('DROP TABLE users_legacy_v1');
+      });
+      final check = await db.rawQuery('PRAGMA integrity_check');
+      final ok = check.isNotEmpty && '${check.first.values.first}'.trim() == 'ok';
+      if (!ok) {
+        throw StateError('integrity_check failed after users migration');
+      }
+    } finally {
+      await db.execute('PRAGMA legacy_alter_table=OFF');
+      await db.execute('PRAGMA foreign_keys=ON');
+    }
   }
 
   Future<void> _ensureColumn(Database db, String table, String column, String spec) async {

@@ -23,13 +23,24 @@ late BackupManager _backup;
 
 const String _usersTable = '''
   CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    full_name TEXT NOT NULL,
-    password_hash TEXT NOT NULL,
-    role TEXT NOT NULL,
-    is_active INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL
+    id INTEGER PRIMARY KEY,
+    uid TEXT UNIQUE,
+    member_id TEXT,
+    email TEXT NOT NULL,
+    full_name TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT 'viewer',
+    status TEXT NOT NULL DEFAULT 'invited',
+    permissions_json TEXT NOT NULL DEFAULT '[]',
+    display_name TEXT,
+    photo_url TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    updated_at TEXT NOT NULL DEFAULT '',
+    updated_by TEXT,
+    remote_version INTEGER NOT NULL DEFAULT 0,
+    remote_synced_at TEXT,
+    sync_state TEXT NOT NULL DEFAULT 'local',
+    deleted_at TEXT,
+    created_at TEXT NOT NULL DEFAULT ''
   )
 ''';
 
@@ -174,10 +185,11 @@ void main() {
       'imported_at': nowIso(),
     });
     await db.insert('users', {
-      'username': 'inspector',
+      'id': 1,
+      'email': 'inspector@lab.test',
       'full_name': 'Ahmed Ali',
-      'password_hash': 'x',
-      'role': 'inspector',
+      'role': 'admin',
+      'status': 'active',
       'created_at': nowIso(),
     });
     await _insertLiveInspection();
@@ -265,57 +277,34 @@ void main() {
     await _backup.validateBackupDatabase(real.path);
   });
 
-  test('pullUsersFromSourceDb copies users and counts legacy hashes', () async {
+  test('pullUsersFromSourceDb is disabled in V2 (identity is remote)', () async {
     final src = await createSourceDb({'users'});
-    final db = await databaseFactoryFfi
+    final sourceDb = await databaseFactoryFfi
         .openDatabase(src, options: OpenDatabaseOptions(version: 1));
-    await db.insert('users', {
-      'username': 'legacy_user',
+    await sourceDb.insert('users', {
+      'id': 99,
+      'email': 'legacy@lab.test',
       'full_name': 'Legacy User',
-      'password_hash': 'pbkdf2_sha256' r'$abc',
-      'role': 'Lab User',
+      'role': 'admin',
+      'status': 'active',
       'created_at': nowIso(),
     });
-    await db.insert('users', {
-      'username': 'v2_user',
-      'full_name': 'V2 User',
-      'password_hash': 'pbkdf2_sha256_v2' r'$xyz',
-      'role': 'Admin',
-      'created_at': nowIso(),
-    });
-    await db.close();
+    await sourceDb.close();
 
     final result = await _backup.pullUsersFromSourceDb(sourceDbPath: src);
-    expect(result['users_copied'], 2);
-    expect(result['legacy_count'], 1);
-    expect(result['v2_count'], 1);
-
-    final live = await _dbHelper.database;
-    final rows = await live.rawQuery(
-        "SELECT username, role FROM users WHERE username IN ('legacy_user', 'v2_user')");
-    expect(rows.length, 2);
-    expect(
-        rows.any((r) => r['username'] == 'v2_user' && r['role'] == 'Admin'),
-        isTrue);
-  });
-
-  test('pullUsersFromSourceDb skips the developer account', () async {
-    final src = await createSourceDb({'users'});
-    final db = await databaseFactoryFfi
-        .openDatabase(src, options: OpenDatabaseOptions(version: 1));
-    await db.insert('users', {
-      'username': 'developer',
-      'full_name': 'Dev Acc',
-      'password_hash': 'pbkdf2_sha256' r'$abc',
-      'role': 'Developer',
-      'created_at': nowIso(),
-    });
-    await db.close();
-
-    final result = await _backup.pullUsersFromSourceDb(
-        sourceDbPath: src, developerName: 'developer');
     expect(result['users_copied'], 0);
-    expect(result['users_skipped'], 1);
+    expect(result['disabled'], isTrue);
+    expect('${result['message']}', contains('Google/Firebase'));
+
+    // The legacy row must not exist here; the only rows are the seeded member
+    // and the reserved `id = 0` placeholder (plan §6.6, D2).
+    final live = await _dbHelper.database;
+    final rows = await live.rawQuery('SELECT id, email FROM users ORDER BY id');
+    expect(rows.map((r) => '${r['email']}'), isNot(contains('legacy@lab.test')));
+    expect(rows.firstWhere((r) => '${r['id']}' == '0')['email'],
+        'unknown@local.invalid');
+    final member = rows.firstWhere((r) => '${r['id']}' == '1');
+    expect('${member['email']}', 'inspector@lab.test');
   });
 
   test('importInspectionsFromSource copies inspections, materials and history',

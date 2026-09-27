@@ -7,6 +7,7 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_button.dart';
+import '../../../design_system/widgets/app_skeleton.dart';
 import '../../../di/service_locator.dart';
 import '../core/test_history_logic.dart';
 import '../data/lab_repo.dart';
@@ -190,14 +191,14 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<TestHistoryCubit>().state;
-    if (state.loading) {
+    if (state.loading && state.rows.isEmpty) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(AppText.t('سجل تحاليل المختبر', 'Test history'),
               style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: AppSpacing.md),
-          const Center(child: CircularProgressIndicator()),
+          const AppSkeletonList(rows: 8, lines: 5, height: 460),
         ],
       );
     }

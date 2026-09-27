@@ -102,7 +102,7 @@
 | 1 | **Firestore Database → Create database** (Native، نفس region لـ Storage) | يظهر `firestore.googleapis.com` في Project |
 | 2 | **Authentication → Sign-in method → Google = Enabled** (مُفعّل مسبقاً — تأكّد فقط) | الحالة "Enabled" |
 | 3 | **نسخ Web OAuth Client ID**: Project settings → General → **Your apps → Web app → SDK setup and configuration** | قيمة تنتهي بـ `.apps.googleusercontent.com` |
-| 4 | (اختياري لكن موصى به) إنشاء **Windows (Desktop) OAuth client** في Google Cloud Console → Credentials → OAuth client ID → Application type: **Desktop app** | `...apps.googleusercontent.com` — يُستخدم كـ fallback (§9.2) |
+| 4 | **إنشاء `Desktop app` OAuth client** في Google Cloud Console → Credentials → OAuth client ID → Application type: **Desktop app**، ثم إضافة `http://127.0.0.1` إلى Authorized redirect URis | **هذه هي قيمة `GOOGLE_DESKTOP_CLIENT_ID` وهي الواجبة فعلاً.** الـ Web client id لا يصلح للتسجيل: تدفّق Windows loopback يرسل `http://127.0.0.1:<port عشوائي>`، وGoogle يتجاهل الـ port فقط لعملاء `Desktop app` (RFC 8252 §7.3) ⇒ `400: redirect_uri_mismatch` مع أي Web client |
 | 5 | **Billing → Budget alerts**: حدّ 50 USD، تنبيه 50% و90% | Guard للتكلفة |
 | 6 | **Google Cloud Console → OAuth consent screen**: External + اختبار/إنتاج حسب الحالة | بريدك مضاف كـ Test user إن كانت الشاشة External بحالة Testing |
 
@@ -114,7 +114,8 @@ FIREBASE_AUTH_DOMAIN       = materiallab-63405.firebaseapp.com
 FIREBASE_STORAGE_BUCKET    = materiallab-63405.firebasestorage.app
 FIREBASE_MESSAGING_SENDER_ID = 603169053186
 FIREBASE_APP_ID            = 1:603169053186:web:bd635ab17e441b92db251b
-GOOGLE_WEB_CLIENT_ID       = <من خطوة 3 —Required>
+GOOGLE_WEB_CLIENT_ID       = <من خطوة 3 — للتشغيل على الويب فقط>
+GOOGLE_DESKTOP_CLIENT_ID   = <من خطوة 4 —Required لتسجيل دخول Windows>
 ```
 > `VITE_MEASUREMENT_ID` تُتجاهل: `firebase_analytics` غير مطلوب في V1.
 > **لا يوجد Secret في التطبيق**: `API_KEY` مفتاح عميل عام (يُقيَّد بـ Security Rules + App Check لاحقاً)؛
@@ -478,15 +479,18 @@ boot ──► needsBootstrap(Firebase not ready / dart-define ناقص) ──�
 ```dart
 // lib/core/sync/remote/auth_remote_data_source.dart
 if (Platform.isWindows) {
-  await GoogleSignInDart.register(clientId: const String.fromEnvironment('GOOGLE_WEB_CLIENT_ID'));
+  await GoogleSignInDart.register(clientId: const String.fromEnvironment('GOOGLE_DESKTOP_CLIENT_ID'));
 }
 final account = await GoogleSignIn().signIn();          // يفتح المتصفح + loopback 127.0.0.1
 final credential = GoogleAuthProvider.credential(idToken: account.authentication.idToken);
 final cred = await FirebaseAuth.instance.signInWithCredential(credential);  // uid + idToken
 ```
 - **لا نحتاج `exchangeEndpoint`** (مستند الباقة:مع FirebaseAuth يكفي الـ idToken).
-- إن فشل بـ `auth/invalid-credential` ⇒ غالباً `GOOGLE_WEB_CLIENT_ID` ليس Web client مسجَّل في
-  المشروع ⇒ **الإصلاح**: أضف Web app جديداً في Console وانسخ client id (خطوتا 3/4 في §4.1).
+- إن فشل بـ `400: redirect_uri_mismatch` ⇒ الـ client id المستخدَم **Web** لا Desktop.
+  التدفّق يستمع على منفذ عشوائي (`token_sign_in.dart:29-31,49`) ⇒ لا يمكن مطابقته
+  إلا مع عميل `Desktop app` (Google يتجاهل الـ port عند loopback له فقط).
+  **الإصلاح**: خطوة 4 في §4.1 ثم تمرير الـ client id في `GOOGLE_DESKTOP_CLIENT_ID`.
+- إن فشل بـ `auth/invalid-credential` ⇒ الـ client id ليس من مشروع `materiallab-63405`.
 - `signIn` يفتح المتصفح ⇒ **Internet إلزامي عند تسجيل الدخول فقط** (وليس للعمل اليومي).
 
 ### 8.3 حلقة Invitation → UID (D4، مطابق لخطتك §8/§9)
@@ -1110,7 +1114,7 @@ firebase emulators:exec --only firestore --project demo-materiallab "flutter tes
 | R7 | إعادة تشغيل بلا إنترنت تُخرج المستخدم | مؤكد (بلا حل) | §8.4 SessionStore |
 | R8 | `report_html` يتجاوز 1 MiB | منخفض | فحص 900 KB + رفض صريح + قابلية إعادة التوليد |
 | R9 | استعادة نسخة قديمة تُفسد المزامنة | متوسط | P11: `reconcileAfterRestore()` + لا حذف صامت |
-| R10 | Visual Studio 17.12 / C++ toolchain | مؤكد (مُتحقَّق ✓) | VS 2022 17.12.1 مثبّت — متوافق مع Firebase Auth Windows |
+| R10 | Visual Studio 17.12 / C++ toolchain | مؤكد (مُتحقَّق ✓) | ~~VS 2022 17.12.1 مثبّت — متوافق~~ **مُصحَّح 2026-09-27:** 17.12.1 (MSVC 14.42) **غير** متوافق — `firebase_core 4.15.0` (C++ SDK 13.12.0) يفشل في الربط بـ6 رموز `__std_*_1`/`_Avx2WmemEnabled`.VS 2022 **17.14** (MSVC `14.44.35207`) يبني `material_lab.exe` بنجاح. التفاصيل في `tool/firebase/README.md` §7 |
 | R11 | بطء السحب على شبكة ضعيفة | متوسط | pagination 300 + مؤشر مركّب + السحب عند الطلب لا دورياً عدوائياً |
 
 ---
@@ -1153,6 +1157,7 @@ firebase emulators:exec --only firestore --project demo-materiallab "flutter tes
 
 ## 19) تأكد قبل البدء (Checklist المبتدئ)
 - [ ] نسخ `GOOGLE_WEB_CLIENT_ID` من Console (P0-3)
+- [ ] إنشاء `Desktop app` OAuth client + `http://127.0.0.1` redirect URI ونسخ `GOOGLE_DESKTOP_CLIENT_ID` (P0-4) — **إلزامي لتسجيل دخول Windows**
 - [ ] إنشاء Firestore database (P0-1)
 - [ ] Budget alert (P0-5)
 - [ ] نسخة احتياطية من أي DB حالية (V1 غير منشور ⇒ لا يوجد، لكن تحقّق)

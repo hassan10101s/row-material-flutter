@@ -1,0 +1,11 @@
+{
+  "_comment": "Shape of the local Firebase config. Copy this file to `firebase.local.json` in the same folder and fill in the real values on your machine only - `firebase.local.json` is git-ignored and must never be committed. Prefer `--dart-define-from-file=tool/firebase/dev.json`, which needs no asset copy. Leave the values empty to run in the 'Firebase not configured' mode.",
+  "FIREBASE_API_KEY": "",
+  "FIREBASE_APP_ID": "",
+  "FIREBASE_MESSAGING_SENDER_ID": "",
+  "FIREBASE_PROJECT_ID": "",
+  "FIREBASE_AUTH_DOMAIN": "",
+  "FIREBASE_STORAGE_BUCKET": "",
+  "GOOGLE_DESKTOP_CLIENT_ID": "",
+  "GOOGLE_WEB_CLIENT_ID": ""
+}

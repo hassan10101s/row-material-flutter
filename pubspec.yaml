@@ -17,7 +17,7 @@ dependencies:
 
   # ── Database ──────────────────────
   sqflite: ^2.3.0
-  sqflite_common_ffi: ^2.3.0
+  sqflite_common_ffi: 2.4.0
   path: ^1.9.0
 
   # ── Auth & secure storage ─────────
@@ -49,12 +49,25 @@ dependencies:
   equatable: ^2.1.0
   flutter_screenutil: ^5.9.3
   flutter_bloc: ^9.1.1
+  firebase_core: ^4.15.0
+  firebase_auth: ^6.7.0
+  cloud_firestore: ^6.10.0
+  connectivity_plus: ^7.3.1
+  uuid: ^4.6.0
+  google_sign_in: 6.3.0
+  google_sign_in_dartio: 0.3.0
+
+  # `device_info_plus` was dropped on purpose: the device registry only needs
+  # `Platform.operatingSystemVersion` (dart:io), and the plugin's `web: ^1.1.0`
+  # constraint is incompatible with the sqlite3 2.x line required by
+  # `sqflite_common_ffi`.
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
   mocktail: ^1.0.3
+  http: ^1.2.2
 
 flutter:
   uses-material-design: true
@@ -66,6 +79,9 @@ flutter:
     - assets/images/
     - assets/icons/
     - assets/templates/
+    # Directory, not the single file: `firebase.local.json` is git-ignored, so
+    # declaring the file itself would break the build on a clean clone.
+    - assets/firebase/
 
   fonts:
     - family: Cairo

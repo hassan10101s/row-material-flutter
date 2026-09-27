@@ -118,7 +118,7 @@ class _DecisionDialogState extends State<DecisionDialog> {
           'follow_up_note': _followUp.text.trim(),
           'rejected_quantity': _rejected.text.trim(),
         },
-        UserContext(id: user.id, fullName: user.fullName, role: user.role),
+        UserContext(id: user.id, uid: user.uid, fullName: user.fullName, role: user.role),
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {

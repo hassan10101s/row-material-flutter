@@ -467,9 +467,10 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       'follow_up_note': _followUp.text.trim(),
       'rejected_quantity': _rejectedQty.text.trim(),
     };
-    final ok = await context.read<InspectionFormCubit>().save(
+    final cubit = context.read<InspectionFormCubit>();
+    final ok = await cubit.save(
       payload,
-      UserContext(id: user.id, fullName: user.fullName, role: user.role),
+      UserContext(id: user.id, uid: user.uid, fullName: user.fullName, role: user.role),
     );
     if (!mounted) return;
     if (ok) {
@@ -483,7 +484,15 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       } else {
         Navigator.of(context).pop(true);
       }
+      return;
     }
+    // `save` swallowed the exception into `state.error`; without this the user
+    // only ever saw a console line and no feedback at all.
+    AppFeedback.errorFrom(
+      context,
+      cubit.state.error ?? 'تعذر حفظ الفحص',
+      summary: AppText.t('تعذر حفظ الفحص', 'Could not save the inspection.'),
+    );
   }
 
   @override
@@ -588,7 +597,7 @@ class _FormBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<InspectionFormCubit>().state;
     Widget body;
-    if (state.loading) {
+    if (state.loading && state.materials.isEmpty) {
       body = const Center(child: CircularProgressIndicator());
     } else {
       body = SingleChildScrollView(

@@ -1,0 +1,7 @@
+tags:
+  emulator:
+    # Needs a running Firestore/Auth emulator:
+    # firebase emulators:exec --only firestore,auth --project demo-materiallab ^
+    #   "flutter test"
+    # Plain `flutter test` skips these suites (they detect the emulator env).
+    timeout: 2x

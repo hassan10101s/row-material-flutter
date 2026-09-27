@@ -111,11 +111,12 @@ class InspectionRepo {
     Map<String, dynamic> payload,
     UserContext user, {
     bool validateDecision = true,
+    DatabaseExecutor? exec,
   }) async {
     final materialId = int.tryParse('${payload['material_id'] ?? 0}') ?? 0;
     if (materialId == 0) throw ValidationError(AppErrors.materialSelectionRequired);
     final material = await referenceRepo.getMaterial(materialId,
-        inspectionDate: '${payload['inspection_date'] ?? todayIso()}');
+        inspectionDate: '${payload['inspection_date'] ?? todayIso()}', exec: exec);
     if ((material['active'] as num?) != 1) {
       throw const ValidationError(
           'Selected material is inactive (archived) and cannot be used in a new inspection.');
@@ -192,9 +193,11 @@ class InspectionRepo {
 
   // ── Create ────────────────────────────────────────────────────
 
-  Future<Map<String, dynamic>> create(Map<String, dynamic> payload, UserContext user) async {
-    final db = await _db;
-    final base = await buildBasePayload(payload, user);
+  Future<Map<String, dynamic>> create(Map<String, dynamic> payload, UserContext user,
+      {DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
+    final base = await buildBasePayload(payload, user, exec: exec);
+    base['created_by'] = await resolveAuthorId(db, user);
     final existing = await db
         .query('inspections', where: 'entry_code = ?', whereArgs: [base['entry_code']]);
     if (existing.isNotEmpty) {
@@ -237,20 +240,20 @@ class InspectionRepo {
       'created_at': timestamp,
       'updated_at': timestamp,
     });
-    await _refreshReportHtml(id);
-    return getById(id);
+    await _refreshReportHtml(id, exec: exec);
+    return getById(id, exec: exec);
   }
 
   /// Port of `InspectionService.refresh_report_html` — reload the full row
   /// (with status history + injected lab tests), re-render the stored HTML and
   /// persist it. Fails soft so report generation never blocks the mutation.
-  Future<void> _refreshReportHtml(int inspectionId) async {
+  Future<void> _refreshReportHtml(int inspectionId, {DatabaseExecutor? exec}) async {
     final builder = htmlBuilder;
     if (builder == null) return;
     try {
-      final row = await getById(inspectionId);
+      final row = await getById(inspectionId, exec: exec);
       final html = await builder.renderInspectionHtml(row);
-      final db = await _db;
+      final db = exec ?? await _db;
       await db.update(
         'inspections',
         {'report_html': html},
@@ -285,18 +288,23 @@ class InspectionRepo {
     int limit = 5000,
     int offset = 0,
     String orderBy = 'id DESC',
+    bool includeDeleted = false,
   }) async {
     final db = await _db;
+    // Tombstoned rows (V2 `delete`) stay on disk so the deletion can replicate
+    // and be audited, but they are not part of the working set.
+    final alive = includeDeleted ? '' : aliveFilter;
     if (query.trim().isEmpty) {
       final rows = await db.query('inspections',
-          orderBy: orderBy, limit: limit, offset: offset);
+          where: alive, orderBy: orderBy, limit: limit, offset: offset);
       return [for (final r in rows) serializeInspectionRow(Map<String, dynamic>.from(r))];
     }
     final like = '%${query.trim()}%';
     final rows = await db.query(
       'inspections',
-      where:
-          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)',
+      where: alive.isEmpty
+          ? '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)'
+          : '$alive AND (entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)',
       whereArgs: [like, like, like, like],
       orderBy: orderBy,
       limit: limit,
@@ -305,29 +313,40 @@ class InspectionRepo {
     return [for (final r in rows) serializeInspectionRow(Map<String, dynamic>.from(r))];
   }
 
-  Future<int> count({String query = ''}) async {
+  /// Rows a user may still see; a tombstone hides the row from every list.
+  static const String aliveFilter = 'deleted_at IS NULL';
+
+  Future<int> count({String query = '', bool includeDeleted = false}) async {
     final db = await _db;
+    final alive = includeDeleted ? '' : aliveFilter;
+    final aliveSql = alive.isEmpty ? '' : ' WHERE $alive';
     if (query.trim().isEmpty) {
-      return Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) AS c FROM inspections')) ?? 0;
+      return Sqflite.firstIntValue(
+              await db.rawQuery('SELECT COUNT(*) AS c FROM inspections$aliveSql')) ??
+          0;
     }
     final like = '%${query.trim()}%';
+    final condition =
+        '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)';
     return Sqflite.firstIntValue(await db.rawQuery(
-            'SELECT COUNT(*) AS c FROM inspections WHERE entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ?',
-            [like, like, like])) ??
+            'SELECT COUNT(*) AS c FROM inspections'
+            '${alive.isEmpty ? '' : ' WHERE $alive AND'}$condition',
+            [like, like, like, like])) ??
         0;
   }
 
-  Future<Map<String, dynamic>> getById(int id) async {
-    final db = await _db;
+  Future<Map<String, dynamic>> getById(int id, {DatabaseExecutor? exec, bool includeDeleted = true}) async {
+    final db = exec ?? await _db;
     final rows = await db.query('inspections', where: 'id = ?', whereArgs: [id]);
     if (rows.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
     final serialized = serializeInspectionRow(Map<String, dynamic>.from(rows.first));
-    serialized['status_history'] = await getStatusHistory(id);
+    serialized['status_history'] = await getStatusHistory(id, exec: exec);
     return serialized;
   }
 
-  Future<List<Map<String, dynamic>>> getStatusHistory(int inspectionId) async {
-    final db = await _db;
+  Future<List<Map<String, dynamic>>> getStatusHistory(int inspectionId,
+      {DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     final rows = await db.query(
       'inspection_status_history',
       where: 'inspection_id = ?',
@@ -337,8 +356,9 @@ class InspectionRepo {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
-  Future<void> _insertStatusHistory(Map<String, dynamic> h) async {
-    final db = await _db;
+  Future<void> _insertStatusHistory(Map<String, dynamic> h,
+      {DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     await db.insert('inspection_status_history', {
       'inspection_id': h['inspection_id'],
       'version': h['version'],
@@ -356,8 +376,9 @@ class InspectionRepo {
   // ── Status update ─────────────────────────────────────────────
 
   Future<Map<String, dynamic>> updateStatus(
-      int inspectionId, Map<String, dynamic> payload, UserContext user) async {
-    final db = await _db;
+      int inspectionId, Map<String, dynamic> payload, UserContext user,
+      {DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     final existingRaw = await db.query('inspections', where: 'id = ?', whereArgs: [inspectionId]);
     if (existingRaw.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
     final existing = serializeInspectionRow(Map<String, dynamic>.from(existingRaw.first));
@@ -413,20 +434,21 @@ class InspectionRepo {
         'change_reason': normalized['decision_reason'],
         'follow_up_note': normalized['follow_up_note'],
         'rejected_quantity': normalized['rejected_quantity'],
-        'changed_by': user.id,
+        'changed_by': await resolveAuthorId(db, user),
         'changed_by_name': user.fullName,
         'changed_at': changedAt,
-      });
+      }, exec: exec);
     }
-    await _refreshReportHtml(inspectionId);
-    return getById(inspectionId);
+    await _refreshReportHtml(inspectionId, exec: exec);
+    return getById(inspectionId, exec: exec);
   }
 
   // ── Data update ───────────────────────────────────────────────
 
   Future<Map<String, dynamic>> update(
-      int inspectionId, Map<String, dynamic> payload, UserContext user) async {
-    final db = await _db;
+      int inspectionId, Map<String, dynamic> payload, UserContext user,
+      {DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     final existingRaw = await db.query('inspections', where: 'id = ?', whereArgs: [inspectionId]);
     if (existingRaw.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
     final existing = serializeInspectionRow(Map<String, dynamic>.from(existingRaw.first));
@@ -495,8 +517,8 @@ class InspectionRepo {
       where: 'id = ?',
       whereArgs: [inspectionId],
     );
-    await _refreshReportHtml(inspectionId);
-    return getById(inspectionId);
+    await _refreshReportHtml(inspectionId, exec: exec);
+    return getById(inspectionId, exec: exec);
   }
 
   Future<void> markPdfExported(int inspectionId, String pdfPath) async {
@@ -505,18 +527,56 @@ class InspectionRepo {
         where: 'id = ?', whereArgs: [inspectionId]);
   }
 
-  Future<void> delete(int inspectionId) async {
-    final db = await _db;
-    await db.delete('inspections', where: 'id = ?', whereArgs: [inspectionId]);
+  /// Tombstone, not a hard delete (plan §5, P7.1): the row stays so the
+  /// deletion can replicate and be audited, and every list hides it.
+  Future<void> delete(int inspectionId, {DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
+    await db.update(
+      'inspections',
+      {'deleted_at': nowIso(), 'updated_at': nowIso()},
+      where: 'id = ?',
+      whereArgs: [inspectionId],
+    );
   }
 }
 
 /// Minimal user context for repository calls.
 class UserContext {
+  /// Local `users.id`. Null in V2 - the identity is the Firebase uid and
+  /// `AuthGate.currentUser` has no roster row to point at.
   final int? id;
+
+  /// Firebase uid of the author; the local roster is looked up by it.
+  final String? uid;
+
   final String fullName;
   final String role;
-  const UserContext({this.id, required this.fullName, required this.role});
+  const UserContext({
+    this.id,
+    this.uid,
+    required this.fullName,
+    required this.role,
+  });
+}
+
+/// Resolve the author of a write to a local `users.id`.
+///
+/// `inspections.created_by` and `inspection_status_history.changed_by` are
+/// `INTEGER NOT NULL REFERENCES users(id)`, but since V2 the signed-in identity
+/// is a Firebase uid with no local row (`AuthGate.currentUser` leaves
+/// `User.id` null), so the insert used to bind `NULL` and fail the constraint.
+///
+/// Look the member up in the local roster and otherwise fall back to the
+/// reserved `id = 0` "Unknown user" row created by
+/// `DatabaseHelper._ensureUnknownUserRow` - the same resolution the pull path
+/// performs in `PullWorker._localUserId`.
+Future<int> resolveAuthorId(DatabaseExecutor exec, UserContext user) async {
+  if (user.id != null) return user.id!;
+  final uid = user.uid;
+  if (uid == null || uid.isEmpty) return 0;
+  final rows = await exec.query('users', where: 'uid = ?', whereArgs: [uid], limit: 1);
+  if (rows.isEmpty) return 0;
+  return (rows.first['id'] as num?)?.toInt() ?? 0;
 }
 
 String normalizeNonNegativeNumericText(

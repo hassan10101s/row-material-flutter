@@ -13,6 +13,7 @@ import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
 import '../../../design_system/widgets/app_paginated_table.dart';
+import '../../../design_system/widgets/app_skeleton.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../di/service_locator.dart';
 import '../../reports/data/report_service.dart';
@@ -220,8 +221,9 @@ class InspectionsScreen extends StatelessWidget {
             },
           ),
           const SizedBox(height: AppSpacing.md),
-          if (state.loading) ...[
-            const Center(child: CircularProgressIndicator()),
+          if (state.loading && state.visible.isNotEmpty) const AppRefreshBar(),
+          if (state.loading && state.visible.isEmpty) ...[
+            const AppSkeletonList(rows: 8, lines: 5, height: 460),
           ] else if (state.error != null) ...[
             Text(state.error!, style: TextStyle(color: AppColors.danger)),
           ] else if (state.visible.isEmpty) ...[

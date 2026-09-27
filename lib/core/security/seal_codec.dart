@@ -76,10 +76,15 @@ String sealText(String value, List<int> key) {
 }
 
 /// unseal_text port. Returns (plaintext, ok).
+///
+/// Anything that is not a well-formed `enc1:` token fails **closed**. It used to
+/// return `(token, true)` for unsealed input, which meant a restored backup (or
+/// anyone with write access to the settings table) could hand over a plaintext
+/// value and have it accepted as authentic.
 (String, bool) unsealText(String value, List<int> key) {
   final token = value.trim();
   if (token.isEmpty) return ('', true);
-  if (!token.startsWith(sealedTextPrefix)) return (token, true);
+  if (!token.startsWith(sealedTextPrefix)) return ('', false);
   final encoded = token.substring(sealedTextPrefix.length);
   List<int> payload;
   try {

@@ -1,0 +1,473 @@
+rules_version = '2';
+
+// Material Lab V2 - multi-organization, offline-first (PLAN_V2 §10).
+//
+// The client is NOT trusted: every rule below re-derives the caller's identity
+// from `users/{uid}` (the only document the caller can create for itself) and
+// never reads a `permissions` array, because permissions are derived from the
+// role in `lib/core/auth/permissions.dart` and mirrored in `rolePermissions`.
+//
+// The role -> permission lists MUST stay byte-identical to the Dart side;
+// `test/security/permissions_parity_test.dart` fails the build when they drift.
+//
+// Document shapes below are the shapes the Dart code actually writes
+// (`lib/core/sync/remote/*` and `lib/core/sync/entity_registry.dart`).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── identity helpers ─────────────────────────────────────────────────
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verifiedEmail() {
+      return signedIn()
+        && request.auth.token.email_verified == true
+        && request.auth.token.email is string;
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid));
+    }
+
+    function hasProfile() {
+      return signedIn() && userDoc(request.auth.uid) != null;
+    }
+
+    function myOrg() {
+      return hasProfile() ? userDoc(request.auth.uid).data.organizationId : '';
+    }
+
+    function myRole() {
+      return hasProfile() ? userDoc(request.auth.uid).data.role : '';
+    }
+
+    function myStatus() {
+      return hasProfile() ? userDoc(request.auth.uid).data.status : '';
+    }
+
+    function rolePermissions(role) {
+      return role == 'admin' ? [
+        'org.read','org.update',
+        'users.read','users.create','users.update','users.disable',
+        'samples.read','samples.create','samples.update',
+        'lab_results.read','lab_results.create','lab_results.update',
+        'qc.read','qc.approve','qc.reject',
+        'reports.read','reports.create','reports.export',
+        'devices.read','devices.register','devices.update','audit.read'
+      ] : role == 'quality_manager' ? [
+        'org.read','users.read',
+        'samples.read','samples.create','samples.update',
+        'lab_results.read','lab_results.create','lab_results.update',
+        'qc.read','qc.approve','qc.reject',
+        'reports.read','reports.create','reports.export','audit.read'
+      ] : role == 'lab' ? [
+        'org.read',
+        'samples.read','samples.create','samples.update',
+        'lab_results.read','lab_results.create','lab_results.update',
+        'reports.read','devices.register'
+      ] : role == 'viewer' ? [
+        'org.read','samples.read','lab_results.read','qc.read','reports.read','devices.register'
+      ] : [];
+    }
+
+    function inOrg(orgId) {
+      return myOrg() == orgId;
+    }
+
+    // An `invited`/`disabled` member can read nothing and write nothing: the
+    // whole permission check is gated on the status, not only on the role.
+    function activeInOrg(orgId) {
+      return inOrg(orgId) && myStatus() == 'active';
+    }
+
+    function can(orgId, perm) {
+      return activeInOrg(orgId) && perm in rolePermissions(myRole());
+    }
+
+    function canManage(uid) {
+      return userDoc(uid) != null
+        && can(userDoc(uid).data.organizationId, 'users.update');
+    }
+
+    // ── sync envelope invariants (plan §6.1) ─────────────────────────────
+    // Every pushed document carries the envelope. `createdBy`, `createdAt`,
+    // `organizationId` and `localId` are immutable after creation, and the
+    // version has to increase by exactly one: that is what makes the
+    // last-writer-wins + conflict detection of §9.7 verifiable server-side.
+    //
+    // Two known gaps, deliberately left open rather than half-closed:
+    //
+    //  * `createdBy` is only asserted to be a string, not to equal
+    //    `request.auth.uid`. `buildRemotePayload` fills it from the local
+    //    row's `created_by`, so requiring authorship would reject rows first
+    //    pushed by a member other than their author. Attribution is not worth
+    //    breaking sync for.
+    //  * There is no `hasOnly` per collection. The real payload is *every*
+    //    column of the backing table (`buildRemotePayload` ignores
+    //    `mutableFields`, which is documentation-only), so a member can append
+    //    an arbitrary column that `PullWorker` will mirror locally — e.g.
+    //    `reportHtml` on a sample. Closing it requires making `mutableFields`
+    //    authoritative first, or the allow-lists will reject legitimate
+    //    pushes. Tracked as a follow-up, not a rules tweak.
+    function hasEnvelope(orgId) {
+      return request.resource.data.organizationId == orgId
+        && request.resource.data.keys().hasAll([
+             'organizationId','version','createdAt','updatedAt',
+             'updatedBy','createdBy','deviceId','localId'])
+        && request.resource.data.version == 1
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.createdBy is string
+        && request.resource.data.localId != null;
+    }
+
+    function bumped(orgId) {
+      return request.resource.data.version == resource.data.version + 1
+        && request.resource.data.organizationId == orgId
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.localId == resource.data.localId
+        && request.resource.data.updatedBy == request.auth.uid;
+    }
+
+    // The organization id stays bound to the organization: a member can never
+    // move a document into another organization.
+    function sameOrgKey(orgId) {
+      return request.resource.data.organizationId == orgId;
+    }
+
+    // ── users/{uid} - the authorization source (plan §6) ─────────────────
+    match /users/{uid} {
+
+      function userPayloadOk() {
+        return request.resource.data.keys().hasOnly([
+                 'email','organizationId','role','status','memberId','inviteKey',
+                 'displayName','photoUrl','lastSeenAt','lastDeviceId',
+                 'createdAt','updatedAt','version','updatedBy'])
+            && request.resource.data.email is string
+            && request.resource.data.email.lower() == request.auth.token.email.lower()
+            && request.resource.data.organizationId is string
+            && request.resource.data.organizationId.size() > 3
+            && request.resource.data.role in ['admin','quality_manager','lab','viewer']
+            && request.resource.data.version == 1;
+      }
+
+      // (a) claimed invitation: the invite document decides the organization,
+      // the role and the member id - the client cannot choose them.
+      function claimedInvite() {
+        let orgId = request.resource.data.organizationId;
+        let invite = get(/databases/$(database)/documents/organizations/$(orgId)
+                          /invites/$(request.resource.data.inviteKey));
+        return request.resource.data.status == 'invited'
+          && invite != null
+          && invite.data.email.lower() == request.auth.token.email.lower()
+          && invite.data.role == request.resource.data.role
+          && invite.data.memberId == request.resource.data.memberId;
+      }
+
+      // (b) organization founder: the only way to become `active` is to own an
+      // organization that already exists and lists this uid as `ownerUid`.
+      // `get()` returns null for a missing document, so a self-declared
+      // organization that does not exist yet fails here.
+      function foundedOrganization() {
+        let orgId = request.resource.data.organizationId;
+        return request.resource.data.status == 'active'
+          && request.resource.data.role == 'admin'
+          && get(/databases/$(database)/documents/organizations/$(orgId))
+               .data.ownerUid == request.auth.uid;
+      }
+
+      allow get: if signedIn() && request.auth.uid == uid;
+      allow list: if false;
+      allow create: if signedIn() && request.auth.uid == uid
+        && verifiedEmail()
+        && userPayloadOk()
+        && (claimedInvite() || foundedOrganization());
+      allow update: if signedIn() && (
+            (request.auth.uid == uid
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['displayName','photoUrl','lastSeenAt','lastDeviceId'])
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasAny(['displayName','photoUrl','lastSeenAt','lastDeviceId'])
+              && request.resource.data.organizationId == resource.data.organizationId
+              && request.resource.data.role == resource.data.role
+              && request.resource.data.status == resource.data.status
+              && request.resource.data.memberId == resource.data.memberId
+              && request.resource.data.email == resource.data.email)
+         || (canManage(uid)
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                   'role','status','displayName','activatedAt','organizationId',
+                   'updatedBy','updatedAt','version'])
+              && request.resource.data.email == resource.data.email
+              && request.resource.data.memberId == resource.data.memberId
+              && request.resource.data.version == resource.data.version + 1
+              // The organization binding may only be dropped (disabling a
+              // member), never swapped for another organization.
+              && (!request.resource.data.keys().hasAll(['organizationId'])
+                    || request.resource.data.organizationId == resource.data.organizationId)))
+         || ( // Self-service departure: the member drops their own organization
+              // binding. `organizationId` may only disappear, never change.
+              request.auth.uid == uid
+              && resource.data.status in ['invited','active']
+              && request.resource.data.status == 'disabled'
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                   'status','organizationId','updatedBy','updatedAt','version'])
+              && !request.resource.data.keys().hasAll(['organizationId'])
+              && request.resource.data.role == resource.data.role
+              && request.resource.data.email == resource.data.email
+              && request.resource.data.memberId == resource.data.memberId
+              && request.resource.data.updatedBy == request.auth.uid
+              && request.resource.data.version == resource.data.version + 1));
+      allow delete: if false;
+    }
+
+    // ── organizations ────────────────────────────────────────────────────
+    match /organizations/{orgId} {
+
+      // The organization id is derived from the owner uid, so creation is
+      // idempotent; a second attempt hits `update` (owner-only) or is denied.
+      // `activeInOrg`: an invited/disabled member reads nothing.
+      allow get: if activeInOrg(orgId)
+        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+      allow list: if false;
+      allow create: if signedIn()
+        && !exists(/databases/$(database)/documents/organizations/$(orgId))
+        && request.resource.data.keys().hasOnly([
+             'name','ownerUid','status','createdAt','createdBy','schemaVersion',
+             'updatedBy','updatedAt','version'])
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 1
+        && request.resource.data.name.size() <= 120
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.status == 'active'
+        && request.resource.data.version == 1;
+      allow update: if can(orgId, 'org.update')
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['name','schemaVersion','updatedBy','updatedAt','version']);
+      allow delete: if false;
+
+      // Heartbeat written by the sync engine.
+      match /meta/{docId} {
+        allow get: if inOrg(orgId);
+        allow list: if false;
+        allow create: if activeInOrg(orgId)
+          && request.resource.data.keys().hasOnly([
+               'lastWriteAt','lastWriteBy','lastEntity','version'])
+          && request.resource.data.lastWriteBy == request.auth.uid;
+        allow update: if activeInOrg(orgId)
+          && request.resource.data.keys().hasOnly([
+               'lastWriteAt','lastWriteBy','lastEntity','version'])
+          && request.resource.data.lastWriteBy == request.auth.uid;
+        allow delete: if false;
+      }
+
+      // Invitations are readable by the invited e-mail only; the admin sees
+      // them through `list`.
+      //
+      // The e-mail check alone is not a boundary: the document id is
+      // `inviteKey(email)`, which is derived from the e-mail, so *any*
+      // authenticated member of the project could `get()` the invite of any
+      // organization and read its roster-in-progress. Admins of the owning org
+      // are also allowed, since they need to resolve one by key.
+      match /invites/{inviteKey} {
+        allow get: if can(orgId, 'users.read')
+          || (verifiedEmail()
+              && resource.data.email is string
+              && resource.data.email.lower() == request.auth.token.email.lower());
+        allow list: if can(orgId, 'users.read');
+        allow create: if can(orgId, 'users.create')
+          && request.resource.data.keys().hasOnly([
+               'email','role','memberId','status','invitedBy','invitedByName',
+               'createdAt','updatedAt','version'])
+          && request.resource.data.email is string
+          && request.resource.data.email.size() > 3
+          && request.resource.data.email == request.resource.data.email.lower()
+          && request.resource.data.role in ['admin','quality_manager','lab','viewer']
+          && request.resource.data.status == 'invited'
+          && request.resource.data.memberId is string
+          && request.resource.data.memberId.size() > 6
+          && request.resource.data.version == 1;
+        // Claiming an invite (claimedBy/claimedAt) or refreshing the invite.
+        allow update: if (verifiedEmail()
+                           && resource.data.email.lower() == request.auth.token.email.lower()
+                           && request.resource.data.diff(resource.data).affectedKeys()
+                                .hasOnly(['claimedBy','claimedAt','updatedAt','version'])
+                           && request.resource.data.email == resource.data.email
+                           && request.resource.data.role == resource.data.role
+                           && request.resource.data.memberId == resource.data.memberId)
+                       || (can(orgId, 'users.create')
+                           && request.resource.data.diff(resource.data).affectedKeys()
+                                .hasOnly(['role','status','version','updatedBy','updatedAt'])
+                           && request.resource.data.email == resource.data.email
+                           && request.resource.data.memberId == resource.data.memberId);
+        allow delete: if can(orgId, 'users.update');
+      }
+
+      match /members/{memberId} {
+
+        function memberKeysOk() {
+          return request.resource.data.keys().hasAll([
+                   'uid','email','role','status','version','updatedBy','updatedAt','createdAt'])
+              && request.resource.data.email is string
+              && request.resource.data.role in ['admin','quality_manager','lab','viewer']
+              && request.resource.data.status in ['invited','active','disabled']
+              && request.resource.data.version == 1;
+        }
+
+        // Admin inviting a member: the member document may only be created in
+        // the `invited` state - an admin cannot mint an active member.
+        function invitedByAdmin() {
+          return can(orgId, 'users.create') && memberKeysOk()
+            && request.resource.data.status == 'invited';
+        }
+
+        // Organization founder writing its own (active admin) member document.
+        function founderMember() {
+          return request.resource.data.uid == request.auth.uid
+            && request.resource.data.status == 'active'
+            && request.resource.data.role == 'admin'
+            && get(/databases/$(database)/documents/organizations/$(orgId))
+                 .data.ownerUid == request.auth.uid;
+        }
+
+        allow get, list: if activeInOrg(orgId);
+        allow create: if invitedByAdmin() || founderMember();
+        allow update: if (
+              // Admin: role / status / display name only, version must bump.
+              can(orgId, 'users.update')
+              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                   'role','status','displayName','activatedAt','updatedBy','updatedAt',
+                   'version','deletedAt'])
+              && request.resource.data.email == resource.data.email
+              && request.resource.data.version == resource.data.version + 1
+            ) || (
+              // Invitee claiming their own member document (status stays
+              // `invited` until an admin activates it).
+              verifiedEmail()
+              && resource.data.status == 'invited'
+              && resource.data.email is string
+              && resource.data.email.lower() == request.auth.token.email.lower()
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['uid','updatedBy','updatedAt','version'])
+              && request.resource.data.status == resource.data.status
+              && request.resource.data.role == resource.data.role
+              && request.resource.data.uid == request.auth.uid
+              && request.resource.data.updatedBy == request.auth.uid
+              // Same envelope invariant as every other write: exactly one step.
+              && request.resource.data.version == resource.data.version + 1)
+            || (
+              // Self-service departure: a member leaving on their own. Any role
+              // may do this, which is why it is not gated on `users.update`.
+              // It can only ever move the row to `disabled` — never change the
+              // role, the e-mail or the member id, so leaving can never be used
+              // to escalate.
+              verifiedEmail()
+              && resource.data.status in ['invited','active']
+              && resource.data.uid == request.auth.uid
+              && request.resource.data.status == 'disabled'
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['status','deletedAt','updatedBy','updatedAt','version'])
+              && request.resource.data.uid == resource.data.uid
+              && request.resource.data.role == resource.data.role
+              && request.resource.data.email == resource.data.email
+              && request.resource.data.updatedBy == request.auth.uid
+              && request.resource.data.version == resource.data.version + 1);
+        // Disabling is a status change (tombstone), never a delete.
+        allow delete: if false;
+      }
+
+      // ── synced domain documents (plan §6.1) ───────────────────────────
+      match /samples/{docId} {
+        allow read: if can(orgId, 'samples.read');
+        allow create: if can(orgId, 'samples.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'samples.update') && bumped(orgId);
+        allow delete: if false; // tombstone only (`deletedAt`)
+      }
+
+      // Append-only decision log.
+      match /qualityChecks/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if hasEnvelope(orgId)
+          && request.resource.data.newStatus is string
+          && ((request.resource.data.newStatus == 'approved' && can(orgId, 'qc.approve'))
+              || (request.resource.data.newStatus != 'approved' && can(orgId, 'qc.reject')));
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      match /labResults/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /labConfig/{docId} {
+        allow read: if can(orgId, 'samples.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      // Device inventory: a member may only write its own document, admins may
+      // refresh or revoke any of them.
+      match /devices/{deviceId} {
+        // The exact field set `DeviceRegistry` can ever write. `revokedAt` /
+        // `revokedReason` / `status` come from `revoke()`; the rest from
+        // `register()` and the `lastSeenAt` heartbeat. Writes are merge-sets,
+        // so this is the union of every partial payload.
+        function deviceKeysOk() {
+          return request.resource.data.keys().hasOnly([
+            'uid','email','displayName','platform','role','readOnly',
+            'lastSeenAt','status','revokedAt','revokedReason','version']);
+        }
+
+        // `activeInOrg`, not `inOrg`: an invited/disabled member must not be
+        // able to list every member's uid, e-mail, platform and role.
+        allow read: if can(orgId, 'devices.read') || activeInOrg(orgId);
+        allow create: if activeInOrg(orgId)
+          && deviceKeysOk()
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.version == 1;
+        // Ownership is checked against the **stored** document. Checking
+        // `request.resource.data.uid` instead (as this used to) meant any
+        // member could write their own uid into anybody's device document, and
+        // with no `hasOnly` they could then set arbitrary fields on it.
+        //
+        // The admin branch additionally may not re-assign ownership: `revoke()`
+        // blanks the uid (it acts on a device it did not create), and nothing
+        // legitimately changes it.
+        allow update: if (resource.data.uid == request.auth.uid
+                          && request.resource.data.uid == resource.data.uid
+                          && deviceKeysOk())
+                      || (can(orgId, 'devices.update')
+                          && deviceKeysOk()
+                          && request.resource.data.uid in [resource.data.uid, '']);
+        allow delete: if false;
+      }
+
+      match /auditLogs/{docId} {
+        allow read: if can(orgId, 'audit.read');
+        allow create: if activeInOrg(orgId)
+          && request.resource.data.keys().hasOnly([
+               'userId','userName','organizationId','action','entityType','entityId',
+               'detailsJson','deviceId','occurredAt','version'])
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.organizationId == orgId
+          && request.resource.data.action is string
+          && request.resource.data.action.size() > 0
+          && request.resource.data.action.size() <= 64
+          && request.resource.data.version == 1;
+        allow update, delete: if false; // append-only
+      }
+
+      // Nothing else inside an organization is writable.
+      match /{document=**} { allow read, write: if false; }
+    }
+
+    // Catch-all: no collection outside the ones above is reachable.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

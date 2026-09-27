@@ -33,17 +33,20 @@ class ReferenceRepo {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
-  Future<Map<String, dynamic>?> getMaterialRaw(int id) async {
-    final db = await _db;
+  /// The optional [exec] lets a caller that already owns a transaction (P7.3)
+  /// reuse it: opening a second connection while the transaction holds the
+  /// write lock would deadlock.
+  Future<Map<String, dynamic>?> getMaterialRaw(int id, {DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     final rows = await db.query('reference_materials', where: 'id = ?', whereArgs: [id]);
     if (rows.isEmpty) return null;
     return Map<String, dynamic>.from(rows.first);
   }
 
   Future<Map<String, dynamic>> getMaterial(
-      int id, {String? inspectionDate}) async {
-    final rows = await _params();
-    final raw = await getMaterialRaw(id);
+      int id, {String? inspectionDate, DatabaseExecutor? exec}) async {
+    final rows = await _params(exec: exec);
+    final raw = await getMaterialRaw(id, exec: exec);
     if (raw == null) throw NotFoundError(AppErrors.materialNotFound);
     final physical = jsonLoads('${raw['physical_reference_json']}');
     final chemicalMap = jsonLoads('${raw['chemical_reference_json']}');
@@ -64,13 +67,13 @@ class ReferenceRepo {
       'active': raw['active'],
       'next_entry_code':
           await generateEntryCode('${raw['material_code']}',
-              inspectionDate ?? todayIso()),
+              inspectionDate ?? todayIso(), exec: exec),
     };
     return material;
   }
 
-  Future<Map<String, String>> _params() async {
-    final db = await _db;
+  Future<Map<String, String>> _params({DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     final rows = await db.query('parameters', columns: ['parameter_name', 'unit']);
     return {for (final r in rows) '${r['parameter_name']}': '${r['unit'] ?? ''}'};
   }
@@ -163,8 +166,9 @@ class ReferenceRepo {
 
   // ── Entry code ────────────────────────────────────────────────
 
-  Future<String> generateEntryCode(String materialCode, String inspectionDate) async {
-    final db = await _db;
+  Future<String> generateEntryCode(String materialCode, String inspectionDate,
+      {DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     final dateFragment = inspectionDate.replaceAll('-', '');
     final prefix = '$materialCode-$dateFragment-';
     final rows = await db.rawQuery(

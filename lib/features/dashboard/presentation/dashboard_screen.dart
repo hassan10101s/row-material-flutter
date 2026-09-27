@@ -9,6 +9,7 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
+import '../../../design_system/widgets/app_skeleton.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../design_system/widgets/app_summary_card.dart';
 import 'cubit/dashboard_cubit.dart';
@@ -45,11 +46,8 @@ class DashboardScreen extends StatelessWidget {
           // Quick Action Buttons
           const _QuickActionsBar(),
           const SizedBox(height: AppSpacing.lg),
-          if (state.loading)
-            const Padding(
-              padding: EdgeInsets.all(60),
-              child: Center(child: CircularProgressIndicator()),
-            )
+          if (state.loading && state.summary == null)
+            const AppSkeletonList(rows: 4, lines: 3, height: 360)
           else if (state.error != null)
             AppEmptyState(
               icon: Icons.error_outline,

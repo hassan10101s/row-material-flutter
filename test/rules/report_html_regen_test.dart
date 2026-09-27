@@ -43,11 +43,11 @@ void main() {
       'imported_at': nowIso(),
     });
     await db.insert('users', {
-      'username': 'inspector',
+      'id': 1,
+      'email': 'inspector@lab.test',
       'full_name': 'Ahmed Ali',
-      'password_hash': 'x',
-      'role': 'Admin',
-      'is_active': 1,
+      'role': 'admin',
+      'status': 'active',
       'created_at': nowIso(),
     });
 

@@ -4,8 +4,12 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/auth_gate.dart';
+import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/locale/locale_service.dart';
+import '../../../core/network/connectivity_service.dart';
+import '../../../core/sync/sync_metadata.dart';
+import '../../../core/sync/sync_queue.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_feedback.dart';
@@ -13,6 +17,8 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../di/service_locator.dart';
 import '../../auth/domain/user.dart';
+import '../../sync/presentation/sync_badge.dart';
+import '../../sync/presentation/sync_status_controller.dart';
 
 /// Application shell: RTL sidebar + topbar + content panel.
 /// Mirrors web/src/50_shell.js (AppShell).
@@ -33,8 +39,22 @@ class _NavEntry {
 
 class _AppShellState extends State<AppShell> {
   bool _navOpen = false;
+  final SyncStatusController _syncStatus = SyncStatusController(
+    queue: getIt<SyncQueue>(),
+    metadata: getIt<SyncMetadata>(),
+    isOnline: () => getIt<ConnectivityService>().isOnline,
+    connectivityChanges: getIt<ConnectivityService>().onStatusChange,
+  )..start();
+
+  @override
+  void dispose() {
+    _syncStatus.dispose();
+    super.dispose();
+  }
 
   List<_NavEntry> _navEntries(User user) {
+    // Sync and Members are no longer top-level destinations: both live in
+    // Settings now (`/settings?tab=sync`, `/settings?tab=members`).
     final entries = <_NavEntry>[
       _NavEntry('/dashboard', AppStrings.dashboard, Icons.dashboard_outlined),
       _NavEntry('/inspections', AppStrings.inspections, Icons.history),
@@ -42,17 +62,46 @@ class _AppShellState extends State<AppShell> {
       _NavEntry('/lab', AppStrings.lab, Icons.biotech_outlined),
     ];
     if (user.canSeeSettings) {
-      entries.add(_NavEntry('/reference', AppStrings.reference, Icons.book_outlined));
-      entries.add(_NavEntry('/settings', AppStrings.settings, Icons.settings_outlined));
+      entries.add(
+        _NavEntry('/reference', AppStrings.reference, Icons.book_outlined),
+      );
+      entries.add(
+        _NavEntry('/settings', AppStrings.settings, Icons.settings_outlined),
+      );
+    }
+    if (getIt<AuthGate>().session.permissions.contains(Permission.auditRead)) {
+      entries.add(
+        _NavEntry(
+          '/audit',
+          AppText.t('سجل التدقيق', 'Audit trail'),
+          Icons.history_toggle_off,
+        ),
+      );
     }
     return entries;
   }
 
   Future<void> _logout() async {
     try {
-      getIt<AuthGate>().auth.logout();
+      await getIt<AuthGate>().auth.signOut();
     } on AppError {
       // best effort
+    } on Object {
+      // best effort: the local session is cleared even if the network fails
+    }
+    getIt<AuthGate>().updated();
+    if (mounted) context.go('/login');
+  }
+
+  /// Signs out of this device only (plan §14-P9.1): the member stays active and
+  /// their other devices keep working.
+  Future<void> _logoutThisDevice() async {
+    try {
+      await getIt<AuthGate>().auth.signOutThisDevice();
+    } on AppError {
+      // best effort
+    } on Object {
+      // best effort: the local session is cleared even if the network fails
     }
     getIt<AuthGate>().updated();
     if (mounted) context.go('/login');
@@ -74,6 +123,7 @@ class _AppShellState extends State<AppShell> {
       listenable: Listenable.merge([
         getIt<LocaleService>(),
         getIt<ThemeService>(),
+        _syncStatus,
       ]),
       builder: (context, _) => _build(context, user),
     );
@@ -92,6 +142,7 @@ class _AppShellState extends State<AppShell> {
         context.go(path);
       },
       onLogout: _logout,
+      onLogoutThisDevice: _logoutThisDevice,
       onOpenPdfFolder: _openPdfFolder,
     );
 
@@ -107,16 +158,20 @@ class _AppShellState extends State<AppShell> {
               width: 280.w,
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                border: Border(
-                  left: BorderSide(color: AppColors.borderMuted),
-                ),
+                border: Border(left: BorderSide(color: AppColors.borderMuted)),
               ),
               child: drawer,
             ),
             Expanded(
               child: Column(
                 children: [
-                  _TopBar(onMenu: () {}, user: user, showMenuButton: false),
+                  _TopBar(
+                    onMenu: () {},
+                    user: user,
+                    showMenuButton: false,
+                    syncStatus: _syncStatus.status,
+                    onOpenSync: () => context.go('/settings?tab=sync'),
+                  ),
                   Expanded(child: widget.child),
                 ],
               ),
@@ -133,9 +188,12 @@ class _AppShellState extends State<AppShell> {
             Column(
               children: [
                 _TopBar(
-                    onMenu: () => setState(() => _navOpen = true),
-                    user: user,
-                    showMenuButton: true),
+                  onMenu: () => setState(() => _navOpen = true),
+                  user: user,
+                  showMenuButton: true,
+                  syncStatus: _syncStatus.status,
+                  onOpenSync: () => context.go('/settings?tab=sync'),
+                ),
                 Expanded(child: widget.child),
               ],
             ),
@@ -152,7 +210,10 @@ class _AppShellState extends State<AppShell> {
                         ),
                       ),
                     ),
-                    SizedBox(width: 280.w, child: Material(child: drawer)),
+                    SizedBox(
+                      width: 280.w,
+                      child: Material(child: drawer),
+                    ),
                   ],
                 ),
               ),
@@ -161,10 +222,7 @@ class _AppShellState extends State<AppShell> {
       );
     }
 
-    return CallbackShortcuts(
-      bindings: _shortcuts(entries),
-      child: body,
-    );
+    return CallbackShortcuts(bindings: _shortcuts(entries), child: body);
   }
 
   Map<ShortcutActivator, VoidCallback> _shortcuts(List<_NavEntry> entries) {
@@ -198,9 +256,13 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onMenu;
   final User user;
   final bool showMenuButton;
+  final SyncBadgeStatus syncStatus;
+  final VoidCallback onOpenSync;
   const _TopBar({
     required this.onMenu,
     required this.user,
+    required this.syncStatus,
+    required this.onOpenSync,
     this.showMenuButton = true,
   });
 
@@ -247,7 +309,7 @@ class _TopBar extends StatelessWidget {
                 color: AppColors.primary,
               ),
             ),
-            if (user.isDeveloper) ...[
+            if (user.isReadOnly) ...[
               const SizedBox(width: 12),
               Container(
                 padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
@@ -255,11 +317,19 @@ class _TopBar extends StatelessWidget {
                   color: AppColors.warning.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Text('Developer',
-                    style:
-                        TextStyle(fontSize: 12.spMax, color: AppColors.warning)),
+                child: Text(
+                  AppRoles.label(user.role),
+                  style: TextStyle(
+                    fontSize: 12.spMax,
+                    color: AppColors.warning,
+                  ),
+                ),
               ),
             ],
+            const SizedBox(width: 10),
+            // §14-P8.1 the badge is the visible proof of the offline-first
+            // state: connection, work waiting, last exchange.
+            SyncBadge(status: syncStatus, onTap: onOpenSync),
           ],
         ),
       ),
@@ -273,6 +343,9 @@ class _Sidebar extends StatelessWidget {
   final String currentPath;
   final ValueChanged<String> onSelect;
   final VoidCallback onLogout;
+
+  /// "Sign out of this device only" (plan §14-P9.1).
+  final VoidCallback onLogoutThisDevice;
   final VoidCallback onOpenPdfFolder;
 
   const _Sidebar({
@@ -281,6 +354,7 @@ class _Sidebar extends StatelessWidget {
     required this.currentPath,
     required this.onSelect,
     required this.onLogout,
+    required this.onLogoutThisDevice,
     required this.onOpenPdfFolder,
   });
 
@@ -301,12 +375,17 @@ class _Sidebar extends StatelessWidget {
                     children: [
                       Icon(Icons.science, size: 44.r, color: AppColors.primary),
                       const SizedBox(height: 8),
-                      Text(AppStrings.appTitle,
-                          style: Theme.of(context).textTheme.titleLarge),
+                      Text(
+                        AppStrings.appTitle,
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                       Text(
                         AppStrings.tagline,
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 12.spMax,
+                        ),
                       ),
                       const SizedBox(height: AppSpacing.md),
                       Container(
@@ -314,7 +393,10 @@ class _Sidebar extends StatelessWidget {
                           color: AppColors.surfaceSoft,
                           borderRadius: BorderRadius.circular(12.r),
                         ),
-                        padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 12.w,
+                          vertical: 10.h,
+                        ),
                         child: Row(
                           children: [
                             CircleAvatar(
@@ -323,8 +405,13 @@ class _Sidebar extends StatelessWidget {
                               child: Text(
                                 user.fullName.isEmpty
                                     ? '?'
-                                    : user.fullName.substring(0, 1).toUpperCase(),
-                                style: TextStyle(color: Colors.white, fontSize: 16.spMax),
+                                    : user.fullName
+                                          .substring(0, 1)
+                                          .toUpperCase(),
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16.spMax,
+                                ),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -332,18 +419,32 @@ class _Sidebar extends StatelessWidget {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(user.fullName,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                          fontWeight: FontWeight.w600, fontSize: 14.spMax)),
+                                  Text(
+                                    user.fullName,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14.spMax,
+                                    ),
+                                  ),
                                   Text(
                                     '${user.username} — ${user.role}',
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
-                                        color: AppColors.textMuted, fontSize: 11.spMax),
+                                      color: AppColors.textMuted,
+                                      fontSize: 11.spMax,
+                                    ),
                                   ),
                                 ],
                               ),
+                            ),
+                            IconButton(
+                              tooltip: AppText.t(
+                                'تسجيل الخروج من هذا الجهاز فقط',
+                                'Sign out of this device only',
+                              ),
+                              onPressed: onLogoutThisDevice,
+                              icon: Icon(Icons.phone_iphone, size: 18.r),
                             ),
                             IconButton(
                               tooltip: AppText.t('تسجيل الخروج', 'Logout'),
@@ -420,10 +521,7 @@ class _FloatingRound extends StatelessWidget {
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: onPressed,
-          child: Padding(
-            padding: const EdgeInsets.all(9),
-            child: child,
-          ),
+          child: Padding(padding: const EdgeInsets.all(9), child: child),
         ),
       ),
     );
@@ -451,13 +549,18 @@ class _NavItem extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         decoration: BoxDecoration(
-          color: active ? AppColors.primary.withValues(alpha: 0.12) : Colors.transparent,
+          color: active
+              ? AppColors.primary.withValues(alpha: 0.12)
+              : Colors.transparent,
           borderRadius: BorderRadius.circular(10.r),
         ),
         child: Row(
           children: [
-            Icon(icon,
-                size: 18.r, color: active ? AppColors.primary : AppColors.textMuted),
+            Icon(
+              icon,
+              size: 18.r,
+              color: active ? AppColors.primary : AppColors.textMuted,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(

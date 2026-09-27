@@ -6,11 +6,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/app/auth_gate.dart';
+import 'package:material_lab/core/auth/app_session.dart';
+import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/utils/app_exceptions.dart';
-import 'package:material_lab/features/auth/data/auth_repo.dart';
+import 'package:material_lab/features/auth/data/auth_repository.dart';
 import 'package:material_lab/features/auth/domain/user.dart';
 import 'package:material_lab/features/auth/presentation/cubit/login_cubit.dart';
-import 'package:material_lab/features/auth/presentation/cubit/setup_cubit.dart';
+import 'package:material_lab/features/auth/presentation/cubit/create_organization_cubit.dart';
+import 'package:material_lab/features/auth/presentation/cubit/login_state.dart';
 import 'package:material_lab/features/backup/data/backup_manager.dart';
 import 'package:material_lab/features/dashboard/data/dashboard_repo.dart';
 import 'package:material_lab/features/dashboard/presentation/cubit/dashboard_cubit.dart';
@@ -35,9 +38,11 @@ import 'package:material_lab/features/reports/presentation/cubit/reports_cubit.d
 import 'package:material_lab/features/settings/data/settings_repo.dart';
 import 'package:material_lab/features/settings/presentation/cubit/database_settings_cubit.dart';
 import 'package:material_lab/features/settings/presentation/cubit/general_settings_cubit.dart';
-import 'package:material_lab/features/settings/presentation/cubit/users_cubit.dart';
+import 'package:material_lab/features/organizations/data/firestore_organization_repository.dart';
+import 'package:material_lab/features/organizations/domain/organization_repository.dart';
 
-class _AuthRepoMock extends Mock implements AuthRepo {}
+class _AuthRepositoryMock extends Mock implements AuthRepository {}
+class _OrganizationRepositoryMock extends Mock implements OrganizationRepository {}
 class _AuthGateMock extends Mock implements AuthGate {}
 class _DashboardRepoMock extends Mock implements DashboardRepo {}
 class _InspectionRepoMock extends Mock implements InspectionRepo {}
@@ -47,7 +52,6 @@ class _SettingsRepoMock extends Mock implements SettingsRepo {}
 class _BackupManagerMock extends Mock implements BackupManager {}
 class _LabRepoMock extends Mock implements LabRepo {}
 
-const _user = User(username: 'u', fullName: 'U', role: 'Admin', createdAt: 'now');
 
 ReportDoc _doc(String name) =>
     ReportDoc(filename: name, bytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46]));
@@ -59,89 +63,124 @@ void main() {
     registerFallbackValue(ReportDoc(filename: '', bytes: Uint8List.fromList([])));
   });
 
-  group('LoginCubit', () {
-    late _AuthRepoMock auth;
+  group('LoginCubit (Google)', () {
+    late _AuthRepositoryMock auth;
     late _AuthGateMock gate;
     late LoginCubit cubit;
 
     setUp(() {
-      auth = _AuthRepoMock();
+      auth = _AuthRepositoryMock();
       gate = _AuthGateMock();
+      when(() => auth.state).thenReturn(AuthState.ready);
+      when(() => auth.missingConfiguration).thenReturn(const []);
+      when(() => gate.updated()).thenReturn(null);
       cubit = LoginCubit(auth: auth, gate: gate);
     });
 
     tearDown(() => cubit.close());
 
-    test('submits, notifies gate and succeeds', () async {
-      when(() => auth.login(username: 'u', password: 'p'))
-          .thenAnswer((_) async => _user);
-      when(() => gate.updated()).thenReturn(null);
+    test('signs in, notifies the gate and succeeds', () async {
+      when(auth.signInWithGoogle).thenAnswer((_) async {});
 
-      final ok = await cubit.submit(username: 'u', password: 'p');
+      final ok = await cubit.signIn();
 
       expect(ok, isTrue);
       expect(cubit.state.busy, isFalse);
       expect(cubit.state.error, isNull);
-      verify(() => auth.login(username: 'u', password: 'p')).called(1);
+      verify(auth.signInWithGoogle).called(1);
       verify(() => gate.updated()).called(1);
     });
 
-    test('surfaces AppError and fails', () async {
-      when(() => auth.login(username: 'u', password: 'p'))
-          .thenThrow(const AppError('bad login'));
-      when(() => gate.updated()).thenReturn(null);
+    test('reports a cancelled sign-in as an error', () async {
+      when(auth.signInWithGoogle).thenThrow(const AuthFailure('cancelled', code: 'cancelled'));
 
-      final ok = await cubit.submit(username: 'u', password: 'p');
+      final ok = await cubit.signIn();
 
       expect(ok, isFalse);
-      expect(cubit.state.error, 'bad login');
+      expect(cubit.state.status, LoginStatus.error);
+      expect(cubit.state.error, 'cancelled');
       verifyNever(() => gate.updated());
     });
 
+    test('missing Firebase configuration is shown, not thrown', () async {
+      when(() => auth.missingConfiguration).thenReturn(const ['GOOGLE_WEB_CLIENT_ID']);
+      when(auth.signInWithGoogle).thenThrow(const AuthFailure('no config', code: 'missing_config'));
+
+      final ok = await cubit.signIn();
+
+      expect(ok, isFalse);
+      expect(cubit.state.status, LoginStatus.firebaseUnavailable);
+      expect(cubit.state.missingConfiguration, ['GOOGLE_WEB_CLIENT_ID']);
+    });
+
+    test('applyBootstrap() switches to the configuration state', () {
+      when(() => auth.missingConfiguration).thenReturn(const ['FIREBASE_API_KEY']);
+
+      cubit.applyBootstrap();
+
+      expect(cubit.state.status, LoginStatus.firebaseUnavailable);
+      expect(cubit.state.missingConfiguration, ['FIREBASE_API_KEY']);
+    });
+
     test('safeEmit tolerates a closed cubit', () async {
-      when(() => auth.login(username: 'u', password: 'p'))
-          .thenAnswer((_) async => _user);
-      when(() => gate.updated()).thenReturn(null);
+      when(auth.signInWithGoogle).thenAnswer((_) async {});
       await cubit.close();
-      final ok = await cubit.submit(username: 'u', password: 'p');
+      final ok = await cubit.signIn();
       expect(ok, isTrue);
     });
   });
 
-  group('SetupCubit', () {
-    test('creates the first admin', () async {
-      final auth = _AuthRepoMock();
-      final gate = _AuthGateMock();
-      when(() => auth.createAdmin(
-            username: 'admin',
-            fullName: 'Admin',
-            password: 'pw',
-            role: 'Developer',
-            usageExpiryDate: any(named: 'usageExpiryDate'),
-          )).thenAnswer((_) async => _user);
-      when(() => gate.updated()).thenReturn(null);
+  group('CreateOrganizationCubit', () {
+    late _AuthRepositoryMock auth;
+    late _AuthGateMock gate;
+    late _OrganizationRepositoryMock orgs;
+    late CreateOrganizationCubit cubit;
 
-      final cubit = SetupCubit(auth: auth, gate: gate);
-      final ok = await cubit.createAdmin(
-        username: 'admin',
-        fullName: 'Admin',
-        password: 'pw',
-        role: 'Developer',
-      );
+    setUp(() {
+      auth = _AuthRepositoryMock();
+      gate = _AuthGateMock();
+      orgs = _OrganizationRepositoryMock();
+      when(() => gate.updated()).thenReturn(null);
+      when(auth.resolveProfile).thenAnswer((_) async => AuthState.ready);
+      cubit = CreateOrganizationCubit(auth: auth, organizations: orgs, gate: gate);
+    });
+
+    tearDown(() => cubit.close());
+
+    test('creates the organization and resolves the profile', () async {
+      when(() => orgs.createOrganization(name: 'Acme'))
+          .thenAnswer((_) async => 'org_ABC');
+
+      cubit.setName('Acme');
+      final ok = await cubit.submit();
+
       expect(ok, isTrue);
+      verify(() => orgs.createOrganization(name: 'Acme')).called(1);
+      verify(auth.resolveProfile).called(1);
+      verify(() => gate.updated()).called(1);
+    });
+
+    test('rejects an empty organization name locally', () async {
+      final ok = await cubit.submit();
+      expect(ok, isFalse);
+      expect(cubit.state.error, isNotNull);
+      verifyNever(() => orgs.createOrganization(name: any(named: 'name')));
+    });
+
+    test('surfaces OrganizationFailure (e.g. invite not found)', () async {
+      cubit.useInvite();
+      cubit.setInviteCode('org_MISSING');
+      when(() => orgs.joinWithInvite(organizationId: 'org_MISSING'))
+          .thenThrow(const OrganizationFailure('no invite', code: 'invite_not_found'));
+
+      final ok = await cubit.submit();
+
+      expect(ok, isFalse);
+      expect(cubit.state.error, 'no invite');
       expect(cubit.state.busy, isFalse);
-      expect(cubit.state.error, isNull);
-      await cubit.close();
-    });
-
-    test('fail() stores the validation message', () async {
-      final cubit =
-          SetupCubit(auth: _AuthRepoMock(), gate: _AuthGateMock());
-      cubit.fail('Password too short');
-      expect(cubit.state.error, 'Password too short');
-      await cubit.close();
     });
   });
+
 
   group('DashboardCubit', () {
     test('loads summary, KPIs and filter options', () async {
@@ -424,37 +463,45 @@ void main() {
     });
   });
 
-  group('UsersCubit', () {
-    test('loads users', () async {
-      final repo = _SettingsRepoMock();
-      when(() => repo.listUsers()).thenAnswer((_) async => [_user]);
-
-      final cubit = UsersCubit(repo: repo);
-      await cubit.load();
-
-      expect(cubit.state.loading, isFalse);
-      expect(cubit.state.users, hasLength(1));
-      await cubit.close();
+  group('member permissions (V2 replacement of UsersCubit)', () {
+    test('a viewer is read-only and cannot manage members', () {
+      const viewer = User(
+        email: 'v@lab.test',
+        role: 'viewer',
+        status: 'active',
+      );
+      expect(viewer.isReadOnly, isTrue);
+      expect(viewer.canEditUsers, isFalse);
+      expect(viewer.canSeeSettings, isFalse);
+      expect(viewer.permissions, isNotEmpty); // reads only
     });
 
-    test('creates a user and reloads the list', () async {
-      final repo = _SettingsRepoMock();
-      when(() => repo.createUser(
-            username: any(named: 'username'),
-            fullName: any(named: 'fullName'),
-            password: any(named: 'password'),
-            role: any(named: 'role'),
-          )).thenAnswer((_) async => _user);
-      when(() => repo.listUsers()).thenAnswer((_) async => [_user]);
+    test('an admin can manage members and organization settings', () {
+      const admin = User(email: 'a@lab.test', role: 'admin', status: 'active');
+      expect(admin.isReadOnly, isFalse);
+      expect(admin.canEditUsers, isTrue);
+      expect(admin.canManageSettings, isTrue);
+      expect(admin.canApproveQuality, isTrue);
+    });
 
-      final cubit = UsersCubit(repo: repo);
-      final ok = await cubit.createUser(
-          username: 'x', fullName: 'X', password: 'pw', role: 'Lab User');
-
-      expect(ok, isTrue);
-      expect(cubit.state.busy, isFalse);
-      expect(cubit.state.users, hasLength(1));
-      await cubit.close();
+    test('an invited member keeps zero write permissions locally', () {
+      const invited = User(
+        email: 'i@lab.test',
+        role: 'lab',
+        status: 'invited',
+      );
+      // The permissions matrix still lists `samples.create`, but
+      // `AppSession.canDo` refuses it while the status is not active.
+      expect(invited.canCreateInspection, isTrue);
+      const session = AppSession(
+        uid: 'u1',
+        email: 'i@lab.test',
+        role: 'lab',
+        status: 'invited',
+      );
+      expect(session.isActiveMember, isFalse);
+      expect(session.canWrite, isFalse);
+      expect(session.canDo(Permission.samplesCreate), isFalse);
     });
   });
 

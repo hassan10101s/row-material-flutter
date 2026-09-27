@@ -106,4 +106,38 @@ class AppSkeletonList extends StatelessWidget {
   }
 }
 
+/// A 2px progress bar for a *refresh* — a load that already has data on screen.
+///
+/// Screens used to swap their whole body for a centred
+/// [CircularProgressIndicator] whenever their cubit reported `loading: true`.
+/// [AppPage] adds no overlay of its own, so that swap replaced the entire
+/// content panel and read as "the whole program is loading" every time a tab
+/// was opened.
+///
+/// The replacement is a two-state pattern, applied uniformly:
+///
+///  * **first load** (`loading` and nothing to show yet) — an [AppSkeletonList]
+///    stands in for the data area, while the shell, filters and buttons stay
+///    put and usable, so the app never looks frozen;
+///  * **refresh** (`loading` with data already present) — the stale content
+///    stays on screen and interactive, with this bar as the only progress cue.
+///
+/// Pair it with a `hasData` check against real content, e.g.
+/// `loading && rows.isEmpty`, otherwise a refresh blanks the screen again.
+class AppRefreshBar extends StatelessWidget {
+  const AppRefreshBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: LinearProgressIndicator(
+        minHeight: 2,
+        backgroundColor: Colors.transparent,
+        color: AppColors.primary,
+      ),
+    );
+  }
+}
+
 const EdgeInsets zero = EdgeInsets.zero;
