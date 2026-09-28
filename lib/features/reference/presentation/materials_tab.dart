@@ -5,6 +5,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -13,6 +14,7 @@ import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
 import '../../../design_system/widgets/app_field.dart';
 import 'cubit/reference_cubit.dart';
+import 'cubit/reference_state.dart';
 import 'material_editor.dart';
 
 /// Reference materials list (search + add/edit/delete) — port of the
@@ -60,7 +62,7 @@ class _MaterialsTabState extends State<MaterialsTab> {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
@@ -79,59 +81,60 @@ class _MaterialsTabState extends State<MaterialsTab> {
   Widget build(BuildContext context) {
     final state = context.watch<ReferenceCubit>().state;
     final rows = _filtered(state.materials);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(AppText.t('المواد المرجعية', 'Reference Materials'),
-                style: Theme.of(context).textTheme.titleLarge),
-            const Spacer(),
-            AppButton(
-              small: true,
-              icon: Icon(Icons.add, size: 16.r),
-              label: AppText.t('إضافة مادة', 'Add New Material'),
-              onPressed: () => _openEditor(),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        SizedBox(
-          width: 320.w,
-          child: AppField(
-            label: AppText.t('بحث بالاسم أو الكود', 'Search by name or code...'),
-            controller: _searchCtrl,
-            onChanged: (_) => setState(() {}),
+    return AppErrorFeedback<ReferenceCubit, ReferenceState>(
+      selector: (s) => s.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(AppText.t('المواد المرجعية', 'Reference Materials'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              const Spacer(),
+              AppButton(
+                small: true,
+                icon: Icon(Icons.add, size: 16.r),
+                label: AppText.t('إضافة مادة', 'Add New Material'),
+                onPressed: () => _openEditor(),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading && state.materials.isEmpty)
-          const AppSkeletonList(rows: 6, lines: 3, height: 380)
-        else if (state.error != null)
-          Text(state.error!, style: TextStyle(color: AppColors.danger))
+          const SizedBox(height: AppSpacing.md),
+          SizedBox(
+            width: 320.w,
+            child: AppField(
+              label: AppText.t('بحث بالاسم أو الكود', 'Search by name or code...'),
+              controller: _searchCtrl,
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (state.loading && state.materials.isEmpty)
+            const AppSkeletonList(rows: 6, lines: 3, height: 380)
         else if (rows.isEmpty)
-          AppEmptyState(
-            icon: Icons.book_outlined,
-            title: state.materials.isEmpty
-                ? AppText.t('لا توجد مواد', 'No materials found.')
-                : AppText.t('لا توجد نتائج مطابقة', 'No matching materials.'),
-            subtitle: state.materials.isEmpty
-                ? AppText.t('أضف مادة جديدة أو استوردها من Reference.xlsx.',
-                    'Add a new material or import from Reference.xlsx.')
-                : AppText.t('جرّب مسح البحث.', 'Try clearing the search.'),
-          )
-        else
-          Flexible(
-            child: AppCard(
-              padding: EdgeInsets.zero,
-              child: ListView.builder(
+            AppEmptyState(
+              icon: Icons.book_outlined,
+              title: state.materials.isEmpty
+                  ? AppText.t('لا توجد مواد', 'No materials found.')
+                  : AppText.t('لا توجد نتائج مطابقة', 'No matching materials.'),
+              subtitle: state.materials.isEmpty
+                  ? AppText.t('أضف مادة جديدة أو استوردها من Reference.xlsx.',
+                      'Add a new material or import from Reference.xlsx.')
+                  : AppText.t('جرّب مسح البحث.', 'Try clearing the search.'),
+            )
+          else
+            Flexible(
+              child: AppCard(
                 padding: EdgeInsets.zero,
-                itemCount: rows.length,
-                itemBuilder: (context, i) => _tile(context, rows[i]),
+                child: ListView.builder(
+                  padding: EdgeInsets.zero,
+                  itemCount: rows.length,
+                  itemBuilder: (context, i) => _tile(context, rows[i]),
+                ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 

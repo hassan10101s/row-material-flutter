@@ -115,35 +115,42 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  /// The listenables that only the chrome (topbar, sidebar) depends on.
+  ///
+  /// `main.dart` already rebuilds `MaterialApp.router` when the theme or the
+  /// locale changes, so the shell itself does not have to: listening here too
+  /// meant the whole subtree - including the routed page in [AppShell.child] -
+  /// was rebuilt twice per toggle.
+  static Listenable get _chromeListenables => Listenable.merge([
+        getIt<LocaleService>(),
+        getIt<ThemeService>(),
+      ]);
+
   @override
   Widget build(BuildContext context) {
     final user = getIt<AuthGate>().currentUser;
     if (user == null) return const SizedBox.shrink();
-    return ListenableBuilder(
-      listenable: Listenable.merge([
-        getIt<LocaleService>(),
-        getIt<ThemeService>(),
-        _syncStatus,
-      ]),
-      builder: (context, _) => _build(context, user),
-    );
+    return _build(context, user);
   }
 
   Widget _build(BuildContext context, User user) {
     final entries = _navEntries(user);
     final currentPath = GoRouterState.of(context).uri.path;
 
-    final drawer = _Sidebar(
-      user: user,
-      entries: entries,
-      currentPath: currentPath,
-      onSelect: (path) {
-        setState(() => _navOpen = false);
-        context.go(path);
-      },
-      onLogout: _logout,
-      onLogoutThisDevice: _logoutThisDevice,
-      onOpenPdfFolder: _openPdfFolder,
+    final drawer = ListenableBuilder(
+      listenable: _chromeListenables,
+      builder: (context, _) => _Sidebar(
+        user: user,
+        entries: entries,
+        currentPath: currentPath,
+        onSelect: (path) {
+          setState(() => _navOpen = false);
+          context.go(path);
+        },
+        onLogout: _logout,
+        onLogoutThisDevice: _logoutThisDevice,
+        onOpenPdfFolder: _openPdfFolder,
+      ),
     );
 
     final Widget body;
@@ -169,7 +176,7 @@ class _AppShellState extends State<AppShell> {
                     onMenu: () {},
                     user: user,
                     showMenuButton: false,
-                    syncStatus: _syncStatus.status,
+                    syncStatus: _syncStatus,
                     onOpenSync: () => context.go('/settings?tab=sync'),
                   ),
                   Expanded(child: widget.child),
@@ -191,7 +198,7 @@ class _AppShellState extends State<AppShell> {
                   onMenu: () => setState(() => _navOpen = true),
                   user: user,
                   showMenuButton: true,
-                  syncStatus: _syncStatus.status,
+                  syncStatus: _syncStatus,
                   onOpenSync: () => context.go('/settings?tab=sync'),
                 ),
                 Expanded(child: widget.child),
@@ -256,7 +263,7 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onMenu;
   final User user;
   final bool showMenuButton;
-  final SyncBadgeStatus syncStatus;
+  final SyncStatusController syncStatus;
   final VoidCallback onOpenSync;
   const _TopBar({
     required this.onMenu,
@@ -268,6 +275,20 @@ class _TopBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Only the bar listens. It is the one widget that renders the counters, the
+    // language label and the theme icon, and the 20s refresh it is driven by
+    // must not rebuild the routed page underneath it.
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        syncStatus,
+        getIt<LocaleService>(),
+        getIt<ThemeService>(),
+      ]),
+      builder: (context, _) => _bar(context),
+    );
+  }
+
+  Widget _bar(BuildContext context) {
     return Material(
       color: AppColors.surface,
       elevation: 0.5,
@@ -329,7 +350,7 @@ class _TopBar extends StatelessWidget {
             const SizedBox(width: 10),
             // §14-P8.1 the badge is the visible proof of the offline-first
             // state: connection, work waiting, last exchange.
-            SyncBadge(status: syncStatus, onTap: onOpenSync),
+            SyncBadge(status: syncStatus.status, onTap: onOpenSync),
           ],
         ),
       ),

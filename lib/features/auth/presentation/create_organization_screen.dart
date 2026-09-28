@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
@@ -49,73 +50,68 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
       builder: (context, state) {
         final cubit = context.read<CreateOrganizationCubit>();
         final isCreate = state.mode == CreateMode.create;
-        return Scaffold(
-          backgroundColor: AppColors.background,
-          body: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: 460.w),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(28),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Icon(Icons.apartment, size: 44.r, color: AppColors.primary),
-                        const SizedBox(height: AppSpacing.md),
-                        Text(
-                          isCreate ? 'إنشاء مؤسسة جديدة' : 'لدي دعوة انضمام',
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.headlineSmall,
-                        ),
-                        const SizedBox(height: AppSpacing.xs),
-                        Text(
-                          isCreate
-                              ? 'أنشئ مؤسسة وسيتم ربط كل عيّناتها ومختبراتها وحساباتها بها.'
-                              : 'أدخل كود المؤسسة الذي أرسله لك مدير المؤسسة.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        if (isCreate)
-                          AppField(
-                            label: 'اسم المؤسسة',
-                            controller: _name,
-                            hint: 'اسم الشركة أو المصنع',
-                            onChanged: cubit.setName,
-                          )
-                        else
-                          AppField(
-                            label: 'كود المؤسسة',
-                            controller: _inviteCode,
-                            hint: 'org_…',
-                            onChanged: cubit.setInviteCode,
-                          ),
-                        if (state.error != null) ...[
+        return AppErrorFeedback<CreateOrganizationCubit, CreateOrganizationState>(
+          selector: (s) => s.error,
+          child: Scaffold(
+            backgroundColor: AppColors.background,
+            body: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: 460.w),
+                  child: Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(28),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Icon(Icons.apartment, size: 44.r, color: AppColors.primary),
                           const SizedBox(height: AppSpacing.md),
                           Text(
-                            state.error!,
+                            isCreate ? 'إنشاء مؤسسة جديدة' : 'لدي دعوة انضمام',
                             textAlign: TextAlign.center,
-                            style: TextStyle(color: AppColors.danger, fontSize: 13.spMax),
+                            style: Theme.of(context).textTheme.headlineSmall,
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          Text(
+                            isCreate
+                                ? 'أنشئ مؤسسة وسيتم ربط كل عيّناتها ومختبراتها وحساباتها بها.'
+                                : 'أدخل كود المؤسسة الذي أرسله لك مدير المؤسسة.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+                          ),
+                          const SizedBox(height: AppSpacing.lg),
+                          if (isCreate)
+                            AppField(
+                              label: 'اسم المؤسسة',
+                              controller: _name,
+                              hint: 'اسم الشركة أو المصنع',
+                              onChanged: cubit.setName,
+                            )
+                          else
+                            AppField(
+                              label: 'كود المؤسسة',
+                              controller: _inviteCode,
+                              hint: 'org_…',
+                              onChanged: cubit.setInviteCode,
+                            ),
+                          const SizedBox(height: AppSpacing.lg),
+                          AppButton(
+                            label: isCreate ? 'إنشاء المؤسسة' : 'انضمام بالدعوة',
+                            expanded: true,
+                            loading: state.busy,
+                            onPressed: state.busy ? null : cubit.submit,
+                          ),
+                          const SizedBox(height: AppSpacing.sm),
+                          TextButton(
+                            onPressed: state.busy
+                                ? null
+                                : () => isCreate ? cubit.useInvite() : cubit.useCreate(),
+                            child: Text(isCreate ? 'لدي دعوة انضمام' : 'إنشاء مؤسسة جديدة'),
                           ),
                         ],
-                        const SizedBox(height: AppSpacing.lg),
-                        AppButton(
-                          label: isCreate ? 'إنشاء المؤسسة' : 'انضمام بالدعوة',
-                          expanded: true,
-                          loading: state.busy,
-                          onPressed: state.busy ? null : cubit.submit,
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        TextButton(
-                          onPressed: state.busy
-                              ? null
-                              : () => isCreate ? cubit.useInvite() : cubit.useCreate(),
-                          child: Text(isCreate ? 'لدي دعوة انضمام' : 'إنشاء مؤسسة جديدة'),
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),

@@ -108,7 +108,7 @@ class LabRepo {
       finalQty,
       finalMinQty,
       description.trim(),
-      user == null ? null : int.parse('${user['id']}'),
+      _userId(user),
       timestamp,
       timestamp,
     ]);
@@ -182,7 +182,7 @@ class LabRepo {
       existing['current_qty'],
       finalQty,
       trimmedReason,
-      user == null ? null : int.parse('${user['id']}'),
+      _userId(user),
       nowIso(),
     ]);
     return getInventoryItem(itemId);
@@ -304,7 +304,7 @@ class LabRepo {
       cleanName,
       category.trim(),
       description.trim(),
-      user == null ? null : int.parse('${user['id']}'),
+      _userId(user),
       nowIso(),
     ]);
     for (final item in ranges ?? []) {
@@ -704,6 +704,17 @@ class LabRepo {
   Map<String, dynamic> _mapOf(Object? v) =>
       v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
 
+  /// Local `users.id` for an author map, or null when the signer-in identity has
+  /// no local roster row. `UserContext.id` is nullable by design since V2, so
+  /// the id - not the map - is what has to be checked before parsing.
+  int? _userId(Map<String, dynamic>? user) {
+    final raw = user?['id'];
+    if (raw == null) return null;
+    if (raw is int) return raw;
+    final parsed = int.tryParse('$raw'.trim());
+    return (parsed == null || parsed <= 0) ? null : parsed;
+  }
+
   // ── Setup / default analyses ──────────────────────────────────
 
   Future<bool> needsSetup() async {
@@ -921,9 +932,9 @@ class LabRepo {
         analysisId, sourceType,
         resolvedSourceRefId, cleanSourceName, cleanSampleName,
         resultText.trim(), jsonDumps(safeDynamics), cleanEntryCode,
-        user == null ? null : int.parse('${user['id']}'),
+        _userId(user),
         nowIso(),
-        user == null ? null : int.parse('${user['id']}'),
+        _userId(user),
         null, null,
       ]);
       final requested = <int, Map<String, Object?>>{};
@@ -1768,12 +1779,15 @@ class LabRepo {
     return analyses;
   }
 
-  Future<Map<int, Map<String, dynamic>>> loadInventoryMap(Set<int> inventoryIds) async {
+  Future<Map<int, Map<String, dynamic>>> loadInventoryMap(
+    DatabaseExecutor? txn,
+    Set<int> inventoryIds,
+  ) async {
     final ids = inventoryIds.toSet().toList()..sort();
     if (ids.isEmpty) return {};
     final qmarks = List.filled(ids.length, '?').join(',');
-    final rows =
-        await (await _db).rawQuery('SELECT * FROM lab_inventory WHERE id IN ($qmarks)', ids);
+    final exec = txn ?? await _db;
+    final rows = await exec.rawQuery('SELECT * FROM lab_inventory WHERE id IN ($qmarks)', ids);
     final found = <int, Map<String, dynamic>>{
       for (final r in rows) int.parse('${r['id']}'): Map<String, dynamic>.from(r),
     };
@@ -1854,7 +1868,7 @@ class LabRepo {
       DatabaseExecutor txn, List<Map<String, dynamic>> rows,
       Map<String, dynamic>? user) async {
     {
-      final userId = user == null ? null : int.parse('${user['id']}');
+      final userId = _userId(user);
       final timestamp = nowIso();
 
       final analysisIds = <int>{};
@@ -1879,7 +1893,7 @@ class LabRepo {
           }
         }
       }
-      final inventoryMap = await loadInventoryMap(consumptionInventoryIds);
+      final inventoryMap = await loadInventoryMap(txn, consumptionInventoryIds);
 
       final consResult = <Map<String, dynamic>>[];
       final lowResult = <Map<String, dynamic>>[];
@@ -2026,7 +2040,7 @@ class LabRepo {
         throw ValidationError(AppErrors.cancelReasonRequired);
       }
       final timestamp = nowIso();
-      final userId = user == null ? null : int.parse('${user['id']}');
+      final userId = _userId(user);
       var reversedCount = 0;
       final tests = await fetchAll(txn,
           'SELECT id FROM lab_sample_tests WHERE worksheet_row_id = ?', [rowId]);

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'audit_logger.dart';import 'audit_trail.dart';
 import 'conflict_resolver.dart';
@@ -263,17 +264,28 @@ class SyncEngine {
       columns: ['id', 'entity_type', 'entity_id', 'local_ref', 'base_version', 'status'],
       where: "status IN ('pending','in_flight')",
     );
+
+    // One `id IN (...)` query per table instead of one per queue row. The old
+    // loop asked the shared background isolate once per entry, so a restore
+    // with a few hundred queued rows spent that many round trips on a lookup
+    // whose answer is a set membership test.
+    final refsByTable = <String, Set<int>>{};
     for (final row in rows) {
       final entity = SyncEntity.byType('${row['entity_type']}');
-      final localRef = row['local_ref'];
+      final localRef = (row['local_ref'] as num?)?.toInt();
       if (entity == null || localRef == null) continue;
-      final local = await db.query(
-        entity.localTable,
-        where: 'id = ?',
-        whereArgs: [localRef],
-        limit: 1,
-      );
-      if (local.isEmpty) {
+      refsByTable.putIfAbsent(entity.localTable, () => <int>{}).add(localRef);
+    }
+    final presentRefs = <String, Set<int>>{};
+    for (final entry in refsByTable.entries) {
+      presentRefs[entry.key] = await _existingRefs(db, entry.key, entry.value);
+    }
+
+    for (final row in rows) {
+      final entity = SyncEntity.byType('${row['entity_type']}');
+      final localRef = (row['local_ref'] as num?)?.toInt();
+      if (entity == null || localRef == null) continue;
+      if (!(presentRefs[entity.localTable]?.contains(localRef) ?? false)) {
         // The restored copy does not contain the row: surface it instead of
         // dropping data silently.
         await db.insert('sync_conflicts', {
@@ -297,17 +309,15 @@ class SyncEngine {
       }
       // The row is there: make sure it is queued for a push even if the queue
       // entry was interrupted mid-flight, so a restored backup cannot strand a
-      // change that the server never saw.
-      final syncState = '${local.first['sync_state'] ?? ''}';
-      if (syncState != 'queued') {
-        await db.update(
-          entity.localTable,
-          {'sync_state': 'queued'},
-          where: 'id = ?',
-          whereArgs: [localRef],
-        );
-        requeued++;
-      }
+      // change that the server never saw. The state is not read back per row
+      // either: anything not already `queued` is stamped, which is idempotent.
+      await db.update(
+        entity.localTable,
+        {'sync_state': 'queued'},
+        where: 'id = ?',
+        whereArgs: [localRef],
+      );
+      requeued++;
     }
     await queue.purgeSolved();
     return RestoreReport(
@@ -317,22 +327,72 @@ class SyncEngine {
     );
   }
 
+  /// Which of [refs] exist in [table], as one `id IN (...)` query.
+  ///
+  /// SQLite caps a host parameter at 999, so long lists are chunked rather than
+  /// silently truncated.
+  static Future<Set<int>> _existingRefs(
+    DatabaseExecutor db,
+    String table,
+    Set<int> refs,
+  ) async {
+    const chunkSize = 500;
+    final present = <int>{};
+    final all = refs.toList(growable: false);
+    for (var offset = 0; offset < all.length; offset += chunkSize) {
+      final end =
+          offset + chunkSize < all.length ? offset + chunkSize : all.length;
+      final chunk = all.sublist(offset, end);
+      final found = await db.query(
+        table,
+        columns: ['id'],
+        where: 'id IN (${List.filled(chunk.length, '?').join(',')})',
+        whereArgs: chunk,
+      );
+      for (final row in found) {
+        present.add((row['id'] as num).toInt());
+      }
+    }
+    return present;
+  }
+
   void markDegraded({bool value = true}) {
     _degraded = value;
     unawaited(_emit());
   }
 
-  Future<SyncStatusSnapshot> _current() async => SyncStatusSnapshot(
-        online: connectivity.isOnline,
-        syncing: _inFlight,
-        pending: await queue.countPending(),
-        blocked: await queue.countBlocked(),
-        conflicts: (await queue.listConflicts(limit: 1000)).length,
-        lastPushAt: await metadata.lastPushAt(),
-        lastPullAt: await metadata.lastPullAt(),
-        lastError: await metadata.lastError().then((e) => e.isEmpty ? null : e),
-        degraded: _degraded,
-      );
+  /// The status snapshot, in **three** round trips instead of six.
+  ///
+  /// `_emit` runs on every sync trigger, every connectivity change and on a
+  /// timer, so this is the hottest read in the app. Each `await` below used to be
+  /// its own message to the one shared background isolate, holding the
+  /// connection's non-reentrant lock for the duration - and the conflicts count
+  /// came from `listConflicts(limit: 1000)`, which pulled a thousand whole rows
+  /// across the isolate boundary to produce an integer.
+  Future<SyncStatusSnapshot> _current() async {
+    final badge = await queue.countBadge();
+    final keys = await metadata.readAll([
+      SyncMetadata.lastPullAtKey,
+      SyncMetadata.lastPushAtKey,
+      SyncMetadata.lastErrorKey,
+    ]);
+    final lastError = keys[SyncMetadata.lastErrorKey] ?? '';
+    return SyncStatusSnapshot(
+      online: connectivity.isOnline,
+      syncing: _inFlight,
+      pending: badge.pending,
+      blocked: badge.blocked,
+      conflicts: badge.conflicts,
+      lastPushAt: _asDate(keys[SyncMetadata.lastPushAtKey]),
+      lastPullAt: _asDate(keys[SyncMetadata.lastPullAtKey]),
+      lastError: lastError.isEmpty ? null : lastError,
+      degraded: _degraded,
+    );
+  }
+
+  static DateTime? _asDate(String? iso) =>
+      (iso == null || iso.isEmpty) ? null : DateTime.tryParse(iso);
+
 
   Future<void> _emit() async {
     if (_disposed || _status.isClosed) return;

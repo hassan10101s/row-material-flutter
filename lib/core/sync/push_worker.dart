@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:math';
 
 import '../auth/app_session.dart';
 import '../auth/session_source.dart';
 import '../auth/permissions.dart';
+import '../database/db_trace.dart';
 import '../utils/app_dates.dart';
 import 'audit_logger.dart';
 import 'entity_registry.dart';
@@ -44,6 +46,7 @@ class PushWorker {
     required this.audit,
     required this.source,
     this.batchSize = 400,
+    this.maxConcurrency = 8,
   });
 
   final SyncQueue queue;
@@ -56,6 +59,15 @@ class PushWorker {
   AppSession get session => source.session;
   final int batchSize;
 
+  /// Upper bound on simultaneous Firestore writes from one device.
+  ///
+  /// 8 keeps a burst of writes under the Firestore per-client limit while
+  /// still overlapping the network latency, which is what the serial version
+  /// was paying in full.
+  final int maxConcurrency;
+
+  int get effectiveConcurrency => min(maxConcurrency, batchSize);
+
   Future<PushReport> runOnce() async {
     if (!remote.isSignedIn) return PushReport.empty;
     final entries = await queue.claim(limit: batchSize);
@@ -67,55 +79,89 @@ class PushWorker {
     var failed = 0;
     String? lastError;
 
+    // Phase 1: the purely local rejections. They cost no network round-trip, so
+    // they are settled on their own instead of occupying a concurrency slot.
+    final sendable = <QueueEntry>[];
+    final settlements = <QueueSettlement>[];
+    final audits = <Future<void> Function()>[];
+
     for (final entry in entries) {
       final entity = entry.entity;
       if (entity == null) {
-        await queue.markConflict(entry,
-            direction: 'push_rejected', error: 'Unknown entity type ${entry.entityType}');
+        settlements.add(QueueSettlement.conflict(
+          entry,
+          direction: 'push_rejected',
+          error: 'Unknown entity type ${entry.entityType}',
+        ));
         conflicts++;
         continue;
       }
       if (!_allowedLocally(entity)) {
-        await queue.markConflict(entry,
-            direction: 'push_rejected', error: 'Permission ${entity.permission} is not granted');
-        await _auditDenied(entry);
+        settlements.add(QueueSettlement.conflict(
+          entry,
+          direction: 'push_rejected',
+          error: 'Permission ${entity.permission} is not granted',
+        ));
+        final target = entry;
+        audits.add(() => _auditDenied(target));
         conflicts++;
         continue;
       }
+      sendable.add(entry);
+    }
 
-      final result = entry.operation == 'tombstone'
-          ? await _pushTombstone(entity, entry)
-          : await _pushDocument(entity, entry);
+    // Phase 2: the network round-trips, at most [maxConcurrency] in flight.
+    // They were fully serial, so a 400-row batch paid 400 round-trip latencies
+    // back to back. Entities are independent documents, so overlapping them is
+    // safe; the cap keeps the socket pool and the Firestore rate limit in view.
+    final results = await _mapWithConcurrency(
+      sendable,
+      effectiveConcurrency,
+      (entry) => _pushOne(entry),
+    );
 
+    for (var i = 0; i < results.length; i++) {
+      final entry = sendable[i];
+      final result = results[i];
       switch (result.kind) {
         case PushResultKind.success:
-          await queue.markDone(entry, remoteVersion: result.version);
+          settlements.add(QueueSettlement.done(entry, remoteVersion: result.version));
           pushed++;
           lastError = null;
         case PushResultKind.permissionDenied:
-          await queue.markConflict(
+          settlements.add(QueueSettlement.conflict(
             entry,
-            direction: entry.operation == 'tombstone' ? 'push_rejected' : 'push_rejected',
+            direction: 'push_rejected',
             remotePayload: result.remote == null ? null : jsonEncode(result.remote),
             error: result.error,
-          );
-          await _logConflict(entry, result.error ?? 'permission denied');
+          ));
+          final target = entry;
+          audits.add(() => _logConflict(target, result.error ?? 'permission denied'));
           conflicts++;
           lastError = result.error;
         case PushResultKind.payloadTooLarge:
-          await queue.markConflict(
+          settlements.add(QueueSettlement.conflict(
             entry,
             direction: 'payload_too_large',
             error: result.error,
-          );
-          await _logConflict(entry, result.error ?? 'payload too large');
+          ));
+          final target = entry;
+          audits.add(() => _logConflict(target, result.error ?? 'payload too large'));
           conflicts++;
           lastError = result.error;
         case PushResultKind.retryable:
-          await queue.markRetry(entry, result.error ?? 'unknown error');
+          settlements.add(QueueSettlement.retry(entry, result.error ?? 'unknown error'));
           retried++;
           lastError = result.error;
       }
+    }
+
+    // Phase 3: one commit for the whole batch. Writing each outcome as it
+    // arrived meant an fsync per entry, and a crash midway left the queue
+    // describing a push that had already happened.
+    await queue.settleAll(settlements);
+    for (final audit in audits) {
+      await audit();
     }
 
     if (pushed > 0) {
@@ -134,6 +180,42 @@ class PushWorker {
       failed: failed,
       lastError: lastError,
     );
+  }
+
+  /// The remote call for one entry, tombstone or document.
+  Future<PushResult> _pushOne(QueueEntry entry) {
+    final entity = entry.entity;
+    if (entity == null) {
+      // Unreachable from [runOnce]: unresolvable entities are rejected locally
+      // before they reach the send phase.
+      return Future.value(PushResult.retryable('Unknown entity type ${entry.entityType}'));
+    }
+    return entry.operation == 'tombstone'
+        ? _pushTombstone(entity, entry)
+        : _pushDocument(entity, entry);
+  }
+
+  /// Applies [action] over [items] with at most [limit] calls in flight,
+  /// preserving input order in the result.
+  static Future<List<R>> _mapWithConcurrency<T, R>(
+    List<T> items,
+    int limit,
+    Future<R> Function(T item) action,
+  ) async {
+    if (items.isEmpty) return const [];
+    final results = List<R?>.filled(items.length, null);
+    var next = 0;
+    Future<void> worker() async {
+      while (true) {
+        final index = next++;
+        if (index >= items.length) return;
+        results[index] = await action(items[index]);
+      }
+    }
+
+    final workers = min(limit, items.length);
+    await Future.wait([for (var i = 0; i < workers; i++) worker()]);
+    return results.cast<R>();
   }
 
   Future<PushResult> _pushDocument(SyncEntity entity, QueueEntry entry) async {
@@ -186,7 +268,7 @@ class PushWorker {
 
   Future<void> _auditDenied(QueueEntry entry) async {
     final db = await queue.dbHelper.database;
-    await db.transaction((txn) async {
+    await tracedTransaction(db, 'push.auditDenied', (txn) async {
       await audit.log(
         txn,
         action: AuditAction.deniedEntry,
@@ -199,7 +281,7 @@ class PushWorker {
 
   Future<void> _logConflict(QueueEntry entry, String error) async {
     final db = await queue.dbHelper.database;
-    await db.transaction((txn) async {
+    await tracedTransaction(db, 'push.auditConflict', (txn) async {
       await audit.log(
         txn,
         action: AuditAction.syncConflict,

@@ -5,6 +5,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../../../core/constants/app_errors.dart';
 import '../../../core/database/database_helper.dart';
+import '../../../core/database/db_trace.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 
@@ -201,8 +202,10 @@ class BackupManager {
     if (await target.exists()) await target.delete();
     await target.parent.create(recursive: true);
 
-    await db.execute('PRAGMA wal_checkpoint(FULL)');
-    await db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'");
+    await DbTrace.run('backup.walCheckpoint',
+        () => db.execute('PRAGMA wal_checkpoint(FULL)'));
+    await DbTrace.run('backup.vacuumInto',
+        () => db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'"));
 
     Database? checkDb;
     try {
@@ -229,8 +232,13 @@ class BackupManager {
       final backupPath = p.join(dir.path, 'material_lab_backup_${fileTimestamp()}.db');
 
       final db = await dbHelper.database;
-      await db.execute('PRAGMA wal_checkpoint(FULL)');
-      await db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'");
+      // Labelled because this runs on every organization bind, on the live
+      // connection, while the UI is already reading: a full-database rewrite
+      // holds the connection for as long as the file takes.
+      await DbTrace.run('autoBackup.walCheckpoint',
+          () => db.execute('PRAGMA wal_checkpoint(FULL)'));
+      await DbTrace.run('autoBackup.vacuumInto',
+          () => db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'"));
 
       Database? checkDb;
       try {

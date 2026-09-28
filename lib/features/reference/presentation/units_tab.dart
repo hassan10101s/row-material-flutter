@@ -5,6 +5,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -12,6 +13,7 @@ import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
 import 'cubit/units_cubit.dart';
+import 'cubit/units_state.dart';
 
 /// Units settings tab — port of the Reference app Units Settings tab
 /// (57_reference_app.js): symbol / name / dimension CRUD on `lab_units`.
@@ -57,96 +59,97 @@ class UnitsTab extends StatelessWidget {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<UnitsCubit>().state;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(AppText.t('إعدادات الوحدات', 'Units Settings'),
-                style: Theme.of(context).textTheme.titleLarge),
-            const Spacer(),
-            AppButton(
-              small: true,
-              icon: Icon(Icons.add, size: 16.r),
-              label: AppText.t('وحدة جديدة', 'New Unit'),
-              onPressed: () => _openEditor(context),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading && state.rows.isEmpty)
-          const AppSkeletonList(rows: 6, lines: 3, height: 380)
-        else if (state.error != null)
-          Text(state.error!, style: TextStyle(color: AppColors.danger))
+    return AppErrorFeedback<UnitsCubit, UnitsState>(
+      selector: (s) => s.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(AppText.t('إعدادات الوحدات', 'Units Settings'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              const Spacer(),
+              AppButton(
+                small: true,
+                icon: Icon(Icons.add, size: 16.r),
+                label: AppText.t('وحدة جديدة', 'New Unit'),
+                onPressed: () => _openEditor(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (state.loading && state.rows.isEmpty)
+            const AppSkeletonList(rows: 6, lines: 3, height: 380)
         else if (state.rows.isEmpty)
-          AppEmptyState(
-            icon: Icons.straighten_outlined,
-            title: AppText.t('لا توجد وحدات.', 'No units found.'),
-            subtitle: AppText.t(
-              'أضف وحدات مثل % و mg/kg و ppm.',
-              'Add units like %, mg/kg, ppm.',
-            ),
-          )
-        else
-          Flexible(
-            child: AppCard(
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: double.infinity,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
+            AppEmptyState(
+              icon: Icons.straighten_outlined,
+              title: AppText.t('لا توجد وحدات.', 'No units found.'),
+              subtitle: AppText.t(
+                'أضف وحدات مثل % و mg/kg و ppm.',
+                'Add units like %, mg/kg, ppm.',
+              ),
+            )
+          else
+            Flexible(
+              child: AppCard(
+                padding: EdgeInsets.zero,
+                child: SizedBox(
+                  width: double.infinity,
                   child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: [
-                        DataColumn(label: Text(AppText.t('الرمز', 'Symbol'))),
-                        DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
-                        DataColumn(label: Text(AppText.t('البعد', 'Dimension'))),
-                        DataColumn(label: Text('')),
-                      ],
-                      rows: [
-                        for (final u in state.rows)
-                          DataRow(
-                            cells: [
-                              DataCell(Text('${u['symbol'] ?? ''}',
-                                  style: const TextStyle(fontWeight: FontWeight.w600))),
-                              DataCell(Text('${u['name'] ?? '-'}')),
-                              DataCell(Text('${u['dimension'] ?? '-'}')),
-                              DataCell(Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    tooltip: AppStrings.edit,
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: () => _openEditor(context, u),
-                                    icon: Icon(Icons.edit_outlined, size: 18.r),
-                                  ),
-                                  IconButton(
-                                    tooltip: AppStrings.delete,
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: () => _delete(context, u),
-                                    icon: Icon(Icons.delete_outline,
-                                        size: 18.r, color: AppColors.danger),
-                                  ),
-                                ],
-                              )),
-                            ],
-                          ),
-                      ],
+                    scrollDirection: Axis.vertical,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columns: [
+                          DataColumn(label: Text(AppText.t('الرمز', 'Symbol'))),
+                          DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
+                          DataColumn(label: Text(AppText.t('البعد', 'Dimension'))),
+                          DataColumn(label: Text('')),
+                        ],
+                        rows: [
+                          for (final u in state.rows)
+                            DataRow(
+                              cells: [
+                                DataCell(Text('${u['symbol'] ?? ''}',
+                                    style: const TextStyle(fontWeight: FontWeight.w600))),
+                                DataCell(Text('${u['name'] ?? '-'}')),
+                                DataCell(Text('${u['dimension'] ?? '-'}')),
+                                DataCell(Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: AppStrings.edit,
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: () => _openEditor(context, u),
+                                      icon: Icon(Icons.edit_outlined, size: 18.r),
+                                    ),
+                                    IconButton(
+                                      tooltip: AppStrings.delete,
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: () => _delete(context, u),
+                                      icon: Icon(Icons.delete_outline,
+                                          size: 18.r, color: AppColors.danger),
+                                    ),
+                                  ],
+                                )),
+                              ],
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -196,7 +199,7 @@ class _UnitDialogState extends State<_UnitDialog> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
 

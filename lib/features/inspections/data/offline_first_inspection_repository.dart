@@ -62,7 +62,7 @@ class OfflineFirstInspectionRepository extends InspectionRepo
   }) async {
     if (exec != null) return super.create(payload, user, exec: exec);
     _check(Permission.samplesCreate);
-    return _inTransaction((txn) async {
+    final row = await _inTransaction((txn) async {
       final row = await super.create(payload, user, exec: txn);
       await _enqueueSample(
         txn,
@@ -74,6 +74,11 @@ class OfflineFirstInspectionRepository extends InspectionRepo
       );
       return row;
     });
+    // After the commit, never inside it: the report builder reads on the root
+    // handle, which a parked-until-commit statement cannot do. See
+    // `InspectionRepo.refreshReportHtml`.
+    await refreshReportHtml((row['id'] as num).toInt());
+    return row;
   }
 
   /// `samples.update` — editing the inspection data.
@@ -86,7 +91,7 @@ class OfflineFirstInspectionRepository extends InspectionRepo
   }) async {
     if (exec != null) return super.update(inspectionId, payload, user, exec: exec);
     _check(Permission.samplesUpdate);
-    return _inTransaction((txn) async {
+    final updated = await _inTransaction((txn) async {
       final row = await super.update(inspectionId, payload, user, exec: txn);
       await _enqueueSample(
         txn,
@@ -98,6 +103,9 @@ class OfflineFirstInspectionRepository extends InspectionRepo
       );
       return row;
     });
+    // See `create`: the report is rendered from committed state.
+    await refreshReportHtml(inspectionId);
+    return updated;
   }
 
   /// A QC decision is privileged ([Permission.qcApprove] / [Permission.qcReject]
@@ -115,7 +123,7 @@ class OfflineFirstInspectionRepository extends InspectionRepo
     final status = '${payload['decision_status'] ?? ''}'.toLowerCase();
     final rejected = status.contains('reject') || status.contains('رفض');
     _check(rejected ? Permission.qcReject : Permission.qcApprove);
-    return _inTransaction((txn) async {
+    final decided = await _inTransaction((txn) async {
       final row = await super.updateStatus(inspectionId, payload, user, exec: txn);
       await _enqueueSample(
         txn,
@@ -131,6 +139,9 @@ class OfflineFirstInspectionRepository extends InspectionRepo
       await _enqueueDecisionHistory(txn, row);
       return row;
     });
+    // See `create`: the report is rendered from committed state.
+    await refreshReportHtml(inspectionId);
+    return decided;
   }
 
   /// A tombstone, not a delete (plan §5/P7.1): the local row survives so the

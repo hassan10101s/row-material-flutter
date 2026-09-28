@@ -2,6 +2,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../auth/app_session.dart';
 import '../auth/session_source.dart';
+import '../database/db_trace.dart';
 import '../utils/app_dates.dart';
 import 'conflict_resolver.dart';
 import 'entity_registry.dart';
@@ -111,8 +112,16 @@ class PullWorker {
           hasMore = hasMore || result.hasMore;
           break;
         }
-        for (final document in result.documents) {
-          final outcome = await _applyDocument(entity, document, organizationId);
+        // One transaction for the whole page instead of one per document.
+        // A page is at most `pageSize` (300) rows, so a single commit is
+        // bounded work, and the page either lands completely or not at all --
+        // which is what the cursor below assumes when it advances.
+        final outcomes = await tracedTransaction(
+          await queue.dbHelper.database,
+          'pull.applyPage(${entity.type})',
+          (txn) => _applyPage(txn, entity, result.documents, organizationId),
+        );
+        for (final outcome in outcomes) {
           switch (outcome) {
             case _ApplyOutcome.applied:
               applied++;
@@ -143,13 +152,30 @@ class PullWorker {
     );
   }
 
+  /// Applies a whole page inside [txn], returning the outcome per document in
+  /// the same order. Runs sequentially because sqflite serialises statements on
+  /// a single connection anyway, and the per-document `Future` bookkeeping in
+  /// [_userIds]/[_columnCache] is keyed on the transaction.
+  Future<List<_ApplyOutcome>> _applyPage(
+    DatabaseExecutor txn,
+    SyncEntity entity,
+    List<RemoteDocument> documents,
+    String organizationId,
+  ) async {
+    final outcomes = <_ApplyOutcome>[];
+    for (final document in documents) {
+      outcomes.add(await _applyDocument(txn, entity, document, organizationId));
+    }
+    return outcomes;
+  }
+
   Future<_ApplyOutcome> _applyDocument(
+    DatabaseExecutor txn,
     SyncEntity entity,
     RemoteDocument document,
     String organizationId,
   ) async {
-    final db = await queue.dbHelper.database;
-    return db.transaction((txn) async {
+    {
       // `localId` first, then the natural key: a document written on another
       // device carries an id that means nothing in this database.
       final localRef =
@@ -230,7 +256,7 @@ class PullWorker {
         whereArgs: [local['id']],
       );
       return _ApplyOutcome.applied;
-    });
+    }
   }
 
   /// Keeps only the keys that are real columns of [entity].localTable.

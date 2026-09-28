@@ -9,9 +9,11 @@ import '../../../core/sync/conflict_resolver.dart';
 import '../../../core/sync/sync_engine.dart';
 import '../../../core/sync/sync_queue.dart';
 import '../../../di/service_locator.dart';
+import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
+import '../../../core/constants/app_strings.dart';
 
 /// SyncScreen (plan P13.4/P25): status, pending/blocked counters, manual
 /// "sync now", and the conflict list with keep-local / keep-remote actions.
@@ -238,10 +240,10 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   void _refuseOffline() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('حل التعارض يحتاج جلسة صالحة واتصال بالإنترنت'),
-      ),
+    AppFeedback.error(
+      context,
+      AppText.t('حل التعارض يحتاج جلسة صالحة واتصال بالإنترنت',
+          'Resolving a conflict needs a valid session and an internet connection'),
     );
   }
 

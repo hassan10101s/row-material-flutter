@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -15,6 +16,7 @@ import '../../../di/service_locator.dart';
 import '../core/formula_engine.dart' show inventoryUnits;
 import '../data/lab_repo.dart';
 import 'cubit/inventory_cubit.dart';
+import 'cubit/inventory_state.dart';
 /// Lab inventory tab (port of LabView inventory list + form).
 class InventoryTab extends StatelessWidget {
   const InventoryTab({super.key});
@@ -45,83 +47,84 @@ class InventoryTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<InventoryCubit>().state;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(AppText.t('المخزون', 'Inventory'), style: Theme.of(context).textTheme.titleLarge),
-            const Spacer(),
-            AppButton(
-              small: true,
-              label: AppText.t('إضافة مادة', 'Add item'),
-              icon: Icon(Icons.add, size: 16.r),
-              onPressed: () => _openAdd(context),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
-          if (state.loading && state.rows.isEmpty) ...[
-            const AppSkeletonList(rows: 6, lines: 3, height: 380),
-          ] else if (state.error != null) ...[
-          Text(state.error!, style: TextStyle(color: AppColors.danger)),
-        ] else if (state.rows.isEmpty) ...[
-          Text(AppText.t('لا توجد مواد', 'No inventory items')),
-        ] else
-          AppCard(
-            padding: EdgeInsets.zero,
-            child: SizedBox(
-              width: double.infinity,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: [
-                    DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
-                    DataColumn(label: Text(AppText.t('النوع', 'Category'))),
-                    DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
-                    DataColumn(label: Text(AppText.t('الكمية', 'Qty'))),
-                    DataColumn(label: Text(AppText.t('الحد الأدنى', 'Min'))),
-                    DataColumn(label: Text(AppText.t('الحالة', 'Status'))),
-                    DataColumn(label: Text('')),
-                  ],
-                  rows: [
-                    for (final r in state.rows)
-                      DataRow(
-                        cells: [
-                          DataCell(Text('${r['name']}')),
-                          DataCell(Text(r['category'] == 'liquid'
-                              ? AppText.t('سائل', 'Liquid')
-                              : AppText.t('مسحوق', 'Powder'))),
-                          DataCell(Text('${r['unit'] ?? ''}')),
-                          DataCell(Text('${r['current_qty'] ?? 0}')),
-                          DataCell(Text('${r['min_qty'] ?? 0}')),
-                          DataCell(_statusCell(r)),
-                          DataCell(Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: AppText.t('تسوية الكمية', 'Adjust'),
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => _openAdjust(context, r),
-                                icon: Icon(Icons.swap_vert, size: 18.r),
-                              ),
-                              IconButton(
-                                tooltip: AppStrings.edit,
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => _openEdit(context, r),
-                                icon: Icon(Icons.edit_outlined, size: 18.r),
-                              ),
-                            ],
-                          )),
-                        ],
-                      ),
-                  ],
+    return AppErrorFeedback<InventoryCubit, InventoryState>(
+      selector: (s) => s.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(AppText.t('المخزون', 'Inventory'), style: Theme.of(context).textTheme.titleLarge),
+              const Spacer(),
+              AppButton(
+                small: true,
+                label: AppText.t('إضافة مادة', 'Add item'),
+                icon: Icon(Icons.add, size: 16.r),
+                onPressed: () => _openAdd(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
+            if (state.loading && state.rows.isEmpty) ...[
+              const AppSkeletonList(rows: 6, lines: 3, height: 380),
+              ] else if (state.rows.isEmpty) ...[
+                Text(AppText.t('لا توجد مواد', 'No inventory items')),
+              ] else
+            AppCard(
+              padding: EdgeInsets.zero,
+              child: SizedBox(
+                width: double.infinity,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columns: [
+                      DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
+                      DataColumn(label: Text(AppText.t('النوع', 'Category'))),
+                      DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
+                      DataColumn(label: Text(AppText.t('الكمية', 'Qty'))),
+                      DataColumn(label: Text(AppText.t('الحد الأدنى', 'Min'))),
+                      DataColumn(label: Text(AppText.t('الحالة', 'Status'))),
+                      DataColumn(label: Text('')),
+                    ],
+                    rows: [
+                      for (final r in state.rows)
+                        DataRow(
+                          cells: [
+                            DataCell(Text('${r['name']}')),
+                            DataCell(Text(r['category'] == 'liquid'
+                                ? AppText.t('سائل', 'Liquid')
+                                : AppText.t('مسحوق', 'Powder'))),
+                            DataCell(Text('${r['unit'] ?? ''}')),
+                            DataCell(Text('${r['current_qty'] ?? 0}')),
+                            DataCell(Text('${r['min_qty'] ?? 0}')),
+                            DataCell(_statusCell(r)),
+                            DataCell(Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: AppText.t('تسوية الكمية', 'Adjust'),
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _openAdjust(context, r),
+                                  icon: Icon(Icons.swap_vert, size: 18.r),
+                                ),
+                                IconButton(
+                                  tooltip: AppStrings.edit,
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _openEdit(context, r),
+                                  icon: Icon(Icons.edit_outlined, size: 18.r),
+                                ),
+                              ],
+                            )),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
   Widget _statusCell(Map<String, dynamic> r) {
@@ -190,7 +193,7 @@ class _InventoryDialogState extends State<_InventoryDialog> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
   @override
@@ -308,7 +311,7 @@ class _AdjustDialogState extends State<_AdjustDialog> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
   @override

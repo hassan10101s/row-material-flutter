@@ -43,6 +43,7 @@ import '../features/members/domain/member_repository.dart';
 import '../features/organizations/data/firestore_organization_repository.dart';
 import '../features/organizations/data/member_write_guard.dart';
 import '../features/organizations/domain/organization_repository.dart';
+import '../features/reference/data/offline_first_reference_repository.dart';
 import '../features/reference/data/reference_repo.dart';
 import '../features/reports/data/report_html_builder.dart';
 import '../features/reports/data/report_service.dart';
@@ -117,6 +118,7 @@ Future<void> initServiceLocator() async {
   // changes while new code can depend on the abstraction (plan P5.4).
   OfflineFirstLabRepository? labFacade;
   OfflineFirstInspectionRepository? inspectionFacade;
+  OfflineFirstReferenceRepository? referenceFacade;
 
   getIt
     ..registerSingleton<FirebaseBootstrapResult>(bootstrap)
@@ -141,10 +143,16 @@ Future<void> initServiceLocator() async {
         () => ThemeService(settings: getIt<SettingsRepo>()))
     ..registerLazySingleton<LocaleService>(
         () => LocaleService(settings: getIt<SettingsRepo>()))
-    ..registerLazySingleton<ReferenceRepo>(() => ReferenceRepo(dbHelper: dbHelper))
     // The offline-first facades are registered under the *old* concrete names,
     // so no cubit or widget changes (plan P5.4). Both are also exposed under
     // their domain contract, which is what new code should depend on.
+    ..registerLazySingleton<ReferenceRepo>(
+        () => referenceFacade ??= OfflineFirstReferenceRepository(
+              dbHelper: dbHelper,
+              guard: getIt<WriteGuard>(),
+              queue: queue,
+              audit: audit,
+            ))
     ..registerLazySingleton<LabRepo>(() => labFacade ??= OfflineFirstLabRepository(
           dbHelper: dbHelper,
           guard: getIt<WriteGuard>(),

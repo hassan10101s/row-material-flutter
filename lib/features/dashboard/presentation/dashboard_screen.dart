@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:material_lab/core/l10n/app_localizations_x.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/animations/app_animations.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
@@ -15,6 +16,7 @@ import '../../../design_system/widgets/app_summary_card.dart';
 import 'cubit/dashboard_cubit.dart';
 import 'cubit/dashboard_kpis_cubit.dart';
 import 'cubit/dashboard_kpis_state.dart';
+import 'cubit/dashboard_state.dart';
 import '../data/dashboard_repo.dart';
 /// Dashboard (port of Web DashboardView + dashboard summary analytics).
 class DashboardScreen extends StatelessWidget {
@@ -23,72 +25,74 @@ class DashboardScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<DashboardCubit>().state;
     final cubit = context.read<DashboardCubit>();
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.page),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Hero Banner & Filters
-          AppEntrance(
-            child: _HeroBanner(
-              period: state.period,
-              selectedMaterial: state.selectedMaterial,
-              selectedSupplier: state.selectedSupplier,
-              selectedStatus: state.selectedStatus,
-              filterOptions: state.filterOptions,
-              onPeriodChange: cubit.setPeriod,
-              onMaterialChange: cubit.setMaterial,
-              onSupplierChange: cubit.setSupplier,
-              onStatusChange: cubit.setStatus,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          // Quick Action Buttons
-          const _QuickActionsBar(),
-          const SizedBox(height: AppSpacing.lg),
-          if (state.loading && state.summary == null)
-            const AppSkeletonList(rows: 4, lines: 3, height: 360)
-          else if (state.error != null)
-            AppEmptyState(
-              icon: Icons.error_outline,
-              title: AppText.t('تعذر تحميل اللوحة', 'Failed to load dashboard'),
-              subtitle: state.error!,
-              action: AppButton(
-                label: AppText.t('إعادة المحاولة', 'Retry'),
-                onPressed: cubit.load,
-              ),
-            )
-          else ...[
-            // Today KPIs Row
-            BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
-              builder: (context, kpi) => AppStagger(
-                interval: const Duration(milliseconds: 40),
-                children: [
-                  _KpiRow(
-                    todayInspections: kpi.todayInspections,
-                    todayApproved: kpi.todayApproved,
-                    todayRejected: kpi.todayRejected,
-                    totalCount: kpi.totalCount,
-                  ),
-                ],
+    return AppErrorFeedback<DashboardCubit, DashboardState>(
+      selector: (s) => s.error,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppSpacing.page),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Hero Banner & Filters
+            AppEntrance(
+              child: _HeroBanner(
+                period: state.period,
+                selectedMaterial: state.selectedMaterial,
+                selectedSupplier: state.selectedSupplier,
+                selectedStatus: state.selectedStatus,
+                filterOptions: state.filterOptions,
+                onPeriodChange: cubit.setPeriod,
+                onMaterialChange: cubit.setMaterial,
+                onSupplierChange: cubit.setSupplier,
+                onStatusChange: cubit.setStatus,
               ),
             ),
             const SizedBox(height: AppSpacing.lg),
-            if (state.summary != null) ...[
-              // Period Decisions Overview Card
-              AppEntrance(child: _DecisionsOverviewCard(summary: state.summary!)),
+            // Quick Action Buttons
+            const _QuickActionsBar(),
+            const SizedBox(height: AppSpacing.lg),
+            if (state.loading && state.summary == null)
+              const AppSkeletonList(rows: 4, lines: 3, height: 360)
+            else if (state.error != null)
+              AppEmptyState(
+                icon: Icons.error_outline,
+                title: AppText.t('تعذر تحميل اللوحة', 'Failed to load dashboard'),
+                action: AppButton(
+                  label: AppText.t('إعادة المحاولة', 'Retry'),
+                  onPressed: cubit.load,
+                ),
+              )
+            else ...[
+              // Today KPIs Row
+              BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
+                builder: (context, kpi) => AppStagger(
+                  interval: const Duration(milliseconds: 40),
+                  children: [
+                    _KpiRow(
+                      todayInspections: kpi.todayInspections,
+                      todayApproved: kpi.todayApproved,
+                      todayRejected: kpi.todayRejected,
+                      totalCount: kpi.totalCount,
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: AppSpacing.lg),
-              // Monthly Trend & Comparison Section
-              _MonthlyTrendSection(summary: state.summary!),
-              const SizedBox(height: AppSpacing.lg),
-              // Recommendations & Insights Section
-              _InsightsAndRecommendationsSection(summary: state.summary!),
-              const SizedBox(height: AppSpacing.lg),
-              // Top Materials & Top Suppliers Section
-              _TopBreakdownSection(summary: state.summary!),
+              if (state.summary != null) ...[
+                // Period Decisions Overview Card
+                AppEntrance(child: _DecisionsOverviewCard(summary: state.summary!)),
+                const SizedBox(height: AppSpacing.lg),
+                // Monthly Trend & Comparison Section
+                _MonthlyTrendSection(summary: state.summary!),
+                const SizedBox(height: AppSpacing.lg),
+                // Recommendations & Insights Section
+                _InsightsAndRecommendationsSection(summary: state.summary!),
+                const SizedBox(height: AppSpacing.lg),
+                // Top Materials & Top Suppliers Section
+                _TopBreakdownSection(summary: state.summary!),
+              ],
             ],
           ],
-        ],
+        ),
       ),
     );
   }

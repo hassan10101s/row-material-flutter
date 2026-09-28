@@ -5,6 +5,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -13,6 +14,7 @@ import '../../../design_system/widgets/app_card.dart';
 import '../../../di/service_locator.dart';
 import '../data/lab_repo.dart';
 import 'cubit/constants_cubit.dart';
+import 'cubit/constants_state.dart';
 
 /// Global formula constants management.
 class ConstantsTab extends StatelessWidget {
@@ -56,88 +58,89 @@ class ConstantsTab extends StatelessWidget {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<ConstantsCubit>().state;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(AppText.t('الثوابت', 'Constants'), style: Theme.of(context).textTheme.titleLarge),
-            const Spacer(),
-            AppButton(
-              small: true,
-              label: AppText.t('إضافة ثابت', 'Add constant'),
-              icon: Icon(Icons.add, size: 16.r),
-              onPressed: () => _openEditor(context),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
-          if (state.loading && state.rows.isEmpty) ...[
-            const AppSkeletonList(rows: 6, lines: 3, height: 380),
-          ] else if (state.error != null) ...[
-          Text(state.error!, style: TextStyle(color: AppColors.danger)),
-        ] else if (state.rows.isEmpty) ...[
-          Text(AppText.t('لا توجد ثوابت', 'No constants')),
-        ] else
-          AppCard(
-            padding: EdgeInsets.zero,
-            child: SizedBox(
-              width: double.infinity,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: [
-                    DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
-                    DataColumn(label: Text(AppText.t('الرمز', 'Symbol'))),
-                    DataColumn(label: Text(AppText.t('القيمة', 'Value'))),
-                    DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
-                    DataColumn(label: Text(AppText.t('نوع', 'Type'))),
-                    DataColumn(label: Text('')),
-                  ],
-                  rows: [
-                    for (final r in state.rows)
-                      DataRow(
-                        cells: [
-                          DataCell(Text('${r['name']}')),
-                          DataCell(Text('${r['symbol']}')),
-                          DataCell(Text('${r['value_text'] ?? ''}')),
-                          DataCell(Text('${r['unit'] ?? ''}')),
-                          DataCell(Text((r['is_expression'] as num?)?.toInt() == 1
-                              ? AppText.t('تعبير', 'Expression')
-                              : AppText.t('قيمة', 'Value'))),
-                          DataCell(Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: AppStrings.edit,
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => _openEditor(context, r),
-                                icon: Icon(Icons.edit_outlined, size: 18.r),
-                              ),
-                              IconButton(
-                                tooltip: AppStrings.delete,
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => _delete(context, r),
-                                icon: Icon(Icons.delete_outline, size: 18.r),
-                              ),
-                            ],
-                          )),
-                        ],
-                      ),
-                  ],
+    return AppErrorFeedback<ConstantsCubit, ConstantsState>(
+      selector: (s) => s.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(AppText.t('الثوابت', 'Constants'), style: Theme.of(context).textTheme.titleLarge),
+              const Spacer(),
+              AppButton(
+                small: true,
+                label: AppText.t('إضافة ثابت', 'Add constant'),
+                icon: Icon(Icons.add, size: 16.r),
+                onPressed: () => _openEditor(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
+            if (state.loading && state.rows.isEmpty) ...[
+              const AppSkeletonList(rows: 6, lines: 3, height: 380),
+              ] else if (state.rows.isEmpty) ...[
+                Text(AppText.t('لا توجد ثوابت', 'No constants')),
+              ] else
+            AppCard(
+              padding: EdgeInsets.zero,
+              child: SizedBox(
+                width: double.infinity,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columns: [
+                      DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
+                      DataColumn(label: Text(AppText.t('الرمز', 'Symbol'))),
+                      DataColumn(label: Text(AppText.t('القيمة', 'Value'))),
+                      DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
+                      DataColumn(label: Text(AppText.t('نوع', 'Type'))),
+                      DataColumn(label: Text('')),
+                    ],
+                    rows: [
+                      for (final r in state.rows)
+                        DataRow(
+                          cells: [
+                            DataCell(Text('${r['name']}')),
+                            DataCell(Text('${r['symbol']}')),
+                            DataCell(Text('${r['value_text'] ?? ''}')),
+                            DataCell(Text('${r['unit'] ?? ''}')),
+                            DataCell(Text((r['is_expression'] as num?)?.toInt() == 1
+                                ? AppText.t('تعبير', 'Expression')
+                                : AppText.t('قيمة', 'Value'))),
+                            DataCell(Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: AppStrings.edit,
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _openEditor(context, r),
+                                  icon: Icon(Icons.edit_outlined, size: 18.r),
+                                ),
+                                IconButton(
+                                  tooltip: AppStrings.delete,
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _delete(context, r),
+                                  icon: Icon(Icons.delete_outline, size: 18.r),
+                                ),
+                              ],
+                            )),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -198,7 +201,7 @@ class _ConstantDialogState extends State<_ConstantDialog> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
 

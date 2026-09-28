@@ -5,6 +5,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -15,6 +16,7 @@ import '../core/formula_engine.dart'
     show inventoryUnits, safeFormulaFloat, unitDimOf, validateFormula;
 import '../data/lab_repo.dart';
 import 'cubit/analyses_cubit.dart';
+import 'cubit/analyses_state.dart';
 
 /// Analyses management tab (list + create/edit/delete).
 class AnalysesTab extends StatelessWidget {
@@ -58,89 +60,90 @@ class AnalysesTab extends StatelessWidget {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AnalysesCubit>().state;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(AppText.t('التحليلات', 'Analyses'), style: Theme.of(context).textTheme.titleLarge),
-            const Spacer(),
-            AppButton(
-              small: true,
-              label: AppText.t('إضافة تحليل', 'Add analysis'),
-              icon: Icon(Icons.add, size: 16.r),
-              onPressed: () => _openEditor(context),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
-          if (state.loading && state.rows.isEmpty) ...[
-            const AppSkeletonList(rows: 6, lines: 3, height: 380),
-          ] else if (state.error != null) ...[
-          Text(state.error!, style: TextStyle(color: AppColors.danger)),
-        ] else if (state.rows.isEmpty) ...[
-          Text(AppText.t('لا توجد تحليلات', 'No analyses')),
-        ] else
-          AppCard(
-            padding: EdgeInsets.zero,
-            child: SizedBox(
-              width: double.infinity,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: [
-                    DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
-                    DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
-                    DataColumn(label: Text(AppText.t('المعادلة', 'Formula'))),
-                    DataColumn(label: Text(AppText.t('المواد', 'Items'))),
-                    DataColumn(label: Text(AppText.t('الحقول', 'Fields'))),
-                    DataColumn(label: Text('')),
-                  ],
-                  rows: [
-                    for (final r in state.rows)
-                      DataRow(
-                        cells: [
-                          DataCell(Text('${r['name']}')),
-                          DataCell(Text('${r['unit'] ?? '%'}')),
-                          DataCell(Text(
-                            '${(r['formula'] is Map ? (r['formula'] as Map)['expression'] : '') ?? ''}',
-                            overflow: TextOverflow.ellipsis,
-                          )),
-                          DataCell(Text('${(r['items'] as List?)?.length ?? 0}')),
-                          DataCell(Text((r['dynamic_fields'] as List?)?.join(', ') ?? '')),
-                          DataCell(Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              IconButton(
-                                tooltip: AppStrings.edit,
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => _openEditor(context, r),
-                                icon: Icon(Icons.edit_outlined, size: 18.r),
-                              ),
-                              IconButton(
-                                tooltip: AppStrings.delete,
-                                visualDensity: VisualDensity.compact,
-                                onPressed: () => _delete(context, r),
-                                icon: Icon(Icons.delete_outline, size: 18.r),
-                              ),
-                            ],
-                          )),
-                        ],
-                      ),
-                  ],
+    return AppErrorFeedback<AnalysesCubit, AnalysesState>(
+      selector: (s) => s.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(AppText.t('التحليلات', 'Analyses'), style: Theme.of(context).textTheme.titleLarge),
+              const Spacer(),
+              AppButton(
+                small: true,
+                label: AppText.t('إضافة تحليل', 'Add analysis'),
+                icon: Icon(Icons.add, size: 16.r),
+                onPressed: () => _openEditor(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
+            if (state.loading && state.rows.isEmpty) ...[
+              const AppSkeletonList(rows: 6, lines: 3, height: 380),
+              ] else if (state.rows.isEmpty) ...[
+                Text(AppText.t('لا توجد تحليلات', 'No analyses')),
+              ] else
+            AppCard(
+              padding: EdgeInsets.zero,
+              child: SizedBox(
+                width: double.infinity,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columns: [
+                      DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
+                      DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
+                      DataColumn(label: Text(AppText.t('المعادلة', 'Formula'))),
+                      DataColumn(label: Text(AppText.t('المواد', 'Items'))),
+                      DataColumn(label: Text(AppText.t('الحقول', 'Fields'))),
+                      DataColumn(label: Text('')),
+                    ],
+                    rows: [
+                      for (final r in state.rows)
+                        DataRow(
+                          cells: [
+                            DataCell(Text('${r['name']}')),
+                            DataCell(Text('${r['unit'] ?? '%'}')),
+                            DataCell(Text(
+                              '${(r['formula'] is Map ? (r['formula'] as Map)['expression'] : '') ?? ''}',
+                              overflow: TextOverflow.ellipsis,
+                            )),
+                            DataCell(Text('${(r['items'] as List?)?.length ?? 0}')),
+                            DataCell(Text((r['dynamic_fields'] as List?)?.join(', ') ?? '')),
+                            DataCell(Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  tooltip: AppStrings.edit,
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _openEditor(context, r),
+                                  icon: Icon(Icons.edit_outlined, size: 18.r),
+                                ),
+                                IconButton(
+                                  tooltip: AppStrings.delete,
+                                  visualDensity: VisualDensity.compact,
+                                  onPressed: () => _delete(context, r),
+                                  icon: Icon(Icons.delete_outline, size: 18.r),
+                                ),
+                              ],
+                            )),
+                          ],
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -401,7 +404,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
 

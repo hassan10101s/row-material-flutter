@@ -314,6 +314,84 @@ void main() {
       expect(resolved['resolved_at'], isNotNull);
     });
 
+    test('countBadge matches the individual counts, including resolved ones',
+        () async {
+      // The badge collapsed three queries into one statement, which means the
+      // "unresolved" predicate is now spelled a second time in SQL instead of
+      // reusing `listConflicts`. It has to agree with the stored resolution
+      // values - `keep_local`/`keep_remote`, not `local`/`remote` - or a settled
+      // conflict stays on the badge forever.
+      final id = await insertSample('QC-BADGE');
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-BADGE',
+            localRef: id,
+            operation: 'update',
+            payload: const {},
+          ));
+      await queue.markConflict(
+        (await queue.claim()).single,
+        direction: 'push',
+        remotePayload: '{"decisionStatus":"REJECTED"}',
+      );
+      expect((await queue.listConflicts()), hasLength(1));
+      expect(await queue.countConflicts(), 1);
+      expect(
+        (await queue.countBadge()).conflicts,
+        1,
+        reason: 'an unresolved conflict must be counted',
+      );
+
+      await queue.resolveConflict(
+        (await queue.listConflicts()).single['id'] as int,
+        resolution: 'keep_remote',
+        onKeepLocal: (_) async => fail('keep_local must not run'),
+        onKeepRemote: (_, _) async {},
+      );
+      expect(await queue.listConflicts(), isEmpty);
+      expect(
+        await queue.countConflicts(),
+        0,
+        reason: 'a resolved conflict must not stay on the badge',
+      );
+      expect((await queue.countBadge()).conflicts, 0);
+    });
+
+    test('countBadge agrees with countPending and countBlocked', () async {
+      for (final code in ['QC-A', 'QC-B', 'QC-C']) {
+        final id = await insertSample(code);
+        await fixture.transaction((txn) => queue.enqueue(
+              txn,
+              entityType: 'sample',
+              entityId: code,
+              localRef: id,
+              operation: 'update',
+              payload: const {},
+            ));
+      }
+      // One pending, one claimed (in_flight), one failed.
+      expect((await queue.claim(limit: 1)), hasLength(1));
+      final remaining = await queue.listQueue();
+      final failed = remaining.firstWhere((r) => r['status'] == 'pending');
+      await queue.markRetry(
+        QueueEntry.fromRow(failed),
+        'boom',
+      );
+      await queue.markRetry(
+        QueueEntry.fromRow(
+          (await queue.listQueue())
+              .firstWhere((r) => r['id'] != failed['id'] && r['status'] == 'pending'),
+        ),
+        'boom',
+      );
+
+      final badge = await queue.countBadge();
+      expect(badge.pending, await queue.countPending());
+      expect(badge.blocked, await queue.countBlocked());
+      expect(badge.conflicts, await queue.countConflicts());
+    });
+
     test('resolveConflict rejects an unknown resolution', () async {
       final id = await insertSample('QC-10b');
       await fixture.transaction((txn) => queue.enqueue(

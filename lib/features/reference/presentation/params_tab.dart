@@ -5,6 +5,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -12,6 +13,7 @@ import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
 import 'cubit/params_cubit.dart';
+import 'cubit/params_state.dart';
 
 /// Parameter management tab — port of the Reference app Chemical/Physical
 /// Aspects tabs (57_reference_app.js). `parameterType` is 'chemical' or
@@ -66,97 +68,98 @@ class ParamsTab extends StatelessWidget {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<ParamsCubit>().state;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              _isChemical
-                  ? AppText.t('التحليل الكيميائي', 'Parameter Chemical Analysis')
-                  : AppText.t('الفحص الظاهري', 'Physical Aspects'),
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const Spacer(),
-            AppButton(
-              small: true,
-              icon: Icon(Icons.add, size: 16.r),
-              label: AppText.t('بارامتر جديد', 'New Parameter'),
-              onPressed: () => _openEditor(context),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading && state.rows.isEmpty)
-          const AppSkeletonList(rows: 6, lines: 3, height: 380)
-        else if (state.error != null)
-          Text(state.error!, style: TextStyle(color: AppColors.danger))
+    return AppErrorFeedback<ParamsCubit, ParamsState>(
+      selector: (s) => s.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                _isChemical
+                    ? AppText.t('التحليل الكيميائي', 'Parameter Chemical Analysis')
+                    : AppText.t('الفحص الظاهري', 'Physical Aspects'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const Spacer(),
+              AppButton(
+                small: true,
+                icon: Icon(Icons.add, size: 16.r),
+                label: AppText.t('بارامتر جديد', 'New Parameter'),
+                onPressed: () => _openEditor(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (state.loading && state.rows.isEmpty)
+            const AppSkeletonList(rows: 6, lines: 3, height: 380)
         else if (state.rows.isEmpty)
-          AppEmptyState(
-            icon: Icons.tag_outlined,
-            title: _isChemical
-                ? AppText.t('لا توجد بارامترات كيميائية.', 'No chemical parameters.')
-                : AppText.t('لا توجد بارامترات ظاهرية.', 'No physical parameters.'),
-          )
-        else
-          Flexible(
-            child: AppCard(
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: double.infinity,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
+            AppEmptyState(
+              icon: Icons.tag_outlined,
+              title: _isChemical
+                  ? AppText.t('لا توجد بارامترات كيميائية.', 'No chemical parameters.')
+                  : AppText.t('لا توجد بارامترات ظاهرية.', 'No physical parameters.'),
+            )
+          else
+            Flexible(
+              child: AppCard(
+                padding: EdgeInsets.zero,
+                child: SizedBox(
+                  width: double.infinity,
                   child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: [
-                        DataColumn(label: Text(AppText.t('البارامتر', 'Parameter'))),
-                        if (_isChemical)
-                          DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
-                        DataColumn(label: Text('')),
-                      ],
-                      rows: [
-                        for (final p in state.rows)
-                          DataRow(
-                            cells: [
-                              DataCell(Text('${p['parameter_name'] ?? ''}')),
-                              if (_isChemical)
-                                DataCell(Text('${p['unit'] ?? '%'}')),
-                              DataCell(Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    tooltip: AppStrings.edit,
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: () => _openEditor(context, p),
-                                    icon: Icon(Icons.edit_outlined, size: 18.r),
-                                  ),
-                                  IconButton(
-                                    tooltip: AppStrings.delete,
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: () => _delete(context, p),
-                                    icon: Icon(Icons.delete_outline,
-                                        size: 18.r, color: AppColors.danger),
-                                  ),
-                                ],
-                              )),
-                            ],
-                          ),
-                      ],
+                    scrollDirection: Axis.vertical,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columns: [
+                          DataColumn(label: Text(AppText.t('البارامتر', 'Parameter'))),
+                          if (_isChemical)
+                            DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
+                          DataColumn(label: Text('')),
+                        ],
+                        rows: [
+                          for (final p in state.rows)
+                            DataRow(
+                              cells: [
+                                DataCell(Text('${p['parameter_name'] ?? ''}')),
+                                if (_isChemical)
+                                  DataCell(Text('${p['unit'] ?? '%'}')),
+                                DataCell(Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: AppStrings.edit,
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: () => _openEditor(context, p),
+                                      icon: Icon(Icons.edit_outlined, size: 18.r),
+                                    ),
+                                    IconButton(
+                                      tooltip: AppStrings.delete,
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: () => _delete(context, p),
+                                      icon: Icon(Icons.delete_outline,
+                                          size: 18.r, color: AppColors.danger),
+                                    ),
+                                  ],
+                                )),
+                              ],
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -220,7 +223,7 @@ class _ParamDialogState extends State<_ParamDialog> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
 

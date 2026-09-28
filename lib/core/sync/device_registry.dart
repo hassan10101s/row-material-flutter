@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../auth/app_session.dart';
 import '../auth/permissions.dart';
 import '../auth/session_source.dart';
+import '../database/db_trace.dart';
 import '../utils/app_dates.dart';
 import 'audit_logger.dart';
 import 'remote/remote_data_source.dart';
@@ -213,7 +214,7 @@ class DeviceRegistry {
     // the queue, and a failing write must not block the sign-out itself.
     try {
       final db = await audit.queue.dbHelper.database;
-      await db.transaction((txn) => audit.log(
+      await tracedTransaction(db, 'devices.signOutAudit', (txn) => audit.log(
             txn,
             action: AuditAction.deviceRegistered,
             entityType: 'device',

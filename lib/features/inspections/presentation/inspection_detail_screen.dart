@@ -7,6 +7,7 @@ import 'dart:convert';
 import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -16,6 +17,7 @@ import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../di/service_locator.dart';
 import 'cubit/inspection_detail_cubit.dart';
+import 'cubit/inspection_detail_state.dart';
 import 'inspection_widgets.dart';
 
 /// Inspection detail: results vs reference, status history, decision
@@ -34,7 +36,7 @@ class InspectionDetailScreen extends StatelessWidget {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
@@ -92,7 +94,7 @@ class InspectionDetailScreen extends StatelessWidget {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
@@ -106,17 +108,10 @@ class InspectionDetailScreen extends StatelessWidget {
       body = const AppSkeletonList(rows: 6, lines: 3, height: 440);
     } else if (state.error != null) {
       body = Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(state.error!, style: TextStyle(color: AppColors.danger)),
-            const SizedBox(height: AppSpacing.md),
-            AppButton(
-              style: AppButtonStyle.secondary,
-              label: AppText.t('إعادة المحاولة', 'Retry'),
-              onPressed: cubit.load,
-            ),
-          ],
+        child: AppButton(
+          style: AppButtonStyle.secondary,
+          label: AppText.t('إعادة المحاولة', 'Retry'),
+          onPressed: cubit.load,
         ),
       );
     } else if (inspection == null) {
@@ -291,12 +286,15 @@ class InspectionDetailScreen extends StatelessWidget {
         ),
       );
     }
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppTopAppBar(
-        title: AppText.t('تفاصيل الفحص', 'Inspection details'),
+    return AppErrorFeedback<InspectionDetailCubit, InspectionDetailState>(
+      selector: (s) => s.error,
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppTopAppBar(
+          title: AppText.t('تفاصيل الفحص', 'Inspection details'),
+        ),
+        body: body,
       ),
-      body: body,
     );
   }
 

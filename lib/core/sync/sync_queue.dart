@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../database/database_helper.dart';
+import '../database/db_trace.dart';
 import '../utils/app_dates.dart';
 import 'entity_registry.dart';
 
@@ -48,6 +49,40 @@ class QueueEntry {
       );
 }
 
+/// What should happen to a queue row once its push attempt is done.
+enum QueueOutcome { done, retry, conflict }
+
+/// One settled push attempt, handed to [SyncQueue.settleAll] so a whole batch
+/// shares a single transaction.
+class QueueSettlement {
+  const QueueSettlement.done(this.entry, {required this.remoteVersion})
+      : kind = QueueOutcome.done,
+        error = null,
+        direction = null,
+        remotePayload = null;
+
+  const QueueSettlement.retry(this.entry, this.error)
+      : kind = QueueOutcome.retry,
+        remoteVersion = null,
+        direction = null,
+        remotePayload = null;
+
+  const QueueSettlement.conflict(
+    this.entry, {
+    this.direction = 'push_rejected',
+    this.remotePayload,
+    this.error,
+  })  : kind = QueueOutcome.conflict,
+        remoteVersion = null;
+
+  final QueueEntry entry;
+  final QueueOutcome kind;
+  final int? remoteVersion;
+  final String? error;
+  final String? direction;
+  final String? remotePayload;
+}
+
 /// Row operations of `sync_queue` (plan §14-P6.2).
 ///
 /// `enqueue` is designed to be called **inside the same transaction** as the
@@ -84,13 +119,15 @@ class SyncQueue {
   /// Dropping the memo and retrying once on a *fresh* connection turns that
   /// race into a slightly later, correct read. Any other error propagates
   /// untouched, so a genuine failure is never masked.
-  Future<T> _withDb<T>(Future<T> Function(Database db) action) async {
+  Future<T> _withDb<T>(String label, Future<T> Function(Database db) action) async {
     try {
-      return await action(await _db);
+      final db = await _db;
+      return await DbTrace.run(label, () => action(db));
     } on DatabaseException catch (e) {
       if (!e.isDatabaseClosedError()) rethrow;
       _resolved = null;
-      return action(await _db);
+      final db = await _db;
+      return await DbTrace.run(label, () => action(db));
     }
   }
 
@@ -190,23 +227,61 @@ class SyncQueue {
     });
   }
 
+
   /// Push succeeded: the row is deleted and the local row is marked `synced`
   /// with the new remote version.
   Future<void> markDone(QueueEntry entry, {required int remoteVersion}) async {
-    await (await _db).transaction((txn) async {
-      await txn.delete('sync_queue', where: 'id = ?', whereArgs: [entry.id]);
-      final entity = entry.entity;
-      if (entity == null) return;
-      await txn.update(
-        entity.localTable,
-        {
-          'remote_version': remoteVersion,
-          'remote_synced_at': nowIso(),
-          'sync_state': 'synced',
-        },
-        where: 'id = ?',
-        whereArgs: [entry.localRef],
-      );
+    await tracedTransaction(
+        await _db, 'queue.markDone', (txn) => _markDone(txn, entry, remoteVersion));
+  }
+
+  /// [markDone] on an existing transaction.
+  Future<void> _markDone(
+    DatabaseExecutor txn,
+    QueueEntry entry,
+    int remoteVersion,
+  ) async {
+    await txn.delete('sync_queue', where: 'id = ?', whereArgs: [entry.id]);
+    final entity = entry.entity;
+    if (entity == null) return;
+    await txn.update(
+      entity.localTable,
+      {
+        'remote_version': remoteVersion,
+        'remote_synced_at': nowIso(),
+        'sync_state': 'synced',
+      },
+      where: 'id = ?',
+      whereArgs: [entry.localRef],
+    );
+  }
+
+  /// Applies many push outcomes in a single transaction.
+  ///
+  /// The per-entry [markDone]/[markRetry]/[markConflict] methods each open
+  /// their own transaction, so a 400-entry batch paid 400 fsyncs. A push
+  /// worker runs a whole batch at once and only needs the results to be
+  /// visible together, so the batch shares one commit.
+  Future<void> settleAll(List<QueueSettlement> settlements) async {
+    if (settlements.isEmpty) return;
+    await tracedTransaction(await _db, 'queue.settleAll', (txn) async {
+      for (final settlement in settlements) {
+        final entry = settlement.entry;
+        switch (settlement.kind) {
+          case QueueOutcome.done:
+            await _markDone(txn, entry, settlement.remoteVersion ?? 0);
+          case QueueOutcome.retry:
+            await _markRetry(txn, entry, settlement.error ?? 'unknown error');
+          case QueueOutcome.conflict:
+            await _markConflict(
+              txn,
+              entry,
+              direction: settlement.direction ?? 'push_rejected',
+              remotePayload: settlement.remotePayload,
+              error: settlement.error,
+            );
+        }
+      }
     });
   }
 
@@ -215,31 +290,41 @@ class SyncQueue {
   /// After [maxRetries] the row becomes `failed` and waits for a manual retry
   /// from the Sync screen (plan §9.5).
   Future<void> markRetry(QueueEntry entry, String error) async {
-    await (await _db).transaction((txn) async {
-      final attempts = entry.retryCount + 1;
-      final exhausted = attempts >= maxRetries;
+    await tracedTransaction(
+        await _db, 'queue.markRetry', (txn) => _markRetry(txn, entry, error));
+  }
+
+  /// [markRetry] on an existing transaction.
+  Future<void> _markRetry(
+    DatabaseExecutor txn,
+    QueueEntry entry,
+    String error,
+  ) async {
+    final attempts = entry.retryCount + 1;
+    final exhausted = attempts >= maxRetries;
+    await txn.update(
+      'sync_queue',
+      {
+        'status': exhausted ? 'failed' : 'pending',
+        'retry_count': attempts,
+        'next_attempt_at': exhausted
+            ? null
+            : nowIsoAt(DateTime.now().add(backoffDelay(attempts - 1))),
+        'last_error': error,
+        'updated_at': nowIso(),
+      },
+      where: 'id = ?',
+      whereArgs: [entry.id],
+    );
+    final entity = entry.entity;
+    if (entity != null && entry.localRef != null) {
       await txn.update(
-        'sync_queue',
-        {
-          'status': exhausted ? 'failed' : 'pending',
-          'retry_count': attempts,
-          'next_attempt_at': exhausted ? null : nowIsoAt(DateTime.now().add(backoffDelay(attempts - 1))),
-          'last_error': error,
-          'updated_at': nowIso(),
-        },
+        entity.localTable,
+        {'sync_state': exhausted ? 'conflict' : 'queued'},
         where: 'id = ?',
-        whereArgs: [entry.id],
+        whereArgs: [entry.localRef],
       );
-      final entity = entry.entity;
-      if (entity != null && entry.localRef != null) {
-        await txn.update(
-          entity.localTable,
-          {'sync_state': exhausted ? 'conflict' : 'queued'},
-          where: 'id = ?',
-          whereArgs: [entry.localRef],
-        );
-      }
-    });
+    }
   }
 
   static const int maxRetries = 20;
@@ -261,38 +346,49 @@ class SyncQueue {
     String? remotePayload,
     String? error,
   }) async {
-    await (await _db).transaction((txn) async {
-      await txn.update(
-        'sync_queue',
-        {
-          'status': 'conflict',
-          'last_error': error,
-          'updated_at': nowIso(),
-          'next_attempt_at': null,
-        },
-        where: 'id = ?',
-        whereArgs: [entry.id],
-      );
-      await txn.insert('sync_conflicts', {
-        'entity_type': entry.entityType,
-        'entity_id': entry.entityId,
-        'direction': direction,
-        'local_payload': jsonEncode(entry.payload),
-        'remote_payload': remotePayload,
-        'detected_at': nowIso(),
-        'resolution': null,
-        'resolved_at': null,
-      });
-      final entity = entry.entity;
-      if (entity != null && entry.localRef != null) {
-        await txn.update(
-          entity.localTable,
-          {'sync_state': 'conflict'},
-          where: 'id = ?',
-          whereArgs: [entry.localRef],
-        );
-      }
+    await tracedTransaction(await _db, 'queue.markConflict',
+        (txn) => _markConflict(txn, entry,
+            direction: direction, remotePayload: remotePayload, error: error));
+  }
+
+  /// [markConflict] on an existing transaction.
+  Future<void> _markConflict(
+    DatabaseExecutor txn,
+    QueueEntry entry, {
+    required String direction,
+    String? remotePayload,
+    String? error,
+  }) async {
+    await txn.update(
+      'sync_queue',
+      {
+        'status': 'conflict',
+        'last_error': error,
+        'updated_at': nowIso(),
+        'next_attempt_at': null,
+      },
+      where: 'id = ?',
+      whereArgs: [entry.id],
+    );
+    await txn.insert('sync_conflicts', {
+      'entity_type': entry.entityType,
+      'entity_id': entry.entityId,
+      'direction': direction,
+      'local_payload': jsonEncode(entry.payload),
+      'remote_payload': remotePayload,
+      'detected_at': nowIso(),
+      'resolution': null,
+      'resolved_at': null,
     });
+    final entity = entry.entity;
+    if (entity != null && entry.localRef != null) {
+      await txn.update(
+        entity.localTable,
+        {'sync_state': 'conflict'},
+        where: 'id = ?',
+        whereArgs: [entry.localRef],
+      );
+    }
   }
 
   /// Unresolved conflicts for the Sync screen.
@@ -410,8 +506,51 @@ class SyncQueue {
 
   Future<int> countBlocked() async => _count("status IN ('failed','conflict')");
 
-  Future<int> _count(String where) async => _withDb((db) async {
+  /// Pending, blocked and unresolved-conflict counts in **one** round trip.
+  ///
+  /// The badge used to add these up from `countPending`, `countBlocked` and
+  /// `listConflicts(limit: 1000)`. On the FFI factory each of those is a separate
+  /// message to the one shared background isolate, and a root-handle call blocks
+  /// every other root-handle call on the connection's non-reentrant `_rawLock`
+  /// while it waits - so a badge that was three cheap reads became three
+  /// opportunities to sit in that queue. The conflict count was the worst of
+  /// them: it loaded whole rows just to call `.length`.
+  Future<SyncQueueCounts> countBadge() => _withDb('queue.countBadge', (db) async {
+        // One statement, three scalar subqueries: a single message to the shared
+        // background isolate instead of four, and nothing left holding the
+        // connection lock in between.
+        final rows = await db.rawQuery('''
+          SELECT
+            (SELECT COUNT(*) FROM sync_queue
+              WHERE status IN ('pending','in_flight')) AS pending,
+            (SELECT COUNT(*) FROM sync_queue
+              WHERE status IN ('failed','conflict')) AS blocked,
+            (SELECT COUNT(*) FROM sync_conflicts
+              WHERE resolution IS NULL
+                 OR resolution NOT IN ('keep_local','keep_remote')) AS conflicts
+        ''');
+        final row = rows.first;
+        return SyncQueueCounts(
+          pending: (row['pending'] as num?)?.toInt() ?? 0,
+          blocked: (row['blocked'] as num?)?.toInt() ?? 0,
+          conflicts: (row['conflicts'] as num?)?.toInt() ?? 0,
+        );
+      });
+
+  Future<int> _count(String where) async => _withDb('queue.count', (db) async {
         final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM sync_queue WHERE $where');
+        return (rows.first['c'] as num).toInt();
+      });
+
+  /// Unresolved conflicts, counted in SQL.
+  ///
+  /// Replaces `listConflicts(limit: 1000).length`, which pulled a thousand full
+  /// conflict rows across the isolate boundary to produce an integer.
+  Future<int> countConflicts() => _withDb('queue.countConflicts', (db) async {
+        final rows = await db.rawQuery(
+          "SELECT COUNT(*) AS c FROM sync_conflicts WHERE resolution IS NULL "
+          "OR resolution NOT IN ('keep_local','keep_remote')",
+        );
         return (rows.first['c'] as num).toInt();
       });
 
@@ -425,4 +564,21 @@ class SyncQueue {
             "WHEN 'pending' THEN 2 WHEN 'in_flight' THEN 3 ELSE 4 END, id ASC",
         limit: limit,
       );
+}
+
+/// The three numbers the sync badge shows, read in one round trip.
+class SyncQueueCounts {
+  const SyncQueueCounts({
+    required this.pending,
+    required this.blocked,
+    required this.conflicts,
+  });
+
+  final int pending;
+  final int blocked;
+  final int conflicts;
+
+  @override
+  String toString() => 'SyncQueueCounts(pending: $pending, blocked: $blocked, '
+      'conflicts: $conflicts)';
 }

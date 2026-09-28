@@ -5,15 +5,15 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
-import '../../../di/service_locator.dart';
-import '../../lab/data/lab_repo.dart';
 import 'cubit/products_cubit.dart';
+import 'cubit/products_state.dart';
 
 /// Products tab — port of the Reference app Products section
 /// (57_reference_app.js): product CRUD with analysis ranges.
@@ -54,13 +54,12 @@ class ProductsTab extends StatelessWidget {
     );
     if (confirmed != true || !context.mounted) return;
     try {
-      await getIt<LabRepo>().deleteProduct((product['id'] as num).toInt());
+      await cubit.delete((product['id'] as num).toInt());
       if (context.mounted) AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
-      await cubit.load();
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
@@ -92,120 +91,121 @@ class ProductsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<ProductsCubit>().state;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(AppText.t('المنتجات', 'Products'),
-                style: Theme.of(context).textTheme.titleLarge),
-            const Spacer(),
-            AppButton(
-              small: true,
-              icon: Icon(Icons.add, size: 16.r),
-              label: AppText.t('منتج جديد', 'New Product'),
-              onPressed: () => _openEditor(context),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.loading && state.rows.isEmpty)
-          const AppSkeletonList(rows: 6, lines: 3, height: 380)
-        else if (state.error != null)
-          Text(state.error!, style: TextStyle(color: AppColors.danger))
+    return AppErrorFeedback<ProductsCubit, ProductsState>(
+      selector: (s) => s.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(AppText.t('المنتجات', 'Products'),
+                  style: Theme.of(context).textTheme.titleLarge),
+              const Spacer(),
+              AppButton(
+                small: true,
+                icon: Icon(Icons.add, size: 16.r),
+                label: AppText.t('منتج جديد', 'New Product'),
+                onPressed: () => _openEditor(context),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (state.loading && state.rows.isEmpty)
+            const AppSkeletonList(rows: 6, lines: 3, height: 380)
         else if (state.rows.isEmpty)
-          AppEmptyState(
-            icon: Icons.inventory_2_outlined,
-            title: AppText.t('لا توجد منتجات.', 'No products.'),
-          )
-        else
-          Flexible(
-            flex: 5,
-            child: AppCard(
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: double.infinity,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
+            AppEmptyState(
+              icon: Icons.inventory_2_outlined,
+              title: AppText.t('لا توجد منتجات.', 'No products.'),
+            )
+          else
+            Flexible(
+              flex: 5,
+              child: AppCard(
+                padding: EdgeInsets.zero,
+                child: SizedBox(
+                  width: double.infinity,
                   child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: [
-                        DataColumn(label: Text(AppText.t('المنتج', 'Product'))),
-                        DataColumn(label: Text(AppText.t('النوع', 'Category'))),
-                        DataColumn(label: Text(AppText.t('الوصف', 'Description'))),
-                        DataColumn(label: Text(AppText.t('الإجراءات', 'Actions'))),
-                      ],
-                      rows: [
-                        for (final p in state.rows)
-                          DataRow(
-                            cells: [
-                              DataCell(Text('${p['name'] ?? ''}',
-                                  style: const TextStyle(fontWeight: FontWeight.w600))),
-                              DataCell(Text('${p['category'] ?? '-'}')),
-                              DataCell(Text('${p['description'] ?? '-'}')),
-                              DataCell(Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    tooltip: AppStrings.edit,
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: () => _openEditor(context, p),
-                                    icon: Icon(Icons.edit_outlined, size: 18.r),
-                                  ),
-                                  IconButton(
-                                    tooltip: AppStrings.delete,
-                                    visualDensity: VisualDensity.compact,
-                                    onPressed: () => _delete(context, p),
-                                    icon: Icon(Icons.delete_outline,
-                                        size: 18.r, color: AppColors.danger),
-                                  ),
-                                ],
-                              )),
-                            ],
-                          ),
-                      ],
+                    scrollDirection: Axis.vertical,
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: DataTable(
+                        columns: [
+                          DataColumn(label: Text(AppText.t('المنتج', 'Product'))),
+                          DataColumn(label: Text(AppText.t('النوع', 'Category'))),
+                          DataColumn(label: Text(AppText.t('الوصف', 'Description'))),
+                          DataColumn(label: Text(AppText.t('الإجراءات', 'Actions'))),
+                        ],
+                        rows: [
+                          for (final p in state.rows)
+                            DataRow(
+                              cells: [
+                                DataCell(Text('${p['name'] ?? ''}',
+                                    style: const TextStyle(fontWeight: FontWeight.w600))),
+                                DataCell(Text('${p['category'] ?? '-'}')),
+                                DataCell(Text('${p['description'] ?? '-'}')),
+                                DataCell(Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    IconButton(
+                                      tooltip: AppStrings.edit,
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: () => _openEditor(context, p),
+                                      icon: Icon(Icons.edit_outlined, size: 18.r),
+                                    ),
+                                    IconButton(
+                                      tooltip: AppStrings.delete,
+                                      visualDensity: VisualDensity.compact,
+                                      onPressed: () => _delete(context, p),
+                                      icon: Icon(Icons.delete_outline,
+                                          size: 18.r, color: AppColors.danger),
+                                    ),
+                                  ],
+                                )),
+                              ],
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
-        const SizedBox(height: AppSpacing.md),
-        if (state.rows.isNotEmpty)
-          Flexible(
-            flex: 3,
-            child: AppCard(
-              child: SingleChildScrollView(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(AppText.t('النطاقات', 'Ranges'),
-                        style: TextStyle(
-                            fontSize: 14.spMax, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: AppSpacing.sm),
-                    for (final p in state.rows)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('${p['name'] ?? ''}',
-                                style: TextStyle(
-                                    fontSize: 13.spMax,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.primary)),
-                            const SizedBox(height: 4),
-                            _rangesChips(p['ranges'] as List? ?? []),
-                          ],
+          const SizedBox(height: AppSpacing.md),
+          if (state.rows.isNotEmpty)
+            Flexible(
+              flex: 3,
+              child: AppCard(
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(AppText.t('النطاقات', 'Ranges'),
+                          style: TextStyle(
+                              fontSize: 14.spMax, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: AppSpacing.sm),
+                      for (final p in state.rows)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('${p['name'] ?? ''}',
+                                  style: TextStyle(
+                                      fontSize: 13.spMax,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.primary)),
+                              const SizedBox(height: 4),
+                              _rangesChips(p['ranges'] as List? ?? []),
+                            ],
+                          ),
                         ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -240,7 +240,6 @@ class _ProductDialog extends StatefulWidget {
 }
 
 class _ProductDialogState extends State<_ProductDialog> {
-  final _repo = getIt<LabRepo>();
   late final TextEditingController _name =
       TextEditingController(text: '${widget.product?['name'] ?? ''}');
   late final TextEditingController _category =
@@ -322,15 +321,16 @@ class _ProductDialogState extends State<_ProductDialog> {
           },
     ];
     try {
+      final cubit = context.read<ProductsCubit>();
       if (widget.product == null) {
-        await _repo.createProduct(
+        await cubit.create(
           name: name,
           category: _category.text.trim(),
           description: _description.text.trim(),
           ranges: ranges,
         );
       } else {
-        await _repo.updateProduct(
+        await cubit.update(
           (widget.product!['id'] as num).toInt(),
           {
             'name': name,
@@ -346,7 +346,7 @@ class _ProductDialogState extends State<_ProductDialog> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
 

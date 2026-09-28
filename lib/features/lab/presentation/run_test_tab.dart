@@ -6,6 +6,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -93,59 +94,40 @@ class _RunTestTabState extends State<RunTestTab> {
           );
       if (!mounted) return;
       widget.onTestRun();
-      final messenger = ScaffoldMessenger.of(context);
-      final nav = Navigator.of(context);
-      nav.pop();
-      messenger.showSnackBar(_resultSnackBar(result));
+      // Raise the banner while this context is still alive, then close the
+      // dialog; it lives in the root overlay so it outlives the dialog anyway.
+      _reportResult(result);
+      Navigator.of(context).pop();
     } on AppError catch (e) {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
-  SnackBar _resultSnackBar(Map<String, dynamic> result) {
+  void _reportResult(Map<String, dynamic> result) {
     final test = Map<String, dynamic>.from(result['test'] as Map? ?? const {});
     final unit = '${result['analysis_unit'] ?? '%'}';
     final consumption = (result['consumption'] as List?) ?? const [];
     final lowStock = (result['low_stock'] as List?) ?? const [];
-    final items = <Widget>[
-      Text(
-        '${AppText.t('تم حفظ الاختبار', 'Test saved')} — '
-        '${test['result_text'] ?? '-'} $unit',
-        style: const TextStyle(fontWeight: FontWeight.w700),
-      ),
-      const SizedBox(height: 4),
-      Text(
-        '${AppText.t('العينة', 'Sample')}: ${test['sample_name'] ?? ''}'
-        ' — ${test['source_name'] ?? ''}',
-      ),
-      if (consumption.isNotEmpty) ...[
-        const SizedBox(height: 4),
-        Text('${AppText.t('الاستهلاك', 'Consumption')}: '
-            '${consumption.length} ${AppText.t('منتج/خامة', 'item(s)')}'),
-      ],
-      if (lowStock.isNotEmpty) ...[
-        const SizedBox(height: 4),
-        Text(
-          '${AppText.t('تنبيه مخزون منخفض', 'Low stock')}: '
-          '${lowStock.length}',
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-      ],
+
+    final lines = <String>[
+      '${AppText.t('تم حفظ الاختبار', 'Test saved')} — '
+          '${test['result_text'] ?? '-'} $unit',
+      '${AppText.t('العينة', 'Sample')}: ${test['sample_name'] ?? ''}'
+          ' — ${test['source_name'] ?? ''}',
+      if (consumption.isNotEmpty)
+        '${AppText.t('الاستهلاك', 'Consumption')}: '
+            '${consumption.length} ${AppText.t('منتج/خامة', 'item(s)')}',
+      if (lowStock.isNotEmpty)
+        '${AppText.t('تنبيه مخزون منخفض', 'Low stock')}: ${lowStock.length}',
     ];
-    return SnackBar(
-      behavior: SnackBarBehavior.floating,
-      duration: const Duration(seconds: 7),
-      backgroundColor: lowStock.isNotEmpty
-          ? AppColors.warning
-          : AppColors.success,
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: items,
-      ),
-    );
+
+    if (lowStock.isNotEmpty) {
+      AppFeedback.show(context, lines.join('\n'), isError: false, type: AppFeedbackType.neutral);
+    } else {
+      AppFeedback.success(context, lines.join('\n'));
+    }
   }
 
   Map<String, dynamic>? _selectedAnalysis(RunTestState state) {
@@ -465,240 +447,241 @@ class _RunTestTabState extends State<RunTestTab> {
         : null;
     final unit = '${analysis?['unit'] ?? '%'}';
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          AppText.t('تشغيل اختبار', 'Run a test'),
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          '${AppText.t('سجّل تحليلاً جديداً وفق إعدادات التحليل.', 'Record a new test following the analysis setup.')}'
-          '${analysis == null ? '' : ' — ${analysis['name']} (${analysis['unit'] ?? '%'})'}',
-          style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-        ),
-        const SizedBox(height: AppSpacing.md),
-          if (state.loading && state.analyses.isNotEmpty) const AppRefreshBar(),
-          if (state.loading && state.analyses.isEmpty) ...[
-            const AppSkeletonList(rows: 6, lines: 3, height: 380),
-          ] else if (state.error != null) ...[
-          Text(state.error!, style: TextStyle(color: AppColors.danger)),
-        ] else ...[
-          _sectionTitle('1', AppText.t('إعدادات العينة', 'Sample setup')),
-          AppCard(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                DropdownButtonFormField<int>(
-                  initialValue: state.analysisId,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    labelText: AppText.t('التحليل', 'Analysis'),
-                    isDense: true,
-                  ),
-                  items: [
-                    for (final a in state.analyses)
-                      DropdownMenuItem<int>(
-                        value: (a['id'] as num).toInt(),
-                        child: Text('${a['name']} (${a['unit'] ?? '%'})',
-                            overflow: TextOverflow.ellipsis),
-                      ),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) {
-                      setState(() {
-                        _formulaAuto = true;
-                        _listSelections.clear();
-                      });
-                      cubit.selectAnalysis(v);
-                    }
-                  },
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Wrap(
-                  spacing: AppSpacing.md,
-                  runSpacing: AppSpacing.sm,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 220.w,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: state.sourceType,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: AppText.t('المصدر', 'Source'),
-                          isDense: true,
-                        ),
-                        items: [
-                          DropdownMenuItem(
-                              value: 'raw_material',
-                              child: Text(AppText.t('مادة خام', 'Raw material'))),
-                          DropdownMenuItem(
-                              value: 'product',
-                              child: Text(AppText.t('منتج', 'Product'))),
-                        ],
-                        onChanged: (v) {
-                          if (v != null) cubit.setSourceType(v);
-                        },
-                      ),
+    return AppErrorFeedback<RunTestCubit, RunTestState>(
+      selector: (s) => s.error,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            AppText.t('تشغيل اختبار', 'Run a test'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            '${AppText.t('سجّل تحليلاً جديداً وفق إعدادات التحليل.', 'Record a new test following the analysis setup.')}'
+            '${analysis == null ? '' : ' — ${analysis['name']} (${analysis['unit'] ?? '%'})'}',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+          ),
+          const SizedBox(height: AppSpacing.md),
+            if (state.loading && state.analyses.isNotEmpty) const AppRefreshBar(),
+            if (state.loading && state.analyses.isEmpty) ...[
+              const AppSkeletonList(rows: 6, lines: 3, height: 380),
+            ] else ...[
+              _sectionTitle('1', AppText.t('إعدادات العينة', 'Sample setup')),
+            AppCard(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<int>(
+                    initialValue: state.analysisId,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      labelText: AppText.t('التحليل', 'Analysis'),
+                      isDense: true,
                     ),
-                    if (state.sourceType == 'raw_material') ...[
-                      SizedBox(
-                        width: 280.w,
-                        child: TextField(
-                          controller: _entryCode,
-                          decoration: InputDecoration(
-                            labelText: AppText.t('رقم القيد', 'Entry code'),
-                            isDense: true,
-                          ),
+                    items: [
+                      for (final a in state.analyses)
+                        DropdownMenuItem<int>(
+                          value: (a['id'] as num).toInt(),
+                          child: Text('${a['name']} (${a['unit'] ?? '%'})',
+                              overflow: TextOverflow.ellipsis),
                         ),
-                      ),
-                      OutlinedButton(
-                        onPressed: _lookupEntry,
-                        child: Text(AppText.t('بحث', 'Lookup')),
-                      ),
-                      if (state.sourceName.isNotEmpty)
-                        Text(
-                          '${AppText.t('المادة', 'Material')}: ${state.sourceName}',
-                          style: TextStyle(
-                              color: AppColors.success,
-                              fontSize: 12.spMax),
-                        ),
-                    ] else ...[
+                    ],
+                    onChanged: (v) {
+                      if (v != null) {
+                        setState(() {
+                          _formulaAuto = true;
+                          _listSelections.clear();
+                        });
+                        cubit.selectAnalysis(v);
+                      }
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Wrap(
+                    spacing: AppSpacing.md,
+                    runSpacing: AppSpacing.sm,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
                       SizedBox(
-                        width: 280.w,
-                        child: DropdownButtonFormField<int>(
-                          initialValue: state.productId,
+                        width: 220.w,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: state.sourceType,
                           isExpanded: true,
                           decoration: InputDecoration(
-                            labelText: AppText.t('المنتج', 'Product'),
+                            labelText: AppText.t('المصدر', 'Source'),
                             isDense: true,
                           ),
                           items: [
-                            for (final p in state.products)
-                              DropdownMenuItem<int>(
-                                value: (p['id'] as num).toInt(),
-                                child: Text('${p['name']}',
-                                    overflow: TextOverflow.ellipsis),
-                              ),
+                            DropdownMenuItem(
+                                value: 'raw_material',
+                                child: Text(AppText.t('مادة خام', 'Raw material'))),
+                            DropdownMenuItem(
+                                value: 'product',
+                                child: Text(AppText.t('منتج', 'Product'))),
                           ],
                           onChanged: (v) {
-                            if (v != null) cubit.selectProduct(v);
+                            if (v != null) cubit.setSourceType(v);
                           },
                         ),
                       ),
-                    ],
-                    SizedBox(
-                      width: 220.w,
-                      child: TextField(
-                        controller: _sampleName,
-                        decoration: InputDecoration(
-                          labelText: AppText.t('اسم العينة', 'Sample name'),
-                          isDense: true,
+                      if (state.sourceType == 'raw_material') ...[
+                        SizedBox(
+                          width: 280.w,
+                          child: TextField(
+                            controller: _entryCode,
+                            decoration: InputDecoration(
+                              labelText: AppText.t('رقم القيد', 'Entry code'),
+                              isDense: true,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          _sectionTitle('2', AppText.t('قيم الحقول', 'Field values')),
-          AppCard(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: dynamicFields.isEmpty
-                ? Text(
-                    AppText.t('لا حقول ديناميكية لهذا التحليل.',
-                        'No dynamic fields for this analysis.'),
-                    style: TextStyle(color: AppColors.textMuted))
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      for (var i = 0; i < dynamicFields.length; i++) ...[
-                        _dynamicFieldWidget(state, dynamicFields[i]),
-                        if (i < dynamicFields.length - 1)
-                          const Divider(height: 24),
-                      ],
-                    ],
-                  ),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          _sectionTitle('3', AppText.t('النتيجة', 'Result')),
-          AppCard(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (formulaEnabled) ...[
-                  SwitchListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(AppText.t(
-                        'حساب النتيجة تلقائياً من المعادلة',
-                        'Compute result from formula')),
-                    value: _formulaAuto,
-                    onChanged: (v) => setState(() => _formulaAuto = v),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                ],
-                if (autoOk)
-                  Container(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    decoration: BoxDecoration(
-                      color: AppColors.success.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: AppColors.success.withValues(alpha: 0.35)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          AppText.t('النتيجة من المعادلة',
-                              'Result from formula'),
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        OutlinedButton(
+                          onPressed: _lookupEntry,
+                          child: Text(AppText.t('بحث', 'Lookup')),
                         ),
-                        Text(
-                          '${_computedDisplay(comp['value'])} $unit',
-                          textDirection: TextDirection.ltr,
-                          style: TextStyle(
-                            fontSize: 22.spMax,
-                            fontWeight: FontWeight.w800,
-                            color: AppColors.success,
+                        if (state.sourceName.isNotEmpty)
+                          Text(
+                            '${AppText.t('المادة', 'Material')}: ${state.sourceName}',
+                            style: TextStyle(
+                                color: AppColors.success,
+                                fontSize: 12.spMax),
+                          ),
+                      ] else ...[
+                        SizedBox(
+                          width: 280.w,
+                          child: DropdownButtonFormField<int>(
+                            initialValue: state.productId,
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              labelText: AppText.t('المنتج', 'Product'),
+                              isDense: true,
+                            ),
+                            items: [
+                              for (final p in state.products)
+                                DropdownMenuItem<int>(
+                                  value: (p['id'] as num).toInt(),
+                                  child: Text('${p['name']}',
+                                      overflow: TextOverflow.ellipsis),
+                                ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) cubit.selectProduct(v);
+                            },
                           ),
                         ),
                       ],
-                    ),
-                  )
-                else ...[
-                  TextField(
-                    controller: _resultText,
-                    decoration: InputDecoration(
-                      labelText: formulaEnabled
-                          ? AppText.t('النتيجة اليدوية', 'Manual result')
-                          : AppText.t('النتيجة', 'Result'),
-                      helperText: missingHint,
-                      helperMaxLines: 3,
-                      isDense: true,
-                    ),
+                      SizedBox(
+                        width: 220.w,
+                        child: TextField(
+                          controller: _sampleName,
+                          decoration: InputDecoration(
+                            labelText: AppText.t('اسم العينة', 'Sample name'),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
-                const SizedBox(height: AppSpacing.lg),
-                AppButton(
-                  expanded: true,
-                  label: AppStrings.runTest,
-                  icon: Icon(Icons.play_arrow, size: 18.r),
-                  loading: state.running,
-                  onPressed: state.running ? null : _run,
-                ),
-              ],
+              ),
             ),
-          ),
+            const SizedBox(height: AppSpacing.lg),
+            _sectionTitle('2', AppText.t('قيم الحقول', 'Field values')),
+            AppCard(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: dynamicFields.isEmpty
+                  ? Text(
+                      AppText.t('لا حقول ديناميكية لهذا التحليل.',
+                          'No dynamic fields for this analysis.'),
+                      style: TextStyle(color: AppColors.textMuted))
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        for (var i = 0; i < dynamicFields.length; i++) ...[
+                          _dynamicFieldWidget(state, dynamicFields[i]),
+                          if (i < dynamicFields.length - 1)
+                            const Divider(height: 24),
+                        ],
+                      ],
+                    ),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            _sectionTitle('3', AppText.t('النتيجة', 'Result')),
+            AppCard(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (formulaEnabled) ...[
+                    SwitchListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(AppText.t(
+                          'حساب النتيجة تلقائياً من المعادلة',
+                          'Compute result from formula')),
+                      value: _formulaAuto,
+                      onChanged: (v) => setState(() => _formulaAuto = v),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
+                  if (autoOk)
+                    Container(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      decoration: BoxDecoration(
+                        color: AppColors.success.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                            color: AppColors.success.withValues(alpha: 0.35)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            AppText.t('النتيجة من المعادلة',
+                                'Result from formula'),
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          Text(
+                            '${_computedDisplay(comp['value'])} $unit',
+                            textDirection: TextDirection.ltr,
+                            style: TextStyle(
+                              fontSize: 22.spMax,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.success,
+                            ),
+                          ),
+                        ],
+                      ),
+                    )
+                  else ...[
+                    TextField(
+                      controller: _resultText,
+                      decoration: InputDecoration(
+                        labelText: formulaEnabled
+                            ? AppText.t('النتيجة اليدوية', 'Manual result')
+                            : AppText.t('النتيجة', 'Result'),
+                        helperText: missingHint,
+                        helperMaxLines: 3,
+                        isDense: true,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: AppSpacing.lg),
+                  AppButton(
+                    expanded: true,
+                    label: AppStrings.runTest,
+                    icon: Icon(Icons.play_arrow, size: 18.r),
+                    loading: state.running,
+                    onPressed: state.running ? null : _run,
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

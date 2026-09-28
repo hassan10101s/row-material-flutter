@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:sqflite_common/utils/utils.dart' as utils;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../app_paths.dart';
+import 'db_trace.dart';
 
 /// SQLite access layer (port of core/infrastructure/sqlite_db.py schema).
 ///
@@ -33,11 +35,60 @@ class DatabaseHelper {
     if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
       sqfliteFfiInit();
       databaseFactory = databaseFactoryFfi;
+      _installLockDiagnostics();
     }
     _desktopFactoryReady = true;
   }
 
   static bool _desktopFactoryReady = false;
+  static bool _lockDiagnosticsReady = false;
+
+  static const Duration _lockWarningDurationDefault = Duration(seconds: 10);
+
+  /// Make sqflite's anonymous lock warning actionable.
+  ///
+  /// `Warning database has been locked for 0:00:10.000000. Make sure you
+  /// always use the transaction object...` is printed by
+  /// `sqflite_common`'s `SqfliteDatabaseMixinBase.txnSynchronized` after
+  /// `lockWarningDurationDefault` (10s) spent waiting for the connection's
+  /// non-reentrant `_rawLock`. It is worth keeping, but it cannot be used to
+  /// find the culprit: it fires from the `Timer` of
+  /// `timeoutCompleter.future.timeout(...)`, so the frames it prints are always
+  /// `Future.timeout -> Timer._runTimers` and never the call that was waiting.
+  ///
+  /// The reason a wait gets that long at all is worth spelling out, because it
+  /// is what makes the warning misleading. With the FFI factory every statement
+  /// of every database is funnelled through **one** shared background isolate
+  /// (`database_factory_ffi_io.dart:43`), and a statement that is not part of
+  /// the transaction currently open on the connection is not run at all - it is
+  /// parked in `SqfliteFfiDatabase._noTransactionHandlerQueue` until that
+  /// transaction ends (`sqflite_ffi_impl.dart:270`) - while already holding the
+  /// `_rawLock` the ten seconds are measured against. So "held the connection
+  /// for ten seconds" almost always means "there was a long call in flight, and
+  /// something behind it needed the same connection".
+  ///
+  /// The holder is reported by [DbTrace], which times every call from the
+  /// synchronous part of its caller - so the stack it prints does name the call
+  /// site, and a stall report lists every call that was in flight at that
+  /// moment. This callback only records that a wait happened and points there.
+  static void _installLockDiagnostics() {
+    if (_lockDiagnosticsReady) return;
+    _lockDiagnosticsReady = true;
+    // Only the callback is replaced: the duration is left at the package default
+    // so the warning still fires on the same schedule as before.
+    utils.setLockWarningInfo(
+      callback: () {
+        // ignore: avoid_print
+        print(
+          'Warning database has been locked for more than '
+          '$_lockWarningDurationDefault. A database call waited for the '
+          'connection lock - the holder is whichever call had it. See the '
+          '[db] lines from DbTrace for the call sites: a stall report lists '
+          'every call that was in flight, oldest first.',
+        );
+      },
+    );
+  }
 
   /// Test hook: allow [ensureDesktopFactory] to run again.
   static void resetDesktopFactoryForTesting() => _desktopFactoryReady = false;
@@ -248,7 +299,12 @@ class DatabaseHelper {
     // Apply idempotent column/table guarantees on every open — returns on
     // existing databases (fixed version 1) otherwise never see new columns.
     await _runLegacyGuarantees(db);
-    return db;
+    // Every call through the handle is timed and, if it overruns, reported with
+    // its caller's stack. Wrapping the handle rather than individual call sites
+    // is what makes the set of suspects complete: a stall report has to list
+    // *every* call that was in flight, including the ones nobody thought to
+    // label, or it names victims and stays silent about the holder.
+    return TracedDatabase(db);
   }
 
   /// Create the full schema. Idempotent (IF NOT EXISTS) so it can also be

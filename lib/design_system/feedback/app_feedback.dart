@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../tokens/app_colors.dart';
+import '../../core/constants/app_strings.dart';
 import '../../core/utils/app_exceptions.dart';
 
 enum AppFeedbackType { neutral, success, error, info }
@@ -15,11 +16,20 @@ enum AppFeedbackType { neutral, success, error, info }
 /// `Scaffold` ancestor, which is what silently dropped messages raised from
 /// dialogs and nested routes.
 ///
-/// An [AppFeedbackType.error] stays until it is dismissed: a failure that
-/// disappears after four seconds looks exactly like a save that never
-/// happened. Everything else auto-dismisses.
+/// Every message auto-dismisses, tuned per type (a success is noise after a
+/// moment; an error needs long enough to actually be read). A long message -
+/// a raw SQLite or Firebase error - gets extra seconds, otherwise it would
+/// vanish mid-sentence. Pass `sticky: true` only for a message that truly must
+/// not disappear on its own.
 class AppFeedback {
   AppFeedback._();
+
+  static const _defaultSeconds = <AppFeedbackType, int>{
+    AppFeedbackType.neutral: 4,
+    AppFeedbackType.success: 3,
+    AppFeedbackType.info: 5,
+    AppFeedbackType.error: 9,
+  };
 
   static ({OverlayEntry entry, int id})? _current;
   static int _seq = 0;
@@ -29,7 +39,8 @@ class AppFeedback {
     String message, {
     bool isError = false,
     AppFeedbackType type = AppFeedbackType.neutral,
-    int durationSeconds = 4,
+    int? durationSeconds,
+    bool sticky = false,
   }) {
     final text = message.trim();
     if (text.isEmpty) return;
@@ -42,14 +53,17 @@ class AppFeedback {
       return;
     }
 
+    final seconds = (durationSeconds ?? _defaultSeconds[kind]!) +
+        (text.length > 160 ? 4 : (text.length > 80 ? 2 : 0));
+
     _dismissCurrent();
     final id = ++_seq;
     final entry = OverlayEntry(
       builder: (context) => _FeedbackBanner(
         message: text,
         type: kind,
-        sticky: kind == AppFeedbackType.error,
-        duration: Duration(seconds: durationSeconds),
+        sticky: sticky,
+        duration: Duration(seconds: seconds),
         onDismiss: () => _dismiss(id),
       ),
     );
@@ -81,10 +95,10 @@ class AppFeedback {
   static String describeError(Object error) {
     if (error is AppError) {
       final message = error.message.trim();
-      return message.isEmpty ? 'حدث خطأ غير متوقع' : message;
+      return message.isEmpty ? _unexpected() : message;
     }
     final text = error.toString().trim();
-    if (text.isEmpty) return 'حدث خطأ غير متوقع';
+    if (text.isEmpty) return _unexpected();
 
     final unwrapped =
         text.replaceFirst(RegExp(r'^(DatabaseException|PlatformException)\s*[:(]\s*'), '');
@@ -96,6 +110,9 @@ class AppFeedback {
     }
     return text;
   }
+
+  static String _unexpected() =>
+      AppText.t('حدث خطأ غير متوقع', 'Something went wrong.');
 
   static void success(BuildContext context, String message) =>
       show(context, message, type: AppFeedbackType.success);

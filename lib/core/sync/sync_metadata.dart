@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../database/database_helper.dart';
+import '../database/db_trace.dart';
 import '../utils/app_dates.dart';
 
 /// Pull cursor of one entity type: `{ts, id}` (plan §6.4).
@@ -61,22 +62,51 @@ class SyncMetadata {
   static String cursorKey(String entityType) => 'pull_cursor_$entityType';
 
   Future<String> get(String key) async {
-    final rows = await (await _db).query('sync_metadata',
-        where: 'key = ?', whereArgs: [key], limit: 1);
+    final db = await _db;
+    final rows = await DbTrace.run(
+        'metadata.get($key)',
+        () => db.query('sync_metadata',
+            where: 'key = ?', whereArgs: [key], limit: 1));
     if (rows.isEmpty) return '';
     return '${rows.first['value']}';
   }
 
-  Future<void> set(String key, String value) async {
-    await (await _db).insert(
-      'sync_metadata',
-      {'key': key, 'value': value},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+  /// Several keys in one round trip.
+  ///
+  /// The status snapshot reads `last_pull_at`, `last_push_at`, `org_bound_at`
+  /// and the sync flag. On the FFI factory each `get` is a separate message to
+  /// the one shared background isolate, and a root-handle call holds the
+  /// connection's non-reentrant lock while it waits, so four independent reads
+  /// are four chances to queue up behind the rest of the app.
+  Future<Map<String, String>> readAll(List<String> keys) async {
+    if (keys.isEmpty) return const {};
+    final placeholders = List.filled(keys.length, '?').join(',');
+    final db = await _db;
+    final rows = await DbTrace.run(
+        'metadata.readAll(${keys.length})',
+        () => db.rawQuery(
+              'SELECT key, value FROM sync_metadata WHERE key IN ($placeholders)',
+              keys,
+            ));
+    return {
+      for (final row in rows) '${row['key']}': '${row['value']}',
+    };
   }
 
-  Future<void> remove(String key) async =>
-      (await _db).delete('sync_metadata', where: 'key = ?', whereArgs: [key]);
+  Future<void> set(String key, String value) async {
+    final db = await _db;
+    await DbTrace.run('metadata.set($key)', () => db.insert(
+          'sync_metadata',
+          {'key': key, 'value': value},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        ));
+  }
+
+  Future<void> remove(String key) async {
+    final db = await _db;
+    await DbTrace.run('metadata.remove($key)',
+        () => db.delete('sync_metadata', where: 'key = ?', whereArgs: [key]));
+  }
 
   /// Generate (once) and persist the device UUID used for `device_registry`
   /// and the remote `devices/{deviceId}` document.

@@ -7,8 +7,8 @@ import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/animations/app_animations.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
-import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
@@ -21,6 +21,7 @@ import '../data/inspection_repo.dart';
 import 'cubit/inspection_detail_cubit.dart';
 import 'cubit/inspection_form_cubit.dart';
 import 'cubit/inspections_cubit.dart';
+import 'cubit/inspections_state.dart';
 import '../../reference/data/reference_repo.dart';
 import 'inspection_detail_screen.dart';
 import 'inspection_form_screen.dart';
@@ -104,7 +105,7 @@ class InspectionsScreen extends StatelessWidget {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
@@ -129,7 +130,7 @@ class InspectionsScreen extends StatelessWidget {
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (context.mounted) AppFeedback.error(context, '$e');
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     }
   }
 
@@ -139,168 +140,169 @@ class InspectionsScreen extends StatelessWidget {
     final cubit = context.read<InspectionsCubit>();
     final user = getIt<AuthGate>().currentUser;
     final canCreate = user?.canCreateInspection ?? false;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppSpacing.page),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            AppStrings.inspections,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final search = TextField(
-                onChanged: cubit.setQuery,
-                decoration: InputDecoration(
-                  labelText: AppText.t('بحث', 'Search'),
-                  isDense: true,
-                  prefixIcon: Icon(Icons.search, size: 20.r),
-                ),
-              );
-              final filters = <Widget>[
-                SizedBox(
-                  width: 260.w,
-                  child: DropdownButtonFormField<String>(
-                    initialValue: state.status,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      labelText: AppText.t('الحالة', 'Status'),
-                      isDense: true,
-                    ),
-                    items: [
-                      DropdownMenuItem(
-                        value: '',
-                        child: Text(AppText.t('الكل', 'All')),
+    return AppErrorFeedback<InspectionsCubit, InspectionsState>(
+      selector: (s) => s.error,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppSpacing.page),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              AppStrings.inspections,
+              style: Theme.of(context).textTheme.headlineSmall,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final search = TextField(
+                  onChanged: cubit.setQuery,
+                  decoration: InputDecoration(
+                    labelText: AppText.t('بحث', 'Search'),
+                    isDense: true,
+                    prefixIcon: Icon(Icons.search, size: 20.r),
+                  ),
+                );
+                final filters = <Widget>[
+                  SizedBox(
+                    width: 260.w,
+                    child: DropdownButtonFormField<String>(
+                      initialValue: state.status,
+                      isExpanded: true,
+                      decoration: InputDecoration(
+                        labelText: AppText.t('الحالة', 'Status'),
+                        isDense: true,
                       ),
-                      for (final s in _allStatuses)
-                        DropdownMenuItem(value: s, child: Text(statusLabel(s))),
-                    ],
-                    onChanged: (v) => cubit.setStatus(v ?? ''),
+                      items: [
+                        DropdownMenuItem(
+                          value: '',
+                          child: Text(AppText.t('الكل', 'All')),
+                        ),
+                        for (final s in _allStatuses)
+                          DropdownMenuItem(value: s, child: Text(statusLabel(s))),
+                      ],
+                      onChanged: (v) => cubit.setStatus(v ?? ''),
+                    ),
                   ),
-                ),
-                AppButton(
-                  icon: Icon(Icons.description_outlined, size: 18.r),
-                  label: AppText.t('تقرير متابعة', 'Follow-up'),
-                  style: AppButtonStyle.secondary,
-                  loading: state.exporting,
-                  onPressed: state.exporting
-                      ? null
-                      : () => _exportFollowUp(context),
-                ),
-                if (canCreate)
                   AppButton(
-                    icon: Icon(Icons.add, size: 18.r),
-                    label: AppStrings.newInspection,
-                    onPressed: () => _newInspection(context),
+                    icon: Icon(Icons.description_outlined, size: 18.r),
+                    label: AppText.t('تقرير متابعة', 'Follow-up'),
+                    style: AppButtonStyle.secondary,
+                    loading: state.exporting,
+                    onPressed: state.exporting
+                        ? null
+                        : () => _exportFollowUp(context),
                   ),
-              ];
-              if (constraints.maxWidth >= 900) {
-                return Row(
+                  if (canCreate)
+                    AppButton(
+                      icon: Icon(Icons.add, size: 18.r),
+                      label: AppStrings.newInspection,
+                      onPressed: () => _newInspection(context),
+                    ),
+                ];
+                if (constraints.maxWidth >= 900) {
+                  return Row(
+                    children: [
+                      Expanded(child: search),
+                      const SizedBox(width: AppSpacing.md),
+                      ...filters,
+                    ],
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: search),
-                    const SizedBox(width: AppSpacing.md),
-                    ...filters,
+                    search,
+                    const SizedBox(height: AppSpacing.md),
+                    Wrap(
+                      spacing: AppSpacing.md,
+                      runSpacing: AppSpacing.sm,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: filters,
+                    ),
                   ],
                 );
-              }
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  search,
-                  const SizedBox(height: AppSpacing.md),
-                  Wrap(
-                    spacing: AppSpacing.md,
-                    runSpacing: AppSpacing.sm,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: filters,
-                  ),
+              },
+            ),
+            const SizedBox(height: AppSpacing.md),
+            if (state.loading && state.visible.isNotEmpty) const AppRefreshBar(),
+            if (state.loading && state.visible.isEmpty) ...[
+              const AppSkeletonList(rows: 8, lines: 5, height: 460),
+            ] else if (state.visible.isEmpty) ...[
+              AppEmptyState(
+                icon: Icons.inventory_2_outlined,
+                title: AppText.t('لا توجد فحوصات', 'No inspections'),
+                subtitle: 'ابدأ بفحص جديد أو عدّل معايير البحث.',
+              ),
+            ] else
+              AppPaginatedTable(
+                columnFlex: const [1.0, 1.15, 2.6, 1.8, 0.95, 1.25, 1.4],
+                headers: [
+                  AppText.t('رقم القيد', 'Entry'),
+                  AppText.t('التاريخ', 'Date'),
+                  AppText.t('المادة', 'Material'),
+                  AppText.t('المورد', 'Supplier'),
+                  AppText.t('الكمية', 'Qty'),
+                  AppText.t('القرار', 'Decision'),
+                  '',
                 ],
-              );
-            },
-          ),
-          const SizedBox(height: AppSpacing.md),
-          if (state.loading && state.visible.isNotEmpty) const AppRefreshBar(),
-          if (state.loading && state.visible.isEmpty) ...[
-            const AppSkeletonList(rows: 8, lines: 5, height: 460),
-          ] else if (state.error != null) ...[
-            Text(state.error!, style: TextStyle(color: AppColors.danger)),
-          ] else if (state.visible.isEmpty) ...[
-            AppEmptyState(
-              icon: Icons.inventory_2_outlined,
-              title: AppText.t('لا توجد فحوصات', 'No inspections'),
-              subtitle: 'ابدأ بفحص جديد أو عدّل معايير البحث.',
-            ),
-          ] else
-            AppPaginatedTable(
-              columnFlex: const [1.0, 1.15, 2.6, 1.8, 0.95, 1.25, 1.4],
-              headers: [
-                AppText.t('رقم القيد', 'Entry'),
-                AppText.t('التاريخ', 'Date'),
-                AppText.t('المادة', 'Material'),
-                AppText.t('المورد', 'Supplier'),
-                AppText.t('الكمية', 'Qty'),
-                AppText.t('القرار', 'Decision'),
-                '',
-              ],
-              rows: [
-                for (final r in state.visible)
-                  [
-                    Text('${r['entry_code']}'),
-                    Text(parseIsoToDisplay('${r['inspection_date']}') ?? ''),
-                    Text(
-                      '${r['material_name']}',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text('${r['supplier']}', overflow: TextOverflow.ellipsis),
-                    Text('${r['quantity']}'),
-                    AppStatusBadge('${r['decision_status']}'),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          tooltip: AppText.t('تحديث القرار', 'Decision'),
-                          icon: Icon(Icons.gavel_outlined, size: 18.r),
-                          onPressed: () => _openDecision(context, r),
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 30,
-                            minHeight: 30,
+                rows: [
+                  for (final r in state.visible)
+                    [
+                      Text('${r['entry_code']}'),
+                      Text(parseIsoToDisplay('${r['inspection_date']}') ?? ''),
+                      Text(
+                        '${r['material_name']}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text('${r['supplier']}', overflow: TextOverflow.ellipsis),
+                      Text('${r['quantity']}'),
+                      AppStatusBadge('${r['decision_status']}'),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: AppText.t('تحديث القرار', 'Decision'),
+                            icon: Icon(Icons.gavel_outlined, size: 18.r),
+                            onPressed: () => _openDecision(context, r),
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 30,
+                              minHeight: 30,
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: AppText.t('تصدير PDF', 'PDF'),
-                          icon: Icon(Icons.picture_as_pdf_outlined, size: 18.r),
-                          onPressed: () => _exportOne(context, r, 'report'),
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 30,
-                            minHeight: 30,
+                          IconButton(
+                            tooltip: AppText.t('تصدير PDF', 'PDF'),
+                            icon: Icon(Icons.picture_as_pdf_outlined, size: 18.r),
+                            onPressed: () => _exportOne(context, r, 'report'),
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 30,
+                              minHeight: 30,
+                            ),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: AppText.t('ملصق', 'Label'),
-                          icon: Icon(Icons.label_outline, size: 18.r),
-                          onPressed: () => _exportOne(context, r, 'label'),
-                          visualDensity: VisualDensity.compact,
-                          padding: EdgeInsets.zero,
-                          constraints: const BoxConstraints(
-                            minWidth: 30,
-                            minHeight: 30,
+                          IconButton(
+                            tooltip: AppText.t('ملصق', 'Label'),
+                            icon: Icon(Icons.label_outline, size: 18.r),
+                            onPressed: () => _exportOne(context, r, 'label'),
+                            visualDensity: VisualDensity.compact,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(
+                              minWidth: 30,
+                              minHeight: 30,
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
-                  ],
-              ],
-              onRowTap: (index) => _openDetail(context, state.visible[index]),
-              totalLabel:
-                  '${state.visible.length} ${AppText.t('فحص', 'inspections')}',
-            ),
-        ],
+                        ],
+                      ),
+                    ],
+                ],
+                onRowTap: (index) => _openDetail(context, state.visible[index]),
+                totalLabel:
+                    '${state.visible.length} ${AppText.t('فحص', 'inspections')}',
+              ),
+          ],
+        ),
       ),
     );
   }

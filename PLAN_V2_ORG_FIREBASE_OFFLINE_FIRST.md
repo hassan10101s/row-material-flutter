@@ -96,7 +96,7 @@
 
 > **لا يوجد استثناء لـ P0.** بدون Firebase OAuth Client ID لن يفتح Dialog تسجيل الدخول.
 
-### 4.1 Firebase Console (مشروع `materiallab-63405`)
+### 4.1 Firebase Console (مشروع `<YOUR_PROJECT_ID>`)
 | # | الخطوة | تحقّق |
 |---|---|---|
 | 1 | **Firestore Database → Create database** (Native، نفس region لـ Storage) | يظهر `firestore.googleapis.com` في Project |
@@ -108,12 +108,12 @@
 
 ### 4.2 القيم التي سأبنيها منها ملفات المشروع
 ```
-FIREBASE_API_KEY           = AIzaSyAZYonwyMByi9KMRFMpy4hrKlD16plEvIQ
-FIREBASE_PROJECT_ID        = materiallab-63405
-FIREBASE_AUTH_DOMAIN       = materiallab-63405.firebaseapp.com
-FIREBASE_STORAGE_BUCKET    = materiallab-63405.firebasestorage.app
-FIREBASE_MESSAGING_SENDER_ID = 603169053186
-FIREBASE_APP_ID            = 1:603169053186:web:bd635ab17e441b92db251b
+FIREBASE_API_KEY           = <YOUR_FIREBASE_API_KEY>
+FIREBASE_PROJECT_ID        = <YOUR_PROJECT_ID>
+FIREBASE_AUTH_DOMAIN       = <YOUR_AUTH_DOMAIN>
+FIREBASE_STORAGE_BUCKET    = <YOUR_STORAGE_BUCKET>
+FIREBASE_MESSAGING_SENDER_ID = <YOUR_SENDER_ID>
+FIREBASE_APP_ID            = <YOUR_APP_ID>
 GOOGLE_WEB_CLIENT_ID       = <من خطوة 3 — للتشغيل على الويب فقط>
 GOOGLE_DESKTOP_CLIENT_ID   = <من خطوة 4 —Required لتسجيل دخول Windows>
 ```

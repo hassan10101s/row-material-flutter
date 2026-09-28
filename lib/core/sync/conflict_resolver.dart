@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../database/db_trace.dart';
 import 'entity_registry.dart';
 import 'remote/remote_data_source.dart';
 import 'sync_queue.dart';
@@ -50,7 +51,7 @@ class ConflictResolver {
           localPayload,
         );
         final columns = await availableColumns(db, entity.localTable);
-        await db.transaction((txn) async {
+        await tracedTransaction(db, 'conflicts.keepLocal', (txn) async {
           await queue.enqueue(
             txn,
             entityType: entity.type,
@@ -97,7 +98,7 @@ class ConflictResolver {
         }
         final db = await queue.dbHelper.database;
         final columns = await availableColumns(db, entity.localTable);
-        await db.transaction((txn) async {
+        await tracedTransaction(db, 'conflicts.keepRemote', (txn) async {
           final localId = document['localId'];
           if (localId is num) {
             final row = remoteToLocalRow(entity, document, organizationId: organizationId)

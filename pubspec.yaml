@@ -18,6 +18,9 @@ dependencies:
   # ── Database ──────────────────────
   sqflite: ^2.3.0
   sqflite_common_ffi: 2.4.0
+  # `utils.setLockWarningInfo` - the connection-lock diagnostics in
+  # `core/database/database_helper.dart` go through this package directly.
+  sqflite_common: ^2.5.13
   path: ^1.9.0
 
   # ── Auth & secure storage ─────────

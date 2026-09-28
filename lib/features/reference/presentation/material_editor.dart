@@ -244,7 +244,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
-      AppFeedback.error(context, '$e');
+      AppFeedback.errorFrom(context, e);
       Navigator.of(context).pop(false);
     }
   }
@@ -406,7 +406,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
 

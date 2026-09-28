@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
+import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
@@ -220,13 +221,46 @@ class _Dropdown extends StatelessWidget {
   }
 }
 
-class _Body extends StatelessWidget {
+class _Body extends StatefulWidget {
   const _Body({required this.controller});
 
   final AuditController controller;
 
   @override
+  State<_Body> createState() => _BodyState();
+}
+
+class _BodyState extends State<_Body> {
+  String? _shownError;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onChanged);
+    super.dispose();
+  }
+
+  void _onChanged() {
+    final error = widget.controller.error;
+    if (error == null) {
+      _shownError = null;
+      return;
+    }
+    if (error == _shownError) return;
+    _shownError = error;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) AppFeedback.error(context, error);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final controller = widget.controller;
     if (controller.loading && controller.page.entries.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -234,7 +268,6 @@ class _Body extends StatelessWidget {
       return AppEmptyState(
         icon: Icons.error_outline,
         title: AppText.t('تعذّر تحميل السجل', 'Could not load the trail'),
-        subtitle: controller.error,
       );
     }
     if (controller.page.entries.isEmpty) {

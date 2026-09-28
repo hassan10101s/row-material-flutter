@@ -88,7 +88,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
     } on AppError catch (e) {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (mounted) AppFeedback.error(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     } finally {
       if (mounted) setState(() => _busyKey = null);
     }

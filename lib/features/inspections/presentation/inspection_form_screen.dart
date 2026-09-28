@@ -8,6 +8,7 @@ import '../../../app/auth_gate.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_format.dart';
+import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -606,13 +607,6 @@ class _FormBody extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: AppSpacing.md),
-            if (state.error != null) ...[
-              Text(
-                state.error!,
-                style: TextStyle(color: AppColors.danger, fontSize: 13.spMax),
-              ),
-              const SizedBox(height: AppSpacing.md),
-            ],
             _Card(
               title: AppText.t('البيانات الأساسية', 'Basic data'),
               children: [
@@ -859,10 +853,13 @@ class _FormBody extends StatelessWidget {
         ),
       );
     }
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppTopAppBar(title: AppText.t('فحص جديد', 'New Inspection')),
-      body: body,
+    return AppErrorFeedback<InspectionFormCubit, InspectionFormState>(
+      selector: (s) => s.error,
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppTopAppBar(title: AppText.t('فحص جديد', 'New Inspection')),
+        body: body,
+      ),
     );
   }
 

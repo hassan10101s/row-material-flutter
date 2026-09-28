@@ -182,12 +182,8 @@ class _GeneralPanelState extends State<_GeneralPanel> {
     } on AppError catch (e) {
       if (mounted) AppFeedback.error(context, e.message);
     } catch (e) {
-      if (mounted) _err(context, '$e');
+      if (mounted) AppFeedback.errorFrom(context, e);
     }
-  }
-
-  void _err(BuildContext context, String message) {
-    AppFeedback.error(context, message);
   }
 
   Future<void> _pickLogo() async {

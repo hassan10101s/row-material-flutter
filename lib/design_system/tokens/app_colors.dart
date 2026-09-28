@@ -1,7 +1,18 @@
 import 'package:flutter/material.dart';
 
 /// Semantic color tokens (light + dark) mirroring the CSS design tokens.
+///
+/// The `light*`/`dark*` constants are the source of truth. [brightness] is a
+/// mutable static, set once per frame in `main.dart` *before* the widget tree
+/// is built, and it only exists so a widget can write `AppColors.primary` and
+/// get the active-mode value.
+///
+/// Anything that builds a theme - rather than rendering inside the current one
+/// - must read the named constant (or take an [AppPalette]) instead, because
+/// both themes are constructed in the same pass while [brightness] names only
+/// one of them. See [AppTextTheme.build].
 class AppColors {
+  /// The active mode, assigned by `main.dart` at the top of every rebuild.
   static Brightness brightness = Brightness.light;
 
   // Light palette

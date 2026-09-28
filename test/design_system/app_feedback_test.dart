@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/utils/app_exceptions.dart';
 import 'package:material_lab/design_system/feedback/app_feedback.dart';
 
@@ -24,6 +25,17 @@ void main() {
     test('never returns an empty string', () {
       expect(AppFeedback.describeError(''), isNotEmpty);
       expect(AppFeedback.describeError(const AppError('  ')), isNotEmpty);
+    });
+
+    test('the empty fallback follows the app language', () {
+      final wasArabic = AppText.arabic;
+      addTearDown(() => AppText.arabic = wasArabic);
+
+      AppText.arabic = true;
+      expect(AppFeedback.describeError(''), 'حدث خطأ غير متوقع');
+
+      AppText.arabic = false;
+      expect(AppFeedback.describeError(''), 'Something went wrong.');
     });
   });
 
@@ -90,22 +102,62 @@ void main() {
   });
 
   group('dismissal', () {
-    testWidgets('an error stays until it is dismissed', (tester) async {
+    Future<void> pumpLauncher(
+        WidgetTester tester, void Function(BuildContext) raise) async {
       await tester.pumpWidget(MaterialApp(
         home: Builder(
           builder: (context) => Scaffold(
             body: TextButton(
-              onPressed: () => AppFeedback.error(context, 'permission denied'),
+              onPressed: () => raise(context),
               child: const Text('go'),
             ),
           ),
         ),
       ));
-
       await tester.tap(find.text('go'));
       await tester.pump();
+    }
 
-      // Well past the old four-second SnackBar duration.
+    testWidgets('an error lingers longer than a success, then auto-dismisses',
+        (tester) async {
+      await pumpLauncher(
+          tester, (c) => AppFeedback.error(c, 'permission denied'));
+
+      // Still readable a full 3s in - as long as a success message survives.
+      await tester.pump(const Duration(seconds: 3));
+      expect(find.byKey(_banner), findsOneWidget);
+
+      // Then it goes away on its own instead of sitting on screen forever.
+      await tester.pump(const Duration(seconds: 8));
+      await tester.pumpAndSettle();
+      expect(find.byKey(_banner), findsNothing);
+    });
+
+    testWidgets('a long error message is given extra time to be read',
+        (tester) async {
+      final long = 'DatabaseException(SqliteException(1299): while executing '
+          'statement, NOT NULL constraint failed: inspections.created_by '
+          '(code 1299)) ${'x' * 120}';
+      expect(long.length, greaterThan(160));
+
+      await pumpLauncher(tester, (c) => AppFeedback.error(c, long));
+
+      // Past the 9s an error normally gets, but still readable.
+      await tester.pump(const Duration(seconds: 12));
+      expect(find.byKey(_banner), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+      expect(find.byKey(_banner), findsNothing);
+    });
+
+    testWidgets('a sticky message stays until it is dismissed', (tester) async {
+      await pumpLauncher(
+        tester,
+        (c) => AppFeedback.show(c, 'permission denied',
+            isError: true, sticky: true),
+      );
+
       await tester.pump(const Duration(seconds: 20));
       expect(find.byKey(_banner), findsOneWidget);
 

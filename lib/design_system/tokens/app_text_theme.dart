@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
-import 'app_colors.dart';
 import 'app_font_weights.dart';
 
 /// Built text theme using the Cairo typeface.
 class AppTextTheme {
   static const String cairoFontFamily = 'Cairo';
 
-  static TextTheme build() {
+  /// [color] is the strong body-text color *for the brightness being built*.
+  ///
+  /// It is a parameter rather than a read of `AppColors.textStrong` because
+  /// `AppTheme` builds both themes in the same pass, while `AppColors` resolves
+  /// against one mutable static: reading it here gave the dark theme the light
+  /// theme's (dark) text color.
+  static TextTheme build(Color color) {
     final base = TextTheme(
       displaySmall: TextStyle(fontSize: 34.spMax, fontWeight: AppFontWeights.bold),
       headlineMedium: TextStyle(fontSize: 26.spMax, fontWeight: AppFontWeights.bold),
@@ -25,8 +30,8 @@ class AppTextTheme {
     );
     return base.apply(
       fontFamily: cairoFontFamily,
-      bodyColor: AppColors.textStrong,
-      displayColor: AppColors.textStrong,
+      bodyColor: color,
+      displayColor: color,
     );
   }
 }

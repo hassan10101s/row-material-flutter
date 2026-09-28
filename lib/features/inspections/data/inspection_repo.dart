@@ -240,14 +240,32 @@ class InspectionRepo {
       'created_at': timestamp,
       'updated_at': timestamp,
     });
-    await _refreshReportHtml(id, exec: exec);
+    await _refreshReportHtmlOutsideTransaction(id, exec: exec);
     return getById(id, exec: exec);
   }
 
   /// Port of `InspectionService.refresh_report_html` — reload the full row
   /// (with status history + injected lab tests), re-render the stored HTML and
   /// persist it. Fails soft so report generation never blocks the mutation.
-  Future<void> _refreshReportHtml(int inspectionId, {DatabaseExecutor? exec}) async {
+  ///
+  /// **Never call this while a transaction is open on the connection.** The
+  /// builder reads through the root handle - `SettingsRepo.getSettings()` and
+  /// `LabRepo.injectLabTests` both call `dbHelper.database` - and a root-handle
+  /// call made while a transaction is open is not executed: `sqflite_common_ffi`
+  /// parks it in `SqfliteFfiDatabase._noTransactionHandlerQueue` until the
+  /// transaction commits, while already holding the connection's non-reentrant
+  /// lock (`sqflite_common/database_mixin.dart:575`). The caller is *waiting on*
+  /// that read, so the transaction can never commit and the read can never be
+  /// released. `sqflite` breaks the deadlock after 10s by failing the parked read
+  /// with a `DatabaseException`, which the `catch` below then swallows: the save
+  /// appears to succeed after a ten-second freeze and `report_html` is silently
+  /// left stale.
+  ///
+  /// Rendering from uncommitted state is wrong anyway - the report describes a row
+  /// that may still roll back - so the mutations below only call this when they
+  /// are the outermost operation ([exec] is null). `OfflineFirstInspectionRepository`
+  /// owns the transaction and refreshes the report after it commits.
+  Future<void> refreshReportHtml(int inspectionId, {DatabaseExecutor? exec}) async {
     final builder = htmlBuilder;
     if (builder == null) return;
     try {
@@ -263,6 +281,16 @@ class InspectionRepo {
     } catch (e, st) {
       debugPrint('[inspections] report_html refresh failed for #$inspectionId: $e\n$st');
     }
+  }
+
+  /// The report refresh, but only when no caller-owned transaction is open.
+  /// See [refreshReportHtml] for why that matters.
+  Future<void> _refreshReportHtmlOutsideTransaction(
+    int inspectionId, {
+    required DatabaseExecutor? exec,
+  }) async {
+    if (exec != null) return;
+    await refreshReportHtml(inspectionId);
   }
 
   String _buildSnapshot(Map<String, dynamic> b) => jsonDumps({
@@ -439,7 +467,7 @@ class InspectionRepo {
         'changed_at': changedAt,
       }, exec: exec);
     }
-    await _refreshReportHtml(inspectionId, exec: exec);
+    await _refreshReportHtmlOutsideTransaction(inspectionId, exec: exec);
     return getById(inspectionId, exec: exec);
   }
 
@@ -517,7 +545,7 @@ class InspectionRepo {
       where: 'id = ?',
       whereArgs: [inspectionId],
     );
-    await _refreshReportHtml(inspectionId, exec: exec);
+    await _refreshReportHtmlOutsideTransaction(inspectionId, exec: exec);
     return getById(inspectionId, exec: exec);
   }
 

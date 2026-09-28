@@ -22,16 +22,60 @@ class ReportsScreen extends StatefulWidget {
 
 class _ReportsScreenState extends State<ReportsScreen> {
   final _date = TextEditingController(text: todayIso());
-  final _month = TextEditingController();
-  final _year = TextEditingController();
+  final _month = TextEditingController(text: '${DateTime.now().month}');
+  // One controller per field. They used to be a single `_year` attached to both
+  // the monthly and the yearly card, so typing in one rewrote the other.
+  final _monthlyYear = TextEditingController(text: '${DateTime.now().year}');
+  final _yearlyYear = TextEditingController(text: '${DateTime.now().year}');
+
+  // Inline validation messages. A mistyped value used to be swallowed by
+  // `int.tryParse(...) ?? DateTime.now()`, which silently exported the wrong
+  // period instead of telling the user.
+  String? _dateError;
+  String? _monthError;
+  String? _monthlyYearError;
+  String? _yearlyYearError;
 
   @override
   void dispose() {
     _date.dispose();
     _month.dispose();
-    _year.dispose();
+    _monthlyYear.dispose();
+    _yearlyYear.dispose();
     super.dispose();
   }
+
+  /// Parses a required integer, reporting [error] instead of substituting a
+  /// default. Returns null when [text] is not a valid value.
+  static int? _requireInt(
+    String text, {
+    required int min,
+    required int max,
+    required String error,
+    required void Function(String?) onError,
+  }) {
+    final raw = text.trim();
+    final value = int.tryParse(raw);
+    if (value == null || value < min || value > max) {
+      onError(error);
+      return null;
+    }
+    onError(null);
+    return value;
+  }
+
+  /// A strict `YYYY-MM-DD` check: `parseIsoDate` alone would accept nonsense
+  /// like `2026-02-31`, which `DateTime` silently rolls over to March.
+  static bool _isValidIsoDate(String raw) {
+    final text = raw.trim();
+    if (text.length != 10 || text[4] != '-' || text[7] != '-') return false;
+    final parsed = parseIsoDate(text);
+    if (parsed == null) return false;
+    return '${_pad4(parsed.year)}-${_pad2(parsed.month)}-${_pad2(parsed.day)}' == text;
+  }
+
+  static String _pad2(int n) => n.toString().padLeft(2, '0');
+  static String _pad4(int n) => n.toString().padLeft(4, '0');
 
   @override
   Widget build(BuildContext context) {
@@ -64,8 +108,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
               children: [
                 TextField(
                   controller: _date,
-                      decoration: InputDecoration(
-                      labelText: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'), isDense: true),
+                  onChanged: (_) {
+                    if (_dateError == null) return;
+                    setState(() => _dateError = null);
+                  },
+                  decoration: InputDecoration(
+                    labelText: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'),
+                    isDense: true,
+                    errorText: _dateError,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppButton(
@@ -73,7 +124,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   loading: state.busy == 'daily',
                   onPressed: state.busy == 'daily'
                       ? null
-                      : () => cubit.runDaily(_date.text.trim()),
+                      : () {
+                          if (!_isValidIsoDate(_date.text)) {
+                            setState(() => _dateError = AppText.t(
+                                'أدخل تاريخًا صحيحًا بالصيغة YYYY-MM-DD',
+                                'Enter a valid date as YYYY-MM-DD'));
+                            return;
+                          }
+                          cubit.runDaily(_date.text.trim());
+                        },
                 ),
               ],
             ),
@@ -83,20 +142,37 @@ class _ReportsScreenState extends State<ReportsScreen> {
               title: AppText.t('التقرير الشهري', 'Monthly report'),
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
                       child: TextField(
                         controller: _month,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) {
+                          if (_monthError == null) return;
+                          setState(() => _monthError = null);
+                        },
                         decoration: InputDecoration(
-                            labelText: AppText.t('الشهر', 'Month (1-12)'), isDense: true),
+                          labelText: AppText.t('الشهر', 'Month (1-12)'),
+                          isDense: true,
+                          errorText: _monthError,
+                        ),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
                     Expanded(
                       child: TextField(
-                        controller: _year,
+                        controller: _monthlyYear,
+                        keyboardType: TextInputType.number,
+                        onChanged: (_) {
+                          if (_monthlyYearError == null) return;
+                          setState(() => _monthlyYearError = null);
+                        },
                         decoration: InputDecoration(
-                            labelText: AppText.t('السنة', 'Year'), isDense: true),
+                          labelText: AppText.t('السنة', 'Year'),
+                          isDense: true,
+                          errorText: _monthlyYearError,
+                        ),
                       ),
                     ),
                   ],
@@ -107,10 +183,27 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   loading: state.busy == 'monthly',
                   onPressed: state.busy == 'monthly'
                       ? null
-                      : () => cubit.runMonthly(
-                            int.tryParse(_month.text.trim()) ?? DateTime.now().month,
-                            int.tryParse(_year.text.trim()) ?? DateTime.now().year,
-                          ),
+                      : () {
+                          final month = _requireInt(
+                            _month.text,
+                            min: 1,
+                            max: 12,
+                            error: AppText.t(
+                                'أدخل شهرًا بين 1 و 12', 'Enter a month between 1 and 12'),
+                            onError: (e) => setState(() => _monthError = e),
+                          );
+                          if (month == null) return;
+                          final year = _requireInt(
+                            _monthlyYear.text,
+                            min: 1970,
+                            max: 9999,
+                            error: AppText.t(
+                                'أدخل سنة صحيحة', 'Enter a valid year'),
+                            onError: (e) => setState(() => _monthlyYearError = e),
+                          );
+                          if (year == null) return;
+                          cubit.runMonthly(month, year);
+                        },
                 ),
               ],
             ),
@@ -120,8 +213,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
               title: AppText.t('التقرير السنوي', 'Yearly report'),
               children: [
                 TextField(
-                  controller: _year,
-                  decoration: InputDecoration(labelText: AppText.t('السنة', 'Year'), isDense: true),
+                  controller: _yearlyYear,
+                  keyboardType: TextInputType.number,
+                  onChanged: (_) {
+                    if (_yearlyYearError == null) return;
+                    setState(() => _yearlyYearError = null);
+                  },
+                  decoration: InputDecoration(
+                    labelText: AppText.t('السنة', 'Year'),
+                    isDense: true,
+                    errorText: _yearlyYearError,
+                  ),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppButton(
@@ -129,8 +231,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   loading: state.busy == 'yearly',
                   onPressed: state.busy == 'yearly'
                       ? null
-                      : () => cubit.runYearly(
-                          int.tryParse(_year.text.trim()) ?? DateTime.now().year),
+                      : () {
+                          final year = _requireInt(
+                            _yearlyYear.text,
+                            min: 1970,
+                            max: 9999,
+                            error: AppText.t(
+                                'أدخل سنة صحيحة', 'Enter a valid year'),
+                            onError: (e) => setState(() => _yearlyYearError = e),
+                          );
+                          if (year == null) return;
+                          cubit.runYearly(year);
+                        },
                 ),
               ],
             ),
