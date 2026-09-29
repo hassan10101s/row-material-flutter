@@ -84,10 +84,11 @@ class ReferenceRepo {
     Map<String, dynamic> physicalReference = const {},
     Map<String, dynamic> chemicalReference = const {},
     Map<String, dynamic> units = const {},
+    DatabaseExecutor? exec,
   }) async {
     if (materialName.trim().isEmpty) throw ValidationError(AppErrors.referenceMaterialNameRequired);
     if (materialCode.trim().isEmpty) throw ValidationError(AppErrors.referenceMaterialCodeRequired);
-    final db = await _db;
+    final db = exec ?? await _db;
     final existing = await db.query('reference_materials',
         where: 'material_name = ?', whereArgs: [materialName.trim()]);
     if (existing.isNotEmpty) {
@@ -112,9 +113,10 @@ class ReferenceRepo {
     Map<String, dynamic>? physicalReference,
     Map<String, dynamic>? chemicalReference,
     Map<String, dynamic> units = const {},
+    DatabaseExecutor? exec,
   }) async {
-    final db = await _db;
-    final existing = await getMaterialRaw(id);
+    final db = exec ?? await _db;
+    final existing = await getMaterialRaw(id, exec: exec);
     if (existing == null) throw NotFoundError(AppErrors.materialNotFound);
     final cleanName = materialName.trim();
     final cleanCode = materialCode.trim();
@@ -138,14 +140,14 @@ class ReferenceRepo {
     await _batchUpsertParameters(chemicalRef, units, db);
   }
 
-  Future<void> deleteMaterial(int id) async {
-    final db = await _db;
+  Future<void> deleteMaterial(int id, [DatabaseExecutor? exec]) async {
+    final db = exec ?? await _db;
     await db.update('reference_materials', {'active': 0},
         where: 'id = ?', whereArgs: [id]);
   }
 
   Future<void> _batchUpsertParameters(
-      Map<String, dynamic> chemicalRef, Map<String, dynamic> units, Database db) async {
+      Map<String, dynamic> chemicalRef, Map<String, dynamic> units, DatabaseExecutor db) async {
     final batch = db.batch();
     for (final e in chemicalRef.entries) {
       final unit = '${units[e.key] ?? ''}'.trim();
@@ -196,8 +198,9 @@ class ReferenceRepo {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
-  Future<void> upsertParameter(String name, String unit, {String parameterType = 'chemical'}) async {
-    final db = await _db;
+  Future<void> upsertParameter(String name, String unit,
+      {String parameterType = 'chemical', DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     final trimmed = name.trim();
     if (trimmed.isEmpty) throw ValidationError(AppErrors.parameterNameRequired);
     if (parameterType != 'chemical' && parameterType != 'physical') {
@@ -215,8 +218,19 @@ class ReferenceRepo {
     );
   }
 
-  Future<void> deleteParameter(String name) async {
-    final db = await _db;
+  Future<void> deleteParameter(String name, [DatabaseExecutor? exec]) async {
+    final db = exec ?? await _db;
+    // Bounds rows and analysis links inherit the NAME from this origin; clear
+    // them so a reference parameter can be removed without FK violations.
+    final rows = await db.query('parameters',
+        columns: ['id'], where: 'parameter_name = ?', whereArgs: [name]);
+    final pid = rows.isEmpty ? null : rows.first['id'];
+    if (pid != null) {
+      await db.delete('material_parameter_bounds',
+          where: 'parameter_id = ?', whereArgs: [pid]);
+      await db.update('lab_analyses', <String, Object?>{'parameter_id': null},
+          where: 'parameter_id = ?', whereArgs: [pid]);
+    }
     await db.delete('parameters', where: 'parameter_name = ?', whereArgs: [name]);
   }
 
@@ -229,8 +243,9 @@ class ReferenceRepo {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
-  Future<void> upsertUnit(String symbol, {String name = '', String dimension = ''}) async {
-    final db = await _db;
+  Future<void> upsertUnit(String symbol,
+      {String name = '', String dimension = '', DatabaseExecutor? exec}) async {
+    final db = exec ?? await _db;
     final trimmed = symbol.trim();
     if (trimmed.isEmpty) throw ValidationError(AppErrors.unitSymbolRequired);
     await db.insert(
@@ -246,8 +261,8 @@ class ReferenceRepo {
     );
   }
 
-  Future<void> deleteUnit(String symbol) async {
-    final db = await _db;
+  Future<void> deleteUnit(String symbol, [DatabaseExecutor? exec]) async {
+    final db = exec ?? await _db;
     await db.delete('lab_units', where: 'symbol = ?', whereArgs: [symbol]);
   }
 

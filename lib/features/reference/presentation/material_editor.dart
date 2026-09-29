@@ -39,13 +39,13 @@ class _PhysicalParamRow {
 }
 
 class _ChemicalParamRow {
-  int? analysisId;
+  int? parameterId;
   final TextEditingController nameCtrl;
   final TextEditingController minCtrl;
   final TextEditingController maxCtrl;
   final TextEditingController unitCtrl;
   _ChemicalParamRow({
-    this.analysisId,
+    this.parameterId,
     String name = '',
     String min = '',
     String max = '',
@@ -74,7 +74,6 @@ class _MaterialEditorState extends State<MaterialEditor> {
 
   final _physical = <_PhysicalParamRow>[];
   final _chemical = <_ChemicalParamRow>[];
-  List<Map<String, dynamic>> _analyses = [];
   List<Map<String, dynamic>> _parameters = [];
   List<Map<String, dynamic>> _units = [];
 
@@ -133,7 +132,6 @@ class _MaterialEditorState extends State<MaterialEditor> {
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final analyses = await _labRepo.listAnalyses();
       final parameters = await _refRepo.listParameters();
       final units = await _refRepo.listUnits();
       var physicalRows = <_PhysicalParamRow>[];
@@ -156,82 +154,46 @@ class _MaterialEditorState extends State<MaterialEditor> {
         ];
 
         final chemRef = jsonLoads('${raw['chemical_reference_json']}');
-        final rangeMap = <String, Map<String, dynamic>>{};
-        final rangesAll = await _labRepo.listMaterialRanges();
-        for (final r in rangesAll) {
-          if ('${r['material_id']}' == '${widget.materialId}') {
-            rangeMap['${r['analysis_id']}'] = r;
-          }
+        final matAnalyses = await _labRepo.getMaterialAnalyses(widget.materialId!);
+        final chemicalByName = <String, _ChemicalParamRow>{};
+        for (final f in (matAnalyses['chemical']?['fields'] as List? ?? const [])) {
+          final fm = Map<String, dynamic>.from(f as Map);
+          final name = '${fm['parameter_name'] ?? ''}'.trim();
+          if (name.isEmpty) continue;
+          final unit = '${fm['unit'] ?? ''}'.trim().isNotEmpty
+              ? '${fm['unit']}'
+              : '%';
+          chemicalByName[name.toLowerCase()] = _ChemicalParamRow(
+            parameterId: fm['parameter_id'] as int?,
+            name: name,
+            min: fm['min']?.toString() ?? '',
+            max: fm['max']?.toString() ?? '',
+            unit: unit,
+          );
         }
-        final nameToAnalysis = {
-          for (final a in analyses) '${a['name']}': a,
-        };
-        final chemRefUnit = <String, String>{};
+        final seenChemical = <String>{};
+        chemicalByName.forEach((key, c) => seenChemical.add(key));
         chemRef.forEach((name, refVal) {
-          if (refVal is Map && '${refVal['unit']}'.trim().isNotEmpty) {
-            chemRefUnit[name] = '${refVal['unit']}';
-          }
-        });
-
-        final seenAnalysis = <String>{};
-        rangeMap.forEach((aid, cur) {
-          final a = analyses.where((x) => '${x['id']}' == aid).firstOrNull;
-          if (a == null) return;
-          seenAnalysis.add(aid);
-          chemicalRows.add(_ChemicalParamRow(
-            analysisId: int.tryParse(aid),
-            name: '${a['name']}',
-            min: cur['min_value'] != null ? '${cur['min_value']}' : '',
-            max: cur['max_value'] != null ? '${cur['max_value']}' : '',
-            unit: '${cur['unit'] ?? ''}'.trim().isNotEmpty
-                ? '${cur['unit']}'
-                : (chemRefUnit['${a['name']}'] ??
-                    ('${a['unit'] ?? ''}'.trim().isNotEmpty ? '${a['unit']}' : '%')),
-          ));
-        });
-        chemRef.forEach((name, refVal) {
+          if (seenChemical.contains(name.trim().toLowerCase())) return;
           final nameStr = name;
-          final a = nameToAnalysis[nameStr];
-          final aid = a != null ? '${a['id']}' : null;
-          if (aid != null && seenAnalysis.contains(aid)) return;
-          Object? valueObj;
           String refUnit = '';
           if (refVal is Map) {
-            valueObj = (refVal['value'] is Map)
-                ? jsonDumps(refVal['value'])
-                : refVal['value'];
             refUnit = '${refVal['unit'] ?? ''}'.trim();
-          } else {
-            valueObj = refVal;
           }
-          final parsed = _parseRangeText('${valueObj ?? ''}');
-          chemicalRows.add(_ChemicalParamRow(
-            analysisId: aid != null ? int.tryParse(aid) : null,
+          final parsed = _parseRangeText(referenceValueText(refVal));
+          chemicalByName[nameStr.trim().toLowerCase()] = _ChemicalParamRow(
             name: nameStr,
             min: parsed.min,
             max: parsed.max,
-            unit: refUnit.isNotEmpty
-                ? refUnit
-                : '${a?['unit'] ?? ''}'.trim().isNotEmpty
-                    ? '${a?['unit']}'
-                    : '%',
-          ));
+            unit: refUnit.isNotEmpty ? refUnit : '%',
+          );
         });
-      } else {
-        chemicalRows = [
-          for (final a in analyses)
-            _ChemicalParamRow(
-              analysisId: int.tryParse('${a['id']}'),
-              name: '${a['name']}',
-              unit: '${a['unit'] ?? ''}'.trim().isNotEmpty ? '${a['unit']}' : '%',
-            ),
-        ];
+        chemicalRows = chemicalByName.values.toList();
       }
 
       final parts = _splitName(initialName);
       if (!mounted) return;
       setState(() {
-        _analyses = analyses;
         _parameters = parameters;
         _units = units;
         _physical.addAll(physicalRows);
@@ -280,26 +242,26 @@ class _MaterialEditorState extends State<MaterialEditor> {
     setState(() {});
   }
 
-  Set<String> _usedAnalysisIds(int excludeIndex) => {
+  Set<String> _usedParameterIds(int excludeIndex) => {
         for (var i = 0; i < _chemical.length; i++)
-          if (i != excludeIndex && _chemical[i].analysisId != null)
-            '${_chemical[i].analysisId}',
+          if (i != excludeIndex && _chemical[i].parameterId != null)
+            '${_chemical[i].parameterId}',
       };
 
-  void _onAnalysisChange(_ChemicalParamRow row) {
-    final a = row.analysisId == null
+  void _onParameterChange(_ChemicalParamRow row) {
+    final p = row.parameterId == null
         ? null
-        : _analyses
-            .where((x) => '${x['id']}' == '${row.analysisId}')
+        : _parameters
+            .where((x) => '${x['id']}' == '${row.parameterId}')
             .firstOrNull;
     setState(() {
-      if (a == null) {
+      if (p == null) {
         row.nameCtrl.text = '';
         return;
       }
-      row.nameCtrl.text = '${a['name'] ?? ''}';
-      row.unitCtrl.text = '${a['unit'] ?? ''}'.trim().isNotEmpty
-          ? '${a['unit']}'
+      row.nameCtrl.text = '${p['parameter_name'] ?? ''}';
+      row.unitCtrl.text = '${p['unit'] ?? ''}'.trim().isNotEmpty
+          ? '${p['unit']}'
           : (row.unitCtrl.text.trim().isNotEmpty ? row.unitCtrl.text.trim() : '%');
     });
   }
@@ -369,14 +331,25 @@ class _MaterialEditorState extends State<MaterialEditor> {
       ].where((s) => s.isNotEmpty).join(' | ');
       final code = _code.text.trim();
 
-      final rangesPayload = <Map<String, dynamic>>[
-        for (final c in _chemical)
-          if (c.analysisId != null)
+      final boundsPayload = <Map<String, dynamic>>[
+        for (final p in _physical)
+          if (p.nameCtrl.text.trim().isNotEmpty) ...[
             {
-              'analysis_id': c.analysisId,
+              'parameter_name': p.nameCtrl.text.trim(),
+              'parameter_type': 'physical',
+              'unit': '',
+              'min_value': _parseRangeText(p.reqCtrl.text.trim()).min,
+              'max_value': _parseRangeText(p.reqCtrl.text.trim()).max,
+            },
+          ],
+        for (final c in _chemical)
+          if (c.nameCtrl.text.trim().isNotEmpty)
+            {
+              'parameter_name': c.nameCtrl.text.trim(),
+              'parameter_type': 'chemical',
+              'unit': c.unitCtrl.text.trim(),
               'min_value': c.minCtrl.text.trim(),
               'max_value': c.maxCtrl.text.trim(),
-              'unit': c.unitCtrl.text.trim().isNotEmpty ? c.unitCtrl.text.trim() : '%',
             },
       ];
 
@@ -388,7 +361,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
           chemicalReference: chemicalReference,
           units: units,
         );
-        await _labRepo.saveMaterialRanges(id, rangesPayload);
+        await _labRepo.saveMaterialBounds(id, boundsPayload);
       } else {
         await _refRepo.updateMaterial(
           widget.materialId!,
@@ -398,7 +371,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
           chemicalReference: chemicalReference,
           units: units,
         );
-        await _labRepo.saveMaterialRanges(widget.materialId!, rangesPayload);
+        await _labRepo.saveMaterialBounds(widget.materialId!, boundsPayload);
       }
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
@@ -536,15 +509,15 @@ class _MaterialEditorState extends State<MaterialEditor> {
                                 small: true,
                                 style: AppButtonStyle.secondary,
                                 icon: Icon(Icons.add, size: 16.r),
-                                label: AppText.t('إضافة من جدول التحاليل', 'Add from Analyses'),
+                                label: AppText.t('إضافة من بارامترات المرجع', 'Add from Reference Parameters'),
                                 onPressed: _saving ? null : _addChemicalRow,
                               ),
                             ),
                             const SizedBox(height: AppSpacing.sm),
                             Text(
                               AppText.t(
-                                'تُحمَّل البارامترات افتراضياً من جدول التحاليل؛ يمكنك أيضاً إضافة المزيد من القائمة أو حذف غير المطلوب.',
-                                'Parameters are loaded from the analyses list by default; you can add more or remove unwanted ones.',
+                                'تُحمَّل البارامترات من المرجع (القاموس القياسي)؛ كل بارامتر يُمثِّل اسماً متوارثاً وله حدود قبول ورفض خاصة بهذه الخامة.',
+                                'Parameters are loaded from the reference (canonical dictionary); each parameter is an inherited name with this material\'s own acceptance/rejection limits.',
                               ),
                               style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
                             ),
@@ -681,8 +654,8 @@ class _MaterialEditorState extends State<MaterialEditor> {
 
   Widget _chemicalRow(int index) {
     final row = _chemical[index];
-    final used = _usedAnalysisIds(index);
-    final enabled = row.analysisId != null && !_saving;
+    final used = _usedParameterIds(index);
+    final enabled = row.parameterId != null && !_saving;
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Row(
@@ -691,7 +664,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
           Expanded(
             flex: 3,
             child: DropdownButtonFormField<int?>(
-              initialValue: row.analysisId,
+              initialValue: row.parameterId,
               isDense: true,
               isExpanded: true,
               decoration: const InputDecoration(
@@ -699,21 +672,21 @@ class _MaterialEditorState extends State<MaterialEditor> {
                 border: OutlineInputBorder(),
               ),
               hint: Text(
-                AppText.t('اختر تحليلاً…', 'Choose an analysis…'),
+                AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
                 overflow: TextOverflow.ellipsis,
                 maxLines: 1,
                 softWrap: false,
               ),
               selectedItemBuilder: (_) => [
                 Text(
-                  AppText.t('اختر تحليلاً…', 'Choose an analysis…'),
+                  AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                   softWrap: false,
                 ),
-                for (final a in _analyses)
+                for (final p in _parameters)
                   Text(
-                    '${a['name']}',
+                    '${p['parameter_name']}',
                     overflow: TextOverflow.ellipsis,
                     maxLines: 1,
                     softWrap: false,
@@ -724,16 +697,16 @@ class _MaterialEditorState extends State<MaterialEditor> {
                   value: null,
                   enabled: false,
                   child: Text(
-                    AppText.t('اختر تحليلاً…', 'Choose an analysis…'),
+                    AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                for (final a in _analyses)
+                for (final p in _parameters)
                   DropdownMenuItem<int?>(
-                    value: int.tryParse('${a['id']}'),
-                    enabled: !used.contains('${a['id']}'),
+                    value: int.tryParse('${p['id']}'),
+                    enabled: !used.contains('${p['id']}'),
                     child: Text(
-                      '${a['name']}',
+                      '${p['parameter_name']}',
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -741,8 +714,8 @@ class _MaterialEditorState extends State<MaterialEditor> {
               onChanged: _saving
                   ? null
                   : (v) {
-                      row.analysisId = v;
-                      _onAnalysisChange(row);
+                      row.parameterId = v;
+                      _onParameterChange(row);
                     },
             ),
           ),

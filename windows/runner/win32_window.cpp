@@ -37,6 +37,24 @@ int Scale(int source, double scale_factor) {
   return static_cast<int>(source * scale_factor);
 }
 
+// Scale factor of the monitor currently displaying |hwnd|, 1.0 on failure.
+//
+// Uses the same DPI entry point as Create() rather than GetDpiForWindow, which
+// would pin the runner to a Windows 10 1607 SDK.
+double ScaleFactorForWindow(HWND hwnd) {
+  RECT rect;
+  if (!GetWindowRect(hwnd, &rect)) {
+    return 1.0;
+  }
+  POINT top_left{rect.left, rect.top};
+  HMONITOR monitor = MonitorFromPoint(top_left, MONITOR_DEFAULTTONEAREST);
+  if (!monitor) {
+    return 1.0;
+  }
+  const UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+  return dpi == 0 ? 1.0 : dpi / 96.0;
+}
+
 // Dynamically loads the |EnableNonClientDpiScaling| from the User32 module.
 // This API is only needed for PerMonitor V1 awareness mode.
 void EnableFullDpiSupportIfAvailable(HWND hwnd) {
@@ -144,7 +162,7 @@ bool Win32Window::Create(const std::wstring& title,
     return false;
   }
 
-  UpdateTheme(window);
+  UpdateTheme();
 
   return OnCreate();
 }
@@ -213,8 +231,18 @@ Win32Window::MessageHandler(HWND hwnd,
       }
       return 0;
 
+    case WM_GETMINMAXINFO: {
+      // Enforces the floor the user can drag down to. Without this the window
+      // collapses to a sliver and the shell sidebar and data tables have no
+      // room to lay out, which then have to be recovered from by maximising.
+      auto info = reinterpret_cast<MINMAXINFO*>(lparam);
+      info->ptMinTrackSize.x = Scale(min_track_size_.width, ScaleFactorForWindow(hwnd));
+      info->ptMinTrackSize.y = Scale(min_track_size_.height, ScaleFactorForWindow(hwnd));
+      return 0;
+    }
+
     case WM_DWMCOLORIZATIONCOLORCHANGED:
-      UpdateTheme(hwnd);
+      UpdateTheme();
       return 0;
   }
 
@@ -272,17 +300,62 @@ void Win32Window::OnDestroy() {
   // No-op; provided for subclasses.
 }
 
-void Win32Window::UpdateTheme(HWND const window) {
-  DWORD light_mode;
-  DWORD light_mode_size = sizeof(light_mode);
-  LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
-                               kGetPreferredBrightnessRegValue,
-                               RRF_RT_REG_DWORD, nullptr, &light_mode,
-                               &light_mode_size);
-
-  if (result == ERROR_SUCCESS) {
-    BOOL enable_dark_mode = light_mode == 0;
-    DwmSetWindowAttribute(window, DWMWA_USE_IMMERSIVE_DARK_MODE,
-                          &enable_dark_mode, sizeof(enable_dark_mode));
+void Win32Window::UpdateTheme() {
+  if (!window_handle_) {
+    return;
   }
+
+  // The app's own toggle wins when it has an opinion; otherwise fall back to
+  // the Windows registry so ThemeMode.system still tracks the OS.
+  BOOL enable_dark_mode;
+  if (dark_mode_override_.has_value()) {
+    enable_dark_mode = dark_mode_override_.value() ? TRUE : FALSE;
+  } else {
+    DWORD light_mode;
+    DWORD light_mode_size = sizeof(light_mode);
+    LSTATUS result = RegGetValue(HKEY_CURRENT_USER, kGetPreferredBrightnessRegKey,
+                                 kGetPreferredBrightnessRegValue,
+                                 RRF_RT_REG_DWORD, nullptr, &light_mode,
+                                 &light_mode_size);
+    if (result != ERROR_SUCCESS) {
+      return;
+    }
+    enable_dark_mode = light_mode == 0;
+  }
+
+  DwmSetWindowAttribute(window_handle_, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                        &enable_dark_mode, sizeof(enable_dark_mode));
+
+  // DWM does not repaint the non-client area when only the attribute changes,
+  // so the title bar would keep its old colours until something else forced a
+  // frame.
+  SetWindowPos(window_handle_, nullptr, 0, 0, 0, 0,
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE |
+                   SWP_FRAMECHANGED);
 }
+
+void Win32Window::SetTitle(const std::wstring& title) {
+  if (!window_handle_) {
+    return;
+  }
+  wchar_t current[256] = {};
+  const int length =
+      GetWindowTextW(window_handle_, current, static_cast<int>(std::size(current)));
+  if (length > 0 && title == current) {
+    return;
+  }
+  SetWindowTextW(window_handle_, title.c_str());
+}
+
+void Win32Window::SetDarkModeOverride(const std::optional<bool>& dark) {
+  if (dark_mode_override_ == dark) {
+    return;
+  }
+  dark_mode_override_ = dark;
+  UpdateTheme();
+}
+
+void Win32Window::SetMinTrackSize(const Size& size) {
+  min_track_size_ = size;
+}
+

@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
+import 'package:material_lab/design_system/widgets/app_button.dart';
 import 'package:material_lab/features/reports/data/report_service.dart';
 import 'package:material_lab/features/reports/presentation/cubit/reports_cubit.dart';
 import 'package:material_lab/features/reports/presentation/reports_screen.dart';
@@ -47,7 +48,13 @@ void main() {
       );
 
   /// The three export buttons, in screen order: daily, monthly, yearly.
-  Finder button(int index) => find.byType(ElevatedButton).at(index);
+  ///
+  /// Addressed by [AppButton] rather than by a Material button class. The
+  /// screen owns these three controls; which of `FilledButton` /
+  /// `OutlinedButton` / `TextButton` backs a given style is a detail of the
+  /// design system, and pinning a test to it means a change there breaks
+  /// unrelated report tests.
+  Finder button(int index) => find.byType(AppButton).at(index);
 
   group('report period fields', () {
     testWidgets('the monthly and yearly year fields are independent',

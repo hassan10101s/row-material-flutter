@@ -46,6 +46,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     Map<String, dynamic> physicalReference = const {},
     Map<String, dynamic> chemicalReference = const {},
     Map<String, dynamic> units = const {},
+    DatabaseExecutor? exec,
   }) async {
     _check(Permission.samplesUpdate);
     final db = await dbHelper.database;
@@ -57,6 +58,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
         physicalReference: physicalReference,
         chemicalReference: chemicalReference,
         units: units,
+        exec: txn,
       );
       final row = await getMaterialRaw(id, exec: txn);
       if (row != null) {
@@ -84,6 +86,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     Map<String, dynamic>? physicalReference,
     Map<String, dynamic>? chemicalReference,
     Map<String, dynamic> units = const {},
+    DatabaseExecutor? exec,
   }) async {
     _check(Permission.samplesUpdate);
     final db = await dbHelper.database;
@@ -95,6 +98,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
         physicalReference: physicalReference,
         chemicalReference: chemicalReference,
         units: units,
+        exec: txn,
       );
       final row = await getMaterialRaw(id, exec: txn);
       if (row != null) {
@@ -116,11 +120,11 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
   /// A tombstone (soft-delete) so delete is auditable and consistent with
   /// the rest of the domain.
   @override
-  Future<void> deleteMaterial(int id) async {
+  Future<void> deleteMaterial(int id, [DatabaseExecutor? exec]) async {
     _check(Permission.samplesUpdate);
     final db = await dbHelper.database;
     await db.transaction((txn) async {
-      await super.deleteMaterial(id);
+      await super.deleteMaterial(id, txn);
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,
@@ -138,11 +142,13 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     String name,
     String unit, {
     String parameterType = 'chemical',
+    DatabaseExecutor? exec,
   }) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     await db.transaction((txn) async {
-      await super.upsertParameter(name, unit, parameterType: parameterType);
+      await super.upsertParameter(name, unit,
+          parameterType: parameterType, exec: txn);
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,
@@ -158,11 +164,11 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
   }
 
   @override
-  Future<void> deleteParameter(String name) async {
+  Future<void> deleteParameter(String name, [DatabaseExecutor? exec]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     await db.transaction((txn) async {
-      await super.deleteParameter(name);
+      await super.deleteParameter(name, txn);
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,
@@ -180,11 +186,12 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     String symbol, {
     String name = '',
     String dimension = '',
+    DatabaseExecutor? exec,
   }) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     await db.transaction((txn) async {
-      await super.upsertUnit(symbol, name: name, dimension: dimension);
+      await super.upsertUnit(symbol, name: name, dimension: dimension, exec: txn);
       final trimmed = symbol.trim();
       final rows = await txn.query(
         'lab_units',
@@ -209,7 +216,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
   }
 
   @override
-  Future<void> deleteUnit(String symbol) async {
+  Future<void> deleteUnit(String symbol, [DatabaseExecutor? exec]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     await db.transaction((txn) async {
@@ -220,7 +227,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
         whereArgs: [trimmed],
         limit: 1,
       );
-      await super.deleteUnit(trimmed);
+      await super.deleteUnit(trimmed, txn);
       if (rows.isNotEmpty) {
         final row = Map<String, dynamic>.from(rows.first)
           ..['is_active'] = 0

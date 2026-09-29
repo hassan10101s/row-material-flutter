@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 // A class abstraction for a high DPI-aware Win32 Window. Intended to be
@@ -35,6 +36,29 @@ class Win32Window {
   // as appropriate for the default monitor. The window is invisible until
   // |Show| is called. Returns true if the window was created successfully.
   bool Create(const std::wstring& title, const Point& origin, const Size& size);
+
+  // Sets the native title bar text.
+  //
+  // MaterialApp's `title` is Dart-side only and never reaches the OS with the
+  // stock runner, so the title bar used to keep showing the build's
+  // `material_lab` while the app branded itself "Material Lab". Doing a no-op
+  // when the text is unchanged avoids a needless frame repaint on every
+  // rebuild, which happens on each locale switch.
+  void SetTitle(const std::wstring& title);
+
+  // Overrides the title bar's dark mode, or clears the override.
+  //
+  // Passing an empty optional hands control back to the Windows registry value
+  // that `UpdateTheme` reads, which is what the app wants under
+  // ThemeMode.system. Without this the app's own light/dark toggle left a light
+  // title bar framing a dark app.
+  void SetDarkModeOverride(const std::optional<bool>& dark);
+
+  // Minimum size the user can drag the window to, in logical (96 DPI) pixels.
+  //
+  // Without a floor the window could be dragged to a few pixels across, which
+  // left the shell sidebar and the data tables with nowhere to lay out.
+  void SetMinTrackSize(const Size& size);
 
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
@@ -87,8 +111,16 @@ class Win32Window {
   // Retrieves a class instance pointer for |window|
   static Win32Window* GetThisFromHandle(HWND const window) noexcept;
 
-  // Update the window frame's theme to match the system theme.
-  static void UpdateTheme(HWND const window);
+  // Update the window frame's theme to match the system theme, unless
+  // dark_mode_override_ says the app has taken over.
+  void UpdateTheme();
+
+  // Minimum size the user may drag the window to, in logical pixels. Clamped by
+  // the monitor's own minimum tracking size during WM_GETMINMAXINFO.
+  Size min_track_size_{480, 360};
+
+  // Empty = follow the OS, otherwise force the contained value.
+  std::optional<bool> dark_mode_override_;
 
   bool quit_on_close_ = false;
 

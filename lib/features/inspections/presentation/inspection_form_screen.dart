@@ -12,6 +12,7 @@ import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../design_system/widgets/app_autocomplete.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_field.dart';
@@ -879,125 +880,41 @@ class _FormBody extends StatelessWidget {
         Row(
           children: [
             Expanded(
-              child: RawAutocomplete<int>(
-                textEditingController: materialController,
-                focusNode: materialFocus,
-                displayStringForOption: (id) {
+              child: AppAutocomplete<int>(
+                options: [for (final m in materials) (m['id'] as num).toInt()],
+                selected: selectedId,
+                displayString: (id) {
                   final m = _materialById(materials, id);
                   return m == null
                       ? ''
                       : '${m['material_name']} (${m['material_code']})';
                 },
-                optionsBuilder: (value) {
-                  if (selected) return const Iterable<int>.empty();
-                  final q = value.text.trim().toLowerCase();
-                  if (q.isEmpty) {
-                    return materials.map((m) => (m['id'] as num).toInt());
-                  }
-                  return materials
-                      .where(
-                        (m) =>
-                            '${m['material_name']}'.toLowerCase().contains(q) ||
-                            '${m['material_code']}'.toLowerCase().contains(q),
-                      )
-                      .map((m) => (m['id'] as num).toInt());
+                filter: (id, query) {
+                  final m = _materialById(materials, id);
+                  if (m == null) return false;
+                  return '${m['material_name']}'
+                          .toLowerCase()
+                          .contains(query) ||
+                      '${m['material_code']}'
+                          .toLowerCase()
+                          .contains(query);
                 },
-                fieldViewBuilder:
-                    (context, controller, focusNode, onFieldSubmitted) {
-                      return TextField(
-                        controller: controller,
-                        focusNode: focusNode,
-                        readOnly: selected,
-                        decoration: InputDecoration(
-                          isDense: true,
-                          labelText: null,
-                          hintText: AppText.t(
-                            'اكتب للبحث أو اختر من القائمة…',
-                            'Type to search or pick…',
-                          ),
-                          prefixIcon: Icon(
-                            Icons.inventory_2_outlined,
-                            size: 20.r,
-                          ),
-                          suffixIcon: InkWell(
-                            onTap: selected
-                                ? null
-                                : () {
-                                    materialFocus.requestFocus();
-                                    materialController
-                                        .selection = TextSelection.collapsed(
-                                      offset: materialController.text.length,
-                                    );
-                                  },
-                            child: Icon(
-                              Icons.arrow_drop_down,
-                              size: 24.r,
-                              color: selected
-                                  ? AppColors.textMuted
-                                  : AppColors.primary,
-                            ),
-                          ),
-                          filled: true,
-                          fillColor: AppColors.surface,
-                          contentPadding: EdgeInsets.symmetric(
-                            horizontal: 12.w,
-                            vertical: 10.h,
-                          ),
-                          enabledBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(AppRadii.sm),
-                            borderSide: BorderSide(color: AppColors.border),
-                          ),
-                          focusedBorder: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(AppRadii.sm),
-                            borderSide: BorderSide(
-                              color: AppColors.primary,
-                              width: 1.6,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                optionsViewBuilder: (context, onSelected, options) {
-                  final ids = options.toList();
-                  return Align(
-                    alignment: Alignment.topLeft,
-                    child: Material(
-                      elevation: 6,
-                      borderRadius: BorderRadius.circular(AppRadii.sm),
-                      clipBehavior: Clip.antiAlias,
-                      color: AppColors.surface,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxHeight: 260,
-                          maxWidth: 420,
-                        ),
-                        child: ListView(
-                          shrinkWrap: true,
-                          padding: EdgeInsets.zero,
-                          children: [
-                            if (ids.isEmpty)
-                              Padding(
-                                padding: const EdgeInsets.all(12),
-                                child: Text(
-                                  AppText.t(
-                                    'لا توجد خامة مطابقة',
-                                    'No matching material',
-                                  ),
-                                  style: TextStyle(
-                                    color: AppColors.textMuted,
-                                    fontSize: 13.spMax,
-                                  ),
-                                ),
-                              ),
-                            for (final id in ids)
-                              _materialOption(materials, id, onSelected),
-                          ],
-                        ),
-                      ),
-                    ),
-                  );
-                },
-                onSelected: (id) => onSelectMaterial(id),
+                onSelected: onSelectMaterial,
+                controller: materialController,
+                focusNode: materialFocus,
+                hint: AppText.t(
+                  'اكتب للبحث أو اختر من القائمة…',
+                  'Type to search or pick…',
+                ),
+                prefixIcon: Icons.inventory_2_outlined,
+                emptyLabel: AppText.t(
+                  'لا توجد خامة مطابقة',
+                  'No matching material',
+                ),
+                dropdownLabel:
+                    AppText.t('عرض القائمة', 'Show the list'),
+                optionBuilder: (context, id, onSelected) =>
+                    _materialOption(materials, id, onSelected),
               ),
             ),
             if (selected) ...[

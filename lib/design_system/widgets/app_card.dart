@@ -21,11 +21,16 @@ class AppCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(AppRadii.md);
     // The inner Material (transparent) gives children like ListTile /
     // SwitchListTile a Material ancestor above the decoration, so their ink
     // splashes and selected background stay visible.
     final content = Material(
       color: Colors.transparent,
+      // Without this the InkWell splash paints a hard rectangle that visibly
+      // overflows the rounded corners.
+      borderRadius: radius,
+      clipBehavior: onTap == null ? Clip.none : Clip.antiAlias,
       child: onTap == null ? child : InkWell(onTap: onTap, child: child),
     );
     return Container(
@@ -33,15 +38,12 @@ class AppCard extends StatelessWidget {
       margin: margin,
       decoration: BoxDecoration(
         color: color ?? AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadii.md),
+        borderRadius: radius,
         border: Border.all(color: AppColors.borderMuted),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF071528).withValues(alpha: 0.03),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        // Reads the shared token, which tracks brightness. The previous inline
+        // shadow hardcoded the *light* surfaceDeep navy at 3% and was therefore
+        // invisible against the dark surface.
+        boxShadow: AppShadows.card(Theme.of(context).brightness),
       ),
       child: content,
     );

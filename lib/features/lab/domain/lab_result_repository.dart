@@ -138,10 +138,12 @@ abstract interface class LabConfigurationRepository {
 
   Future<List<Map<String, dynamic>>> getProductRangesAll();
 
-  Future<List<Map<String, dynamic>>> listMaterialRanges();
-
-  Future<Map<String, dynamic>> saveMaterialRanges(
+  Future<Map<String, dynamic>> saveMaterialBounds(
     int materialId,
-    List<Map<String, dynamic>>? ranges,
+    List<Map<String, dynamic>>? specs,
   );
+
+  Future<Map<String, dynamic>> getMaterialAnalyses(int materialId);
+
+  Future<Map<int, Map<String, dynamic>>> listMaterialsAnalyses();
 }

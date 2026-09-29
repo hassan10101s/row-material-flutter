@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
 
-/// Value-object holding the currently active AppColors set (mirrors
-/// AppColorScheme in morattab but kept flat for simplicity).
+/// Value-object holding one complete set of semantic colors for a single
+/// brightness.
+///
+/// Every token in `AppColors` must have a field here. The two sets used to
+/// drift: `AppColors` carries `whatsapp` and `pdf` but `AppPalette` did not, so
+/// those two could never reach a `ColorScheme` and were only reachable through
+/// the mutable `AppColors.*` getters.
 class AppPalette {
   final Color background;
   final Color surface;
@@ -15,6 +20,8 @@ class AppPalette {
   final Color partial;
   final Color danger;
   final Color info;
+  final Color whatsapp;
+  final Color pdf;
   final Color textStrong;
   final Color textMuted;
   final Color border;
@@ -33,11 +40,17 @@ class AppPalette {
     required this.partial,
     required this.danger,
     required this.info,
+    required this.whatsapp,
+    required this.pdf,
     required this.textStrong,
     required this.textMuted,
     required this.border,
     required this.borderMuted,
   });
+
+  /// The palette matching [brightness].
+  factory AppPalette.of(Brightness brightness) =>
+      brightness == Brightness.dark ? dark : light;
 
   static const AppPalette light = AppPalette(
     background: Color(0xFFF3F6FB),
@@ -52,6 +65,8 @@ class AppPalette {
     partial: Color(0xFFF97316),
     danger: Color(0xFFEF4444),
     info: Color(0xFF3B82F6),
+    whatsapp: Color(0xFF25D366),
+    pdf: Color(0xFFE11D48),
     textStrong: Color(0xFF0F172A),
     textMuted: Color(0xFF64748B),
     border: Color(0xFFD9E1EC),
@@ -71,6 +86,8 @@ class AppPalette {
     partial: Color(0xFFFB923C),
     danger: Color(0xFFF87171),
     info: Color(0xFF60A5FA),
+    whatsapp: Color(0xFF4ADE80),
+    pdf: Color(0xFFFB7185),
     textStrong: Color(0xFFF1F5F9),
     textMuted: Color(0xFF94A3B8),
     border: Color(0xFF334155),

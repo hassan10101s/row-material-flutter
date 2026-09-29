@@ -415,6 +415,7 @@ class DatabaseHelper {
         description TEXT,
         dynamic_fields_json TEXT NOT NULL DEFAULT '[]',
         formula_json TEXT NOT NULL DEFAULT '{}',
+        parameter_id INTEGER REFERENCES parameters(id),
         created_at TEXT NOT NULL,
         active INTEGER NOT NULL DEFAULT 1
       )
@@ -559,6 +560,23 @@ class DatabaseHelper {
         UNIQUE(material_id, analysis_id)
       )
     ''');
+    // Reference-driven material specs (plan: every material inherits the
+    // canonical parameter NAME from `parameters` but carries its own
+    // acceptance/rejection limits here).
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS material_parameter_bounds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        material_id INTEGER NOT NULL REFERENCES reference_materials(id),
+        parameter_id INTEGER NOT NULL REFERENCES parameters(id),
+        parameter_type TEXT NOT NULL CHECK(parameter_type IN ('physical', 'chemical')),
+        unit TEXT NOT NULL DEFAULT '',
+        min_value REAL,
+        max_value REAL,
+        precision INTEGER,
+        active INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(material_id, parameter_id)
+      )
+    ''');
 
     await _createIndexes(db);
     await _createSyncTables(db);
@@ -686,7 +704,6 @@ class DatabaseHelper {
     'lab_constants',
     'lab_products',
     'lab_product_analyses',
-    'lab_material_analyses',
     'lab_units',
     // The audit outbox is never pulled back, but its rows are pushed as
     // `organizations/{orgId}/auditLogs` documents, so `SyncQueue.markDone`
@@ -770,6 +787,21 @@ class DatabaseHelper {
     await _ensureColumn(db, 'reference_materials', 'active', 'active INTEGER NOT NULL DEFAULT 1');
     await _ensureColumn(db, 'lab_products', 'active', 'active INTEGER NOT NULL DEFAULT 1');
     await _ensureColumn(db, 'lab_analyses', 'active', 'active INTEGER NOT NULL DEFAULT 1');
+    await _ensureColumn(db, 'lab_analyses', 'parameter_id', 'parameter_id INTEGER REFERENCES parameters(id)');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS material_parameter_bounds (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        material_id INTEGER NOT NULL REFERENCES reference_materials(id),
+        parameter_id INTEGER NOT NULL REFERENCES parameters(id),
+        parameter_type TEXT NOT NULL CHECK(parameter_type IN ('physical', 'chemical')),
+        unit TEXT NOT NULL DEFAULT '',
+        min_value REAL,
+        max_value REAL,
+        precision INTEGER,
+        active INTEGER NOT NULL DEFAULT 1,
+        UNIQUE(material_id, parameter_id)
+      )
+    ''');
     await _ensureColumn(db, 'lab_inventory', 'category', "category TEXT CHECK(category IN ('liquid', 'powder'))");
     await _ensureColumn(db, 'lab_field_chemical_links', 'kind', "kind TEXT NOT NULL DEFAULT 'link'");
     await _ensureColumn(db, 'lab_field_chemical_links', 'fixed_value', 'fixed_value REAL');

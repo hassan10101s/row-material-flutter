@@ -94,9 +94,6 @@ const Map<String, List<String>> _legacyPresentationDataImports = {
     '../../lab/data/lab_repo.dart',
     '../data/reference_repo.dart',
   ],
-  'lib/features/reference/presentation/products_tab.dart': [
-    '../../lab/data/lab_repo.dart',
-  ],
   'lib/features/reference/presentation/reference_screen.dart': [
     '../../lab/data/lab_repo.dart',
     '../data/reference_repo.dart',

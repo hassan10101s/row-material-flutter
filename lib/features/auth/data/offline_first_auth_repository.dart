@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../../../core/auth/app_session.dart';
 import '../../../core/auth/permissions.dart';
@@ -10,6 +11,7 @@ import '../../../core/auth/session_store.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/firebase/firebase_bootstrap.dart';
 import '../../../core/network/connectivity_service.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/sync/device_registry.dart';
 import '../../../core/sync/remote/auth_remote_data_source.dart' show GoogleSignInException;
 import '../../../core/sync/remote/remote_data_source.dart';
@@ -102,20 +104,26 @@ class OfflineFirstAuthRepository implements AuthRepository {
   Future<void> signInWithGoogle() async {
     if (!remote.isConfigured) {
       throw const AuthFailure(
-        'Firebase غير مهيأ — أضف إعدادات Firebase ثم أعد تشغيل التطبيق',
+        'تعذر تسجيل الدخول: لم يتم ضبط تسجيل Google بشكل صحيح. أعد تشغيل التطبيق بعد ضبط الإعدادات.',
         code: 'missing_config',
       );
     }
     try {
       await remote.signInWithGoogle();
     } on GoogleSignInException catch (e) {
-      throw AuthFailure(_googleMessage(e.message), code: _googleCode(e.message));
+      final code = _googleCode(e.message);
+      debugPrint('[auth] google sign-in failed ($code): ${e.message}');
+      throw AuthFailure(_userFacingMessage(code), code: code);
     } on Object catch (e) {
-      throw AuthFailure('$e');
+      debugPrint('[auth] google sign-in failed (unknown): $e');
+      throw AuthFailure(_userFacingMessage('auth_failed'), code: 'auth_failed');
     }
     final user = await remote.currentUser();
     if (user == null) {
-      throw const AuthFailure('لم يتم تسجيل الدخول عبر Google', code: 'cancelled');
+      throw AuthFailure(
+        AppText.t('تم إلغاء تسجيل الدخول', 'Sign-in was cancelled'),
+        code: 'cancelled',
+      );
     }
     await resolveProfile(user: user);
   }
@@ -145,7 +153,9 @@ class OfflineFirstAuthRepository implements AuthRepository {
         }
       }
 
-      throw AuthFailure('$e');
+      final code = connectivity.isOnline ? 'auth_failed' : 'offline';
+      debugPrint('[auth] failed to load profile ($code): $e');
+      throw AuthFailure(_userFacingMessage(code), code: code);
     }
 
     if (profile == null) {
@@ -294,5 +304,33 @@ class OfflineFirstAuthRepository implements AuthRepository {
     return 'auth_failed';
   }
 
-  static String _googleMessage(String message) => message;
+  /// The only strings a sign-in failure may surface: clear, bilingual and free
+  /// of any technical/exception detail. The raw plugin error is logged, never
+  /// shown to the user.
+  static String _userFacingMessage(String code) {
+    switch (code) {
+      case 'missing_config':
+        return AppText.t(
+          'تعذر تسجيل الدخول: لم يتم ضبط تسجيل Google بشكل صحيح. أعد تشغيل التطبيق بعد ضبط الإعدادات.',
+          'Unable to sign in: Google sign-in is not set up correctly. Restart the app after fixing the configuration.',
+        );
+      case 'cancelled':
+        return AppText.t('تم إلغاء تسجيل الدخول', 'Sign-in was cancelled');
+      case 'access_denied':
+        return AppText.t(
+          'لم يُسمح بتسجيل الدخول. تحقق من إذن الوصول إلى حساب Google ثم حاول مرة أخرى.',
+          'Sign-in was not allowed. Check Google account access and try again.',
+        );
+      case 'offline':
+        return AppText.t(
+          'لا يوجد اتصال بالإنترنت. تحقق من الشبكة ثم حاول مرة أخرى.',
+          'No internet connection. Check your network and try again.',
+        );
+      default:
+        return AppText.t(
+          'تعذر تسجيل الدخول بحساب Google الآن. حاول مرة أخرى.',
+          'Unable to sign in with Google right now. Please try again.',
+        );
+    }
+  }
 }

@@ -53,8 +53,6 @@ class OfflineFirstLabRepository extends LabRepo
       syncEntities.firstWhere((e) => e.type == 'labFieldLink');
   static final SyncEntity _labProductAnalysis =
       syncEntities.firstWhere((e) => e.type == 'labProductAnalysis');
-  static final SyncEntity _labMaterialAnalysis =
-      syncEntities.firstWhere((e) => e.type == 'labMaterialAnalysis');
 
   // ── §9.4 writes: Inventory (device-local, still guarded) ────────────
 
@@ -67,6 +65,7 @@ class OfflineFirstLabRepository extends LabRepo
     required double minQty,
     String description = '',
     Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
   }) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
@@ -79,6 +78,7 @@ class OfflineFirstLabRepository extends LabRepo
         minQty: minQty,
         description: description,
         user: user,
+        executor: txn,
       );
       await audit.log(
         txn,
@@ -99,12 +99,13 @@ class OfflineFirstLabRepository extends LabRepo
   @override
   Future<Map<String, dynamic>> updateInventoryItem(
     int itemId,
-    Map<String, dynamic> fields,
-  ) async {
+    Map<String, dynamic> fields, [
+    DatabaseExecutor? executor,
+  ]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     return db.transaction((txn) async {
-      final item = await super.updateInventoryItem(itemId, fields);
+      final item = await super.updateInventoryItem(itemId, fields, txn);
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,
@@ -126,6 +127,7 @@ class OfflineFirstLabRepository extends LabRepo
     String reason = '',
     Map<String, dynamic>? user,
     double? deltaQty,
+    DatabaseExecutor? executor,
   }) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
@@ -136,6 +138,7 @@ class OfflineFirstLabRepository extends LabRepo
         reason: reason,
         user: user,
         deltaQty: deltaQty,
+        executor: txn,
       );
       await audit.log(
         txn,
@@ -162,6 +165,7 @@ class OfflineFirstLabRepository extends LabRepo
     String description = '',
     List<Map<String, dynamic>>? ranges,
     Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
   }) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
@@ -173,6 +177,7 @@ class OfflineFirstLabRepository extends LabRepo
         description: description,
         ranges: ranges,
         user: user,
+        executor: txn,
       );
       final id = (product['id'] as num?)?.toInt();
       if (id != null) {
@@ -200,13 +205,14 @@ class OfflineFirstLabRepository extends LabRepo
   @override
   Future<Map<String, dynamic>> updateProduct(
     int productId,
-    Map<String, dynamic> fields,
-  ) async {
+    Map<String, dynamic> fields, [
+    DatabaseExecutor? executor,
+  ]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     late final Map<String, dynamic> product;
     await db.transaction((txn) async {
-      product = await super.updateProduct(productId, fields);
+      product = await super.updateProduct(productId, fields, txn);
       await _enqueueConfig(
         txn,
         entity: _labProduct,
@@ -227,11 +233,13 @@ class OfflineFirstLabRepository extends LabRepo
   }
 
   @override
-  Future<Map<String, dynamic>> deleteProduct(int productId) async {
+  Future<Map<String, dynamic>> deleteProduct(int productId, [
+    DatabaseExecutor? executor,
+  ]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     return db.transaction((txn) async {
-      final result = await super.deleteProduct(productId);
+      final result = await super.deleteProduct(productId, txn);
       await _enqueueConfig(
         txn,
         entity: _labProduct,
@@ -246,32 +254,52 @@ class OfflineFirstLabRepository extends LabRepo
   }
 
   @override
-  Future<Map<String, dynamic>> saveMaterialRanges(
+  Future<Map<String, dynamic>> saveMaterialBounds(
     int materialId,
-    List<Map<String, dynamic>>? ranges,
-  ) async {
+    List<Map<String, dynamic>>? specs, [
+    DatabaseExecutor? executor,
+  ]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     return db.transaction((txn) async {
-      final result = await super.saveMaterialRanges(materialId, ranges);
-      final rows = await txn.query(
-        'lab_material_analyses',
-        where: 'material_id = ?',
-        whereArgs: [materialId],
+      final result = await super.saveMaterialBounds(materialId, specs, txn);
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'materialParameterBounds',
+        entityId: 'mat_bounds_$materialId',
+        details: {
+          'materialId': materialId,
+          'saved': result['saved'],
+        },
       );
-      for (final r in rows) {
-        final id = (r['id'] as num?)?.toInt();
-        if (id == null) continue;
-        await _enqueueConfig(
-          txn,
-          entity: _labMaterialAnalysis,
-          table: 'lab_material_analyses',
-          localId: id,
-          operation: 'upsert',
-          action: AuditAction.settingsUpdated,
-          details: {'materialId': materialId, 'analysisId': r['analysis_id']},
-        );
-      }
+      return result;
+    });
+  }
+
+  /// Derive the canonical reference (parameters, per-material bounds and linked
+  /// analyses) from the materials themselves. Local-only, like the reference,
+  /// and deliberately role-agnostic (mirrors `ensureDefaultAnalyses`, which
+  /// also runs during organization bootstrap).
+  @override
+  Future<Map<String, dynamic>> syncReferenceAnalyses(
+      [DatabaseExecutor? executor]) async {
+    final db = await dbHelper.database;
+    return db.transaction((txn) async {
+      final result = await super.syncReferenceAnalyses(txn);
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'referenceAnalyses',
+        entityId: 'sync_reference_analyses',
+        details: {
+          'materials': result['materials'],
+          'parameters': result['parameters'],
+          'bounds': result['bounds'],
+          'analyses': result['analyses'],
+          'linked': result['linked'],
+        },
+      );
       return result;
     });
   }
@@ -287,6 +315,7 @@ class OfflineFirstLabRepository extends LabRepo
     String unit = '%',
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
+    DatabaseExecutor? executor,
   }) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
@@ -300,6 +329,7 @@ class OfflineFirstLabRepository extends LabRepo
         unit: unit,
         formula: formula,
         fieldChemicalLinks: fieldChemicalLinks,
+        executor: txn,
       );
       final id = (analysis['id'] as num?)?.toInt();
       if (id != null) {
@@ -327,6 +357,7 @@ class OfflineFirstLabRepository extends LabRepo
     String? unit,
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
+    DatabaseExecutor? executor,
   }) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
@@ -339,6 +370,7 @@ class OfflineFirstLabRepository extends LabRepo
         unit: unit,
         formula: formula,
         fieldChemicalLinks: fieldChemicalLinks,
+        executor: txn,
       );
       await _enqueueConfig(
         txn,
@@ -357,11 +389,13 @@ class OfflineFirstLabRepository extends LabRepo
   }
 
   @override
-  Future<Map<String, dynamic>> deleteAnalysis(int analysisId) async {
+  Future<Map<String, dynamic>> deleteAnalysis(int analysisId, [
+    DatabaseExecutor? executor,
+  ]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     return db.transaction((txn) async {
-      final result = await super.deleteAnalysis(analysisId);
+      final result = await super.deleteAnalysis(analysisId, txn);
       await _enqueueConfig(
         txn,
         entity: _labAnalysis,
@@ -379,12 +413,13 @@ class OfflineFirstLabRepository extends LabRepo
 
   @override
   Future<Map<String, dynamic>> upsertGlobalConstant(
-    Map<String, dynamic> payload,
-  ) async {
+    Map<String, dynamic> payload, [
+    DatabaseExecutor? executor,
+  ]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     return db.transaction((txn) async {
-      final row = await super.upsertGlobalConstant(payload);
+      final row = await super.upsertGlobalConstant(payload, txn);
       final id = (row['id'] as num?)?.toInt();
       if (id != null) {
         await _enqueueConfig(
@@ -406,11 +441,13 @@ class OfflineFirstLabRepository extends LabRepo
   }
 
   @override
-  Future<Map<String, dynamic>> deleteGlobalConstant(int constantId) async {
+  Future<Map<String, dynamic>> deleteGlobalConstant(int constantId, [
+    DatabaseExecutor? executor,
+  ]) async {
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     return db.transaction((txn) async {
-      final result = await super.deleteGlobalConstant(constantId);
+      final result = await super.deleteGlobalConstant(constantId, txn);
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,
@@ -577,7 +614,6 @@ class OfflineFirstLabRepository extends LabRepo
         'lab_constants' => 'constant',
         'lab_products' => 'product',
         'lab_product_analyses' => 'product_analysis',
-        'lab_material_analyses' => 'material_analysis',
         'lab_units' => 'unit',
         _ => table,
       };

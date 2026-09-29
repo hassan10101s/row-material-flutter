@@ -7,9 +7,12 @@ import 'app/app_bootstrap.dart';
 import 'app/auth_gate.dart';
 import 'core/constants/app_strings.dart';
 import 'core/locale/locale_service.dart';
+import 'core/platform/app_scroll_behavior.dart';
+import 'core/platform/window_chrome.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_service.dart';
 import 'design_system/tokens/app_colors.dart';
+import 'design_system/tokens/app_text_theme.dart';
 import 'di/service_locator.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'router/app_router.dart';
@@ -42,37 +45,88 @@ class MaterialLabApp extends StatefulWidget {
 class _MaterialLabAppState extends State<MaterialLabApp> {
   @override
   Widget build(BuildContext context) {
-    return ScreenUtilInit(
-      designSize: const Size(1280, 720),
-      minTextAdapt: true,
-      splitScreenMode: true,
-      builder: (context, _) => ListenableBuilder(
-        listenable: Listenable.merge([
-          getIt<ThemeService>(),
-          getIt<LocaleService>(),
-        ]),
+    // Applied *above* ScreenUtilInit on purpose: ScreenUtil latches its text
+    // scale during initState, so a clamp placed only inside MaterialApp would
+    // leave the sp-derived theme sizes scaling by the raw system factor while
+    // the body text used the capped one.
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: AppTextTheme.clampScaler(context)),
+      child: ScreenUtilInit(
+        designSize: const Size(1280, 720),
+        minTextAdapt: true,
+        splitScreenMode: true,
         builder: (context, _) {
-          final themeService = getIt<ThemeService>();
-          final localeService = getIt<LocaleService>();
-          AppColors.brightness = themeService.mode == ThemeMode.dark
-              ? Brightness.dark
-              : Brightness.light;
-          AppText.arabic = localeService.isArabic;
-          return MaterialApp.router(
-            title: 'Material Lab',
-            debugShowCheckedModeBanner: false,
-            theme: AppTheme.light(),
-            darkTheme: AppTheme.dark(),
-            themeMode: themeService.mode,
-            locale: localeService.locale,
-            supportedLocales: LocaleService.supportedLocales,
-            localizationsDelegates: const [
-              AppLocalizations.delegate,
-              GlobalMaterialLocalizations.delegate,
-              GlobalWidgetsLocalizations.delegate,
-              GlobalCupertinoLocalizations.delegate,
-            ],
-            routerConfig: widget.router,
+          // Read here (outside the ListenableBuilder) so the subtree holds a
+          // dependency on the OS brightness: under ThemeMode.system a system-wide
+          // theme change must rebuild, not just an explicit toggle.
+          final platformBrightness = MediaQuery.platformBrightnessOf(context);
+          return ListenableBuilder(
+            listenable: Listenable.merge([
+              getIt<ThemeService>(),
+              getIt<LocaleService>(),
+            ]),
+            builder: (context, _) {
+              final themeService = getIt<ThemeService>();
+              final localeService = getIt<LocaleService>();
+              // `AppColors.brightness` must name the brightness the scheme
+              // actually resolves. Inferring "not dark => light" silently
+              // disagreed with MaterialApp whenever mode was ThemeMode.system
+              // on a machine set to dark.
+              AppColors.brightness = switch (themeService.mode) {
+                ThemeMode.dark => Brightness.dark,
+                ThemeMode.light => Brightness.light,
+                ThemeMode.system => platformBrightness,
+              };
+              AppText.arabic = localeService.isArabic;
+
+              // Push the resolved language and brightness to the native window
+              // chrome. Fire-and-forget on purpose: a retitle that fails is
+              // cosmetic and must not gate the first frame.
+              const chrome = WindowChrome();
+              chrome.setTitle(AppStrings.appTitle);
+              switch (themeService.mode) {
+                case ThemeMode.dark:
+                  chrome.setDarkMode(true);
+                case ThemeMode.light:
+                  chrome.setDarkMode(false);
+                case ThemeMode.system:
+                  // Let the OS registry value decide, so the title bar keeps
+                  // tracking a system-wide theme change.
+                  chrome.setDarkMode(null);
+              }
+
+              return MaterialApp.router(
+                title: AppStrings.appTitle,
+                debugShowCheckedModeBanner: false,
+                scrollBehavior: const AppScrollBehavior(),
+                theme: AppTheme.light(),
+                darkTheme: AppTheme.dark(),
+                themeMode: themeService.mode,
+                locale: localeService.locale,
+                supportedLocales: LocaleService.supportedLocales,
+                localizationsDelegates: const [
+                  AppLocalizations.delegate,
+                  GlobalMaterialLocalizations.delegate,
+                  GlobalWidgetsLocalizations.delegate,
+                  GlobalCupertinoLocalizations.delegate,
+                ],
+                routerConfig: widget.router,
+                // The second half of the clamp. `MaterialApp` builds its own
+                // MediaQuery from the view instead of inheriting the ambient one,
+                // so the wrapper above is dropped here and has to be reapplied
+                // below the navigator — otherwise dialogs, menus and overlays,
+                // which are inserted into this subtree, would read the raw
+                // unbounded system scale.
+                builder: (context, child) => MediaQuery(
+                  data: MediaQuery.of(
+                    context,
+                  ).copyWith(textScaler: AppTextTheme.clampScaler(context)),
+                  child: child!,
+                ),
+              );
+            },
           );
         },
       ),

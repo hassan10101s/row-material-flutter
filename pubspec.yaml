@@ -80,7 +80,6 @@ flutter:
     - assets/Reference.xlsx
     - assets/units.xlsx
     - assets/images/
-    - assets/icons/
     - assets/templates/
     # Directory, not the single file: `firebase.local.json` is git-ignored, so
     # declaring the file itself would break the build on a clean clone.

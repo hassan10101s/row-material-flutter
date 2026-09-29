@@ -229,14 +229,6 @@ final List<SyncEntity> syncEntities = [
     mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
   ),
   SyncEntity(
-    type: 'labMaterialAnalysis',
-    collection: SyncCollection.labConfig,
-    localTable: 'lab_material_analyses',
-    docId: labConfigDocId('lab_material_analyses'),
-    permission: 'lab_results.update',
-    mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
-  ),
-  SyncEntity(
     type: 'labUnit',
     collection: SyncCollection.labConfig,
     localTable: 'lab_units',

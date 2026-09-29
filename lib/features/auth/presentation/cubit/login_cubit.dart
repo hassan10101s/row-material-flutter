@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../../../app/auth_gate.dart';
+import '../../../../core/constants/app_strings.dart';
 import '../../../../core/state/app_cubit.dart';
 import '../../data/auth_repository.dart';
 import 'login_state.dart';
@@ -37,7 +40,14 @@ class LoginCubit extends AppCubit<LoginState> {
       ));
       return false;
     } catch (e) {
-      safeEmit(LoginState(status: LoginStatus.error, error: '$e'));
+      debugPrint('[auth] unexpected sign-in error: $e');
+      safeEmit(LoginState(
+        status: LoginStatus.error,
+        error: AppText.t(
+          'حدث خطأ غير متوقع. حاول مرة أخرى.',
+          'An unexpected error occurred. Please try again.',
+        ),
+      ));
       return false;
     }
   }

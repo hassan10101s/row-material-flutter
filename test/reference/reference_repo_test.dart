@@ -86,7 +86,7 @@ Future<void> _run() async {
   // entry code generated from material code + date
   expect(enriched['next_entry_code'], startsWith('M-SUGAR-01-'));
 
-  // ── Editor save path: updateMaterial + saveMaterialRanges ──────────
+  // ── Editor save path: updateMaterial + saveMaterialBounds ──────────
   await _repo.updateMaterial(
     id,
     materialName: 'Refined Sugar EN | AR',
@@ -98,9 +98,30 @@ Future<void> _run() async {
     },
     units: {'Moisture': '%', 'Purity': '%'},
   );
-  await _lab.saveMaterialRanges(id, [
-    {'analysis_id': 1, 'min_value': '0.5', 'max_value': '2.0', 'unit': '%'},
+  final saved = await _lab.saveMaterialBounds(id, [
+    {
+      'parameter_name': 'Moisture',
+      'parameter_type': 'chemical',
+      'unit': '%',
+      'min_value': '0',
+      'max_value': '0.4',
+    },
+    {
+      'parameter_name': 'Ash',
+      'parameter_type': 'chemical',
+      'unit': '%',
+      'min_value': '0',
+      'max_value': '1.5',
+    },
+    {
+      'parameter_name': 'Purity',
+      'parameter_type': 'chemical',
+      'unit': '%',
+      'min_value': '98',
+      'max_value': '100',
+    },
   ]);
+  expect(saved['saved'], 3);
 
   final updatedRaw = await _repo.getMaterialRaw(id);
   expect(updatedRaw!['material_name'], 'Refined Sugar EN | AR');
@@ -110,7 +131,18 @@ Future<void> _run() async {
   expect(params2.any((p) => p['parameter_name'] == 'Purity'), isTrue);
   expect(
       params2.firstWhere((p) => p['parameter_name'] == 'Purity')['unit'], '%');
-  expect(await _lab.listMaterialRanges(), hasLength(1));
+
+  // Bounds are persisted per parameter and resolved through the reference.
+  final analyses = await _lab.getMaterialAnalyses(id);
+  final chemFields = ((analyses['chemical']?['fields']) as List)
+      .cast<Map<String, dynamic>>();
+  final purity = chemFields.firstWhere((f) => f['parameter_name'] == 'Purity');
+  expect(purity['min'], 98);
+  expect(purity['max'], 100);
+  expect(purity['unit'], '%');
+  expect(
+      chemFields.map((f) => f['parameter_name']).toSet(),
+      containsAll({'Moisture', 'Ash', 'Purity'}));
 
   // ── Duplicate name rejected on update ─────────────────────────────
   await _repo.createMaterial(

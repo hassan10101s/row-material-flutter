@@ -263,6 +263,7 @@ Future<void> registerOrganizationBinder(AuthRepository auth) async {
       await getIt<SettingsRepo>().ensureDefaults();
       await getIt<SeedService>().ensureInitialImport();
       await getIt<LabRepo>().ensureDefaultAnalyses();
+      await getIt<LabRepo>().syncReferenceAnalyses();
       await getIt<BackupManager>().autoBackup();
       await getIt<SyncMetadata>().markOrgBound(DateTime.now());
       // Register this device once per organization (plan §8.5 step 4) and then

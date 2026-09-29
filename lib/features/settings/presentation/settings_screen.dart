@@ -11,6 +11,8 @@ import 'package:go_router/go_router.dart';
 import '../../../app/auth_gate.dart';
 import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/locale/locale_service.dart';
+import '../../../core/theme/theme_service.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/logo_encoding.dart';
 
@@ -232,6 +234,8 @@ class _GeneralPanelState extends State<_GeneralPanel> {
             ),
             const SizedBox(height: AppSpacing.md),
             AppField(label: 'اسم القسم في التقارير', controller: _dept),
+            const SizedBox(height: AppSpacing.lg),
+            const _AppearanceSection(),
             const SizedBox(height: AppSpacing.md),
             _ReportLogoSection(
               path: state.logoPath,
@@ -247,6 +251,84 @@ class _GeneralPanelState extends State<_GeneralPanel> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Theme and language controls.
+///
+/// These were previously reachable only from the compact top-bar toggle, which
+/// cycles light -> dark -> system with no labels, and from a second,
+/// never-read theme store in `token_storage.dart`. Settings is the discoverable
+/// home for them.
+class _AppearanceSection extends StatelessWidget {
+  const _AppearanceSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final themeService = getIt<ThemeService>();
+    final localeService = getIt<LocaleService>();
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'المظهر واللغة',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text('السمة', style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: AppSpacing.sm),
+            // SegmentedButton shows all three states at once, unlike the
+            // top-bar toggle which can only imply the current one.
+            SegmentedButton<ThemeMode>(
+              segments: const [
+                ButtonSegment(
+                  value: ThemeMode.system,
+                  icon: Icon(Icons.brightness_auto, size: 18),
+                  label: Text('النظام'),
+                ),
+                ButtonSegment(
+                  value: ThemeMode.light,
+                  icon: Icon(Icons.light_mode_outlined, size: 18),
+                  label: Text('فاتح'),
+                ),
+                ButtonSegment(
+                  value: ThemeMode.dark,
+                  icon: Icon(Icons.dark_mode_outlined, size: 18),
+                  label: Text('داكن'),
+                ),
+              ],
+              selected: {themeService.mode},
+              showSelectedIcon: false,
+              onSelectionChanged: (selection) =>
+                  themeService.setMode(selection.first),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Text('اللغة', style: Theme.of(context).textTheme.bodyMedium),
+            const SizedBox(height: AppSpacing.sm),
+            SegmentedButton<Locale>(
+              segments: const [
+                ButtonSegment(
+                  value: Locale('ar'),
+                  label: Text('العربية'),
+                ),
+                ButtonSegment(
+                  value: Locale('en'),
+                  label: Text('English'),
+                ),
+              ],
+              selected: {localeService.locale},
+              showSelectedIcon: false,
+              onSelectionChanged: (selection) =>
+                  localeService.setLocale(selection.first),
+            ),
+          ],
+        ),
       ),
     );
   }
