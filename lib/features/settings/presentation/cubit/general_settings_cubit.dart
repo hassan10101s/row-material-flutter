@@ -1,13 +1,13 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../data/settings_repo.dart';
+import '../../domain/settings_repository.dart';
 import 'general_settings_state.dart';
 
 /// Loads/saves the department label shown on reports (General panel).
 class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
   GeneralSettingsCubit({required this.repo}) : super(const GeneralSettingsState());
 
-  final SettingsRepo repo;
+  final SettingsRepository repo;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true));

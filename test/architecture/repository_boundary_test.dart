@@ -5,40 +5,20 @@ import 'package:flutter_test/flutter_test.dart';
 /// Enforces the repository boundary of plan P5 (§3).
 ///
 /// The rule is "presentation depends on domain contracts, never on `data/`".
-/// Plan P5.4 also forbids touching the 30 V1 cubits and 8 widgets, and most of
-/// them still import their repository implementation directly - so the rule is
-/// enforced as a **ratchet**: the known legacy imports are frozen in
-/// [_legacyPresentationDataImports] and the set may shrink (when a module gets a
-/// domain contract) but must never grow. Everything else is a hard failure:
+///
+/// **This rule used to be a ratchet and no longer is.** Plan V5 phase P1 closed
+/// the last six exceptions by giving `auth`, `settings` and `backup` real
+/// domain contracts, so the frozen list is gone and the rule is now a hard
+/// failure: a presentation file that imports `data/` fails the build outright,
+/// with no grandfathered set to negotiate with.
+///
+/// The rest of the rules were always hard failures:
 ///
 ///  * no presentation file may build a `DatabaseHelper`, import `sqflite` or
 ///    write raw SQL;
 ///  * a feature may only own `data/`, `domain/`, `core/` and `presentation/`;
 ///  * every declared domain contract must be registered in the DI.
 const String sep = r'\';
-
-/// Frozen at P5. Time to delete entries, never to add one.
-const Map<String, List<String>> _legacyPresentationDataImports = {
-  'lib/features/auth/presentation/cubit/create_organization_cubit.dart': [
-    '../../data/auth_repository.dart',
-  ],
-  'lib/features/auth/presentation/cubit/login_cubit.dart': [
-    '../../data/auth_repository.dart',
-  ],
-  'lib/features/settings/presentation/migration_panel.dart': [
-    '../../backup/data/backup_manager.dart',
-  ],
-  'lib/features/settings/presentation/settings_screen.dart': [
-    '../../backup/data/backup_manager.dart',
-    '../data/settings_repo.dart',
-  ],
-  'lib/features/settings/presentation/cubit/database_settings_cubit.dart': [
-    '../../../backup/data/backup_manager.dart',
-  ],
-  'lib/features/settings/presentation/cubit/general_settings_cubit.dart': [
-    '../../data/settings_repo.dart',
-  ],
-};
 
 void main() {
   final lib = Directory('lib');
@@ -81,45 +61,20 @@ void main() {
     expect(dartFiles.length, greaterThan(40));
   });
 
-  test('presentation never gains a new data/ import (ratchet)', () {
-    final current = currentPresentationDataImports();
-    final added = <String>[];
-    for (final entry in current.entries) {
-      final known = _legacyPresentationDataImports[entry.key] ?? const <String>[];
+  test('presentation never imports data/', () {
+    final offenders = <String>[];
+    for (final entry in currentPresentationDataImports().entries) {
       for (final target in entry.value) {
-        if (!known.contains(target)) {
-          added.add('${entry.key} -> $target');
-        }
+        offenders.add('${entry.key} -> $target');
       }
     }
     expect(
-      added,
+      offenders,
       isEmpty,
-      reason: 'new presentation -> data/ dependency; depend on the domain '
-          'contract instead\n${added.join('\n')}',
-    );
-  });
-
-  test('the legacy ratchet list is not stale', () {
-    final current = currentPresentationDataImports();
-    final stale = <String>[];
-    for (final entry in _legacyPresentationDataImports.entries) {
-      final live = current[entry.key];
-      if (live == null) {
-        stale.add('${entry.key} no longer imports data/ - delete the entry');
-        continue;
-      }
-      for (final target in entry.value) {
-        if (!live.contains(target)) {
-          stale.add('${entry.key} -> $target was removed - delete the entry');
-        }
-      }
-    }
-    expect(
-      stale,
-      isEmpty,
-      reason: 'the boundary improved: shrink the frozen list\n'
-          '${stale.join('\n')}',
+      reason: 'presentation depends on the domain contract, never on the '
+          'implementation. This list was a ratchet until plan V5 phase P1 '
+          'closed the last six exceptions; there is no grandfathered set '
+          'anymore.\n${offenders.join('\n')}',
     );
   });
 
@@ -168,6 +123,8 @@ void main() {
     // A contract that was declared and never wired is dead weight: the facade
     // has to be reachable under its abstraction.
     const contracts = <String>[
+      'AuthRepository',
+      'BackupService',
       'DashboardRepository',
       'InspectionRepository',
       'SampleRepository',
@@ -179,6 +136,7 @@ void main() {
       'OrganizationRepository',
       'ReferenceRepository',
       'ReportRepository',
+      'SettingsRepository',
     ];
     final locator =
         File('lib${sep}di${sep}service_locator.dart').readAsStringSync();

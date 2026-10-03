@@ -10,7 +10,7 @@ import 'package:material_lab/core/firebase/firebase_options.dart';
 import 'package:material_lab/core/network/connectivity_service.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
-import 'package:material_lab/features/auth/data/auth_repository.dart';
+import 'package:material_lab/features/auth/domain/auth_repository.dart';
 import 'package:material_lab/features/auth/data/offline_first_auth_repository.dart';
 
 class _MockDatabaseHelper extends Mock implements DatabaseHelper {}

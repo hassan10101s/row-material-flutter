@@ -4,13 +4,14 @@ import '../../../core/app_paths.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/security/seal_codec.dart';
+import '../domain/settings_repository.dart';
 
 /// Settings repository (organization scoped).
 ///
 /// User management moved to `features/members` in V2: members are owned by
 /// Firestore and mirrored into the local `users` table, they are never created
 /// or edited from the settings screen.
-class SettingsRepo {
+class SettingsRepo implements SettingsRepository {
   final DatabaseHelper dbHelper;
   final LocalSecret secret;
   final AppPaths? paths;
@@ -28,6 +29,7 @@ class SettingsRepo {
     return map;
   }
 
+  @override
   Future<void> updateSettings(Map<String, String> updates) async {
     final db = await dbHelper.database;
     final batch = db.batch();
@@ -83,6 +85,7 @@ class SettingsRepo {
     return rows.isEmpty ? null : rows.first;
   }
 
+  @override
   Future<String?> getSettingValue(String key) async {
     final row = await getSetting(key);
     return row == null ? null : '${row['value']}';
@@ -110,10 +113,13 @@ class SettingsRepo {
 
   // ── Logo ──────────────────────────────────────────────────────
 
+  @override
   Future<String?> getReportLogoPath() => getSettingValue('report_logo_path');
 
+  @override
   Future<String?> getReportLogoDataUri() => getSettingValue('report_logo_data_uri');
 
+  @override
   Future<void> setReportLogo(String path, String dataUri) async {
     await updateSettings({
       'report_logo_path': path,
@@ -125,6 +131,7 @@ class SettingsRepo {
     await updateSettings({'report_logo_path': path});
   }
 
+  @override
   Future<void> clearReportLogo() async {
     await updateSettings({'report_logo_path': '', 'report_logo_data_uri': ''});
   }

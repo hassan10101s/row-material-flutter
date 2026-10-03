@@ -18,12 +18,21 @@ enum AuthState {
   ready,
 }
 
-/// The authentication contract (plan §14-P2.3).
+/// The authentication contract.
 ///
-/// Implementation: `OfflineFirstAuthRepository`.
-/// Replacing it (or its `AuthRemoteDataSource`) is the only change needed to
-/// move authentication to a Django backend later.
-abstract class AuthRepository {
+/// Implementation: `data/offline_first_auth_repository.dart`
+/// (`OfflineFirstAuthRepository`). Replacing it - or the `AuthRemoteDataSource`
+/// behind it - is the only change needed to move authentication to a Django
+/// backend later.
+///
+/// ## Why this lives in `domain/`
+///
+/// It used to sit in `data/auth_repository.dart` next to its implementation,
+/// which meant `login_cubit` and `create_organization_cubit` had to import the
+/// data layer to name the type they hold. That is the one dependency the
+/// architecture ratchet exists to remove, and these two cubits were the last
+/// two entries in it.
+abstract interface class AuthRepository {
   Stream<AuthState> get currentState;
 
   AuthState get state;

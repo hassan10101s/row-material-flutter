@@ -4,7 +4,7 @@ import '../core/firebase/firebase_bootstrap.dart';
 import '../core/sync/sync_engine.dart';
 import '../di/service_locator.dart';
 import 'auth_gate.dart';
-import '../features/auth/data/auth_repository.dart';
+import '../features/auth/domain/auth_repository.dart';
 
 /// Startup sequence (plan §8.1 + §6.5).
 ///

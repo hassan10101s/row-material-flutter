@@ -16,7 +16,7 @@ import '../../../core/sync/device_registry.dart';
 import '../../../core/sync/remote/auth_remote_data_source.dart' show GoogleSignInException;
 import '../../../core/sync/remote/remote_data_source.dart';
 import '../../../core/sync/sync_metadata.dart';
-import 'auth_repository.dart';
+import '../domain/auth_repository.dart';
 
 /// Offline-first authentication (plan §8.4, §14-P2.3).
 ///

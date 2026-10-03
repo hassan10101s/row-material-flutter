@@ -9,7 +9,7 @@ import 'package:material_lab/app/auth_gate.dart';
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/utils/app_exceptions.dart';
-import 'package:material_lab/features/auth/data/auth_repository.dart';
+import 'package:material_lab/features/auth/domain/auth_repository.dart';
 import 'package:material_lab/features/auth/domain/user.dart';
 import 'package:material_lab/features/auth/presentation/cubit/login_cubit.dart';
 import 'package:material_lab/features/auth/presentation/cubit/create_organization_cubit.dart';

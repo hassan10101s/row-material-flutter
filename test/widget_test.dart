@@ -6,7 +6,7 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/app/auth_gate.dart';
 import 'package:material_lab/core/constants/app_strings.dart';
-import 'package:material_lab/features/auth/data/auth_repository.dart';
+import 'package:material_lab/features/auth/domain/auth_repository.dart';
 import 'package:material_lab/features/auth/presentation/cubit/login_cubit.dart';
 import 'package:material_lab/features/auth/presentation/login_screen.dart';
 

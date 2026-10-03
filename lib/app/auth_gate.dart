@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../core/auth/app_session.dart';
 import '../core/auth/permissions.dart';
 import '../core/network/connectivity_service.dart';
-import '../features/auth/data/auth_repository.dart';
+import '../features/auth/domain/auth_repository.dart';
 import '../features/auth/domain/user.dart';
 
 /// Observable auth state consumed by the router guards and the shell badge

@@ -1,6 +1,6 @@
 import '../../../../app/auth_gate.dart';
 import '../../../../core/state/app_cubit.dart';
-import '../../data/auth_repository.dart';
+import '../../domain/auth_repository.dart';
 import '../../../organizations/domain/organization_repository.dart';
 import 'create_organization_state.dart';
 

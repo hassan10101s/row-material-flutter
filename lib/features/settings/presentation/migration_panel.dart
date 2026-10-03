@@ -10,7 +10,7 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../di/service_locator.dart';
-import '../../backup/data/backup_manager.dart';
+import '../../backup/domain/backup_service.dart';
 
 /// Migration wizard (port of Web Settings DatabasePanel "Import from external
 /// DB" sections): import users+inspections, users only, or materials+units.
@@ -22,7 +22,7 @@ class MigrationPanel extends StatefulWidget {
 }
 
 class _MigrationPanelState extends State<MigrationPanel> {
-  final _backup = getIt<BackupManager>();
+  final _backup = getIt<BackupService>();
   String? _combinedPath;
   String? _usersPath;
   String? _materialsPath;

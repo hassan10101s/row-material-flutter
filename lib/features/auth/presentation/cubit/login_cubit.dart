@@ -3,7 +3,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../../../../app/auth_gate.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/state/app_cubit.dart';
-import '../../data/auth_repository.dart';
+import '../../domain/auth_repository.dart';
 import 'login_state.dart';
 
 /// Drives the single Google button. The router reacts to [AuthGate], so the

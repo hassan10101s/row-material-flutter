@@ -27,7 +27,7 @@ import '../../../design_system/widgets/app_empty_state.dart';
 import '../../../design_system/widgets/app_field.dart';
 import '../../../di/service_locator.dart';
 import '../../../router/app_router.dart';
-import '../../backup/data/backup_manager.dart';
+import '../../backup/domain/backup_service.dart';
 import '../../../core/sync/sync_engine.dart';
 import '../../members/presentation/leave_organization_section.dart';
 import '../../members/presentation/members_screen.dart';
@@ -37,7 +37,7 @@ import 'cubit/database_settings_state.dart';
 import 'cubit/general_settings_cubit.dart';
 import 'cubit/general_settings_state.dart';
 import 'migration_panel.dart';
-import '../data/settings_repo.dart';
+import '../domain/settings_repository.dart';
 
 /// Deep-linkable Settings sections, reachable as `/settings?tab=<key>`.
 enum SettingsTab {
@@ -104,12 +104,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _body() => switch (_tab) {
     SettingsTab.general => BlocProvider(
-      create: (c) => GeneralSettingsCubit(repo: getIt<SettingsRepo>())..load(),
+      create: (c) => GeneralSettingsCubit(repo: getIt<SettingsRepository>())..load(),
       child: const _GeneralPanel(),
     ),
     SettingsTab.database => BlocProvider(
       create: (c) => DatabaseSettingsCubit(
-        backup: getIt<BackupManager>(),
+        backup: getIt<BackupService>(),
         engine: getIt<SyncEngine>(),
       ),
       child: const _DatabasePanel(),

@@ -11,7 +11,7 @@ import '../design_system/animations/app_animations.dart';
 import '../features/audit/presentation/audit_controller.dart';
 import '../features/audit/presentation/audit_screen.dart';
 import '../di/service_locator.dart';
-import '../features/auth/data/auth_repository.dart';
+import '../features/auth/domain/auth_repository.dart';
 import '../features/auth/presentation/cubit/create_organization_cubit.dart';
 import '../features/auth/presentation/cubit/login_cubit.dart';
 import '../features/auth/presentation/create_organization_screen.dart';

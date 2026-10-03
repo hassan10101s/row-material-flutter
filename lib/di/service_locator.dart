@@ -35,10 +35,11 @@ import '../core/sync/sync_engine.dart';
 import '../core/sync/sync_metadata.dart';
 import '../core/sync/sync_queue.dart';
 import '../core/theme/theme_service.dart';
-import '../features/auth/data/auth_repository.dart';
+import '../features/auth/domain/auth_repository.dart';
 import '../features/auth/data/offline_first_auth_repository.dart';
 import '../features/audit/presentation/audit_controller.dart';
 import '../features/backup/data/backup_manager.dart';
+import '../features/backup/domain/backup_service.dart';
 import '../features/dashboard/data/dashboard_repo.dart';
 import '../features/dashboard/domain/dashboard_repository.dart';
 import '../features/inspections/data/inspection_repo.dart';
@@ -59,6 +60,7 @@ import '../features/reports/data/report_html_builder.dart';
 import '../features/reports/data/report_service.dart';
 import '../features/reports/domain/report_repository.dart';
 import '../features/settings/data/settings_repo.dart';
+import '../features/settings/domain/settings_repository.dart';
 import '../features/settings/domain/export_root_service.dart';
 
 /// Global service locator (get_it). Registration happens once in
@@ -170,6 +172,8 @@ Future<void> initServiceLocator() async {
     })
     ..registerLazySingleton<SettingsRepo>(
         () => SettingsRepo(dbHelper: dbHelper, secret: secret, paths: getIt<AppPaths>()))
+    ..registerLazySingleton<SettingsRepository>(
+        () => getIt<SettingsRepo>() as SettingsRepository)
     ..registerLazySingleton<ExportRootService>(() => ExportRootService(
           repo: getIt<SettingsRepo>(),
           paths: getIt<AppPaths>(),
@@ -226,6 +230,8 @@ Future<void> initServiceLocator() async {
         () => getIt<DashboardRepo>() as DashboardRepository)
     ..registerLazySingleton<SeedService>(() => SeedService(dbHelper: dbHelper))
     ..registerLazySingleton<BackupManager>(() => BackupManager(dbHelper: dbHelper))
+    ..registerLazySingleton<BackupService>(
+        () => getIt<BackupManager>() as BackupService)
     ..registerLazySingleton<ReportService>(() => ReportService(
           settingsRepo: getIt<SettingsRepo>(),
           inspectionRepo: getIt<InspectionRepo>(),

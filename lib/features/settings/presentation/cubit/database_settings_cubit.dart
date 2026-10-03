@@ -1,14 +1,14 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/sync/sync_engine.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../../backup/data/backup_manager.dart';
+import '../../../backup/domain/backup_service.dart';
 import 'database_settings_state.dart';
 
 /// Database backup/export/restore actions (Database panel).
 class DatabaseSettingsCubit extends AppCubit<DatabaseSettingsState> {
   DatabaseSettingsCubit({required this.backup, this.engine}) : super(const DatabaseSettingsState());
 
-  final BackupManager backup;
+  final BackupService backup;
 
   /// Optional: after a restore the sync state has to be reconciled before the
   /// next cycle (plan §14-P11.2). Absent in tests and on a degraded bootstrap.

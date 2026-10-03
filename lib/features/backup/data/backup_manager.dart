@@ -8,10 +8,11 @@ import '../../../core/database/database_helper.dart';
 import '../../../core/database/db_trace.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../domain/backup_service.dart';
 
 /// Port of core/services/backup.py + controller.py backup/restore/migration
 /// glue. Qt-free, DB-plumbing only — safe to unit-test headlessly.
-class BackupManager {
+class BackupManager implements BackupService {
   BackupManager({required this.dbHelper});
 
   final DatabaseHelper dbHelper;
@@ -96,6 +97,7 @@ class BackupManager {
   // ── Validation / pre-flight ───────────────────────────────────
 
   /// Validate that a file is a readable backup with the required schema.
+  @override
   Future<void> validateBackupDatabase(String backupPath) async {
     Database? conn;
     try {
@@ -129,6 +131,7 @@ class BackupManager {
 
   /// Copy the backup to a temp file and run the full current-schema migration
   /// against the copy. Returns the migrated file path.
+  @override
   Future<String> preflightMigrateBackup(String backupPath, Directory tempRoot) async {
     final stamp = nowIso().replaceAll(':', '').replaceAll(' ', '_');
     final migrated = p.join(tempRoot.path, 'preflight_$stamp.db');
@@ -151,6 +154,7 @@ class BackupManager {
   }
 
   /// Validate a materials (reference) database file.
+  @override
   Future<void> validateMaterialsDatabase(String sourcePath) async {
     Database? conn;
     try {
@@ -182,6 +186,7 @@ class BackupManager {
   /// Export a full backup of the live database. Mirrors
   /// controller.export_database_backup (VACUUM INTO achieves the same
   /// consistent snapshot as sqlite's online backup API).
+  @override
   Future<Map<String, dynamic>> exportDatabaseBackup({String? explicitPath}) async {
     final db = await dbHelper.database;
     final livePath = await dbHelper.databasePath;
@@ -226,6 +231,7 @@ class BackupManager {
   /// Create an automatic safety backup (retaining the latest 5) before a
   /// restore overwrites the live database. Failures are silent (parity with
   /// controller._perform_auto_backup).
+  @override
   Future<void> autoBackup() async {
     try {
       final dir = await dbHelper.paths.autoBackupDir();
@@ -274,6 +280,7 @@ class BackupManager {
   /// Restore the live database from a backup, upgrading old backups to the
   /// current schema first. On failure the sign-in state is invalidated by the
   /// caller (the DB may be untouched).
+  @override
   Future<Map<String, dynamic>> restoreDatabaseBackup(String backupPath) async {
     final livePath = await dbHelper.databasePath;
     if (await _sameFile(backupPath, livePath)) {
@@ -321,6 +328,7 @@ class BackupManager {
   /// The migration panel shows [usersImportDisabledMessage] instead. Importing
   /// local password hashes into the roster would resurrect the exact
   /// vulnerability V2 removes, and Firebase UIDs cannot be invented locally.
+  @override
   Future<Map<String, dynamic>> pullUsersFromSourceDb({
     required String sourceDbPath,
     String developerName = '',
@@ -344,6 +352,7 @@ class BackupManager {
   /// Copy inspections (and their status history) from a source database,
   /// creating missing reference materials. Returns the number of inspections
   /// copied.
+  @override
   Future<int> importInspectionsFromSource({required String sourceDbPath}) async {
     final livePath = await dbHelper.databasePath;
     if (await _sameFile(sourceDbPath, livePath)) return 0;
@@ -497,6 +506,7 @@ class BackupManager {
   /// Merge materials + parameters from a source materials DB into the live
   /// database (Upsert on name). Optionally re-import units when the source has
   /// no parameters table rows.
+  @override
   Future<Map<String, dynamic>> importMaterialsDatabase({
     required String sourceDbPath,
     Future<int> Function()? importUnits,
