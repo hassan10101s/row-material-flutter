@@ -5,8 +5,8 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../di/service_locator.dart';
-import '../../lab/data/lab_repo.dart';
-import '../data/reference_repo.dart';
+import '../../lab/domain/lab_result_repository.dart';
+import '../domain/reference_repository.dart';
 import 'cubit/params_cubit.dart';
 import 'cubit/products_cubit.dart';
 import 'cubit/reference_cubit.dart';
@@ -37,22 +37,22 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final refRepo = getIt<ReferenceRepo>();
-    final labRepo = getIt<LabRepo>();
+    final refRepo = getIt<ReferenceRepository>();
+    final labConfig = getIt<LabConfigurationRepository>();
     final tabs = <_RefTab>[
       _RefTab(
         AppText.t('المواد المرجعية', 'Materials'),
         Icons.science_outlined,
         BlocProvider(
           create: (_) => ReferenceCubit(repo: refRepo)..load(),
-          child: const MaterialsTab(),
+          child: MaterialsTab(refRepo: refRepo, labConfig: labConfig),
         ),
       ),
       _RefTab(
         AppText.t('المنتجات', 'Products'),
         Icons.inventory_2_outlined,
         BlocProvider(
-          create: (_) => ProductsCubit(repo: labRepo)..load(),
+          create: (_) => ProductsCubit(repo: labConfig)..load(),
           child: const ProductsTab(),
         ),
       ),
@@ -85,10 +85,16 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding:
-              const EdgeInsets.fromLTRB(AppSpacing.page, AppSpacing.page, AppSpacing.page, 0),
-          child: Text(AppStrings.reference,
-              style: Theme.of(context).textTheme.headlineSmall),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.page,
+            AppSpacing.page,
+            AppSpacing.page,
+            0,
+          ),
+          child: Text(
+            AppStrings.reference,
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
         ),
         const SizedBox(height: AppSpacing.md),
         SizedBox(
@@ -115,7 +121,10 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.page),
-            child: IndexedStack(index: _tab, children: [for (final t in tabs) t.child]),
+            child: IndexedStack(
+              index: _tab,
+              children: [for (final t in tabs) t.child],
+            ),
           ),
         ),
       ],

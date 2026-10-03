@@ -8,11 +8,11 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/design_system/widgets/app_button.dart';
-import 'package:material_lab/features/reports/data/report_service.dart';
+import 'package:material_lab/features/reports/domain/report_repository.dart';
 import 'package:material_lab/features/reports/presentation/cubit/reports_cubit.dart';
 import 'package:material_lab/features/reports/presentation/reports_screen.dart';
 
-class _ReportServiceMock extends Mock implements ReportService {}
+class _ReportServiceMock extends Mock implements ReportRepository {}
 
 void main() {
   late _ReportServiceMock repo;

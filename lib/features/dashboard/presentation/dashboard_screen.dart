@@ -6,6 +6,7 @@ import 'package:material_lab/core/l10n/app_localizations_x.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/animations/app_animations.dart';
 import '../../../design_system/feedback/app_error_feedback.dart';
+import '../../../design_system/tokens/app_breakpoints.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
@@ -17,7 +18,7 @@ import 'cubit/dashboard_cubit.dart';
 import 'cubit/dashboard_kpis_cubit.dart';
 import 'cubit/dashboard_kpis_state.dart';
 import 'cubit/dashboard_state.dart';
-import '../data/dashboard_repo.dart';
+import '../domain/dashboard_repository.dart';
 /// Dashboard (port of Web DashboardView + dashboard summary analytics).
 class DashboardScreen extends StatelessWidget {
   const DashboardScreen({super.key});
@@ -203,7 +204,7 @@ class _HeroBanner extends StatelessWidget {
           if (filterOptions != null)
             LayoutBuilder(
               builder: (context, constraints) {
-                final isWide = constraints.maxWidth >= 700;
+                final isWide = constraints.maxWidth >= AppBreakpoints.medium;
                 return Wrap(
                   spacing: 12,
                   runSpacing: 10,
@@ -397,7 +398,7 @@ class _KpiRow extends StatelessWidget {
       (context.l10n.kpi_total, '$totalCount', AppColors.accent, Icons.inventory_2_outlined),
     ];    return LayoutBuilder(
       builder: (context, constraints) {
-        final width = constraints.maxWidth >= 760 ? 4 : 2;
+        final width = constraints.maxWidth >= AppBreakpoints.medium ? 4 : 2;
         final tile = (constraints.maxWidth - AppSpacing.md * (width - 1)) / width;
         return Wrap(
           spacing: AppSpacing.md,
@@ -704,8 +705,12 @@ class _InsightsAndRecommendationsSection extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           LayoutBuilder(
             builder: (context, constraints) {
-              final isWide = constraints.maxWidth >= 600;
-              final tile = isWide
+              final tile = AppBreakpoints.fitsColumnsIn(
+                availableWidth: constraints.maxWidth,
+                columns: insightCards.length,
+                minColumnWidth: 280,
+                gap: AppSpacing.md,
+              )
                   ? (constraints.maxWidth - AppSpacing.md * (insightCards.length - 1)) /
                       insightCards.length
                   : constraints.maxWidth;
@@ -777,8 +782,15 @@ class _TopBreakdownSection extends StatelessWidget {
     final topSuppliers = (summary['topSuppliers'] as List?) ?? const [];
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 760;
-        final cardWidth = isWide ? (constraints.maxWidth - AppSpacing.md) / 2 : constraints.maxWidth;
+        final cardWidth = AppBreakpoints.fitsColumnsIn(
+          availableWidth: constraints.maxWidth,
+          columns: 2,
+          minColumnWidth: 300,
+          gap: AppSpacing.md,
+        )
+            ? (constraints.maxWidth - AppSpacing.md) / 2
+            : constraints.maxWidth;
+
         return Wrap(
           spacing: AppSpacing.md,
           runSpacing: AppSpacing.md,

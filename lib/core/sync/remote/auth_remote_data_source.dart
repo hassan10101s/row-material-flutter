@@ -75,7 +75,9 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       throw const GoogleSignInException('FirebaseAuth is not initialized');
     }
     await ensureGoogleRegistered();
-    final result = await google.signIn(clientId: googleClientId);
+    final result = await google.signIn(
+      clientId: AuthRemoteDataSourceImpl.effectiveGoogleClientId,
+    );
     if (!result.isValid) {
       throw const GoogleSignInException('Google sign-in returned no ID token');
     }
@@ -84,9 +86,14 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       await auth.signInWithCredential(credential);
     } on FirebaseAuthException catch (e) {
       if (e.code == 'invalid-credential') {
-        throw const GoogleSignInException(
-          'The Google client id was rejected — make sure it is a Desktop app client '
-          'id registered in project materiallab-63405',
+        throw GoogleSignInException(
+          Platform.isAndroid || Platform.isIOS
+              ? 'Firebase rejected the Google identity. Check that the Android '
+                    'OAuth client and google-services.json belong to project '
+                    'materiallab-63405 and that the registered SHA-1 matches '
+                    'this device.'
+              : 'The Google client id was rejected — make sure it is a Desktop '
+                    'app client id registered in project materiallab-63405',
         );
       }
       rethrow;
@@ -128,6 +135,26 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   static final String googleClientId = _desktopClientIdDefine.isNotEmpty
       ? _desktopClientIdDefine
       : _webClientIdDefine;
+
+  /// Android client id, passed via `--dart-define`. It is **not** handed to
+  /// `GoogleSignIn(clientId:)`: on Android that parameter is ignored and Play
+  /// Services resolves the id from `google-services.json`. It exists so the app
+  /// can tell "configured for this platform" from "configured for some other
+  /// platform" and show the right instructions.
+  static const String googleAndroidClientId = String.fromEnvironment(
+    'GOOGLE_ANDROID_CLIENT_ID',
+  );
+
+  /// The client id to hand to `GoogleSignIn(clientId:)` on the current platform,
+  /// or `''` when the platform resolves its own.
+  ///
+  /// Passing a Desktop id on Android used to look like it worked — the
+  /// parameter is simply dropped — so a misconfigured phone build failed much
+  /// later, at the token exchange, with an opaque error.
+  static String get effectiveGoogleClientId {
+    if (Platform.isAndroid || Platform.isIOS) return '';
+    return googleClientId;
+  }
 
   /// Deterministic organization id: `org_` + base32(sha256(uid)[0..8])
   /// (plan §8.5). Retrying the creation can never produce a second organization
@@ -565,13 +592,26 @@ class RemoteAuthException implements Exception {
 /// Windows-only `google_sign_in_dartio` import stays in one file.
 class GoogleAuthDataSourceImpl implements GoogleAuthDataSource {
   GoogleAuthDataSourceImpl({GoogleSignIn? signIn})
-      : _signIn = signIn ??
-            GoogleSignIn(clientId: AuthRemoteDataSourceImpl.googleClientId);
+      : _signIn =
+            signIn ??
+            // Empty on Android/iOS on purpose - see [effectiveGoogleClientId].
+            GoogleSignIn(
+              clientId: AuthRemoteDataSourceImpl.effectiveGoogleClientId,
+            );
 
   final GoogleSignIn _signIn;
 
+  /// True when sign-in can plausibly work on **this** platform.
+  ///
+  /// This used to check a Desktop client id unconditionally, which reported
+  /// "configured" on a phone and then failed later at the token exchange.
   @override
-  bool get isConfigured => AuthRemoteDataSourceImpl.googleClientId.isNotEmpty;
+  bool get isConfigured {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return AuthRemoteDataSourceImpl.googleAndroidClientId.isNotEmpty;
+    }
+    return AuthRemoteDataSourceImpl.googleClientId.isNotEmpty;
+  }
 
   @override
   Future<GoogleAuthResult> signIn({required String clientId}) async {

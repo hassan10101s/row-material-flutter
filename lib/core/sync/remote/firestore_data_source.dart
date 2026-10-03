@@ -260,13 +260,31 @@ class FirestoreDataSource implements RemoteDataSource {
     final updatedAt = data['updatedAt'];
     return RemoteDocument(
       id: snapshot.id,
-      data: Map<String, dynamic>.from(data),
+      // Deep-convert server `Timestamp` objects (deletedAt, activatedAt, ...)
+      // to ISO strings: the sqflite layer only accepts num / String / Uint8List.
+      data: _sqliteSafe(Map<String, dynamic>.from(data)),
       version: (data['version'] as num?)?.toInt() ?? 1,
       updatedAt: updatedAt is Timestamp
           ? updatedAt.toDate().toIso8601String()
           : (updatedAt == null ? null : '$updatedAt'),
       exists: snapshot.exists,
     );
+  }
+
+  /// Recursively replace every value the local SQLite store cannot persist.
+  static Map<String, dynamic> _sqliteSafe(Map<String, dynamic> data) => {
+        for (final entry in data.entries) entry.key: _sqliteSafeValue(entry.value),
+      };
+
+  static Object? _sqliteSafeValue(Object? value) {
+    if (value is Timestamp) return value.toDate().toIso8601String();
+    if (value is List) return [for (final v in value) _sqliteSafeValue(v)];
+    if (value is Map) {
+      return {
+        for (final e in value.entries) '${e.key}': _sqliteSafeValue(e.value),
+      };
+    }
+    return value;
   }
 
   /// Replace the sentinel with real server timestamps.

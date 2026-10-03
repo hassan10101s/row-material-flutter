@@ -14,7 +14,8 @@ import '../../../design_system/widgets/app_card.dart';
 import '../../../di/service_locator.dart';
 import '../core/formula_engine.dart'
     show inventoryUnits, safeFormulaFloat, unitDimOf, validateFormula;
-import '../data/lab_repo.dart';
+import '../domain/lab_local_repository.dart';
+import '../domain/lab_result_repository.dart';
 import 'cubit/analyses_cubit.dart';
 import 'cubit/analyses_state.dart';
 
@@ -22,7 +23,10 @@ import 'cubit/analyses_state.dart';
 class AnalysesTab extends StatelessWidget {
   const AnalysesTab({super.key});
 
-  Future<void> _openEditor(BuildContext context, [Map<String, dynamic>? analysis]) async {
+  Future<void> _openEditor(
+    BuildContext context, [
+    Map<String, dynamic>? analysis,
+  ]) async {
     final cubit = context.read<AnalysesCubit>();
     final saved = await showDialog<bool>(
       context: context,
@@ -31,7 +35,10 @@ class AnalysesTab extends StatelessWidget {
     if (saved == true) await cubit.load();
   }
 
-  Future<void> _delete(BuildContext context, Map<String, dynamic> analysis) async {
+  Future<void> _delete(
+    BuildContext context,
+    Map<String, dynamic> analysis,
+  ) async {
     final cubit = context.read<AnalysesCubit>();
     final confirmed = await showDialog<bool>(
       context: context,
@@ -74,7 +81,10 @@ class AnalysesTab extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(AppText.t('التحليلات', 'Analyses'), style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                AppText.t('التحليلات', 'Analyses'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const Spacer(),
               AppButton(
                 small: true,
@@ -86,62 +96,100 @@ class AnalysesTab extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.md),
           if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
-            if (state.loading && state.rows.isEmpty) ...[
-              const AppSkeletonList(rows: 6, lines: 3, height: 380),
-              ] else if (state.rows.isEmpty) ...[
-                Text(AppText.t('لا توجد تحليلات', 'No analyses')),
-              ] else
-            AppCard(
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: double.infinity,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: [
-                      DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
-                      DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
-                      DataColumn(label: Text(AppText.t('المعادلة', 'Formula'))),
-                      DataColumn(label: Text(AppText.t('المواد', 'Items'))),
-                      DataColumn(label: Text(AppText.t('الحقول', 'Fields'))),
-                      DataColumn(label: Text('')),
-                    ],
-                    rows: [
-                      for (final r in state.rows)
-                        DataRow(
-                          cells: [
-                            DataCell(Text('${r['name']}')),
-                            DataCell(Text('${r['unit'] ?? '%'}')),
-                            DataCell(Text(
-                              '${(r['formula'] is Map ? (r['formula'] as Map)['expression'] : '') ?? ''}',
-                              overflow: TextOverflow.ellipsis,
-                            )),
-                            DataCell(Text('${(r['items'] as List?)?.length ?? 0}')),
-                            DataCell(Text((r['dynamic_fields'] as List?)?.join(', ') ?? '')),
-                            DataCell(Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: AppStrings.edit,
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _openEditor(context, r),
-                                  icon: Icon(Icons.edit_outlined, size: 18.r),
+          Expanded(
+            child: state.loading && state.rows.isEmpty
+                ? const AppSkeletonList(rows: 6, lines: 3, height: 380)
+                : state.rows.isEmpty
+                ? Text(AppText.t('لا توجد تحليلات', 'No analyses'))
+                : AppCard(
+                    padding: EdgeInsets.zero,
+                    child: SingleChildScrollView(
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: DataTable(
+                            columns: [
+                              DataColumn(
+                                label: Text(AppText.t('الاسم', 'Name')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('الوحدة', 'Unit')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('المعادلة', 'Formula')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('المواد', 'Items')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('الحقول', 'Fields')),
+                              ),
+                              DataColumn(label: Text('')),
+                            ],
+                            rows: [
+                              for (final r in state.rows)
+                                DataRow(
+                                  cells: [
+                                    DataCell(Text('${r['name']}')),
+                                    DataCell(Text('${r['unit'] ?? '%'}')),
+                                    DataCell(
+                                      Text(
+                                        '${(r['formula'] is Map ? (r['formula'] as Map)['expression'] : '') ?? ''}',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    DataCell(
+                                      Text(
+                                        '${(r['items'] as List?)?.length ?? 0}',
+                                      ),
+                                    ),
+                                    DataCell(
+                                      Text(
+                                        (r['dynamic_fields'] as List?)?.join(
+                                              ', ',
+                                            ) ??
+                                            '',
+                                      ),
+                                    ),
+                                    DataCell(
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip: AppStrings.edit,
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            onPressed: () =>
+                                                _openEditor(context, r),
+                                            icon: Icon(
+                                              Icons.edit_outlined,
+                                              size: 18.r,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: AppStrings.delete,
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            onPressed: () =>
+                                                _delete(context, r),
+                                            icon: Icon(
+                                              Icons.delete_outline,
+                                              size: 18.r,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                IconButton(
-                                  tooltip: AppStrings.delete,
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _delete(context, r),
-                                  icon: Icon(Icons.delete_outline, size: 18.r),
-                                ),
-                              ],
-                            )),
-                          ],
+                            ],
+                          ),
                         ),
-                    ],
+                      ),
+                    ),
                   ),
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );
@@ -157,15 +205,23 @@ class _AnalysisDialog extends StatefulWidget {
 }
 
 class _AnalysisDialogState extends State<_AnalysisDialog> {
-  final _repo = getIt<LabRepo>();
-  late final TextEditingController _name =
-      TextEditingController(text: '${widget.analysis?['name'] ?? ''}');
-  late final TextEditingController _unit =
-      TextEditingController(text: '${widget.analysis?['unit'] ?? '%'}');
-  late final TextEditingController _description =
-      TextEditingController(text: '${widget.analysis?['description'] ?? ''}');
+  // The analysis definition replicates; the chemical stock it draws on does not,
+  // so this dialog legitimately needs both contracts.
+  final _repo = getIt<LabConfigurationRepository>();
+  final _stock = getIt<LabLocalRepository>();
+  late final TextEditingController _name = TextEditingController(
+    text: '${widget.analysis?['name'] ?? ''}',
+  );
+  late final TextEditingController _unit = TextEditingController(
+    text: '${widget.analysis?['unit'] ?? '%'}',
+  );
+  late final TextEditingController _description = TextEditingController(
+    text: '${widget.analysis?['description'] ?? ''}',
+  );
   late final TextEditingController _formula = TextEditingController(
-      text: '${widget.analysis?['formula'] is Map ? (widget.analysis?['formula'] as Map)['expression'] : ''}');
+    text:
+        '${widget.analysis?['formula'] is Map ? (widget.analysis?['formula'] as Map)['expression'] : ''}',
+  );
   final _newFieldController = TextEditingController();
   final List<TextEditingController> _fieldControllers = [];
   final List<Map<String, dynamic>> _fieldLinks = [];
@@ -178,13 +234,15 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
   void initState() {
     super.initState();
     final fields = [
-      for (final f in (widget.analysis?['dynamic_fields'] as List?) ??
-          const ['Sample Name'])
+      for (final f
+          in (widget.analysis?['dynamic_fields'] as List?) ??
+              const ['Sample Name'])
         if ('$f'.trim().isNotEmpty) '$f'.trim(),
     ];
     final links = Map<String, Map<String, dynamic>>.fromEntries([
-      for (final l in (widget.analysis?['field_chemical_links'] as List?) ??
-          const <Object?>[])
+      for (final l
+          in (widget.analysis?['field_chemical_links'] as List?) ??
+              const <Object?>[])
         if (l is Map && '${l['dynamic_field'] ?? ''}'.trim().isNotEmpty)
           MapEntry(
             '${l['dynamic_field']}'.trim(),
@@ -198,8 +256,9 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     for (final item in (widget.analysis?['items'] as List?) ?? const []) {
       if (item is Map) {
         final m = Map<String, dynamic>.from(item);
-        m['qtyCtrl'] =
-            TextEditingController(text: _fmtNum(item['qty_per_sample']));
+        m['qtyCtrl'] = TextEditingController(
+          text: _fmtNum(item['qty_per_sample']),
+        );
         _consumedItems.add(m);
       }
     }
@@ -218,9 +277,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       cfg['fixed_value'] = safeFormulaFloat(row['fixed_value']);
     } else if (kind == 'list') {
       cfg['list_values'] = [
-        for (final v in row['list_values'] is List
-            ? row['list_values'] as List
-            : const [])
+        for (final v
+            in row['list_values'] is List
+                ? row['list_values'] as List
+                : const [])
           '$v',
       ];
     }
@@ -229,7 +289,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
 
   Future<void> _loadInventory() async {
     try {
-      final items = await _repo.listInventory();
+      final items = await _stock.listInventory();
       if (mounted) setState(() => _inventory = items);
     } catch (_) {}
   }
@@ -261,11 +321,20 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
   }
 
   List<String> get _fieldList => [
-        for (final c in _fieldControllers)
-          if (c.text.trim().isNotEmpty) c.text.trim(),
-      ];
+    for (final c in _fieldControllers)
+      if (c.text.trim().isNotEmpty) c.text.trim(),
+  ];
 
-  static const List<String> _formulaOps = ['(', ')', '+', '-', '*', '/', '^', '%'];
+  static const List<String> _formulaOps = [
+    '(',
+    ')',
+    '+',
+    '-',
+    '*',
+    '/',
+    '^',
+    '%',
+  ];
 
   List<({String label, String value})> get _formulaTokens {
     final tokens = <({String label, String value})>[
@@ -315,7 +384,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
           if (!known.contains(v) &&
               v.toLowerCase() != 'true' &&
               v.toLowerCase() != 'false')
-            v
+            v,
       ];
       return (error: null, unresolved: unresolved, empty: false);
     } on ValidationError catch (e) {
@@ -368,10 +437,11 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     final consumedItems = <Map<String, dynamic>>[
       for (final item in _consumedItems)
         {
-          'inventory_id':
-              int.tryParse('${item['inventory_id'] ?? 0}') ?? 0,
-          'qty_per_sample': safeFormulaFloat(
-                  (item['qtyCtrl'] as TextEditingController).text) ??
+          'inventory_id': int.tryParse('${item['inventory_id'] ?? 0}') ?? 0,
+          'qty_per_sample':
+              safeFormulaFloat(
+                (item['qtyCtrl'] as TextEditingController).text,
+              ) ??
               0,
           'unit': '${item['unit'] ?? 'g'}',
         },
@@ -469,10 +539,15 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
           ((_fieldLinks[index]['list_values'] as List?) ?? const []).length;
       return n == 0
           ? const SizedBox.shrink()
-          : _stateChip(Icons.view_list_outlined, 'قائمة ($n)', AppColors.accent);
+          : _stateChip(
+              Icons.view_list_outlined,
+              'قائمة ($n)',
+              AppColors.accent,
+            );
     }
     if (kind == 'link') {
-      final id = int.tryParse('${_fieldLinks[index]['inventory_id'] ?? 0}') ?? 0;
+      final id =
+          int.tryParse('${_fieldLinks[index]['inventory_id'] ?? 0}') ?? 0;
       final name = '${_fieldLinks[index]['inventory_name'] ?? ''}';
       return id <= 0
           ? const SizedBox.shrink()
@@ -499,7 +574,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               label,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                  fontSize: 11.spMax, color: color, fontWeight: FontWeight.w600),
+                fontSize: 11.spMax,
+                color: color,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -524,7 +602,8 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         visualDensity: VisualDensity.compact,
         avatar: Icon(Icons.link, size: 14.r),
         label: Text('ربط', style: TextStyle(fontSize: 12.spMax)),
-        onPressed: () => setState(() => _linkPicker = _linkPicker == index ? -1 : index),
+        onPressed: () =>
+            setState(() => _linkPicker = _linkPicker == index ? -1 : index),
       );
     }
     final name = '${cfg['inventory_name'] ?? ''}';
@@ -532,10 +611,13 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     return InputChip(
       visualDensity: VisualDensity.compact,
       avatar: Icon(Icons.link, size: 14.r),
-      label: Text(name.isEmpty ? 'مرتبط' : '$name ${unit.isNotEmpty ? '($unit)' : ''}',
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(fontSize: 12.spMax)),
-      onPressed: () => setState(() => _linkPicker = _linkPicker == index ? -1 : index),
+      label: Text(
+        name.isEmpty ? 'مرتبط' : '$name ${unit.isNotEmpty ? '($unit)' : ''}',
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 12.spMax),
+      ),
+      onPressed: () =>
+          setState(() => _linkPicker = _linkPicker == index ? -1 : index),
       onDeleted: () => setState(() {
         _fieldLinks[index] = {'kind': 'link', 'unit': 'mL'};
         _linkPicker = -1;
@@ -547,8 +629,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
     if (_inventory.isEmpty) {
       return Padding(
         padding: const EdgeInsets.only(top: 4),
-        child: Text('لا توجد مواد في المخزون.',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
+        child: Text(
+          'لا توجد مواد في المخزون.',
+          style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+        ),
       );
     }
     final cfg = _fieldLinks[index];
@@ -563,21 +647,30 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('ربط بمادة المخزون (استهلاك تلقائي)',
-              style: TextStyle(
-                  color: AppColors.textMuted, fontSize: 11.spMax)),
+          Text(
+            'ربط بمادة المخزون (استهلاك تلقائي)',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
+          ),
           const SizedBox(height: 6),
           DropdownButtonFormField<int?>(
             initialValue: selectedId,
             isExpanded: true,
             decoration: const InputDecoration(
-                labelText: 'المادة', isDense: true),
+              labelText: 'المادة',
+              isDense: true,
+            ),
             items: [
-              const DropdownMenuItem<int?>(value: null, child: Text('— بدون ربط —')),
+              const DropdownMenuItem<int?>(
+                value: null,
+                child: Text('— بدون ربط —'),
+              ),
               for (final inv in _inventory)
                 DropdownMenuItem<int?>(
                   value: int.tryParse('${inv['id']}'),
-                  child: Text('${inv['name']}', overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    '${inv['name']}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
             ],
             onChanged: (v) => setState(() {
@@ -603,7 +696,9 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               initialValue: '${_fieldLinks[index]['unit'] ?? 'mL'}',
               isExpanded: true,
               decoration: const InputDecoration(
-                  labelText: 'وحدة الاستهلاك', isDense: true),
+                labelText: 'وحدة الاستهلاك',
+                isDense: true,
+              ),
               items: [
                 for (final u in inventoryUnits)
                   DropdownMenuItem<String>(value: u, child: Text(u)),
@@ -613,15 +708,13 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               }),
             ),
             if (unitDimOf('${_fieldLinks[index]['unit'] ?? 'mL'}') !=
-                unitDimOf('${_inventory
-                    .firstWhere((e) => '${e['id']}' ==
-                        '${_fieldLinks[index]['inventory_id']}')
-                    ['unit'] ?? ''}')) ...[
+                unitDimOf(
+                  '${_inventory.firstWhere((e) => '${e['id']}' == '${_fieldLinks[index]['inventory_id']}')['unit'] ?? ''}',
+                )) ...[
               const SizedBox(height: 4),
               Text(
                 'تنبيه: وحدة الاستهلاك لا تطابق وحدة المادة، الكمية قد تُستهلك بقيمة رقمية مباشرة.',
-                style: TextStyle(
-                    color: AppColors.warning, fontSize: 11.spMax),
+                style: TextStyle(color: AppColors.warning, fontSize: 11.spMax),
               ),
             ],
           ],
@@ -652,9 +745,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('قيمة ثابتة تستخدم في المعادلة',
-              style: TextStyle(
-                  color: AppColors.textMuted, fontSize: 11.spMax)),
+          Text(
+            'قيمة ثابتة تستخدم في المعادلة',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
+          ),
           const SizedBox(height: 6),
           TextField(
             controller: _valueCtrl(index),
@@ -663,7 +757,9 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               _fieldLinks[index]['fixed_value'] = safeFormulaFloat(t);
             },
             decoration: const InputDecoration(
-                labelText: 'قيمة ثابتة', isDense: true),
+              labelText: 'قيمة ثابتة',
+              isDense: true,
+            ),
           ),
         ],
       ),
@@ -702,9 +798,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('قيم متعددة — يختار المستخدم قيمة لكل اختبار',
-              style: TextStyle(
-                  color: AppColors.textMuted, fontSize: 11.spMax)),
+          Text(
+            'قيم متعددة — يختار المستخدم قيمة لكل اختبار',
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
+          ),
           if (values.isNotEmpty) ...[
             const SizedBox(height: 6),
             Wrap(
@@ -715,8 +812,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                   InputChip(
                     visualDensity: VisualDensity.compact,
                     avatar: Icon(Icons.tag, size: 14.r),
-                    label: Text(values[i],
-                        style: TextStyle(fontSize: 12.spMax)),
+                    label: Text(
+                      values[i],
+                      style: TextStyle(fontSize: 12.spMax),
+                    ),
                     onDeleted: () => setState(() => values.removeAt(i)),
                   ),
               ],
@@ -728,11 +827,14 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               Expanded(
                 child: TextField(
                   controller: _listAddCtrl(index),
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
                   onChanged: (_) => setState(() {}),
                   decoration: const InputDecoration(
-                      labelText: 'قيمة...', isDense: true),
+                    labelText: 'قيمة...',
+                    isDense: true,
+                  ),
                 ),
               ),
               const SizedBox(width: 6),
@@ -767,12 +869,18 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         children: [
           Row(
             children: [
-              Icon(Icons.science_outlined,
-                  size: 16.r, color: AppColors.primary),
+              Icon(
+                Icons.science_outlined,
+                size: 16.r,
+                color: AppColors.primary,
+              ),
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  AppText.t('المواد المستهلكة تلقائياً', 'Auto-consumed chemicals'),
+                  AppText.t(
+                    'المواد المستهلكة تلقائياً',
+                    'Auto-consumed chemicals',
+                  ),
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 13.spMax,
@@ -785,7 +893,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
           const SizedBox(height: 8),
           if (_consumedItems.isEmpty)
             Text(
-              AppText.t('لا توجد مواد مستهلكة بعد', 'No consumed chemicals yet'),
+              AppText.t(
+                'لا توجد مواد مستهلكة بعد',
+                'No consumed chemicals yet',
+              ),
               style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
             )
           else
@@ -820,7 +931,9 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
             width: 84,
             child: TextField(
               controller: ctrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               style: TextStyle(fontSize: 12.5.spMax),
               decoration: const InputDecoration(
                 labelText: 'الكمية',
@@ -866,8 +979,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       alignment: AlignmentDirectional.centerStart,
       child: ActionChip(
         avatar: Icon(Icons.add, size: 14.r),
-        label: Text(AppText.t('إضافة مادة مستهلكة', 'Add consumed chemical'),
-            style: TextStyle(fontSize: 12.spMax)),
+        label: Text(
+          AppText.t('إضافة مادة مستهلكة', 'Add consumed chemical'),
+          style: TextStyle(fontSize: 12.spMax),
+        ),
         onPressed: _pickInventoryItem,
       ),
     );
@@ -885,12 +1000,17 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               onPressed: () => Navigator.of(dialogContext).pop(inv),
               child: Row(
                 children: [
-                  Icon(Icons.science_outlined,
-                      size: 16.r, color: AppColors.accent),
+                  Icon(
+                    Icons.science_outlined,
+                    size: 16.r,
+                    color: AppColors.accent,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text('${inv['name']} (${inv['unit'] ?? ''})',
-                        overflow: TextOverflow.ellipsis),
+                    child: Text(
+                      '${inv['name']} (${inv['unit'] ?? ''})',
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ],
               ),
@@ -930,28 +1050,40 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               TextField(
                 controller: _name,
                 enabled: widget.analysis == null,
-                decoration: const InputDecoration(labelText: 'الاسم', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: 'الاسم',
+                  isDense: true,
+                ),
               ),
               TextField(
                 controller: _unit,
-                decoration: const InputDecoration(labelText: 'الوحدة', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: 'الوحدة',
+                  isDense: true,
+                ),
               ),
               TextField(
                 controller: _description,
                 maxLines: 2,
-                decoration:
-                    const InputDecoration(labelText: 'الوصف', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: 'الوصف',
+                  isDense: true,
+                ),
               ),
               Text(
                 'الحقول الديناميكية (البارامترات)',
-                style:
-                    TextStyle(fontWeight: FontWeight.w600, fontSize: 13.spMax),
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13.spMax,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
                 'لكل حقل حدد كيف تُملأ قيمته: مرتبط بمادة من المخزون (تُستهلك تلقائياً)، أو قيمة ثابتة تدخل في المعادلة، أو قائمة قيم يختار منها المستخدم.',
                 style: TextStyle(
-                    color: AppColors.textMuted, fontSize: 11.spMax),
+                  color: AppColors.textMuted,
+                  fontSize: 11.spMax,
+                ),
               ),
               const SizedBox(height: 8),
               for (var i = 0; i < _fieldControllers.length; i++) ...[
@@ -968,8 +1100,11 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
-                          Icon(Icons.tune, size: 16.r,
-                              color: AppColors.textMuted),
+                          Icon(
+                            Icons.tune,
+                            size: 16.r,
+                            color: AppColors.textMuted,
+                          ),
                           const SizedBox(width: 6),
                           Expanded(
                             child: TextField(
@@ -1013,8 +1148,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                     ],
                   ),
                 ),
-                if (i < _fieldControllers.length - 1)
-                  const SizedBox(height: 8),
+                if (i < _fieldControllers.length - 1) const SizedBox(height: 8),
               ],
               const SizedBox(height: 6),
               Row(
@@ -1084,9 +1218,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                         for (final op in _formulaOps)
                           ActionChip(
                             visualDensity: VisualDensity.compact,
-                            label: Text(op,
-                                style:
-                                    const TextStyle(fontFamily: 'monospace')),
+                            label: Text(
+                              op,
+                              style: const TextStyle(fontFamily: 'monospace'),
+                            ),
                             onPressed: () => _insertFormulaToken(op),
                           ),
                       ],
@@ -1101,15 +1236,19 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                       ? Text(
                           _formulaStatus.error!,
                           style: TextStyle(
-                              color: AppColors.danger, fontSize: 12.spMax),
+                            color: AppColors.danger,
+                            fontSize: 12.spMax,
+                          ),
                         )
                       : Text(
                           _formulaStatus.unresolved.isEmpty
                               ? 'معادلة صالحة بدون متغيرات.'
                               : 'المتغيرات المطلوبة: '
-                                  '${_formulaStatus.unresolved.join(', ')}',
+                                    '${_formulaStatus.unresolved.join(', ')}',
                           style: TextStyle(
-                              color: AppColors.textMuted, fontSize: 12.spMax),
+                            color: AppColors.textMuted,
+                            fontSize: 12.spMax,
+                          ),
                         ),
                 ),
               _consumptionCard(),

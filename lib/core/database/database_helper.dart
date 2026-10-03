@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:io';
-
+import 'package:flutter/foundation.dart';
 import 'package:sqflite_common/utils/utils.dart' as utils;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -742,34 +742,7 @@ class DatabaseHelper {
 
   /// Idempotent legacy-guard migrations matching sqlite_db.py pragmas/rules.
   Future<void> _runLegacyGuarantees(Database db) async {
-    // lab_field_chemical_links gained kind/fixed_value/list_values and a
-    // nullable inventory_id (value/list configs store inventory_id NULL).
-    // Rebuild the legacy NOT NULL FK table once.
-    final fclCols = await db.rawQuery('PRAGMA table_info(lab_field_chemical_links)');
-    if (fclCols.isNotEmpty && !fclCols.any((c) => c['name'] == 'kind')) {
-      await db.execute(
-          'ALTER TABLE lab_field_chemical_links RENAME TO lab_field_chemical_links_old');
-      await db.execute('''
-        CREATE TABLE lab_field_chemical_links (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          analysis_id INTEGER NOT NULL REFERENCES lab_analyses(id) ON DELETE CASCADE,
-          dynamic_field TEXT NOT NULL,
-          inventory_id INTEGER REFERENCES lab_inventory(id),
-          unit TEXT NOT NULL DEFAULT 'mL',
-          kind TEXT NOT NULL DEFAULT 'link',
-          fixed_value REAL,
-          list_values TEXT,
-          created_at TEXT NOT NULL,
-          UNIQUE(analysis_id, dynamic_field)
-        )
-      ''');
-      await db.execute('''
-        INSERT INTO lab_field_chemical_links (id, analysis_id, dynamic_field, inventory_id, unit, created_at)
-        SELECT id, analysis_id, dynamic_field, inventory_id, unit, created_at
-        FROM lab_field_chemical_links_old
-      ''');
-      await db.execute('DROP TABLE lab_field_chemical_links_old');
-    }
+    await _rebuildFieldChemicalLinks(db);
     await _ensureColumn(db, 'inspections', 'expiry_date', 'expiry_date TEXT');
     await _ensureColumn(db, 'inspections', 'specialist_name', "specialist_name TEXT NOT NULL DEFAULT ''");
     await _ensureColumn(db, 'inspections', 'decision_version', 'decision_version INTEGER NOT NULL DEFAULT 1');
@@ -825,6 +798,92 @@ class DatabaseHelper {
     }
     await _ensureUnknownUserRow(db);
   }
+
+  /// Current definition of `lab_field_chemical_links`.
+  static const String _fclTableV2 = '''
+    CREATE TABLE lab_field_chemical_links (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      analysis_id INTEGER NOT NULL REFERENCES lab_analyses(id) ON DELETE CASCADE,
+      dynamic_field TEXT NOT NULL,
+      inventory_id INTEGER REFERENCES lab_inventory(id),
+      unit TEXT NOT NULL DEFAULT 'mL',
+      kind TEXT NOT NULL DEFAULT 'link',
+      fixed_value REAL,
+      list_values TEXT,
+      created_at TEXT NOT NULL,
+      UNIQUE(analysis_id, dynamic_field)
+    )
+  ''';
+
+  /// Columns the pre-V2 table shares with [_fclTableV2]. `inventory_id` was
+  /// `NOT NULL` before value/list configs needed a NULL, so a legacy row can
+  /// legitimately be dropped here only if that constraint is being lifted.
+  static const List<String> _fclCarriedColumns = [
+    'id',
+    'analysis_id',
+    'dynamic_field',
+    'inventory_id',
+    'unit',
+    'created_at',
+  ];
+
+  /// Rebuilds the pre-V2 `lab_field_chemical_links` table exactly once.
+  ///
+  /// The table gained `kind`/`fixed_value`/`list_values` and a nullable
+  /// `inventory_id`, which SQLite cannot add to a NOT NULL foreign key in place,
+  /// so the upgrade is a rename → create → copy → drop cycle.
+  ///
+  /// That cycle used to run outside a transaction, on *every* open (the schema
+  /// version is pinned at 1, so `onUpgrade` never fires). A process death
+  /// between the rename and the drop left the live table missing while its rows
+  /// sat in `..._old`; the next open then saw an empty `PRAGMA table_info`,
+  /// decided there was nothing to rebuild, and fell through to
+  /// `_ensureColumn('lab_field_chemical_links', 'kind', ...)` — an `ALTER TABLE`
+  /// against a table that no longer exists. The open threw and the database was
+  /// permanently unopenable, with no path back.
+  ///
+  /// Two changes close that: the whole cycle is now one transaction, so an
+  /// interrupted upgrade rolls back instead of leaving a half-migrated schema;
+  /// and a database already stuck in that half-state is detected and finished
+  /// rather than abandoned.
+  Future<void> _rebuildFieldChemicalLinks(Database db) async {
+    final cols = await db.rawQuery('PRAGMA table_info(lab_field_chemical_links)');
+    if (cols.isNotEmpty && cols.any((c) => c['name'] == 'kind')) return;
+
+    // Nothing to carry over on a database that was never created.
+    if (cols.isEmpty) {
+      final orphan = await db.rawQuery(
+          'PRAGMA table_info(lab_field_chemical_links_old)');
+      if (orphan.isEmpty) return;
+    }
+
+    await db.transaction((txn) async {
+      if (await _tableExists(txn, 'lab_field_chemical_links')) {
+        await txn.execute('ALTER TABLE lab_field_chemical_links '
+            'RENAME TO lab_field_chemical_links_old');
+      }
+      await txn.execute(_fclTableV2);
+
+      final legacy = await txn.rawQuery(
+          'PRAGMA table_info(lab_field_chemical_links_old)');
+      if (legacy.isNotEmpty) {
+        final present = legacy.map((c) => '${c['name']}').toSet();
+        final carried =
+            _fclCarriedColumns.where(present.contains).toList(growable: false);
+        if (carried.isNotEmpty) {
+          final columns = carried.join(', ');
+          await txn.execute(
+            'INSERT INTO lab_field_chemical_links ($columns) '
+            'SELECT $columns FROM lab_field_chemical_links_old',
+          );
+        }
+      }
+      await txn.execute('DROP TABLE IF EXISTS lab_field_chemical_links_old');
+    });
+  }
+
+  Future<bool> _tableExists(DatabaseExecutor db, String table) async =>
+      (await db.rawQuery('PRAGMA table_info($table)')).isNotEmpty;
 
   /// Reserved `users` row with `id = 0` (plan §6.6, D2).
   ///
@@ -922,6 +981,16 @@ class DatabaseHelper {
 
   Future<void> _ensureColumn(Database db, String table, String column, String spec) async {
     final cols = await db.rawQuery('PRAGMA table_info($table)');
+    if (cols.isEmpty) {
+      // A table that is not there cannot gain a column, and `ALTER TABLE` on a
+      // missing table throws - which would abort the open and leave the user
+      // with no way into their data at all. Report it and move on: an absent
+      // table is a degraded database, an unopenable one is a lost one.
+      debugPrint(
+        '[DatabaseHelper] cannot add "$column": table "$table" does not exist.',
+      );
+      return;
+    }
     final has = cols.any((c) => c['name'] == column);
     if (!has) {
       await db.execute('ALTER TABLE $table ADD COLUMN $spec');

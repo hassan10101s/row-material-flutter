@@ -1,7 +1,7 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../../reference/data/reference_repo.dart';
-import '../../data/inspection_repo.dart';
+import '../../../reference/domain/reference_repository.dart';
+import '../../domain/inspection_repository.dart';
 import 'inspection_form_state.dart';
 
 /// Drives the inspectable data behind the new-inspection form: material
@@ -11,8 +11,8 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
   InspectionFormCubit({required this.repo, required this.reference})
       : super(const InspectionFormState());
 
-  final InspectionRepo repo;
-  final ReferenceRepo reference;
+  final InspectionRepository repo;
+  final ReferenceRepository reference;
 
   Future<void> loadMaterials() async {
     safeEmit(state.copyWith(loading: true, error: null));

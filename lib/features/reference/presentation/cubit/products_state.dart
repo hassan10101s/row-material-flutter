@@ -20,13 +20,12 @@ class ProductsState extends Equatable {
     String? error,
     List<Map<String, dynamic>>? rows,
     List<Map<String, dynamic>>? analyses,
-  }) =>
-      ProductsState(
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        rows: rows ?? this.rows,
-        analyses: analyses ?? this.analyses,
-      );
+  }) => ProductsState(
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    rows: rows ?? this.rows,
+    analyses: analyses ?? this.analyses,
+  );
 
   @override
   List<Object?> get props => [loading, error, rows, analyses];

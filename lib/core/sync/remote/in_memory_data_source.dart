@@ -83,7 +83,17 @@ class InMemoryDataSource implements RemoteDataSource {
     }
     final payload = _withServerTimestamps(Map<String, dynamic>.from(data))
       ..['version'] = baseVersion + 1;
-    documents[key] = payload;
+    if (existing == null) {
+      documents[key] = payload;
+    } else {
+      // `FirestoreDataSourceImpl` issues `ref.update(payload)`, a partial write:
+      // absent keys keep their stored value. Replacing the whole document here
+      // would diverge from production exactly where it matters most - an
+      // immutable field omitted from an update payload (`createdAt`) would
+      // disappear from the double and no sync test could ever prove that the
+      // real server preserves it.
+      documents[key] = Map<String, dynamic>.from(existing)..addAll(payload);
+    }
     return PushResult.success(baseVersion + 1, payload: jsonEncode(payload));
   }
 

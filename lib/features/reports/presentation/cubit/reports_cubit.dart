@@ -1,13 +1,13 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../data/report_service.dart';
+import '../../domain/report_repository.dart';
 import 'reports_state.dart';
 
 /// Runs daily/monthly/yearly PDF report jobs and tracks busy/result state.
 class ReportsCubit extends AppCubit<ReportsState> {
   ReportsCubit({required this.repo}) : super(const ReportsState());
 
-  final ReportService repo;
+  final ReportRepository repo;
 
   Future<void> runDaily(String date) => _run('daily', () => repo.dailyReport(date));
 

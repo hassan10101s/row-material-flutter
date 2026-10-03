@@ -14,9 +14,11 @@ import '../../../design_system/widgets/app_card.dart';
 import '../../../app/auth_gate.dart';
 import '../../../di/service_locator.dart';
 import '../core/formula_engine.dart' show inventoryUnits;
-import '../data/lab_repo.dart';
+import '../domain/lab_local_repository.dart';
+import '../domain/lab_result_repository.dart';
 import 'cubit/inventory_cubit.dart';
 import 'cubit/inventory_state.dart';
+
 /// Lab inventory tab (port of LabView inventory list + form).
 class InventoryTab extends StatelessWidget {
   const InventoryTab({super.key});
@@ -28,6 +30,7 @@ class InventoryTab extends StatelessWidget {
     );
     if (saved == true) await cubit.load();
   }
+
   Future<void> _openEdit(BuildContext context, Map<String, dynamic> row) async {
     final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
@@ -36,7 +39,11 @@ class InventoryTab extends StatelessWidget {
     );
     if (saved == true) await cubit.load();
   }
-  Future<void> _openAdjust(BuildContext context, Map<String, dynamic> row) async {
+
+  Future<void> _openAdjust(
+    BuildContext context,
+    Map<String, dynamic> row,
+  ) async {
     final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
       context: context,
@@ -44,6 +51,7 @@ class InventoryTab extends StatelessWidget {
     );
     if (saved == true) await cubit.load();
   }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<InventoryCubit>().state;
@@ -54,7 +62,10 @@ class InventoryTab extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(AppText.t('المخزون', 'Inventory'), style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                AppText.t('المخزون', 'Inventory'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const Spacer(),
               AppButton(
                 small: true,
@@ -66,95 +77,145 @@ class InventoryTab extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.md),
           if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
-            if (state.loading && state.rows.isEmpty) ...[
-              const AppSkeletonList(rows: 6, lines: 3, height: 380),
-              ] else if (state.rows.isEmpty) ...[
-                Text(AppText.t('لا توجد مواد', 'No inventory items')),
-              ] else
-            AppCard(
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: double.infinity,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: DataTable(
-                    columns: [
-                      DataColumn(label: Text(AppText.t('الاسم', 'Name'))),
-                      DataColumn(label: Text(AppText.t('النوع', 'Category'))),
-                      DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
-                      DataColumn(label: Text(AppText.t('الكمية', 'Qty'))),
-                      DataColumn(label: Text(AppText.t('الحد الأدنى', 'Min'))),
-                      DataColumn(label: Text(AppText.t('الحالة', 'Status'))),
-                      DataColumn(label: Text('')),
-                    ],
-                    rows: [
-                      for (final r in state.rows)
-                        DataRow(
-                          cells: [
-                            DataCell(Text('${r['name']}')),
-                            DataCell(Text(r['category'] == 'liquid'
-                                ? AppText.t('سائل', 'Liquid')
-                                : AppText.t('مسحوق', 'Powder'))),
-                            DataCell(Text('${r['unit'] ?? ''}')),
-                            DataCell(Text('${r['current_qty'] ?? 0}')),
-                            DataCell(Text('${r['min_qty'] ?? 0}')),
-                            DataCell(_statusCell(r)),
-                            DataCell(Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: AppText.t('تسوية الكمية', 'Adjust'),
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _openAdjust(context, r),
-                                  icon: Icon(Icons.swap_vert, size: 18.r),
+          Expanded(
+            child: state.loading && state.rows.isEmpty
+                ? const AppSkeletonList(rows: 6, lines: 3, height: 380)
+                : state.rows.isEmpty
+                ? Text(AppText.t('لا توجد مواد', 'No inventory items'))
+                : AppCard(
+                    padding: EdgeInsets.zero,
+                    child: SingleChildScrollView(
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: DataTable(
+                            columns: [
+                              DataColumn(
+                                label: Text(AppText.t('الاسم', 'Name')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('النوع', 'Category')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('الوحدة', 'Unit')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('الكمية', 'Qty')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('الحد الأدنى', 'Min')),
+                              ),
+                              DataColumn(
+                                label: Text(AppText.t('الحالة', 'Status')),
+                              ),
+                              DataColumn(label: Text('')),
+                            ],
+                            rows: [
+                              for (final r in state.rows)
+                                DataRow(
+                                  cells: [
+                                    DataCell(Text('${r['name']}')),
+                                    DataCell(
+                                      Text(
+                                        r['category'] == 'liquid'
+                                            ? AppText.t('سائل', 'Liquid')
+                                            : AppText.t('مسحوق', 'Powder'),
+                                      ),
+                                    ),
+                                    DataCell(Text('${r['unit'] ?? ''}')),
+                                    DataCell(Text('${r['current_qty'] ?? 0}')),
+                                    DataCell(Text('${r['min_qty'] ?? 0}')),
+                                    DataCell(_statusCell(r)),
+                                    DataCell(
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          IconButton(
+                                            tooltip: AppText.t(
+                                              'تسوية الكمية',
+                                              'Adjust',
+                                            ),
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            onPressed: () =>
+                                                _openAdjust(context, r),
+                                            icon: Icon(
+                                              Icons.swap_vert,
+                                              size: 18.r,
+                                            ),
+                                          ),
+                                          IconButton(
+                                            tooltip: AppStrings.edit,
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                            onPressed: () =>
+                                                _openEdit(context, r),
+                                            icon: Icon(
+                                              Icons.edit_outlined,
+                                              size: 18.r,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                IconButton(
-                                  tooltip: AppStrings.edit,
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _openEdit(context, r),
-                                  icon: Icon(Icons.edit_outlined, size: 18.r),
-                                ),
-                              ],
-                            )),
-                          ],
+                            ],
+                          ),
                         ),
-                    ],
+                      ),
+                    ),
                   ),
-                ),
-              ),
-            ),
+          ),
         ],
       ),
     );
   }
+
   Widget _statusCell(Map<String, dynamic> r) {
     final qty = (r['current_qty'] as num?)?.toDouble() ?? 0;
     final min = (r['min_qty'] as num?)?.toDouble() ?? 0;
     if (qty <= 0) {
-      return Text(AppText.t('نفد', 'Empty'), style: TextStyle(color: AppColors.danger, fontSize: 12.spMax));
+      return Text(
+        AppText.t('نفد', 'Empty'),
+        style: TextStyle(color: AppColors.danger, fontSize: 12.spMax),
+      );
     }
     if (qty < min) {
-      return Text(AppText.t('منخفض', 'Low'), style: TextStyle(color: AppColors.partial, fontSize: 12.spMax));
+      return Text(
+        AppText.t('منخفض', 'Low'),
+        style: TextStyle(color: AppColors.partial, fontSize: 12.spMax),
+      );
     }
-    return Text(AppText.t('متوفر', 'OK'), style: TextStyle(color: AppColors.success, fontSize: 12.spMax));
+    return Text(
+      AppText.t('متوفر', 'OK'),
+      style: TextStyle(color: AppColors.success, fontSize: 12.spMax),
+    );
   }
 }
+
 class _InventoryDialog extends StatefulWidget {
   final Map<String, dynamic>? item;
   const _InventoryDialog({this.item});
   @override
   State<_InventoryDialog> createState() => _InventoryDialogState();
 }
+
 class _InventoryDialogState extends State<_InventoryDialog> {
-  final _repo = getIt<LabRepo>();
-  late final TextEditingController _name =
-      TextEditingController(text: '${widget.item?['name'] ?? ''}');
-  late final TextEditingController _qty =
-      TextEditingController(text: '${widget.item?['current_qty'] ?? ''}');
-  late final TextEditingController _min =
-      TextEditingController(text: '${widget.item?['min_qty'] ?? ''}');
-  late final TextEditingController _description =
-      TextEditingController(text: '${widget.item?['description'] ?? ''}');
+  final _repo = getIt<LabLocalRepository>();
+  late final TextEditingController _name = TextEditingController(
+    text: '${widget.item?['name'] ?? ''}',
+  );
+  late final TextEditingController _qty = TextEditingController(
+    text: '${widget.item?['current_qty'] ?? ''}',
+  );
+  late final TextEditingController _min = TextEditingController(
+    text: '${widget.item?['min_qty'] ?? ''}',
+  );
+  late final TextEditingController _description = TextEditingController(
+    text: '${widget.item?['description'] ?? ''}',
+  );
   late String _category = '${widget.item?['category'] ?? 'liquid'}';
   late String _unit = '${widget.item?['unit'] ?? 'mL'}';
   bool _saving = false;
@@ -166,6 +227,7 @@ class _InventoryDialogState extends State<_InventoryDialog> {
     _description.dispose();
     super.dispose();
   }
+
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
@@ -196,6 +258,7 @@ class _InventoryDialogState extends State<_InventoryDialog> {
       if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -208,12 +271,17 @@ class _InventoryDialogState extends State<_InventoryDialog> {
             children: [
               TextField(
                 controller: _name,
-                decoration: const InputDecoration(labelText: 'الاسم', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: 'الاسم',
+                  isDense: true,
+                ),
               ),
               DropdownButtonFormField<String>(
                 initialValue: _category,
-                decoration:
-                    const InputDecoration(labelText: 'النوع', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: 'النوع',
+                  isDense: true,
+                ),
                 items: const [
                   DropdownMenuItem(value: 'liquid', child: Text('سائل')),
                   DropdownMenuItem(value: 'powder', child: Text('مسحوق')),
@@ -224,8 +292,10 @@ class _InventoryDialogState extends State<_InventoryDialog> {
               ),
               DropdownButtonFormField<String>(
                 initialValue: _unit,
-                decoration:
-                    const InputDecoration(labelText: 'الوحدة', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: 'الوحدة',
+                  isDense: true,
+                ),
                 items: [
                   for (final u in inventoryUnits)
                     DropdownMenuItem(value: u, child: Text(u)),
@@ -237,18 +307,25 @@ class _InventoryDialogState extends State<_InventoryDialog> {
               if (widget.item == null)
                 TextField(
                   controller: _qty,
-                  decoration: const InputDecoration(labelText: 'الكمية', isDense: true),
+                  decoration: const InputDecoration(
+                    labelText: 'الكمية',
+                    isDense: true,
+                  ),
                 ),
               TextField(
                 controller: _min,
-                decoration:
-                    const InputDecoration(labelText: 'الحد الأدنى', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: 'الحد الأدنى',
+                  isDense: true,
+                ),
               ),
               TextField(
                 controller: _description,
                 maxLines: 2,
-                decoration:
-                    const InputDecoration(labelText: 'الوصف', isDense: true),
+                decoration: const InputDecoration(
+                  labelText: 'الوصف',
+                  isDense: true,
+                ),
               ),
             ],
           ),
@@ -273,29 +350,40 @@ class _InventoryDialogState extends State<_InventoryDialog> {
     );
   }
 }
+
 class _AdjustDialog extends StatefulWidget {
   final Map<String, dynamic> item;
   const _AdjustDialog({required this.item});
   @override
   State<_AdjustDialog> createState() => _AdjustDialogState();
 }
+
 class _AdjustDialogState extends State<_AdjustDialog> {
-  final _repo = getIt<LabRepo>();
-  late final TextEditingController _delta =
-      TextEditingController(text: '${widget.item['current_qty'] ?? 0}');
+  // A stock adjustment replicates with the test that caused it, so it belongs
+  // to the *result* repository - unlike the item CRUD above, which is local.
+  final _repo = getIt<LabResultRepository>();
+  late final TextEditingController _delta = TextEditingController(
+    text: '${widget.item['current_qty'] ?? 0}',
+  );
   final _reason = TextEditingController();
   bool _saving = false;
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
     if (user == null) return null;
-    return {'id': user.id, 'username': user.username, 'full_name': user.fullName};
+    return {
+      'id': user.id,
+      'username': user.username,
+      'full_name': user.fullName,
+    };
   }
+
   @override
   void dispose() {
     _delta.dispose();
     _reason.dispose();
     super.dispose();
   }
+
   Future<void> _save() async {
     setState(() => _saving = true);
     try {
@@ -314,6 +402,7 @@ class _AdjustDialogState extends State<_AdjustDialog> {
       if (mounted) AppFeedback.errorFrom(context, e);
     }
   }
+
   @override
   Widget build(BuildContext context) {
     final current = '${widget.item['current_qty'] ?? 0}';
@@ -325,8 +414,10 @@ class _AdjustDialogState extends State<_AdjustDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('${widget.item['name']} — الحالية: $current ${widget.item['unit']}',
-                style: const TextStyle(fontWeight: FontWeight.w600)),
+            Text(
+              '${widget.item['name']} — الحالية: $current ${widget.item['unit']}',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _delta,
@@ -338,7 +429,10 @@ class _AdjustDialogState extends State<_AdjustDialog> {
             const SizedBox(height: AppSpacing.md),
             TextField(
               controller: _reason,
-              decoration: const InputDecoration(labelText: 'السبب', isDense: true),
+              decoration: const InputDecoration(
+                labelText: 'السبب',
+                isDense: true,
+              ),
             ),
           ],
         ),

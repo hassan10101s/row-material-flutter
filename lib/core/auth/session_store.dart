@@ -9,7 +9,11 @@ class SessionStore {
   SessionStore({FlutterSecureStorage? storage})
       : _storage = storage ??
             const FlutterSecureStorage(
-              aOptions: AndroidOptions(encryptedSharedPreferences: true),
+              // `resetOnError` is what makes a **restored** device recoverable:
+              // after a restore the Android KeyStore key that encrypted the
+              // token is gone, and without this a `KeyStoreException` is thrown
+              // out of `read` at boot instead of degrading to "signed out".
+              aOptions: AndroidOptions(resetOnError: true),
             );
 
   static const String key = 'ml_session_v2';
@@ -25,14 +29,17 @@ class SessionStore {
   }
 
   Future<AppSession?> restore() async {
-    final raw = await _storage.read(key: key);
-    if (raw == null || raw.trim().isEmpty) return null;
     try {
+      // Inside the try on purpose: a `read` on a device whose KeyStore key was
+      // invalidated (restore, OS upgrade) can throw, and the contract of this
+      // method is "never crash at boot".
+      final raw = await _storage.read(key: key);
+      if (raw == null || raw.trim().isEmpty) return null;
       final session = AppSession.decode(raw);
       if (!session.isSignedIn) return null;
       return session;
     } on Object {
-      // Corrupted cache = signed out (never crash at boot).
+      // Unreadable or corrupted cache = signed out (never crash at boot).
       await clear();
       return null;
     }

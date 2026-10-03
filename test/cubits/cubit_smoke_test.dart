@@ -15,14 +15,15 @@ import 'package:material_lab/features/auth/presentation/cubit/login_cubit.dart';
 import 'package:material_lab/features/auth/presentation/cubit/create_organization_cubit.dart';
 import 'package:material_lab/features/auth/presentation/cubit/login_state.dart';
 import 'package:material_lab/features/backup/data/backup_manager.dart';
-import 'package:material_lab/features/dashboard/data/dashboard_repo.dart';
+import 'package:material_lab/features/dashboard/domain/dashboard_repository.dart';
 import 'package:material_lab/features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import 'package:material_lab/features/dashboard/presentation/cubit/dashboard_kpis_cubit.dart';
-import 'package:material_lab/features/inspections/data/inspection_repo.dart';
+import 'package:material_lab/features/inspections/domain/inspection_repository.dart';
 import 'package:material_lab/features/inspections/presentation/cubit/inspection_detail_cubit.dart';
 import 'package:material_lab/features/inspections/presentation/cubit/inspection_form_cubit.dart';
 import 'package:material_lab/features/inspections/presentation/cubit/inspections_cubit.dart';
-import 'package:material_lab/features/lab/data/lab_repo.dart';
+import 'package:material_lab/features/lab/domain/lab_local_repository.dart';
+import 'package:material_lab/features/lab/domain/lab_result_repository.dart';
 import 'package:material_lab/features/lab/presentation/cubit/activity_cubit.dart';
 import 'package:material_lab/features/lab/presentation/cubit/analyses_cubit.dart';
 import 'package:material_lab/features/lab/presentation/cubit/constants_cubit.dart';
@@ -33,24 +34,27 @@ import 'package:material_lab/features/lab/presentation/cubit/run_test_cubit.dart
 import 'package:material_lab/features/lab/presentation/cubit/test_history_cubit.dart';
 import 'package:material_lab/features/reference/data/reference_repo.dart';
 import 'package:material_lab/features/reference/presentation/cubit/reference_cubit.dart';
-import 'package:material_lab/features/reports/data/report_service.dart';
+import 'package:material_lab/features/reports/domain/report_repository.dart';
 import 'package:material_lab/features/reports/presentation/cubit/reports_cubit.dart';
 import 'package:material_lab/features/settings/data/settings_repo.dart';
+import 'package:material_lab/features/settings/domain/export_root_service.dart';
 import 'package:material_lab/features/settings/presentation/cubit/database_settings_cubit.dart';
 import 'package:material_lab/features/settings/presentation/cubit/general_settings_cubit.dart';
-import 'package:material_lab/features/organizations/data/firestore_organization_repository.dart';
 import 'package:material_lab/features/organizations/domain/organization_repository.dart';
 
 class _AuthRepositoryMock extends Mock implements AuthRepository {}
 class _OrganizationRepositoryMock extends Mock implements OrganizationRepository {}
 class _AuthGateMock extends Mock implements AuthGate {}
-class _DashboardRepoMock extends Mock implements DashboardRepo {}
-class _InspectionRepoMock extends Mock implements InspectionRepo {}
+class _DashboardRepoMock extends Mock implements DashboardRepository {}
+class _InspectionRepoMock extends Mock implements InspectionRepository {}
 class _ReferenceRepoMock extends Mock implements ReferenceRepo {}
-class _ReportServiceMock extends Mock implements ReportService {}
+class _ReportServiceMock extends Mock implements ReportRepository {}
 class _SettingsRepoMock extends Mock implements SettingsRepo {}
 class _BackupManagerMock extends Mock implements BackupManager {}
-class _LabRepoMock extends Mock implements LabRepo {}
+// The real `OfflineFirstLabRepository` satisfies all three lab contracts, so the
+// single stub does too - that is what lets one `repo` stand in for any of them.
+class _LabRepoMock extends Mock
+    implements LabLocalRepository, LabConfigurationRepository, LabResultRepository {}
 
 
 ReportDoc _doc(String name) =>
@@ -403,11 +407,54 @@ void main() {
     });
   });
 
+  group('ExportRootService', () {
+    test('configuredPath trims and nulls empty values', () async {
+      final repo = _SettingsRepoMock();
+      final service = ExportRootService(repo: repo, paths: null);
+
+      when(() => repo.getSettingValue('export_root_path'))
+          .thenAnswer((_) async => r'C:\exports\ ');
+      expect(await service.configuredPath(), r'C:\exports\');
+      verify(() => repo.getSettingValue('export_root_path')).called(1);
+
+      when(() => repo.getSettingValue('export_root_path'))
+          .thenAnswer((_) async => '  ');
+      expect(await service.configuredPath(), isNull);
+    });
+
+    test('setPath persists the trimmed value', () async {
+      final repo = _SettingsRepoMock();
+      final service = ExportRootService(repo: repo, paths: null);
+      when(() => repo.updateSettings({'export_root_path': r'D:\reports'}))
+          .thenAnswer((_) async {});
+
+      await service.setPath(r'  D:\reports  ');
+
+      verify(() => repo.updateSettings({'export_root_path': r'D:\reports'}))
+          .called(1);
+    });
+
+    test('effectiveRoot creates and returns the configured folder', () async {
+      final root = (await Directory.systemTemp.createTemp('matlab_root')).path;
+      final repo = _SettingsRepoMock();
+      final service = ExportRootService(repo: repo, paths: null);
+      when(() => repo.getSettingValue('export_root_path'))
+          .thenAnswer((_) async => '$root\\new\\nested');
+
+      final dir = await service.effectiveRoot();
+
+      expect(dir.path, '$root\\new\\nested');
+      expect(await dir.exists(), isTrue);
+    });
+  });
+
   group('GeneralSettingsCubit', () {
     test('loads the department label', () async {
       final repo = _SettingsRepoMock();
       when(() => repo.getSettingValue('department_label'))
           .thenAnswer((_) async => 'QA Dept');
+      when(() => repo.getSettingValue('export_root_path'))
+          .thenAnswer((_) async => '');
       when(() => repo.getReportLogoPath()).thenAnswer((_) async => '');
       when(() => repo.getReportLogoDataUri()).thenAnswer((_) async => '');
 
@@ -430,6 +477,52 @@ void main() {
       expect(cubit.state.saving, isFalse);
       expect(cubit.state.departmentLabel, 'New');
       verify(() => repo.updateSettings({'department_label': 'New'})).called(1);
+      await cubit.close();
+    });
+
+    test('loads the export root path', () async {
+      final repo = _SettingsRepoMock();
+      when(() => repo.getSettingValue('department_label'))
+          .thenAnswer((_) async => 'QA Dept');
+      when(() => repo.getReportLogoPath()).thenAnswer((_) async => '');
+      when(() => repo.getReportLogoDataUri()).thenAnswer((_) async => '');
+      when(() => repo.getSettingValue('export_root_path'))
+          .thenAnswer((_) async => r'C:\exports\pdfs');
+
+      final cubit = GeneralSettingsCubit(repo: repo);
+      await cubit.load();
+
+      expect(cubit.state.exportRootPath, r'C:\exports\pdfs');
+      await cubit.close();
+    });
+
+    test('saves the export root path', () async {
+      final repo = _SettingsRepoMock();
+      when(() =>
+              repo.updateSettings({'export_root_path': r'D:\reports'}))
+          .thenAnswer((_) async {});
+
+      final cubit = GeneralSettingsCubit(repo: repo);
+      await cubit.saveExportRootPath(r'D:\reports');
+
+      expect(cubit.state.saving, isFalse);
+      expect(cubit.state.exportRootPath, r'D:\reports');
+      verify(() =>
+              repo.updateSettings({'export_root_path': r'D:\reports'}))
+          .called(1);
+      await cubit.close();
+    });
+
+    test('clearing the export root path falls back to the default', () async {
+      final repo = _SettingsRepoMock();
+      when(() => repo.updateSettings({'export_root_path': ''}))
+          .thenAnswer((_) async {});
+
+      final cubit = GeneralSettingsCubit(repo: repo);
+      await cubit.saveExportRootPath('');
+
+      expect(cubit.state.exportRootPath, isEmpty);
+      verify(() => repo.updateSettings({'export_root_path': ''})).called(1);
       await cubit.close();
     });
   });
@@ -604,7 +697,7 @@ void main() {
       when(() => repo.listConsumptionLog()).thenAnswer((_) async => []);
       when(() => repo.listAnalyses()).thenAnswer((_) async => []);
 
-      final cubit = TestHistoryCubit(repo: repo);
+      final cubit = TestHistoryCubit(results: repo, local: repo, config: repo);
       await cubit.load();
 
       expect(cubit.state.loading, isFalse);
@@ -623,7 +716,7 @@ void main() {
             {'id': 3, 'name': 'Gel'},
           ]);
 
-      final cubit = RunTestCubit(repo: repo);
+      final cubit = RunTestCubit(config: repo, results: repo, local: repo);
       await cubit.load();
 
       expect(cubit.state.loading, isFalse);
@@ -658,7 +751,7 @@ void main() {
             'low_stock': <dynamic>[],
           });
 
-      final cubit = RunTestCubit(repo: repo);
+      final cubit = RunTestCubit(config: repo, results: repo, local: repo);
       await cubit.load();
       cubit.setSourceType('raw_material');
       expect(await cubit.lookupEntry('QC-9'), isTrue);

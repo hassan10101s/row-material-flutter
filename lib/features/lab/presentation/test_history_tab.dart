@@ -5,13 +5,15 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
+import '../../../design_system/tokens/app_breakpoints.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_skeleton.dart';
 import '../../../di/service_locator.dart';
 import '../core/test_history_logic.dart';
-import '../data/lab_repo.dart';
+import '../domain/lab_local_repository.dart';
+import '../domain/lab_result_repository.dart';
 import 'cubit/run_test_cubit.dart';
 import 'cubit/test_history_cubit.dart';
 import 'cubit/test_history_state.dart';
@@ -79,10 +81,16 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
       // app; tapping outside (or pressing the close button) returns to the main
       // page. barrierDismissible is true by default.
       builder: (dialogContext) => BlocProvider(
-        create: (_) => RunTestCubit(repo: getIt<LabRepo>())..load(),
+        create: (_) => RunTestCubit(
+          config: getIt<LabConfigurationRepository>(),
+          results: getIt<LabResultRepository>(),
+          local: getIt<LabLocalRepository>(),
+        )..load(),
         child: Dialog(
-          insetPadding:
-              const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 48,
+            vertical: 32,
+          ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1040, maxHeight: 780),
             child: Column(
@@ -93,14 +101,19 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                   decoration: BoxDecoration(
                     color: AppColors.surfaceSoft,
                     borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(4)),
+                      top: Radius.circular(4),
+                    ),
                     border: Border(
-                        bottom: BorderSide(color: AppColors.borderMuted)),
+                      bottom: BorderSide(color: AppColors.borderMuted),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.science_outlined,
-                          size: 20.r, color: AppColors.primary),
+                      Icon(
+                        Icons.science_outlined,
+                        size: 20.r,
+                        color: AppColors.primary,
+                      ),
                       const SizedBox(width: 10),
                       Text(
                         AppText.t('اختبار جديد', 'New Test'),
@@ -205,7 +218,10 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
           }
 
           return Dialog(
-            insetPadding: const EdgeInsets.symmetric(horizontal: 48, vertical: 32),
+            insetPadding: const EdgeInsets.symmetric(
+              horizontal: 48,
+              vertical: 32,
+            ),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
               child: Column(
@@ -216,14 +232,20 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                     padding: const EdgeInsets.fromLTRB(20, 8, 8, 6),
                     decoration: BoxDecoration(
                       color: AppColors.surfaceSoft,
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(4),
+                      ),
                       border: Border(
-                          bottom: BorderSide(color: AppColors.borderMuted)),
+                        bottom: BorderSide(color: AppColors.borderMuted),
+                      ),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.filter_alt_outlined,
-                            size: 20.r, color: AppColors.primary),
+                        Icon(
+                          Icons.filter_alt_outlined,
+                          size: 20.r,
+                          color: AppColors.primary,
+                        ),
                         const SizedBox(width: 10),
                         Text(
                           AppText.t('الفلاتر', 'Filters'),
@@ -277,10 +299,12 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
                     decoration: BoxDecoration(
                       color: AppColors.surfaceSoft,
-                      borderRadius:
-                          const BorderRadius.vertical(bottom: Radius.circular(4)),
+                      borderRadius: const BorderRadius.vertical(
+                        bottom: Radius.circular(4),
+                      ),
                       border: Border(
-                          top: BorderSide(color: AppColors.borderMuted)),
+                        top: BorderSide(color: AppColors.borderMuted),
+                      ),
                     ),
                     child: Row(
                       children: [
@@ -340,8 +364,9 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
   }
 
   List<Map<String, dynamic>> _buildRows(
-      List<Map<String, dynamic>> history,
-      List<Map<String, dynamic>> log) {
+    List<Map<String, dynamic>> history,
+    List<Map<String, dynamic>> log,
+  ) {
     var rows = thFilterModeRows(history, _filterMode, _specificDate);
     rows = thSlice(rows, thCoerceRecordLimit(_recordLimit));
     rows = thApplyRowFilters(
@@ -363,8 +388,10 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(AppText.t('سجل تحاليل المختبر', 'Test history'),
-              style: Theme.of(context).textTheme.titleLarge),
+          Text(
+            AppText.t('سجل تحاليل المختبر', 'Test history'),
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
           const SizedBox(height: AppSpacing.md),
           const AppSkeletonList(rows: 8, lines: 5, height: 460),
         ],
@@ -391,247 +418,294 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
       child: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(AppText.t('سجل تحاليل المختبر', 'Test history'),
-                    style: Theme.of(context).textTheme.titleLarge),
-              ),
-              AppButton(
-                label: 'اختبار جديد',
-                icon: Icon(Icons.add_circle_outline, size: 18.r),
-                onPressed: _openNewTest,
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          AppCard(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _query,
-                        onChanged: (_) => setState(_resetPage),
-                        decoration: InputDecoration(
-                          prefixIcon: Icon(Icons.search, size: 20.r),
-                          suffixIcon: _query.text.isEmpty
-                              ? null
-                              : IconButton(
-                                  tooltip: AppText.t('مسح البحث', 'Clear search'),
-                                  icon: Icon(Icons.close, size: 18.r),
-                                  onPressed: () => setState(() {
-                                    _query.clear();
+                Expanded(
+                  child: Text(
+                    AppText.t('سجل تحاليل المختبر', 'Test history'),
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                AppButton(
+                  label: 'اختبار جديد',
+                  icon: Icon(Icons.add_circle_outline, size: 18.r),
+                  onPressed: _openNewTest,
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppCard(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _query,
+                          onChanged: (_) => setState(_resetPage),
+                          decoration: InputDecoration(
+                            prefixIcon: Icon(Icons.search, size: 20.r),
+                            suffixIcon: _query.text.isEmpty
+                                ? null
+                                : IconButton(
+                                    tooltip: AppText.t(
+                                      'مسح البحث',
+                                      'Clear search',
+                                    ),
+                                    icon: Icon(Icons.close, size: 18.r),
+                                    onPressed: () => setState(() {
+                                      _query.clear();
+                                      _resetPage();
+                                    }),
+                                  ),
+                            hintText: AppText.t(
+                              'بحث في: تحليل / عينة / مصدر / كود دخول / نتيجة / فاحص / حالة...',
+                              'Search analysis, sample, source, entry code, result...',
+                            ),
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      _FilterButton(
+                        activeCount: chips.length,
+                        onPressed: () => _openFilterDialog(state, chemOptions),
+                      ),
+                      const SizedBox(width: 6),
+                      AppButton(
+                        label: AppText.t('الكل', 'All'),
+                        icon: Icon(Icons.grid_view_outlined, size: 16.r),
+                        style: AppButtonStyle.secondary,
+                        small: true,
+                        onPressed: chips.isEmpty && _query.text.isEmpty
+                            ? null
+                            : _clearAllFilters,
+                      ),
+                    ],
+                  ),
+                  if (chips.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                AppText.t('الفلاتر:', 'Filters:'),
+                                style: TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 12.spMax,
+                                ),
+                              ),
+                              for (final chip in chips)
+                                InputChip(
+                                  visualDensity: VisualDensity.compact,
+                                  label: Text(
+                                    chip.label,
+                                    style: TextStyle(fontSize: 12.spMax),
+                                  ),
+                                  onDeleted: () => setState(() {
+                                    final next = thClearChip(
+                                      filterMode: _filterMode,
+                                      specificDate: _specificDate,
+                                      analysisId: _analysisId,
+                                      sourceType: _sourceType,
+                                      chemicalId: _chemicalId,
+                                      rangeState: _rangeState,
+                                      query: _query.text,
+                                      key: chip.key,
+                                    );
+                                    _filterMode = next.filterMode;
+                                    _specificDate = next.specificDate;
+                                    _analysisId = next.analysisId;
+                                    _sourceType = next.sourceType;
+                                    _chemicalId = next.chemicalId;
+                                    _rangeState = next.rangeState;
                                     _resetPage();
                                   }),
                                 ),
-                          hintText: AppText.t(
-                              'بحث في: تحليل / عينة / مصدر / كود دخول / نتيجة / فاحص / حالة...',
-                              'Search analysis, sample, source, entry code, result...'),
-                          border: const OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    _FilterButton(
-                      activeCount: chips.length,
-                      onPressed: () => _openFilterDialog(state, chemOptions),
-                    ),
-                    const SizedBox(width: 6),
-                    AppButton(
-                      label: AppText.t('الكل', 'All'),
-                      icon: Icon(Icons.grid_view_outlined, size: 16.r),
-                      style: AppButtonStyle.secondary,
-                      small: true,
-                      onPressed: chips.isEmpty && _query.text.isEmpty
-                          ? null
-                          : _clearAllFilters,
-                    ),
-                  ],
-                ),
-                if (chips.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(AppText.t('الفلاتر:', 'Filters:'),
-                                style: TextStyle(
-                                    color: AppColors.textMuted, fontSize: 12.spMax)),
-                            for (final chip in chips)
-                              InputChip(
-                                visualDensity: VisualDensity.compact,
-                                label: Text(chip.label,
-                                    style: TextStyle(fontSize: 12.spMax)),
-                                onDeleted: () => setState(() {
-                                  final next = thClearChip(
-                                    filterMode: _filterMode,
-                                    specificDate: _specificDate,
-                                    analysisId: _analysisId,
-                                    sourceType: _sourceType,
-                                    chemicalId: _chemicalId,
-                                    rangeState: _rangeState,
-                                    query: _query.text,
-                                    key: chip.key,
-                                  );
-                                  _filterMode = next.filterMode;
-                                  _specificDate = next.specificDate;
-                                  _analysisId = next.analysisId;
-                                  _sourceType = next.sourceType;
-                                  _chemicalId = next.chemicalId;
-                                  _rangeState = next.rangeState;
-                                  _resetPage();
-                                }),
+                              TextButton(
+                                onPressed: _clearAllFilters,
+                                child: Text(
+                                  AppText.t('مسح الكل', 'Clear all'),
+                                  style: TextStyle(fontSize: 12.spMax),
+                                ),
                               ),
-                            TextButton(
-                              onPressed: _clearAllFilters,
-                              child: Text(AppText.t('مسح الكل', 'Clear all'),
-                                  style: TextStyle(fontSize: 12.spMax)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Text(
-                        AppText.t('يتم عرض ${paged.slice.length} من أصل ${sorted.length}',
-                            'Showing ${paged.slice.length} of ${sorted.length}'),
-                        style: TextStyle(
-                            color: AppColors.textMuted, fontSize: 12.spMax),
-                      ),
-                      if (summary['out'] != 0)
-                        _StatBadge(
-                            label: AppText.t('خارج النطاق: ${summary['out']}',
-                                'Out of range: ${summary['out']}'),
-                            color: AppColors.danger),
-                      if (summary['in'] != 0)
-                        _StatBadge(
-                            label: AppText.t('ضمن النطاق: ${summary['in']}',
-                                'In range: ${summary['in']}'),
-                            color: AppColors.success),
-                    ],
-                  ),
-                ] else
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          AppText.t('يتم عرض ${paged.slice.length} من أصل ${sorted.length}',
-                              'Showing ${paged.slice.length} of ${sorted.length}'),
-                          style: TextStyle(
-                              color: AppColors.textMuted, fontSize: 12.spMax),
-                        ),
-                      ),
-                      if (summary['out'] != 0)
-                        _StatBadge(
-                            label: AppText.t('خارج النطاق: ${summary['out']}',
-                                'Out of range: ${summary['out']}'),
-                            color: AppColors.danger),
-                      if (summary['in'] != 0)
-                        _StatBadge(
-                            label: AppText.t('ضمن النطاق: ${summary['in']}',
-                                'In range: ${summary['in']}'),
-                            color: AppColors.success),
-                    ],
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          AppCard(
-            padding: EdgeInsets.zero,
-            child: SizedBox(
-              width: double.infinity,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: DataTable(
-                  columns: [
-                    const DataColumn(label: Text('#')),
-                    _sortable('التوقيت', 'tested_at'),
-                    _sortable('التحليل', 'analysis_name'),
-                    _sortable('العينة', 'sample_name'),
-                    _sortable('المصدر', 'source_name'),
-                    _sortable('كود الدخول', 'entry_code'),
-                    _sortable('النتيجة', 'result_text'),
-                    const DataColumn(label: Text('النطاق')),
-                    _sortable('الحالة', 'range_state'),
-                    _sortable('بواسطة', 'tested_by_name'),
-                  ],
-                  rows: [
-                    if (paged.slice.isEmpty)
-                      DataRow(cells: [
-                        for (var i = 0; i < 10; i++)
-                          DataCell(
-                            i == 0
-                                ? Text(
-                                    state.rows.isEmpty
-                                        ? 'لا توجد تحاليل بعد. شغّل تحليلاً من تبويب تشغيل تحليل.'
-                                        : 'لا توجد نتائج مطابقة للفلاتر الحالية.',
-                                    style: TextStyle(color: AppColors.textMuted),
-                                  )
-                                : const SizedBox(),
+                            ],
                           ),
-                      ])
-                    else
-                      for (var i = 0; i < paged.slice.length; i++)
-                        _row(paged.slice[i], paged.start + i + 1),
-                  ],
+                        ),
+                        Text(
+                          AppText.t(
+                            'يتم عرض ${paged.slice.length} من أصل ${sorted.length}',
+                            'Showing ${paged.slice.length} of ${sorted.length}',
+                          ),
+                          style: TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 12.spMax,
+                          ),
+                        ),
+                        if (summary['out'] != 0)
+                          _StatBadge(
+                            label: AppText.t(
+                              'خارج النطاق: ${summary['out']}',
+                              'Out of range: ${summary['out']}',
+                            ),
+                            color: AppColors.danger,
+                          ),
+                        if (summary['in'] != 0)
+                          _StatBadge(
+                            label: AppText.t(
+                              'ضمن النطاق: ${summary['in']}',
+                              'In range: ${summary['in']}',
+                            ),
+                            color: AppColors.success,
+                          ),
+                      ],
+                    ),
+                  ] else
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            AppText.t(
+                              'يتم عرض ${paged.slice.length} من أصل ${sorted.length}',
+                              'Showing ${paged.slice.length} of ${sorted.length}',
+                            ),
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 12.spMax,
+                            ),
+                          ),
+                        ),
+                        if (summary['out'] != 0)
+                          _StatBadge(
+                            label: AppText.t(
+                              'خارج النطاق: ${summary['out']}',
+                              'Out of range: ${summary['out']}',
+                            ),
+                            color: AppColors.danger,
+                          ),
+                        if (summary['in'] != 0)
+                          _StatBadge(
+                            label: AppText.t(
+                              'ضمن النطاق: ${summary['in']}',
+                              'In range: ${summary['in']}',
+                            ),
+                            color: AppColors.success,
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppCard(
+              padding: EdgeInsets.zero,
+              child: SizedBox(
+                width: double.infinity,
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: DataTable(
+                    columns: [
+                      const DataColumn(label: Text('#')),
+                      _sortable('التوقيت', 'tested_at'),
+                      _sortable('التحليل', 'analysis_name'),
+                      _sortable('العينة', 'sample_name'),
+                      _sortable('المصدر', 'source_name'),
+                      _sortable('كود الدخول', 'entry_code'),
+                      _sortable('النتيجة', 'result_text'),
+                      const DataColumn(label: Text('النطاق')),
+                      _sortable('الحالة', 'range_state'),
+                      _sortable('بواسطة', 'tested_by_name'),
+                    ],
+                    rows: [
+                      if (paged.slice.isEmpty)
+                        DataRow(
+                          cells: [
+                            for (var i = 0; i < 10; i++)
+                              DataCell(
+                                i == 0
+                                    ? Text(
+                                        state.rows.isEmpty
+                                            ? 'لا توجد تحاليل بعد. شغّل تحليلاً من تبويب تشغيل تحليل.'
+                                            : 'لا توجد نتائج مطابقة للفلاتر الحالية.',
+                                        style: TextStyle(
+                                          color: AppColors.textMuted,
+                                        ),
+                                      )
+                                    : const SizedBox(),
+                              ),
+                          ],
+                        )
+                      else
+                        for (var i = 0; i < paged.slice.length; i++)
+                          _row(paged.slice[i], paged.start + i + 1),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          if (paged.pageCount > 1) ...[
-            const SizedBox(height: AppSpacing.md),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(
-                  tooltip: 'السابق',
-                  onPressed: _page <= 1 ? null : () => setState(() => _page--),
-                  icon: const Icon(Icons.chevron_left),
-                ),
-                for (var p = 1; p <= paged.pageCount; p++)
-                  if (p == 1 ||
-                      p == paged.pageCount ||
-                      (p - _page).abs() <= 2)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 2),
-                      child: p == _page
-                          ? Container(
-                              width: 30,
-                              height: 30,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: AppColors.primary,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text('$p',
+            if (paged.pageCount > 1) ...[
+              const SizedBox(height: AppSpacing.md),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    tooltip: 'السابق',
+                    onPressed: _page <= 1
+                        ? null
+                        : () => setState(() => _page--),
+                    icon: const Icon(Icons.chevron_left),
+                  ),
+                  for (var p = 1; p <= paged.pageCount; p++)
+                    if (p == 1 ||
+                        p == paged.pageCount ||
+                        (p - _page).abs() <= 2)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: p == _page
+                            ? Container(
+                                width: 30,
+                                height: 30,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: AppColors.primary,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  '$p',
                                   style: TextStyle(
-                                      color: Colors.white, fontSize: 13.spMax)),
-                            )
-                          : TextButton(
-                              onPressed: () => setState(() => _page = p),
-                              child: Text('$p', style: TextStyle(fontSize: 13.spMax)),
-                            ),
-                    ),
-                IconButton(
-                  tooltip: 'التالي',
-                  onPressed: _page >= paged.pageCount
-                      ? null
-                      : () => setState(() => _page++),
-                  icon: const Icon(Icons.chevron_right),
-                ),
-              ],
-            ),
+                                    color: Colors.white,
+                                    fontSize: 13.spMax,
+                                  ),
+                                ),
+                              )
+                            : TextButton(
+                                onPressed: () => setState(() => _page = p),
+                                child: Text(
+                                  '$p',
+                                  style: TextStyle(fontSize: 13.spMax),
+                                ),
+                              ),
+                      ),
+                  IconButton(
+                    tooltip: 'التالي',
+                    onPressed: _page >= paged.pageCount
+                        ? null
+                        : () => setState(() => _page++),
+                    icon: const Icon(Icons.chevron_right),
+                  ),
+                ],
+              ),
+            ],
           ],
-        ],
         ),
       ),
     );
@@ -664,151 +738,177 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
     required ValueChanged<String> onRange,
     required ValueChanged<String> onLimit,
   }) {
-    return LayoutBuilder(builder: (context, constraints) {
-      final narrow = constraints.maxWidth < 900;
-      final children = <Widget>[
-        _filterField(
-          label: AppText.t('التصفية', 'Period'),
-          child: Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            children: [
-              _modeButton(AppText.t('الكل', 'All'), 'all', mode, onMode),
-              _modeButton(AppText.t('24 ساعة', '24h'), 'last24h', mode, onMode),
-              _modeButton(AppText.t('تاريخ', 'Date'), 'specific-date', mode, onMode),
-            ],
-          ),
-        ),
-        if (mode == 'specific-date')
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final narrow = constraints.maxWidth < AppBreakpoints.expanded;
+        final children = <Widget>[
           _filterField(
-            label: AppText.t('اختر التاريخ', 'Pick date'),
-            child: InkWell(
-              onTap: onDate,
-              borderRadius: BorderRadius.circular(8),
-              child: InputDecorator(
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  suffixIcon: Icon(Icons.calendar_today, size: 16.r),
+            label: AppText.t('التصفية', 'Period'),
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: [
+                _modeButton(AppText.t('الكل', 'All'), 'all', mode, onMode),
+                _modeButton(
+                  AppText.t('24 ساعة', '24h'),
+                  'last24h',
+                  mode,
+                  onMode,
                 ),
-                child: Text(specificDate),
+                _modeButton(
+                  AppText.t('تاريخ', 'Date'),
+                  'specific-date',
+                  mode,
+                  onMode,
+                ),
+              ],
+            ),
+          ),
+          if (mode == 'specific-date')
+            _filterField(
+              label: AppText.t('اختر التاريخ', 'Pick date'),
+              child: InkWell(
+                onTap: onDate,
+                borderRadius: BorderRadius.circular(8),
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    border: const OutlineInputBorder(),
+                    isDense: true,
+                    suffixIcon: Icon(Icons.calendar_today, size: 16.r),
+                  ),
+                  child: Text(specificDate),
+                ),
               ),
             ),
-          ),
-        _filterField(
-          label: AppText.t('حد السجلات', 'Record limit'),
-          child: DropdownButtonFormField<String>(
-            initialValue: recordLimit,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
+          _filterField(
+            label: AppText.t('حد السجلات', 'Record limit'),
+            child: DropdownButtonFormField<String>(
+              initialValue: recordLimit,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: [
+                for (final l in _recordLimits)
+                  DropdownMenuItem(value: l, child: Text(l)),
+              ],
+              onChanged: (v) => onLimit(v ?? recordLimit),
             ),
-            items: [
-              for (final l in _recordLimits)
-                DropdownMenuItem(value: l, child: Text(l)),
-            ],
-            onChanged: (v) => onLimit(v ?? recordLimit),
           ),
-        ),
-        _filterField(
-          label: AppText.t('التحليل', 'Analysis'),
-          child: DropdownButtonFormField<String>(
-            initialValue: analysisId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
+          _filterField(
+            label: AppText.t('التحليل', 'Analysis'),
+            child: DropdownButtonFormField<String>(
+              initialValue: analysisId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem(value: '', child: Text('كل التحاليل')),
+                for (final a in state.analyses)
+                  DropdownMenuItem(
+                    value: '${a['id']}',
+                    child: Text(
+                      '${a['name']}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (v) => onAnalysis(v ?? ''),
             ),
-            items: [
-              const DropdownMenuItem(value: '', child: Text('كل التحاليل')),
-              for (final a in state.analyses)
+          ),
+          _filterField(
+            label: AppText.t('النوع', 'Source type'),
+            child: DropdownButtonFormField<String>(
+              initialValue: sourceType,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: const [
+                DropdownMenuItem(value: '', child: Text('كل الأنواع')),
                 DropdownMenuItem(
-                  value: '${a['id']}',
-                  child: Text('${a['name']}', overflow: TextOverflow.ellipsis),
+                  value: 'raw_material',
+                  child: Text('مادة خام'),
                 ),
-            ],
-            onChanged: (v) => onAnalysis(v ?? ''),
-          ),
-        ),
-        _filterField(
-          label: AppText.t('النوع', 'Source type'),
-          child: DropdownButtonFormField<String>(
-            initialValue: sourceType,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
+                DropdownMenuItem(value: 'product', child: Text('منتج')),
+              ],
+              onChanged: (v) => onSource(v ?? ''),
             ),
-            items: const [
-              DropdownMenuItem(value: '', child: Text('كل الأنواع')),
-              DropdownMenuItem(value: 'raw_material', child: Text('مادة خام')),
-              DropdownMenuItem(value: 'product', child: Text('منتج')),
-            ],
-            onChanged: (v) => onSource(v ?? ''),
           ),
-        ),
-        _filterField(
-          label: AppText.t('المواد المستهلكة', 'Consumables'),
-          child: DropdownButtonFormField<String>(
-            initialValue: chemicalId,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
+          _filterField(
+            label: AppText.t('المواد المستهلكة', 'Consumables'),
+            child: DropdownButtonFormField<String>(
+              initialValue: chemicalId,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: [
+                const DropdownMenuItem(value: '', child: Text('كل المواد')),
+                for (final o in chemOptions)
+                  DropdownMenuItem(value: o.value, child: Text(o.label)),
+              ],
+              onChanged: (v) => onChemical(v ?? ''),
             ),
-            items: [
-              const DropdownMenuItem(value: '', child: Text('كل المواد')),
-              for (final o in chemOptions)
-                DropdownMenuItem(value: o.value, child: Text(o.label)),
-            ],
-            onChanged: (v) => onChemical(v ?? ''),
           ),
-        ),
-        _filterField(
-          label: AppText.t('الحالة', 'Range state'),
-          child: DropdownButtonFormField<String>(
-            initialValue: rangeState,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
+          _filterField(
+            label: AppText.t('الحالة', 'Range state'),
+            child: DropdownButtonFormField<String>(
+              initialValue: rangeState,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: const [
+                DropdownMenuItem(value: '', child: Text('كل النتائج')),
+                DropdownMenuItem(value: 'out', child: Text('خارج النطاق')),
+                DropdownMenuItem(value: 'in', child: Text('ضمن النطاق')),
+                DropdownMenuItem(value: 'none', child: Text('بدون نطاق')),
+              ],
+              onChanged: (v) => onRange(v ?? ''),
             ),
-            items: const [
-              DropdownMenuItem(value: '', child: Text('كل النتائج')),
-              DropdownMenuItem(value: 'out', child: Text('خارج النطاق')),
-              DropdownMenuItem(value: 'in', child: Text('ضمن النطاق')),
-              DropdownMenuItem(value: 'none', child: Text('بدون نطاق')),
-            ],
-            onChanged: (v) => onRange(v ?? ''),
           ),
-        ),
-      ];
-      if (narrow) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: children,
+        ];
+        if (narrow) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: children,
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final c in children)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(left: AppSpacing.sm),
+                  child: c,
+                ),
+              ),
+          ],
         );
-      }
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final c in children)
-            Expanded(child: Padding(padding: const EdgeInsets.only(left: AppSpacing.sm), child: c)),
-        ],
-      );
-    });
+      },
+    );
   }
 
   Widget _filterField({required String label, required Widget child}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 11.spMax,
-                fontWeight: FontWeight.w600)),
+        Text(
+          label,
+          style: TextStyle(
+            color: AppColors.textMuted,
+            fontSize: 11.spMax,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         const SizedBox(height: 4),
         child,
       ],
@@ -816,7 +916,11 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
   }
 
   Widget _modeButton(
-      String label, String mode, String current, ValueChanged<String> onPick) {
+    String label,
+    String mode,
+    String current,
+    ValueChanged<String> onPick,
+  ) {
     final selected = current == mode;
     return Padding(
       padding: const EdgeInsets.only(left: 4),
@@ -835,55 +939,69 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
     final stateColor = out
         ? AppColors.danger
         : inn
-            ? AppColors.success
-            : AppColors.textMuted;
-    final range =
-        r['min'] == null && r['max'] == null
-            ? '-'
-            : '${r['min'] ?? ''} – ${r['max'] ?? ''} '
-                '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
+        ? AppColors.success
+        : AppColors.textMuted;
+    final range = r['min'] == null && r['max'] == null
+        ? '-'
+        : '${r['min'] ?? ''} – ${r['max'] ?? ''} '
+              '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
     return DataRow(
       color: out
           ? WidgetStatePropertyAll(AppColors.danger.withValues(alpha: 0.06))
           : inn
-              ? WidgetStatePropertyAll(AppColors.success.withValues(alpha: 0.06))
-              : null,
+          ? WidgetStatePropertyAll(AppColors.success.withValues(alpha: 0.06))
+          : null,
       cells: [
         DataCell(Text('$index')),
         DataCell(Text(thFmtDateTime(r['tested_at']))),
         DataCell(Text('${r['analysis_name'] ?? '-'}')),
         DataCell(Text('${r['sample_name'] ?? '-'}')),
-        DataCell(Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('${r['source_name'] ?? '-'}'),
-            if ('${r['source_type'] ?? ''}' != '')
-              Text(
-                ' (${r['source_type'] == 'product' ? 'منتج' : 'خام'})',
-                style: TextStyle(
-                    color: AppColors.textMuted, fontSize: 11.spMax),
-              ),
-          ],
-        )),
-        DataCell(Text('${r['entry_code'] ?? '-'}',
-            textDirection: TextDirection.ltr)),
-        DataCell(Text('${r['result_text'] ?? '-'}',
-            style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: out ? AppColors.danger : null))),
-        DataCell(Text(range, overflow: TextOverflow.ellipsis)),
-        DataCell(Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: stateColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(20),
+        DataCell(
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('${r['source_name'] ?? '-'}'),
+              if ('${r['source_type'] ?? ''}' != '')
+                Text(
+                  ' (${r['source_type'] == 'product' ? 'منتج' : 'خام'})',
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 11.spMax,
+                  ),
+                ),
+            ],
           ),
-          child: Text(thRangeLabel('${r['range_state'] ?? 'none'}'),
+        ),
+        DataCell(
+          Text('${r['entry_code'] ?? '-'}', textDirection: TextDirection.ltr),
+        ),
+        DataCell(
+          Text(
+            '${r['result_text'] ?? '-'}',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: out ? AppColors.danger : null,
+            ),
+          ),
+        ),
+        DataCell(Text(range, overflow: TextOverflow.ellipsis)),
+        DataCell(
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            decoration: BoxDecoration(
+              color: stateColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              thRangeLabel('${r['range_state'] ?? 'none'}'),
               style: TextStyle(
-                  color: stateColor,
-                  fontSize: 11.spMax,
-                  fontWeight: FontWeight.w600)),
-        )),
+                color: stateColor,
+                fontSize: 11.spMax,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ),
         DataCell(Text('${r['tested_by_name'] ?? '-'}')),
       ],
     );
@@ -925,11 +1043,14 @@ class _StatBadge extends StatelessWidget {
           color: color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(20),
         ),
-        child: Text(label,
-            style: TextStyle(
-                color: color,
-                fontSize: 11.spMax,
-                fontWeight: FontWeight.w600)),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 11.spMax,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }

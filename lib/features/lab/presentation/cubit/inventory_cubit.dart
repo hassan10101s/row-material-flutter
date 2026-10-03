@@ -1,6 +1,6 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../data/lab_repo.dart';
+import '../../domain/lab_local_repository.dart';
 import 'inventory_state.dart';
 
 /// Loads the lab inventory list for the Inventory tab.
@@ -9,7 +9,7 @@ import 'inventory_state.dart';
 class InventoryCubit extends AppCubit<InventoryState> {
   InventoryCubit({required this.repo}) : super(const InventoryState());
 
-  final LabRepo repo;
+  final LabLocalRepository repo;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

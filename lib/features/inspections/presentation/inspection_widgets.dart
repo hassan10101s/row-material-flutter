@@ -8,7 +8,7 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../app/auth_gate.dart';
 import '../../../di/service_locator.dart';
-import '../data/inspection_repo.dart';
+import '../domain/inspection_repository.dart';
 
 /// Result of comparing a result against its reference bound.
 class CheckResult {
@@ -83,7 +83,7 @@ class DecisionDialog extends StatefulWidget {
 }
 
 class _DecisionDialogState extends State<DecisionDialog> {
-  final _repo = getIt<InspectionRepo>();
+  final _repo = getIt<InspectionRepository>();
   late String _status =
       '${widget.inspection['decision_status'] ?? 'APPROVED'}';
   late final TextEditingController _reason =

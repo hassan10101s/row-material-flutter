@@ -1,6 +1,6 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../data/lab_repo.dart';
+import '../../domain/lab_result_repository.dart';
 import 'analyses_state.dart';
 
 /// Loads the analyses catalog and exposes delete for the Analyses tab.
@@ -9,7 +9,7 @@ import 'analyses_state.dart';
 class AnalysesCubit extends AppCubit<AnalysesState> {
   AnalysesCubit({required this.repo}) : super(const AnalysesState());
 
-  final LabRepo repo;
+  final LabConfigurationRepository repo;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

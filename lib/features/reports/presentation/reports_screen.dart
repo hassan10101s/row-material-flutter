@@ -5,6 +5,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../design_system/feedback/app_feedback.dart';
+import '../../../design_system/feedback/app_feedback_export.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
@@ -85,13 +86,16 @@ class _ReportsScreenState extends State<ReportsScreen> {
       listenWhen: (prev, curr) =>
           (curr.error != null && curr.error != prev.error) ||
           (curr.lastExport != null && curr.lastExport != prev.lastExport),
-      listener: (context, state) {
+      listener: (context, state) async {
         if (state.error != null) {
           AppFeedback.error(context, state.error!);
         } else if (state.lastExport != null) {
-          AppFeedback.success(
+          // A bare path is unreachable from inside the Android sandbox - see
+          // AppFeedbackExport.
+          await AppFeedbackExport.actions(
             context,
-            '${AppText.t('تم إنشاء التقرير', 'Report ready')}: ${state.lastExport}',
+            filePath: state.lastExport!,
+            documentName: state.lastExportTitle,
           );
         }
       },

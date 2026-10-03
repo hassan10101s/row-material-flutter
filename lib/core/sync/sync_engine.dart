@@ -94,6 +94,34 @@ class SyncEngine {
   final AuditLogger audit;
   final ConnectivityService connectivity;
 
+  /// One recovery sweep per process, not per cycle: [SyncQueue.recoverStalled]
+  /// is cheap but touches every stranded row, and the point is to clean up after
+  /// *startup*, not on every manual "sync now".
+  bool _stalledRecovered = false;
+
+  /// Hands rows stranded by a crashed push back to the pending pool.
+  ///
+  /// A row only reaches `in_flight` via [SyncQueue.claim], and the settlement
+  /// that would move it on never runs if the process dies in between — leaving a
+  /// permanently un-drainable row that also cannot be retried by hand, because
+  /// the Sync screen only surfaces `failed`/`conflict`.
+  ///
+  /// Best-effort: a failure here must never abort the data cycle, so the error
+  /// goes through the same reporting path as the rest of [syncNow].
+  Future<void> _recoverStalledRows() async {
+    if (_stalledRecovered) return;
+    try {
+      final recovered = await queue.recoverStalled();
+      if (recovered > 0) {
+        await _markErrorSafely('Recovered $recovered push(es) interrupted by an app exit.');
+      }
+    } on Object catch (e) {
+      await _markErrorSafely('Push recovery failed: $e');
+    } finally {
+      _stalledRecovered = true;
+    }
+  }
+
   /// The audit trail is pulled on its own (`audit.read` is a separate
   /// permission, and the collection is append-only), never as part of the data
   /// cycle.
@@ -169,6 +197,7 @@ class SyncEngine {
     _inFlight = true;
     await _emit();
     try {
+      await _recoverStalledRows();
       if (!pullOnly) {
         await pushWorker.runOnce();
       }

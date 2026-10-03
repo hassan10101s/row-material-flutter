@@ -1,13 +1,13 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../data/reference_repo.dart';
+import '../../domain/reference_repository.dart';
 import 'reference_state.dart';
 
 /// Loads the reference materials catalog for the Materials tab.
 class ReferenceCubit extends AppCubit<ReferenceState> {
   ReferenceCubit({required this.repo}) : super(const ReferenceState());
 
-  final ReferenceRepo repo;
+  final ReferenceRepository repo;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));
@@ -21,7 +21,11 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
     }
   }
 
-  Future<void> update(int id, {required String name, required String code}) async {
+  Future<void> update(
+    int id, {
+    required String name,
+    required String code,
+  }) async {
     await repo.updateMaterial(id, materialName: name, materialCode: code);
     await load();
   }

@@ -12,13 +12,16 @@ import '../../../core/sync/sync_metadata.dart';
 import '../../../core/sync/sync_queue.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../di/platform_ports.dart';
 import '../../../design_system/feedback/app_feedback.dart';
+import '../../../design_system/tokens/app_breakpoints.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../di/service_locator.dart';
 import '../../auth/domain/user.dart';
 import '../../sync/presentation/sync_badge.dart';
 import '../../sync/presentation/sync_status_controller.dart';
+import '../../settings/domain/export_root_service.dart';
 
 /// Application shell: RTL sidebar + topbar + content panel.
 /// Mirrors web/src/50_shell.js (AppShell).
@@ -108,11 +111,41 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _openPdfFolder() async {
-    // TODO: wire exportScience PDF folder later with ReportService.
-    AppFeedback.info(
-      context,
-      AppText.t('فتح مجلد PDF قريباً', 'Opening PDF folder soon'),
-    );
+    final delivery = fileDelivery();
+    if (!delivery.canReveal) return;
+    final picker = folderPicker();
+    final exportRoot = getIt<ExportRootService>();
+    try {
+      var path = await exportRoot.configuredPath();
+      if (path == null) {
+        if (!picker.supported) return;
+        final picked = await picker.pick(
+          dialogTitle: AppText.t(
+            'اختر مجلد حفظ التصدير',
+            'Choose the exports folder',
+          ),
+        );
+        if (picked == null || !mounted) return;
+        await exportRoot.setPath(picked);
+        path = picked;
+      }
+      final opened = await delivery.reveal(path);
+      if (!opened && mounted) {
+        AppFeedback.error(
+          context,
+          AppText.t('تعذر فتح مجلد PDF', 'Could not open the PDF folder'),
+        );
+      }
+    } on AppError catch (e) {
+      if (mounted) AppFeedback.error(context, e.message);
+    } catch (_) {
+      if (mounted) {
+        AppFeedback.error(
+          context,
+          AppText.t('تعذر فتح مجلد PDF', 'Could not open the PDF folder'),
+        );
+      }
+    }
   }
 
   /// The listenables that only the chrome (topbar, sidebar) depends on.
@@ -150,12 +183,13 @@ class _AppShellState extends State<AppShell> {
         onLogout: _logout,
         onLogoutThisDevice: _logoutThisDevice,
         onOpenPdfFolder: _openPdfFolder,
+        canOpenPdfFolder: fileDelivery().canReveal,
       ),
     );
 
     final Widget body;
     // Desktop / Large screen: sidebar on the right (first child in RTL Row).
-    if (MediaQuery.sizeOf(context).width >= 720) {
+    if (MediaQuery.sizeOf(context).width >= AppBreakpoints.medium) {
       body = Scaffold(
         backgroundColor: AppColors.background,
         body: Row(
@@ -369,6 +403,10 @@ class _Sidebar extends StatelessWidget {
   final VoidCallback onLogoutThisDevice;
   final VoidCallback onOpenPdfFolder;
 
+  /// Whether the exports folder can be shown in a file manager on this
+  /// platform. False on Android, where the folder is inside the sandbox.
+  final bool canOpenPdfFolder;
+
   const _Sidebar({
     required this.user,
     required this.entries,
@@ -377,6 +415,7 @@ class _Sidebar extends StatelessWidget {
     required this.onLogout,
     required this.onLogoutThisDevice,
     required this.onOpenPdfFolder,
+    required this.canOpenPdfFolder,
   });
 
   @override
@@ -499,20 +538,25 @@ class _Sidebar extends StatelessWidget {
             ),
           ),
         ),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: OutlinedButton.icon(
-            onPressed: onOpenPdfFolder,
-            icon: Icon(Icons.folder_open, size: 18.r),
-            label: Text(AppStrings.openPdfFolder),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              backgroundColor: AppColors.surface,
-              side: BorderSide(color: AppColors.border),
+        // On a phone the export folder is inside the app sandbox and no file
+        // manager can reach it, so the button would only ever fail. Reports are
+        // shared from the sheet that appears when one is created.
+        if (canOpenPdfFolder)
+          const Divider(height: 1),
+        if (canOpenPdfFolder)
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: OutlinedButton.icon(
+              onPressed: onOpenPdfFolder,
+              icon: Icon(Icons.folder_open, size: 18.r),
+              label: Text(AppStrings.openPdfFolder),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.primary,
+                backgroundColor: AppColors.surface,
+                side: BorderSide(color: AppColors.border),
+              ),
             ),
           ),
-        ),
       ],
     );
   }

@@ -15,6 +15,7 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
       final label = await repo.getSettingValue('department_label');
       final logoPath = await repo.getReportLogoPath();
       final logoDataUri = await repo.getReportLogoDataUri();
+      final exportRootPath = await repo.getSettingValue('export_root_path');
       safeEmit(state.copyWith(
         loading: false,
         departmentLabel: label?.trim().isNotEmpty == true
@@ -22,6 +23,7 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
             : 'Quality Assurance Department',
         logoPath: logoPath ?? '',
         logoDataUri: logoDataUri ?? '',
+        exportRootPath: exportRootPath?.trim() ?? '',
       ));
     } catch (e) {
       safeEmit(state.copyWith(
@@ -65,6 +67,22 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
     try {
       await repo.clearReportLogo();
       safeEmit(state.copyWith(saving: false, logoPath: '', logoDataUri: ''));
+    } on AppError {
+      safeEmit(state.copyWith(saving: false));
+      rethrow;
+    } catch (_) {
+      safeEmit(state.copyWith(saving: false));
+      rethrow;
+    }
+  }
+
+  /// Save the export root folder for report PDFs; an empty string makes the
+  /// reports use the app's default exports folder again.
+  Future<void> saveExportRootPath(String path) async {
+    safeEmit(state.copyWith(saving: true));
+    try {
+      await repo.updateSettings({'export_root_path': path.trim()});
+      safeEmit(state.copyWith(saving: false, exportRootPath: path.trim()));
     } on AppError {
       safeEmit(state.copyWith(saving: false));
       rethrow;

@@ -7,22 +7,17 @@ class UnitsState extends Equatable {
   final String? error;
   final List<Map<String, dynamic>> rows;
 
-  const UnitsState({
-    this.loading = true,
-    this.error,
-    this.rows = const [],
-  });
+  const UnitsState({this.loading = true, this.error, this.rows = const []});
 
   UnitsState copyWith({
     bool? loading,
     String? error,
     List<Map<String, dynamic>>? rows,
-  }) =>
-      UnitsState(
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        rows: rows ?? this.rows,
-      );
+  }) => UnitsState(
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    rows: rows ?? this.rows,
+  );
 
   @override
   List<Object?> get props => [loading, error, rows];

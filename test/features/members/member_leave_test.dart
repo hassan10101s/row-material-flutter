@@ -3,6 +3,7 @@ import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/features/organizations/data/firestore_organization_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
+import 'package:material_lab/features/organizations/domain/organization_repository.dart';
 import 'package:mocktail/mocktail.dart';
 
 class _MockRemote extends Mock implements AuthRemoteDataSource {}

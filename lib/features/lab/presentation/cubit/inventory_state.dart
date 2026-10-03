@@ -7,22 +7,17 @@ class InventoryState extends Equatable {
   final String? error;
   final List<Map<String, dynamic>> rows;
 
-  const InventoryState({
-    this.loading = true,
-    this.error,
-    this.rows = const [],
-  });
+  const InventoryState({this.loading = true, this.error, this.rows = const []});
 
   InventoryState copyWith({
     bool? loading,
     String? error,
     List<Map<String, dynamic>>? rows,
-  }) =>
-      InventoryState(
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        rows: rows ?? this.rows,
-      );
+  }) => InventoryState(
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    rows: rows ?? this.rows,
+  );
 
   @override
   List<Object?> get props => [loading, error, rows];

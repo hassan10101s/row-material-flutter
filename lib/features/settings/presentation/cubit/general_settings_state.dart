@@ -9,12 +9,17 @@ class GeneralSettingsState extends Equatable {
   final String logoPath;
   final String logoDataUri;
 
+  /// Export root for report PDFs (`export_root_path`); empty means the app
+  /// default exports folder is used.
+  final String exportRootPath;
+
   const GeneralSettingsState({
     this.loading = true,
     this.saving = false,
     this.departmentLabel = 'Quality Assurance Department',
     this.logoPath = '',
     this.logoDataUri = '',
+    this.exportRootPath = '',
   });
 
   GeneralSettingsState copyWith({
@@ -23,6 +28,7 @@ class GeneralSettingsState extends Equatable {
     String? departmentLabel,
     String? logoPath,
     String? logoDataUri,
+    String? exportRootPath,
   }) =>
       GeneralSettingsState(
         loading: loading ?? this.loading,
@@ -30,9 +36,16 @@ class GeneralSettingsState extends Equatable {
         departmentLabel: departmentLabel ?? this.departmentLabel,
         logoPath: logoPath ?? this.logoPath,
         logoDataUri: logoDataUri ?? this.logoDataUri,
+        exportRootPath: exportRootPath ?? this.exportRootPath,
       );
 
   @override
-  List<Object?> get props =>
-      [loading, saving, departmentLabel, logoPath, logoDataUri];
+  List<Object?> get props => [
+        loading,
+        saving,
+        departmentLabel,
+        logoPath,
+        logoDataUri,
+        exportRootPath,
+      ];
 }

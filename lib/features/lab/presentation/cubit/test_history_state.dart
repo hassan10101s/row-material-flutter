@@ -23,14 +23,13 @@ class TestHistoryState extends Equatable {
     List<Map<String, dynamic>>? rows,
     List<Map<String, dynamic>>? log,
     List<Map<String, dynamic>>? analyses,
-  }) =>
-      TestHistoryState(
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        rows: rows ?? this.rows,
-        log: log ?? this.log,
-        analyses: analyses ?? this.analyses,
-      );
+  }) => TestHistoryState(
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    rows: rows ?? this.rows,
+    log: log ?? this.log,
+    analyses: analyses ?? this.analyses,
+  );
 
   @override
   List<Object?> get props => [loading, error, rows, log, analyses];

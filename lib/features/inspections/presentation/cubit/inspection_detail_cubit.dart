@@ -1,8 +1,8 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../../reports/data/report_service.dart';
-import '../../data/inspection_repo.dart';
+import '../../../reports/domain/report_repository.dart';
+import '../../domain/inspection_repository.dart';
 import 'inspection_detail_state.dart';
 
 /// Loads a single inspection for the detail screen and drives PDF exports.
@@ -15,8 +15,8 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
   }) : super(const InspectionDetailState());
 
   final int inspectionId;
-  final InspectionRepo repo;
-  final ReportService reports;
+  final InspectionRepository repo;
+  final ReportRepository reports;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

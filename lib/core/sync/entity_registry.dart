@@ -280,6 +280,10 @@ Map<String, dynamic> buildRemotePayload(
     }
     final camel = _toCamel(entry.key);
     if (_internalColumns.contains(camel)) continue;
+    // `createdAt` is write-once and is stamped from the envelope below, so the
+    // local `created_at` string must never be copied through. See the note
+    // where the sentinel is written for why an update must omit it entirely.
+    if (camel == 'createdAt') continue;
     payload[camel] = entry.value;
   }
   final builder = entity.payloadBuilder;
@@ -296,7 +300,23 @@ Map<String, dynamic> buildRemotePayload(
   payload['updatedBy'] = ctx.uid;
   payload['deviceId'] = ctx.deviceId;
   payload['updatedAt'] = FieldTimestampSentinel.value;
-  payload['createdAt'] = asCreate ? FieldTimestampSentinel.value : row['created_at'] ?? FieldTimestampSentinel.value;
+  // `createdAt` is write-once. A create writes a real `Timestamp` (the
+  // sentinel is swapped for `serverTimestamp()` in the remote layer), so an
+  // update must NOT re-send the local ISO `String` in `row['created_at']`:
+  // Rules compare `request.resource.data.createdAt == resource.data.createdAt`
+  // with no type coercion, so a String-over-Timestamp update is denied for
+  // `samples`, `labResults` and `labConfig` alike and the push degenerates
+  // into a permanent conflict row the user cannot clear.
+  //
+  // Leaving the key out is sufficient because the update path uses
+  // `ref.update(payload)` (a partial write) and `allow update` calls
+  // `bumped()` rather than `hasEnvelope()`, whose `hasAll` list includes
+  // `createdAt`. The stored Timestamp is untouched and stays identical.
+  //
+  // The copy loop above skips `created_at` for the same reason; without that
+  // skip this line only ever *overwrote* the local string on create and let it
+  // through on update.
+  if (asCreate) payload['createdAt'] = FieldTimestampSentinel.value;
   payload['createdBy'] = row['created_by'] != null
       ? _uidForLocalUser(row['created_by'])
       : ctx.uid;

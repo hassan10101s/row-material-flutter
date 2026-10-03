@@ -21,6 +21,7 @@ class FirebaseConfig {
     this.storageBucket = '',
     this.googleWebClientId = '',
     this.googleDesktopClientId = '',
+    this.googleAndroidClientId = '',
     this.source = FirebaseConfigSource.missing,
   });
 
@@ -36,6 +37,16 @@ class FirebaseConfig {
   /// loopback flow needs; [googleWebClientId] is kept only as a fallback so
   /// older config files keep resolving.
   final String googleDesktopClientId;
+
+  /// OAuth client id of the **Android** client.
+  ///
+  /// Kept separate because on Android `GoogleSignIn(clientId:)` is *ignored*:
+  /// Play Services resolves the id from `google-services.json`. The value is
+  /// therefore only used to decide whether the flow can work at all, and
+  /// [googleClientIdFor] deliberately returns the **Desktop** id on Windows and
+  /// an empty string on Android so no caller can accidentally hand a Desktop id
+  /// to the mobile SDK.
+  final String googleAndroidClientId;
   final FirebaseConfigSource source;
 
   static const String localConfigAsset = 'assets/firebase/firebase.local.json';
@@ -56,8 +67,47 @@ class FirebaseConfig {
       projectId.isNotEmpty &&
       authDomain.isNotEmpty;
 
-  bool get hasGoogleClientId =>
-      googleDesktopClientId.isNotEmpty || googleWebClientId.isNotEmpty;
+  /// The OAuth client id that is meaningful for [platform], or `''` when the
+  /// platform resolves its own.
+  ///
+  /// Windows needs a Desktop client id because `google_sign_in_dartio` drives
+  /// the loopback redirect itself. Android resolves the id from
+  /// `google-services.json`, so returning the Desktop id there would be a lie
+  /// that only surfaces as a confusing auth failure.
+  String googleClientIdFor(TargetPlatform platform) {
+    switch (platform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return '';
+      case TargetPlatform.windows:
+      case TargetPlatform.macOS:
+      case TargetPlatform.linux:
+        return googleDesktopClientId.isNotEmpty
+            ? googleDesktopClientId
+            : googleWebClientId;
+      case TargetPlatform.fuchsia:
+        return googleWebClientId;
+    }
+  }
+
+  /// True when Google sign-in has a chance of working on [platform].
+  ///
+  /// This used to be a flat `googleClientId.isNotEmpty`, which reported
+  /// "configured" on a phone purely because a *Desktop* client id existed.
+  bool hasGoogleClientIdFor(TargetPlatform platform) {
+    switch (platform) {
+      case TargetPlatform.android:
+      case TargetPlatform.iOS:
+        return googleAndroidClientId.isNotEmpty;
+      case TargetPlatform.windows:
+      case TargetPlatform.macOS:
+      case TargetPlatform.linux:
+      case TargetPlatform.fuchsia:
+        return googleClientIdFor(platform).isNotEmpty;
+    }
+  }
+
+  bool get hasGoogleClientId => hasGoogleClientIdFor(defaultTargetPlatform);
 
   /// Names of the missing values, shown by the configuration screen.
   List<String> get missingKeys {
@@ -71,6 +121,7 @@ class FirebaseConfig {
       'GOOGLE_DESKTOP_CLIENT_ID': googleDesktopClientId.isNotEmpty
           ? googleDesktopClientId
           : googleWebClientId,
+      'GOOGLE_ANDROID_CLIENT_ID': googleAndroidClientId,
     };
     return [
       for (final entry in values.entries)
@@ -95,6 +146,7 @@ class FirebaseConfig {
         'FIREBASE_AUTH_DOMAIN': authDomain,
         'FIREBASE_STORAGE_BUCKET': storageBucket,
         'GOOGLE_DESKTOP_CLIENT_ID': _redact(googleDesktopClientId),
+        'GOOGLE_ANDROID_CLIENT_ID': _redact(googleAndroidClientId),
       };
 
   static String _redact(String value) {
@@ -115,6 +167,7 @@ class FirebaseConfig {
         googleWebClientId:
             '${map['googleWebClientId'] ?? map['GOOGLE_WEB_CLIENT_ID'] ?? ''}',
         googleDesktopClientId: '${map['googleDesktopClientId'] ?? map['GOOGLE_DESKTOP_CLIENT_ID'] ?? ''}',
+        googleAndroidClientId: '${map['googleAndroidClientId'] ?? map['GOOGLE_ANDROID_CLIENT_ID'] ?? ''}',
         source: source,
       );
 
@@ -150,6 +203,7 @@ class FirebaseConfig {
       storageBucket: v('FIREBASE_STORAGE_BUCKET'),
       googleWebClientId: v('GOOGLE_WEB_CLIENT_ID'),
       googleDesktopClientId: v('GOOGLE_DESKTOP_CLIENT_ID'),
+      googleAndroidClientId: v('GOOGLE_ANDROID_CLIENT_ID'),
       source: FirebaseConfigSource.dartDefine,
     );
   }
@@ -177,6 +231,8 @@ String? _lookup(String key) {
       return const String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
     case 'GOOGLE_DESKTOP_CLIENT_ID':
       return const String.fromEnvironment('GOOGLE_DESKTOP_CLIENT_ID');
+    case 'GOOGLE_ANDROID_CLIENT_ID':
+      return const String.fromEnvironment('GOOGLE_ANDROID_CLIENT_ID');
     default:
       return null;
   }

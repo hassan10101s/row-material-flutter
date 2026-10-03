@@ -6,10 +6,11 @@ import '../../../core/domain/rules.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
+import '../domain/reference_repository.dart';
 
 /// Reference materials / parameters / units repository
 /// (port of core/services/reference.py).
-class ReferenceRepo {
+class ReferenceRepo implements ReferenceRepository {
   final DatabaseHelper dbHelper;
 
   ReferenceRepo({required this.dbHelper});
@@ -18,6 +19,7 @@ class ReferenceRepo {
 
   // ── Materials ─────────────────────────────────────────────────
 
+  @override
   Future<List<Map<String, dynamic>>> listMaterials() async {
     final db = await _db;
     final rows = await db.query('reference_materials',
@@ -26,6 +28,7 @@ class ReferenceRepo {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
+  @override
   Future<List<Map<String, dynamic>>> listAllMaterials() async {
     final db = await _db;
     final rows = await db.query('reference_materials',
@@ -36,6 +39,7 @@ class ReferenceRepo {
   /// The optional [exec] lets a caller that already owns a transaction (P7.3)
   /// reuse it: opening a second connection while the transaction holds the
   /// write lock would deadlock.
+  @override
   Future<Map<String, dynamic>?> getMaterialRaw(int id, {DatabaseExecutor? exec}) async {
     final db = exec ?? await _db;
     final rows = await db.query('reference_materials', where: 'id = ?', whereArgs: [id]);
@@ -43,6 +47,7 @@ class ReferenceRepo {
     return Map<String, dynamic>.from(rows.first);
   }
 
+  @override
   Future<Map<String, dynamic>> getMaterial(
       int id, {String? inspectionDate, DatabaseExecutor? exec}) async {
     final rows = await _params(exec: exec);
@@ -78,6 +83,7 @@ class ReferenceRepo {
     return {for (final r in rows) '${r['parameter_name']}': '${r['unit'] ?? ''}'};
   }
 
+  @override
   Future<int> createMaterial({
     required String materialName,
     required String materialCode,
@@ -106,6 +112,7 @@ class ReferenceRepo {
     return id;
   }
 
+  @override
   Future<void> updateMaterial(
     int id, {
     required String materialName,
@@ -140,6 +147,7 @@ class ReferenceRepo {
     await _batchUpsertParameters(chemicalRef, units, db);
   }
 
+  @override
   Future<void> deleteMaterial(int id, [DatabaseExecutor? exec]) async {
     final db = exec ?? await _db;
     await db.update('reference_materials', {'active': 0},
@@ -168,6 +176,7 @@ class ReferenceRepo {
 
   // ── Entry code ────────────────────────────────────────────────
 
+  @override
   Future<String> generateEntryCode(String materialCode, String inspectionDate,
       {DatabaseExecutor? exec}) async {
     final db = exec ?? await _db;
@@ -186,6 +195,7 @@ class ReferenceRepo {
 
   // ── Parameters ────────────────────────────────────────────────
 
+  @override
   Future<List<Map<String, dynamic>>> listParameters({String? parameterType}) async {
     final db = await _db;
     final rows = parameterType == null
@@ -198,6 +208,7 @@ class ReferenceRepo {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
+  @override
   Future<void> upsertParameter(String name, String unit,
       {String parameterType = 'chemical', DatabaseExecutor? exec}) async {
     final db = exec ?? await _db;
@@ -218,6 +229,7 @@ class ReferenceRepo {
     );
   }
 
+  @override
   Future<void> deleteParameter(String name, [DatabaseExecutor? exec]) async {
     final db = exec ?? await _db;
     // Bounds rows and analysis links inherit the NAME from this origin; clear
@@ -236,6 +248,7 @@ class ReferenceRepo {
 
   // ── Lab units ─────────────────────────────────────────────────
 
+  @override
   Future<List<Map<String, dynamic>>> listUnits() async {
     final db = await _db;
     final rows = await db.query('lab_units',
@@ -243,6 +256,7 @@ class ReferenceRepo {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
+  @override
   Future<void> upsertUnit(String symbol,
       {String name = '', String dimension = '', DatabaseExecutor? exec}) async {
     final db = exec ?? await _db;
@@ -261,6 +275,7 @@ class ReferenceRepo {
     );
   }
 
+  @override
   Future<void> deleteUnit(String symbol, [DatabaseExecutor? exec]) async {
     final db = exec ?? await _db;
     await db.delete('lab_units', where: 'symbol = ?', whereArgs: [symbol]);

@@ -1,13 +1,13 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../data/lab_repo.dart';
+import '../../domain/lab_local_repository.dart';
 import 'activity_state.dart';
 
 /// Loads the lab activity log (stock adjustments + consumptions).
 class ActivityCubit extends AppCubit<ActivityState> {
   ActivityCubit({required this.repo}) : super(const ActivityState());
 
-  final LabRepo repo;
+  final LabLocalRepository repo;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

@@ -36,3 +36,19 @@ class OrganizationProfile {
   final String status;
   final int schemaVersion;
 }
+
+/// Raised when an organization/member write is rejected.
+///
+/// Lives in the domain rather than beside the Firestore implementation because
+/// it is part of what a caller has to handle: the members screen catches it by
+/// type, and importing the data layer to name an exception would be exactly the
+/// dependency inversion the boundary test exists to prevent.
+class OrganizationFailure implements Exception {
+  const OrganizationFailure(this.message, {this.code = 'failed'});
+
+  final String message;
+  final String code;
+
+  @override
+  String toString() => message;
+}

@@ -11,7 +11,7 @@ class TokenStorage {
   static const String _kDbKey = 'ml_db_key';
 
   final FlutterSecureStorage _secure = const FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(resetOnError: true),
   );
 
   Future<AppPreferences> getPreferences() async {

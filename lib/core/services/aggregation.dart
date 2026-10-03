@@ -1,15 +1,36 @@
+import '../domain/rules.dart' as rules;
 import '../utils/app_format.dart';
 
 /// Port of core/services/aggregation.py.
-const Map<String, String> decisionLabels = {
-  'APPROVED': 'قبول نهائي',
-  'CONDITIONAL_APPROVAL': 'قبول مع متابعة',
-  'PARTIAL_REJECTION': 'رفض جزئي',
-  'FULL_REJECTION': 'رفض كلي',
+
+/// Arabic labels for the decision codes, DERIVED from the single bilingual
+/// source of truth in `core/domain/rules.dart`.
+///
+/// This used to be a hand-copied literal, so the two copies could drift and
+/// did: `CONDITIONAL_APPROVAL` read "قبول مبدئي مع المتابعة" on the inspection
+/// screen but "قبول مع متابعة" on the exported PDF of that very inspection -
+/// two names for one decision, side by side, in the same session. Deriving the
+/// map means a wording change now reaches every surface by construction.
+final Map<String, String> decisionLabels = {
+  for (final code in rules.decisionCodes)
+    code: rules.decisionLabels[code]!['ar']!,
 };
 
-String decisionLabel(String? status) =>
-    decisionLabels[status ?? ''] ?? status ?? '-';
+/// Label for a decision status, for reports and PDFs.
+///
+/// An absent or empty status becomes the visible placeholder "-", never an
+/// empty cell: a blank Decision column on a released certificate is
+/// indistinguishable from "no decision was recorded", which is a materially
+/// different claim. The placeholder used to be unreachable, because
+/// `decisionLabels[status ?? ''] ?? status ?? '-'` let the `?? status` arm
+/// shadow it for every non-null status - so `''` printed as `''`.
+///
+/// An unrecognised status falls back to the raw code, so it stays visible
+/// rather than being silently blanked.
+String decisionLabel(String? status) {
+  if (status == null || status.isEmpty) return '-';
+  return decisionLabels[status] ?? status;
+}
 
 double _safeQty(Object? value, double fallback) {
   final d = safeFloat(value);

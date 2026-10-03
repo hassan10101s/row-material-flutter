@@ -7,17 +7,9 @@ class LabReportsState extends Equatable {
   final String? error;
   final String? lastExport;
 
-  const LabReportsState({
-    this.busy = '',
-    this.error,
-    this.lastExport,
-  });
+  const LabReportsState({this.busy = '', this.error, this.lastExport});
 
-  LabReportsState copyWith({
-    String? busy,
-    String? error,
-    String? lastExport,
-  }) =>
+  LabReportsState copyWith({String? busy, String? error, String? lastExport}) =>
       LabReportsState(
         busy: busy ?? this.busy,
         error: error ?? this.error,

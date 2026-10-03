@@ -10,7 +10,7 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_field.dart';
-import '../../organizations/data/firestore_organization_repository.dart';
+import '../../organizations/domain/organization_repository.dart';
 import '../domain/member_repository.dart';
 import 'leave_organization_section.dart';
 

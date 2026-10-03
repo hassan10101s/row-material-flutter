@@ -20,98 +20,10 @@ const String sep = r'\';
 /// Frozen at P5. Time to delete entries, never to add one.
 const Map<String, List<String>> _legacyPresentationDataImports = {
   'lib/features/auth/presentation/cubit/create_organization_cubit.dart': [
-    '../../../organizations/data/firestore_organization_repository.dart',
     '../../data/auth_repository.dart',
   ],
   'lib/features/auth/presentation/cubit/login_cubit.dart': [
     '../../data/auth_repository.dart',
-  ],
-  'lib/features/dashboard/presentation/dashboard_screen.dart': [
-    '../data/dashboard_repo.dart',
-  ],
-  'lib/features/dashboard/presentation/cubit/dashboard_cubit.dart': [
-    '../../data/dashboard_repo.dart',
-  ],
-  'lib/features/dashboard/presentation/cubit/dashboard_state.dart': [
-    '../../data/dashboard_repo.dart',
-  ],
-  'lib/features/inspections/presentation/inspections_screen.dart': [
-    '../../reference/data/reference_repo.dart',
-    '../../reports/data/report_service.dart',
-    '../data/inspection_repo.dart',
-  ],
-  'lib/features/inspections/presentation/inspection_form_screen.dart': [
-    '../data/inspection_repo.dart',
-  ],
-  'lib/features/inspections/presentation/inspection_widgets.dart': [
-    '../data/inspection_repo.dart',
-  ],
-  'lib/features/inspections/presentation/cubit/inspections_cubit.dart': [
-    '../../../reports/data/report_service.dart',
-    '../../data/inspection_repo.dart',
-  ],
-  'lib/features/inspections/presentation/cubit/inspection_detail_cubit.dart': [
-    '../../../reports/data/report_service.dart',
-    '../../data/inspection_repo.dart',
-  ],
-  'lib/features/inspections/presentation/cubit/inspection_form_cubit.dart': [
-    '../../../reference/data/reference_repo.dart',
-    '../../data/inspection_repo.dart',
-  ],
-  'lib/features/lab/presentation/analyses_tab.dart': ['../data/lab_repo.dart'],
-  'lib/features/lab/presentation/constants_tab.dart': ['../data/lab_repo.dart'],
-  'lib/features/lab/presentation/inventory_tab.dart': ['../data/lab_repo.dart'],
-  'lib/features/lab/presentation/lab_screen.dart': [
-    '../../reports/data/report_service.dart',
-    '../data/lab_repo.dart',
-  ],
-  'lib/features/lab/presentation/test_history_tab.dart': ['../data/lab_repo.dart'],
-  'lib/features/lab/presentation/cubit/activity_cubit.dart': [
-    '../../data/lab_repo.dart',
-  ],
-  'lib/features/lab/presentation/cubit/analyses_cubit.dart': [
-    '../../data/lab_repo.dart',
-  ],
-  'lib/features/lab/presentation/cubit/constants_cubit.dart': [
-    '../../data/lab_repo.dart',
-  ],
-  'lib/features/lab/presentation/cubit/inventory_cubit.dart': [
-    '../../data/lab_repo.dart',
-  ],
-  'lib/features/lab/presentation/cubit/lab_reports_cubit.dart': [
-    '../../../reports/data/report_service.dart',
-  ],
-  'lib/features/lab/presentation/cubit/run_test_cubit.dart': [
-    '../../data/lab_repo.dart',
-  ],
-  'lib/features/lab/presentation/cubit/test_history_cubit.dart': [
-    '../../data/lab_repo.dart',
-  ],
-  'lib/features/members/presentation/members_screen.dart': [
-    '../../organizations/data/firestore_organization_repository.dart',
-  ],
-  'lib/features/reference/presentation/material_editor.dart': [
-    '../../lab/data/lab_repo.dart',
-    '../data/reference_repo.dart',
-  ],
-  'lib/features/reference/presentation/reference_screen.dart': [
-    '../../lab/data/lab_repo.dart',
-    '../data/reference_repo.dart',
-  ],
-  'lib/features/reference/presentation/cubit/params_cubit.dart': [
-    '../../data/reference_repo.dart',
-  ],
-  'lib/features/reference/presentation/cubit/products_cubit.dart': [
-    '../../../lab/data/lab_repo.dart',
-  ],
-  'lib/features/reference/presentation/cubit/reference_cubit.dart': [
-    '../../data/reference_repo.dart',
-  ],
-  'lib/features/reference/presentation/cubit/units_cubit.dart': [
-    '../../data/reference_repo.dart',
-  ],
-  'lib/features/reports/presentation/cubit/reports_cubit.dart': [
-    '../../data/report_service.dart',
   ],
   'lib/features/settings/presentation/migration_panel.dart': [
     '../../backup/data/backup_manager.dart',
@@ -256,13 +168,17 @@ void main() {
     // A contract that was declared and never wired is dead weight: the facade
     // has to be reachable under its abstraction.
     const contracts = <String>[
+      'DashboardRepository',
       'InspectionRepository',
       'SampleRepository',
       'QualityCheckRepository',
       'LabResultRepository',
       'LabConfigurationRepository',
+      'LabLocalRepository',
       'MemberRepository',
       'OrganizationRepository',
+      'ReferenceRepository',
+      'ReportRepository',
     ];
     final locator =
         File('lib${sep}di${sep}service_locator.dart').readAsStringSync();

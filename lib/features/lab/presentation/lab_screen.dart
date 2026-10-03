@@ -5,8 +5,9 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../di/service_locator.dart';
-import '../data/lab_repo.dart';
-import '../../reports/data/report_service.dart';
+import '../domain/lab_local_repository.dart';
+import '../domain/lab_result_repository.dart';
+import '../../reports/domain/report_repository.dart';
 import 'activity_tab.dart';
 import 'analyses_tab.dart';
 import 'constants_tab.dart';
@@ -39,7 +40,12 @@ class _LabTab {
 /// six `load()`s and built six tables before the user looked at any of them -
 /// and the `IndexedStack` built all of them on every rebuild of the screen.
 class _LazyTab extends StatefulWidget {
-  const _LazyTab({super.key, required this.index, required this.active, required this.builder});
+  const _LazyTab({
+    super.key,
+    required this.index,
+    required this.active,
+    required this.builder,
+  });
 
   final int index;
   final bool active;
@@ -72,13 +78,15 @@ class LabScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final state = context.watch<LabCubit>().state;
     final cubit = context.read<LabCubit>();
-    final repo = getIt<LabRepo>();
+    final local = getIt<LabLocalRepository>();
+    final config = getIt<LabConfigurationRepository>();
+    final results = getIt<LabResultRepository>();
     final tabs = <_LabTab>[
       _LabTab(
         AppText.t('المخزون', 'Inventory'),
         Icons.inventory_2_outlined,
         (context) => BlocProvider(
-          create: (_) => InventoryCubit(repo: repo)..load(),
+          create: (_) => InventoryCubit(repo: local)..load(),
           child: const InventoryTab(),
         ),
       ),
@@ -86,7 +94,7 @@ class LabScreen extends StatelessWidget {
         AppText.t('التحليلات', 'Analyses'),
         Icons.science_outlined,
         (context) => BlocProvider(
-          create: (_) => AnalysesCubit(repo: repo)..load(),
+          create: (_) => AnalysesCubit(repo: config)..load(),
           child: const AnalysesTab(),
         ),
       ),
@@ -94,7 +102,9 @@ class LabScreen extends StatelessWidget {
         AppText.t('سجل الفحوصات', 'Tests'),
         Icons.history,
         (context) => BlocProvider(
-          create: (_) => TestHistoryCubit(repo: repo)..load(),
+          create: (_) =>
+              TestHistoryCubit(results: results, local: local, config: config)
+                ..load(),
           child: TestHistoryTab(refreshTick: state.historyTick),
         ),
       ),
@@ -102,15 +112,15 @@ class LabScreen extends StatelessWidget {
         AppText.t('الثوابت', 'Constants'),
         Icons.functions,
         (context) => BlocProvider(
-          create: (_) => ConstantsCubit(repo: repo)..load(),
-          child: const ConstantsTab(),
+          create: (_) => ConstantsCubit(repo: local)..load(),
+          child: ConstantsTab(repo: local),
         ),
       ),
       _LabTab(
         AppText.t('سجل النشاط', 'Activity'),
         Icons.receipt_long_outlined,
         (context) => BlocProvider(
-          create: (_) => ActivityCubit(repo: repo)..load(),
+          create: (_) => ActivityCubit(repo: local)..load(),
           child: const ActivityTab(),
         ),
       ),
@@ -118,7 +128,7 @@ class LabScreen extends StatelessWidget {
         AppText.t('تقارير المختبر', 'Reports'),
         Icons.description_outlined,
         (context) => BlocProvider(
-          create: (_) => LabReportsCubit(reports: getIt<ReportService>()),
+          create: (_) => LabReportsCubit(reports: getIt<ReportRepository>()),
           child: const LabReportsTab(),
         ),
       ),
@@ -127,8 +137,16 @@ class LabScreen extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.page, AppSpacing.page, AppSpacing.page, 0),
-          child: Text(AppStrings.lab, style: Theme.of(context).textTheme.headlineSmall),
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.page,
+            AppSpacing.page,
+            AppSpacing.page,
+            0,
+          ),
+          child: Text(
+            AppStrings.lab,
+            style: Theme.of(context).textTheme.headlineSmall,
+          ),
         ),
         const SizedBox(height: AppSpacing.md),
         SizedBox(

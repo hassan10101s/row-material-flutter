@@ -1,4 +1,4 @@
-import '../../data/dashboard_repo.dart';
+import '../../domain/dashboard_repository.dart';
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import 'dashboard_kpis_cubit.dart';
@@ -13,7 +13,7 @@ class DashboardCubit extends AppCubit<DashboardState> {
     required this.kpis,
   }) : super(const DashboardState());
 
-  final DashboardRepo repo;
+  final DashboardRepository repo;
   final DashboardKpisCubit kpis;
 
   Future<void> load() async {

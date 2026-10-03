@@ -310,7 +310,7 @@ final qrPayloadText = buildQrPayloadText(
     'quantity_display': formatLabelQuantity(inspection['quantity']),
     'department_label': settings['department_label'] ??
         'Quality Assurance Department',
-    'generated_at': nowIso().substring(0, 16),
+    'generated_at': (nowIso().substring(0, 16)).replaceAll('T', ' '),
   };
 }
 
@@ -396,6 +396,9 @@ Map<String, dynamic> buildDailyContext(
     'total_quantity': formatQuantity(summary['total_qty']),
     'total_accepted_qty': formatQuantity(summary['total_accepted_qty']),
     'total_rejected_qty': formatQuantity(summary['total_rejected_qty']),
+    // ~Vue daily_report_template names (also provided, matching the template).
+    'total_accepted_quantity': formatQuantity(summary['total_accepted_qty']),
+    'total_rejected_quantity': formatQuantity(summary['total_rejected_qty']),
     'unique_suppliers': summary['unique_suppliers'],
     'unique_materials': summary['unique_materials'],
     'materials': groupByMaterial(inspections),
@@ -1113,8 +1116,8 @@ Map<String, dynamic> buildLabReportContext(
               'name': sourceName,
               'source_type': sourceType,
               'type_label': sourceType == 'product'
-                  ? 'منتج'
-                  : 'خام',
+                  ? 'منتج | Product'
+                  : 'خام | Raw',
               'count': 0,
               'out_count': 0,
               'rows': <Map<String, dynamic>>[],

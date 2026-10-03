@@ -20,13 +20,12 @@ class ParamsState extends Equatable {
     String? error,
     List<Map<String, dynamic>>? rows,
     List<Map<String, dynamic>>? units,
-  }) =>
-      ParamsState(
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        rows: rows ?? this.rows,
-        units: units ?? this.units,
-      );
+  }) => ParamsState(
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    rows: rows ?? this.rows,
+    units: units ?? this.units,
+  );
 
   @override
   List<Object?> get props => [loading, error, rows, units];

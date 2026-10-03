@@ -1,6 +1,7 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../data/lab_repo.dart';
+import '../../domain/lab_local_repository.dart';
+import '../../domain/lab_result_repository.dart';
 import 'run_test_state.dart';
 
 /// Drives the "Run a test" form: loads analyses/products, holds the current
@@ -8,26 +9,39 @@ import 'run_test_state.dart';
 /// Text-field values live in the tab (pure UI); this cubit owns data and
 /// business state. Errors from [run] rethrow so the caller can show a dialog
 /// with the result or a feedback snackbar.
+///
+/// Running a test genuinely spans the three lab contracts - the *definition* of
+/// the analysis replicates, the *result* replicates, and the raw-material lookup
+/// is local - so this cubit takes all three rather than pretending one of them
+/// covers the job.
 class RunTestCubit extends AppCubit<RunTestState> {
-  RunTestCubit({required this.repo}) : super(const RunTestState());
+  RunTestCubit({
+    required this.config,
+    required this.results,
+    required this.local,
+  }) : super(const RunTestState());
 
-  final LabRepo repo;
+  final LabConfigurationRepository config;
+  final LabResultRepository results;
+  final LabLocalRepository local;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));
     try {
-      final analyses = await repo.listAnalyses();
-      final products = await repo.listProducts();
+      final analyses = await config.listAnalyses();
+      final products = await config.listProducts();
       int? analysisId = state.analysisId;
       if (analysisId == null && analyses.isNotEmpty) {
         analysisId = (analyses.first['id'] as num).toInt();
       }
-      safeEmit(state.copyWith(
-        loading: false,
-        analyses: analyses,
-        products: products,
-        analysisId: analysisId,
-      ));
+      safeEmit(
+        state.copyWith(
+          loading: false,
+          analyses: analyses,
+          products: products,
+          analysisId: analysisId,
+        ),
+      );
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
@@ -55,9 +69,11 @@ class RunTestCubit extends AppCubit<RunTestState> {
   Future<bool> lookupEntry(String code) async {
     final trimmed = code.trim();
     if (trimmed.isEmpty) return false;
-    final inspection = await repo.resolveInspection(trimmed);
+    final inspection = await local.resolveInspection(trimmed);
     if (inspection == null) return false;
-    safeEmit(state.copyWith(sourceName: '${inspection['material_name'] ?? ''}'));
+    safeEmit(
+      state.copyWith(sourceName: '${inspection['material_name'] ?? ''}'),
+    );
     return true;
   }
 
@@ -77,7 +93,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
       final sourceName = state.sourceType == 'product'
           ? _productName(state.productId)
           : state.sourceName;
-      return await repo.runSampleTest(
+      return await results.runSampleTest(
         analysisId: state.analysisId!,
         sourceType: state.sourceType,
         sourceRefId: state.sourceType == 'product' ? state.productId : null,

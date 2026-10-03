@@ -9,6 +9,8 @@ import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/animations/app_animations.dart';
 import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
+import '../../../design_system/feedback/app_feedback_export.dart';
+import '../../../design_system/tokens/app_breakpoints.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
@@ -16,13 +18,13 @@ import '../../../design_system/widgets/app_paginated_table.dart';
 import '../../../design_system/widgets/app_skeleton.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../di/service_locator.dart';
-import '../../reports/data/report_service.dart';
-import '../data/inspection_repo.dart';
+import '../../reference/domain/reference_repository.dart';
+import '../../reports/domain/report_repository.dart';
+import '../domain/inspection_repository.dart';
 import 'cubit/inspection_detail_cubit.dart';
 import 'cubit/inspection_form_cubit.dart';
 import 'cubit/inspections_cubit.dart';
 import 'cubit/inspections_state.dart';
-import '../../reference/data/reference_repo.dart';
 import 'inspection_detail_screen.dart';
 import 'inspection_form_screen.dart';
 
@@ -41,8 +43,8 @@ class InspectionsScreen extends StatelessWidget {
       AppPageRoute(
         builder: (_) => BlocProvider(
           create: (c) => InspectionFormCubit(
-            repo: getIt<InspectionRepo>(),
-            reference: getIt<ReferenceRepo>(),
+            repo: getIt<InspectionRepository>(),
+            reference: getIt<ReferenceRepository>(),
           )..loadMaterials(),
           child: const InspectionFormScreen(),
         ),
@@ -75,8 +77,8 @@ class InspectionsScreen extends StatelessWidget {
         builder: (_) => BlocProvider(
           create: (c) => InspectionDetailCubit(
             inspectionId: id,
-            repo: getIt<InspectionRepo>(),
-            reports: getIt<ReportService>(),
+            repo: getIt<InspectionRepository>(),
+            reports: getIt<ReportRepository>(),
           )..load(),
           child: InspectionDetailScreen(inspectionId: id),
         ),
@@ -98,10 +100,7 @@ class InspectionsScreen extends StatelessWidget {
         );
         return;
       }
-      AppFeedback.success(
-        context,
-        '${AppText.t('تم التصدير', 'Exported')}: $path',
-      );
+      await AppFeedbackExport.actions(context, filePath: path);
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
@@ -116,16 +115,22 @@ class InspectionsScreen extends StatelessWidget {
   ) async {
     final id = (row['id'] as num).toInt();
     try {
-      final reports = getIt<ReportService>();
+      final reports = getIt<ReportRepository>();
       final doc = kind == 'label'
           ? await reports.sampleLabelPdf(id)
           : await reports.inspectionReport(id);
       final date = parseIsoDate('${row['inspection_date'] ?? ''}');
       final file = await reports.saveReport(doc, date: date);
       if (!context.mounted) return;
-      AppFeedback.success(
+      // Not a bare "Exported: <path>" banner: on a phone that path is inside
+      // the app sandbox and cannot be opened, so the user is offered the actions
+      // that actually reach the file.
+      await AppFeedbackExport.actions(
         context,
-        '${AppText.t('تم التصدير', 'Exported')}: ${file.path}',
+        filePath: file.path,
+        documentName: file.uri.pathSegments.isEmpty
+            ? null
+            : file.uri.pathSegments.last,
       );
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
@@ -199,7 +204,7 @@ class InspectionsScreen extends StatelessWidget {
                       onPressed: () => _newInspection(context),
                     ),
                 ];
-                if (constraints.maxWidth >= 900) {
+                if (constraints.maxWidth >= AppBreakpoints.expanded) {
                   return Row(
                     children: [
                       Expanded(child: search),

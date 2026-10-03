@@ -1,7 +1,7 @@
 import 'package:flutter/foundation.dart' show immutable;
 import 'package:equatable/equatable.dart';
 
-import '../../data/dashboard_repo.dart';
+import '../../domain/dashboard_repository.dart';
 
 /// Dashboard analytics state: summary analytics, filter options and the active
 /// filter values. The four KPI cards live in [DashboardKpisState].

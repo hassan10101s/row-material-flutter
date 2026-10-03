@@ -18,11 +18,11 @@ import '../features/auth/presentation/create_organization_screen.dart';
 import '../features/auth/presentation/login_screen.dart';
 import '../features/auth/presentation/waiting_activation_screen.dart';
 
-import '../features/dashboard/data/dashboard_repo.dart';
+import '../features/dashboard/domain/dashboard_repository.dart';
 import '../features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import '../features/dashboard/presentation/cubit/dashboard_kpis_cubit.dart';
 import '../features/dashboard/presentation/dashboard_screen.dart';
-import '../features/inspections/data/inspection_repo.dart';
+import '../features/inspections/domain/inspection_repository.dart';
 import '../features/inspections/presentation/cubit/inspection_form_cubit.dart';
 import '../features/inspections/presentation/cubit/inspections_cubit.dart';
 import '../features/inspections/presentation/inspection_form_screen.dart';
@@ -31,9 +31,9 @@ import '../features/lab/presentation/cubit/lab_cubit.dart';
 import '../features/lab/presentation/lab_screen.dart';
 import '../features/organizations/domain/organization_repository.dart';
 import '../features/members/presentation/members_screen.dart';
-import '../features/reference/data/reference_repo.dart';
+import '../features/reference/domain/reference_repository.dart';
 import '../features/reference/presentation/reference_screen.dart';
-import '../features/reports/data/report_service.dart';
+import '../features/reports/domain/report_repository.dart';
 import '../features/reports/presentation/cubit/reports_cubit.dart';
 import '../features/reports/presentation/reports_screen.dart';
 import '../features/settings/presentation/settings_screen.dart';
@@ -120,7 +120,7 @@ class AppRouter {
                   BlocProvider(create: (c) => DashboardKpisCubit()),
                   BlocProvider(
                     create: (c) => DashboardCubit(
-                      repo: getIt<DashboardRepo>(),
+                      repo: getIt<DashboardRepository>(),
                       kpis: c.read<DashboardKpisCubit>(),
                     )..load(),
                   ),
@@ -135,8 +135,8 @@ class AppRouter {
               name: s.uri.path,
               builder: (c) => BlocProvider(
                 create: (c) => InspectionFormCubit(
-                  repo: getIt<InspectionRepo>(),
-                  reference: getIt<ReferenceRepo>(),
+                  repo: getIt<InspectionRepository>(),
+                  reference: getIt<ReferenceRepository>(),
                 )..loadMaterials(),
                 child: InspectionFormScreen(
                   onSaved: () => GoRouter.of(c).go(AppRoutes.inspections),
@@ -150,8 +150,8 @@ class AppRouter {
               name: s.uri.path,
               builder: (c) => BlocProvider(
                 create: (c) => InspectionsCubit(
-                  repo: getIt<InspectionRepo>(),
-                  reports: getIt<ReportService>(),
+                  repo: getIt<InspectionRepository>(),
+                  reports: getIt<ReportRepository>(),
                 )..load(),
                 child: const InspectionsScreen(),
               ),
@@ -162,7 +162,7 @@ class AppRouter {
             pageBuilder: (c, s) => AppPage<ReportsScreen>(
               name: s.uri.path,
               builder: (c) => BlocProvider(
-                create: (c) => ReportsCubit(repo: getIt<ReportService>()),
+                create: (c) => ReportsCubit(repo: getIt<ReportRepository>()),
                 child: const ReportsScreen(),
               ),
             ),

@@ -267,13 +267,3 @@ class _Members implements MemberRepository {
         _ => 2,
       };
 }
-
-class OrganizationFailure implements Exception {
-  const OrganizationFailure(this.message, {this.code = 'failed'});
-
-  final String message;
-  final String code;
-
-  @override
-  String toString() => message;
-}

@@ -10,6 +10,7 @@ import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_card.dart';
 import 'cubit/activity_cubit.dart';
 import 'cubit/activity_state.dart';
+
 /// Activity-log tab: stock adjustments + consumptions.
 class ActivityTab extends StatelessWidget {
   const ActivityTab({super.key});
@@ -22,7 +23,10 @@ class ActivityTab extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(AppText.t('سجل النشاط', 'Activity log'), style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              AppText.t('سجل النشاط', 'Activity log'),
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: AppSpacing.md),
             if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
             if (state.loading && state.rows.isEmpty) ...[
@@ -48,10 +52,15 @@ class ActivityTab extends StatelessWidget {
                                 ? AppColors.info
                                 : AppColors.primary,
                           ),
-                          title: Text('${r['inventory_name']}  ·  ${r['quantity_text']}'),
+                          title: Text(
+                            '${r['inventory_name']}  ·  ${r['quantity_text']}',
+                          ),
                           subtitle: Text(
                             '${r['user_name']}${(r['reason'] ?? '').toString().trim().isNotEmpty ? ' — ${r['reason']}' : ''}\n${r['at']}',
-                            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 12.spMax,
+                            ),
                           ),
                           isThreeLine: true,
                         ),

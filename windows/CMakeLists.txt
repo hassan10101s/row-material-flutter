@@ -29,6 +29,12 @@ set(CMAKE_SHARED_LINKER_FLAGS_PROFILE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE}")
 set(CMAKE_C_FLAGS_PROFILE "${CMAKE_C_FLAGS_RELEASE}")
 set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 
+# The Firebase C++ SDK ships prebuilt .lib files without their PDB debug
+# symbols, which makes the linker emit a LNK4099 warning per object file.
+# Those warnings are noise (no effect on the binary), so suppress them.
+set(CMAKE_EXE_LINKER_FLAGS_DEBUG
+  "${CMAKE_EXE_LINKER_FLAGS_DEBUG} /IGNORE:4099")
+
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 

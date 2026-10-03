@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <title>التقرير اليومي - {{ date_str }}</title>
+    {% if base_url %}<base href="{{ base_url }}">{% endif %}
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <style>
+      @page {
+        size: A4;
+        margin: 9mm 8mm;
+      }
+
+      :root {
+        --navy-900: #000000;
+        --navy-800: #000000;
+        --navy-700: #1a1a1a;
+        --teal-600: #000000;
+        --teal-100: #dff5f4;
+        --gold-500: #c4972f;
+        --gold-100: #fbf2dc;
+        --slate-900: #182537;
+        --slate-700: #43566d;
+        --slate-500: #6d7f93;
+        --slate-300: #ccd6e2;
+        --slate-200: #dde5ef;
+        --slate-100: #f3f6fa;
+        --white: #ffffff;
+        --success-bg: #e3f7ef;
+        --success-text: #0b6b47;
+        --warning-bg: #fff3dc;
+        --warning-text: #9b5d00;
+        --danger-bg: #fde7e7;
+        --danger-text: #a12626;
+        --shadow: 0 14px 34px rgba(11, 31, 51, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: 'Inter', 'IBM Plex Sans Arabic', "Segoe UI", Tahoma, Arial, sans-serif;
+        color: var(--slate-900);
+        background: var(--white);
+        line-height: 1.45;
+      }
+
+      .page {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .page::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+            circle at top right,
+            rgba(15, 139, 141, 0.08),
+            transparent 28%
+          ),
+          radial-gradient(
+            circle at bottom left,
+            rgba(196, 151, 47, 0.08),
+            transparent 30%
+          );
+        pointer-events: none;
+      }
+
+      .report-shell {
+        position: relative;
+        z-index: 1;
+        border: 1px solid var(--slate-300);
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+        background: var(--white);
+      }
+
+      .top-band {
+        height: 8px;
+        background: linear-gradient(90deg, #000000, #334155, #000000);
+      }
+
+      .header {
+        padding: 18px 20px 14px;
+        border-bottom: 1px solid var(--slate-200);
+        background: linear-gradient(
+          180deg,
+          rgba(243, 246, 250, 0.9),
+          rgba(255, 255, 255, 1)
+        );
+      }
+
+      .header-grid {
+        display: grid;
+        grid-template-columns: 112px 1fr 112px;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .header-side {
+        min-height: 72px;
+      }
+
+      .brand-logo {
+        width: 92px;
+        height: 92px;
+        margin: 0 auto;
+        object-fit: contain;
+        display: block;
+      }
+
+      .brand-center {
+        text-align: center;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: var(--gold-100);
+        color: var(--gold-500);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.9px;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .title {
+        margin: 0;
+        color: var(--navy-900);
+        font-size: 24px;
+        font-weight: 900;
+        letter-spacing: 0.2px;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        color: var(--slate-700);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .meta-strip {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+        margin-top: 14px;
+      }
+
+      .meta-card {
+        border: 1px solid var(--slate-200);
+        border-radius: 12px;
+        background: var(--slate-100);
+        padding: 10px 12px;
+      }
+
+      .meta-card .label {
+        display: block;
+        font-size: 10px;
+        color: var(--slate-500);
+        margin-bottom: 4px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .meta-card .value {
+        display: block;
+        font-size: 15px;
+        color: var(--navy-900);
+        font-weight: 800;
+      }
+
+      .body {
+        padding: 18px 20px 20px;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .summary-card {
+        border: 1px solid var(--slate-200);
+        border-radius: 14px;
+        padding: 12px;
+        background: var(--white);
+        min-height: 92px;
+      }
+
+      .summary-card .summary-label {
+        display: block;
+        color: var(--slate-500);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .summary-card .summary-value {
+        display: block;
+        font-size: 24px;
+        font-weight: 900;
+        color: var(--navy-900);
+        line-height: 1;
+      }
+
+      .summary-card .summary-note {
+        display: block;
+        margin-top: 7px;
+        font-size: 11px;
+        color: var(--slate-700);
+        font-weight: 600;
+      }
+
+      .summary-card.primary {
+        background: linear-gradient(145deg, var(--navy-900), var(--navy-700));
+        border-color: transparent;
+      }
+
+      .summary-card.primary .summary-label,
+      .summary-card.primary .summary-value,
+      .summary-card.primary .summary-note {
+        color: var(--white);
+      }
+
+      .summary-card.success {
+        background: var(--success-bg);
+      }
+
+      .summary-card.success .summary-value {
+        color: var(--success-text);
+      }
+
+      .summary-card.warning {
+        background: var(--warning-bg);
+      }
+
+      .summary-card.warning .summary-value {
+        color: var(--warning-text);
+      }
+
+      .summary-card.danger {
+        background: var(--danger-bg);
+      }
+
+      .summary-card.danger .summary-value {
+        color: var(--danger-text);
+      }
+
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin: 14px 0 10px;
+      }
+
+      .section-title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 900;
+        color: var(--navy-900);
+      }
+
+      .section-caption {
+        color: var(--slate-500);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .materials-list {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .material-card {
+        border: 1px solid var(--slate-200);
+        border-radius: 16px;
+        overflow: hidden;
+        background: linear-gradient(180deg, #fbfdff, #ffffff);
+        page-break-inside: avoid;
+      }
+
+      .material-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        background: linear-gradient(135deg, var(--navy-800), var(--navy-700));
+        color: var(--white);
+      }
+
+      .material-title {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .material-badge {
+        padding: 5px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.14);
+        font-size: 11px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .material-kpis {
+        display: grid;
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        gap: 8px;
+        padding: 12px 14px;
+        background: var(--slate-100);
+        border-bottom: 1px solid var(--slate-200);
+      }
+
+      .material-kpi {
+        border: 1px solid var(--slate-200);
+        border-radius: 12px;
+        background: var(--white);
+        padding: 8px 10px;
+        text-align: center;
+      }
+
+      .material-kpi .kpi-label {
+        display: block;
+        color: var(--slate-500);
+        font-size: 10px;
+        font-weight: 700;
+        margin-bottom: 4px;
+      }
+
+      .material-kpi .kpi-value {
+        display: block;
+        color: var(--navy-900);
+        font-size: 15px;
+        font-weight: 900;
+      }
+
+      .table-wrap {
+        padding: 12px 14px 14px;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+      }
+
+      thead {
+        display: table-header-group;
+      }
+
+      th {
+        background: #ebf2fa;
+        color: var(--navy-900);
+        font-size: 10px;
+        font-weight: 800;
+        padding: 9px 6px;
+        border: 1px solid var(--slate-200);
+        text-align: center;
+      }
+
+      td {
+        font-size: 10px;
+        color: var(--slate-900);
+        padding: 8px 6px;
+        border: 1px solid var(--slate-200);
+        vertical-align: middle;
+        text-align: center;
+        word-break: break-word;
+      }
+
+      tbody tr:nth-child(even) {
+        background: #fbfdff;
+      }
+
+      .status-cell {
+        font-weight: 800;
+        text-align: center;
+      }
+
+      .muted {
+        color: var(--slate-500);
+      }
+
+      .empty-state {
+        border: 1px dashed var(--slate-300);
+        border-radius: 16px;
+        background: linear-gradient(180deg, #fafcff, #f3f6fa);
+        padding: 34px 20px;
+        text-align: center;
+      }
+
+      .empty-state h3 {
+        margin: 0 0 8px;
+        color: var(--navy-900);
+        font-size: 18px;
+        font-weight: 900;
+      }
+
+      .empty-state p {
+        margin: 0;
+        color: var(--slate-700);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 20px 16px;
+        border-top: 1px solid var(--slate-200);
+        background: var(--slate-100);
+        font-size: 11px;
+        color: var(--slate-700);
+      }
+
+      .footer strong {
+        color: var(--navy-900);
+      }
+
+      @media print {
+        body {
+          background: #ffffff;
+        }
+
+        .report-shell {
+          box-shadow: none;
+        }
+
+        .material-card {
+          break-inside: avoid;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="report-shell">
+        <div class="top-band"></div>
+
+        <div class="header">
+          <div class="header-grid">
+            <div class="header-side">
+              {% if report_logo_data_uri %}
+              <img
+                class="brand-logo"
+                src="{{ report_logo_data_uri }}"
+                alt="Report Logo"
+              />
+              {% endif %}
+            </div>
+
+            <div class="brand-center">
+              <div class="eyebrow">Daily Quality Report</div>
+              <h1 class="title">التقرير اليومي لمعامل الجودة</h1>
+              <p class="subtitle">{{ department_label }}</p>
+              <p class="subtitle">{{ formatted_date }} | {{ date_str }}</p>
+              {% if shift_label %}
+              <p
+                class="subtitle"
+                style="font-size: 11px; color: #6d7f93; margin-top: 4px"
+              >
+                🕐 نطاق التغطية: {{ shift_label }}
+              </p>
+              {% endif %}
+            </div>
+
+            <div class="header-side"></div>
+          </div>
+
+          <div class="meta-strip">
+            <div class="meta-card">
+              <span class="label">Report Scope</span>
+              <span class="value">Daily Inspection Summary</span>
+            </div>
+            <div class="meta-card">
+              <span class="label">Coverage Period</span>
+              <span class="value" style="font-size: 12px"
+                >{% if shift_label %}{{ shift_label }}{% else %}{{ date_str }}{%
+                endif %}</span
+              >
+            </div>
+            <div class="meta-card">
+              <span class="label">Generated At</span>
+              <span class="value">{{ generation_time }}</span>
+            </div>
+            <div class="meta-card">
+              <span class="label">Reference</span>
+              <span class="value">MAT-LAB-DAILY</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="body">
+          <div class="summary-grid">
+            <div class="summary-card primary">
+              <span class="summary-label">Total Inspections</span>
+              <span class="summary-value">{{ total }}</span>
+              <span class="summary-note">إجمالي محاضر الفحص خلال اليوم</span>
+            </div>
+            <div class="summary-card success">
+              <span class="summary-label">Accepted</span>
+              <span class="summary-value">{{ accepted_total }}</span>
+              <span class="summary-note">قبول نهائي أو قبول مع متابعة</span>
+            </div>
+            <div class="summary-card warning">
+              <span class="summary-label">Under Follow-Up</span>
+              <span class="summary-value">{{ conditional_partial }}</span>
+              <span class="summary-note">حالات المتابعة أو الرفض الجزئي</span>
+            </div>
+            <div class="summary-card danger">
+              <span class="summary-label">Rejected</span>
+              <span class="summary-value">{{ rejected }}</span>
+              <span class="summary-note">عدد حالات الرفض الكلي</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Unique Materials</span>
+              <span class="summary-value">{{ unique_materials }}</span>
+              <span class="summary-note">عدد الخامات التي تم فحصها</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Total Quantity</span>
+              <span class="summary-value">{{ total_quantity }}</span>
+              <span class="summary-note">مجموع الكميات المفحوصة</span>
+            </div>
+          </div>
+
+          <div
+            class="summary-grid"
+            style="
+              grid-template-columns: repeat(3, minmax(0, 1fr));
+              margin-top: -4px;
+            "
+          >
+            <div class="summary-card">
+              <span class="summary-label">Accepted Quantity</span>
+              <span class="summary-value">{{ total_accepted_quantity }}</span>
+              <span class="summary-note">إجمالي الكمية المقبولة</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Rejected Quantity</span>
+              <span class="summary-value">{{ total_rejected_quantity }}</span>
+              <span class="summary-note">إجمالي الكمية المرفوضة</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Approval Rate</span>
+              <span class="summary-value">{{ approval_rate }}%</span>
+              <span class="summary-note">نسبة القبول اليومي</span>
+            </div>
+          </div>
+
+          <div
+            class="summary-grid"
+            style="
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              margin-top: -4px;
+            "
+          >
+            <div class="summary-card">
+              <span class="summary-label">Suppliers</span>
+              <span class="summary-value">{{ unique_suppliers }}</span>
+              <span class="summary-note">عدد الموردين </span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Decision Spectrum</span>
+              <span class="summary-value"
+                >{{ approved }}/{{ conditional_partial }}/{{ rejected }}</span
+              >
+              <span class="summary-note">قبول | متابعة/جزئي | رفض كلي</span>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <h2 class="section-title">تفاصيل الفحوصات حسب الخامة</h2>
+            <div class="section-caption">
+              Material-Wise Daily Inspection Details
+            </div>
+          </div>
+
+          {% if material_sections %}
+          <div class="materials-list">
+            {% for material in material_sections %}
+            <section class="material-card">
+              <div class="material-header">
+                <h3 class="material-title">{{ material.name }}</h3>
+                <span class="material-badge">{{ material.count }} سجل</span>
+              </div>
+
+              <div class="material-kpis">
+                <div class="material-kpi">
+                  <span class="kpi-label">Records</span>
+                  <span class="kpi-value">{{ material.count }}</span>
+                </div>
+                <div class="material-kpi">
+                  <span class="kpi-label">Quantity</span>
+                  <span class="kpi-value">{{ material.total_quantity }}</span>
+                </div>
+                <div class="material-kpi">
+                  <span class="kpi-label">Accepted Qty</span>
+                  <span class="kpi-value" style="color: #10b981"
+                    >{{ material.accepted_quantity }}</span
+                  >
+                </div>
+                <div class="material-kpi">
+                  <span class="kpi-label">Rejected Qty</span>
+                  <span class="kpi-value" style="color: #ef4444"
+                    >{{ material.rejected_quantity }}</span
+                  >
+                </div>
+                <div class="material-kpi">
+                  <span class="kpi-label">Approved</span>
+                  <span class="kpi-value">{{ material.approved }}</span>
+                </div>
+                <div class="material-kpi">
+                  <span class="kpi-label">Follow-Up / Partial</span>
+                  <span class="kpi-value"
+                    >{{ material.conditional_partial }}</span
+                  >
+                </div>
+                <div class="material-kpi">
+                  <span class="kpi-label">Rejected</span>
+                  <span class="kpi-value">{{ material.rejected }}</span>
+                </div>
+              </div>
+
+              <div class="table-wrap">
+                {# Check if column data exists for this specific material
+                section using namespace for scoping #} {% set ns =
+                namespace(has_follow_up=false, has_rejected_qty=false) %} {% for
+                row in material.rows %} {% if row.follow_up_note and
+                row.follow_up_note != '-' and row.follow_up_note|trim != '' %}
+                {% set ns.has_follow_up = true %} {% endif %} {% if
+                row.rejected_quantity and row.rejected_quantity != '-' and
+                row.rejected_quantity != '0' and row.rejected_quantity|trim !=
+                '' %} {% set ns.has_rejected_qty = true %} {% endif %} {% endfor
+                %}
+
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="width: 3%">#</th>
+                      <th style="width: 15%">كود الدخول</th>
+                      <th style="width: 7%">وقت القرار</th>
+                      <th style="width: 15%">المورد</th>
+                      <th style="width: 7%">الكمية</th>
+                      <th style="width: 11%">الحالة</th>
+                      <th style="width: 18%">سبب القرار</th>
+                      {% if ns.has_follow_up %}
+                      <th style="width: 12%">ملاحظة المتابعة</th>
+                      {% endif %} {% if ns.has_rejected_qty %}
+                      <th style="width: 7%">الكمية المرفوضة</th>
+                      {% endif %}
+                      <th style="width: 15%">أخصائي الجودة</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in material.rows %}
+                    <tr>
+                      <td>{{ row.index }}</td>
+                      <td>{{ row.entry_code }}</td>
+                      <td>{{ row.decision_time }}</td>
+                      <td>{{ row.supplier }}</td>
+                      <td>{{ row.quantity }}</td>
+                      <td
+                        class="status-cell"
+                        style="
+                                            {% if row.decision_status_raw == 'FULL_REJECTION' or row.decision_status_raw == 'PARTIAL_REJECTION' %}
+                                                color: var(--danger-text); background-color: var(--danger-bg);
+                                            {% elif row.decision_status_raw == 'CONDITIONAL_APPROVAL' %}
+                                                color: var(--warning-text); background-color: var(--warning-bg);
+                                            {% elif row.decision_status_raw == 'APPROVED' %}
+                                                color: var(--success-text); background-color: var(--success-bg);
+                                            {% endif %}
+                                            border-radius: 4px; border: 1px solid rgba(0,0,0,0.05); padding: 4px;
+                                        "
+                      >
+                        {{ row.decision_status or '-' }}
+                      </td>
+                      <td>{{ row.decision_reason or '-' }}</td>
+                      {% if ns.has_follow_up %}
+                      <td>{{ row.follow_up_note or '-' }}</td>
+                      {% endif %} {% if ns.has_rejected_qty %}
+                      <td>{{ row.rejected_quantity or '-' }}</td>
+                      {% endif %}
+                      <td>{{ row.specialist_name }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="empty-state">
+            <h3>لا توجد فحوصات مطابقة لمعايير التصفية</h3>
+            <p>لم يتم العثور على بيانات.</p>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="footer">
+          <div><strong>Material Lab</strong> | نظام المعمل الداخلي</div>
+          <div>Prepared Automatically by {{ department_label }}</div>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
+        Powered by Material Lab
+    </div>
+  </body>
+</html>

@@ -1,9 +1,12 @@
+import 'dart:io';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:get_it/get_it.dart';
 
 import '../app/auth_gate.dart';
+import '../app/auto_backup_task.dart';
 import '../core/app_paths.dart';
 import '../core/auth/session_source.dart';
 import '../core/auth/session_store.dart';
@@ -11,6 +14,10 @@ import '../core/database/database_helper.dart';
 import '../core/firebase/firebase_bootstrap.dart';
 import '../core/locale/locale_service.dart';
 import '../core/network/connectivity_service.dart';
+import '../core/platform/auto_backup_scheduler.dart';
+import '../core/platform/file_delivery.dart';
+import '../core/platform/file_delivery_mobile.dart';
+import '../core/platform/folder_picker.dart';
 import '../core/security/local_secret.dart';
 import '../core/security/password_hash.dart';
 import '../core/services/seed_service.dart';
@@ -33,11 +40,13 @@ import '../features/auth/data/offline_first_auth_repository.dart';
 import '../features/audit/presentation/audit_controller.dart';
 import '../features/backup/data/backup_manager.dart';
 import '../features/dashboard/data/dashboard_repo.dart';
+import '../features/dashboard/domain/dashboard_repository.dart';
 import '../features/inspections/data/inspection_repo.dart';
 import '../features/inspections/data/offline_first_inspection_repository.dart';
 import '../features/inspections/domain/inspection_repository.dart';
 import '../features/lab/data/lab_repo.dart';
 import '../features/lab/data/offline_first_lab_repository.dart';
+import '../features/lab/domain/lab_local_repository.dart';
 import '../features/lab/domain/lab_result_repository.dart';
 import '../features/members/domain/member_repository.dart';
 import '../features/organizations/data/firestore_organization_repository.dart';
@@ -45,9 +54,12 @@ import '../features/organizations/data/member_write_guard.dart';
 import '../features/organizations/domain/organization_repository.dart';
 import '../features/reference/data/offline_first_reference_repository.dart';
 import '../features/reference/data/reference_repo.dart';
+import '../features/reference/domain/reference_repository.dart';
 import '../features/reports/data/report_html_builder.dart';
 import '../features/reports/data/report_service.dart';
+import '../features/reports/domain/report_repository.dart';
 import '../features/settings/data/settings_repo.dart';
+import '../features/settings/domain/export_root_service.dart';
 
 /// Global service locator (get_it). Registration happens once in
 /// [initServiceLocator] during app bootstrap.
@@ -137,8 +149,31 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<WriteGuard>(
         () => SessionWriteGuard(source: sessionSource, isOnline: () => connectivity.isOnline))
     ..registerLazySingleton<PasswordHasher>(() => hasher)
+    // Platform ports (PLAN_V4 phase 2.5). Registered behind their abstraction so
+    // presentation asks "can this platform do it" instead of branching on
+    // `Platform.is*`, and so a test can substitute a double.
+    ..registerLazySingleton<FileDelivery>(() {
+      if (Platform.isAndroid || Platform.isIOS) {
+        return const MobileFileDelivery();
+      }
+      return const DesktopFileDelivery();
+    })
+    ..registerLazySingleton<FolderPicker>(() {
+      if (Platform.isAndroid || Platform.isIOS) {
+        return const UnsupportedFolderPicker();
+      }
+      return const DesktopFolderPicker();
+    })
+    ..registerLazySingleton<AutoBackupScheduler>(() {
+      if (Platform.isAndroid) return const AndroidBackupScheduler();
+      return const NoopBackupScheduler();
+    })
     ..registerLazySingleton<SettingsRepo>(
         () => SettingsRepo(dbHelper: dbHelper, secret: secret, paths: getIt<AppPaths>()))
+    ..registerLazySingleton<ExportRootService>(() => ExportRootService(
+          repo: getIt<SettingsRepo>(),
+          paths: getIt<AppPaths>(),
+        ))
     ..registerLazySingleton<ThemeService>(
         () => ThemeService(settings: getIt<SettingsRepo>()))
     ..registerLazySingleton<LocaleService>(
@@ -153,6 +188,8 @@ Future<void> initServiceLocator() async {
               queue: queue,
               audit: audit,
             ))
+    ..registerLazySingleton<ReferenceRepository>(
+        () => getIt<ReferenceRepo>() as ReferenceRepository)
     ..registerLazySingleton<LabRepo>(() => labFacade ??= OfflineFirstLabRepository(
           dbHelper: dbHelper,
           guard: getIt<WriteGuard>(),
@@ -162,6 +199,8 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<LabResultRepository>(() => getIt<LabRepo>() as LabResultRepository)
     ..registerLazySingleton<LabConfigurationRepository>(
         () => getIt<LabRepo>() as LabConfigurationRepository)
+    ..registerLazySingleton<LabLocalRepository>(
+        () => getIt<LabRepo>() as LabLocalRepository)
     ..registerLazySingleton<ReportHtmlBuilder>(() => ReportHtmlBuilder(
           settingsRepo: getIt<SettingsRepo>(),
           labRepo: getIt<LabRepo>(),
@@ -183,6 +222,8 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<QualityCheckRepository>(
         () => getIt<InspectionRepo>() as QualityCheckRepository)
     ..registerLazySingleton<DashboardRepo>(() => DashboardRepo(dbHelper: dbHelper))
+    ..registerLazySingleton<DashboardRepository>(
+        () => getIt<DashboardRepo>() as DashboardRepository)
     ..registerLazySingleton<SeedService>(() => SeedService(dbHelper: dbHelper))
     ..registerLazySingleton<BackupManager>(() => BackupManager(dbHelper: dbHelper))
     ..registerLazySingleton<ReportService>(() => ReportService(
@@ -191,7 +232,10 @@ Future<void> initServiceLocator() async {
           labRepo: getIt<LabRepo>(),
           dbHelper: dbHelper,
           secret: secret,
+          htmlBuilder: getIt<ReportHtmlBuilder>(),
         ))
+    ..registerLazySingleton<ReportRepository>(
+        () => getIt<ReportService>() as ReportRepository)
     // ── Organizations / members ───────────────────────────────────────────
     ..registerLazySingleton<OrganizationRepository>(() {
       final guard = getIt<WriteGuard>();

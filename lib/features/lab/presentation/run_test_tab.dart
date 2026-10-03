@@ -35,7 +35,11 @@ class _RunTestTabState extends State<RunTestTab> {
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
     if (user == null) return null;
-    return {'id': user.id, 'username': user.username, 'full_name': user.fullName};
+    return {
+      'id': user.id,
+      'username': user.username,
+      'full_name': user.fullName,
+    };
   }
 
   @override
@@ -51,19 +55,32 @@ class _RunTestTabState extends State<RunTestTab> {
   }
 
   Future<void> _lookupEntry() async {
-    final found = await context.read<RunTestCubit>().lookupEntry(_entryCode.text);
+    final found = await context.read<RunTestCubit>().lookupEntry(
+      _entryCode.text,
+    );
     if (!mounted) return;
-    if (!found) AppFeedback.error(context, AppText.t('كود الدخول غير موجود', 'Entry code not found.'));
+    if (!found) {
+      AppFeedback.error(
+        context,
+        AppText.t('كود الدخول غير موجود', 'Entry code not found.'),
+      );
+    }
   }
 
   Future<void> _run() async {
     final state = context.read<RunTestCubit>().state;
     if (state.analysisId == null) {
-      AppFeedback.error(context, AppText.t('اختر التحليل', 'Select an analysis.'));
+      AppFeedback.error(
+        context,
+        AppText.t('اختر التحليل', 'Select an analysis.'),
+      );
       return;
     }
     if (_sampleName.text.trim().isEmpty) {
-      AppFeedback.error(context, AppText.t('اسم العينة مطلوب', 'Sample name is required.'));
+      AppFeedback.error(
+        context,
+        AppText.t('اسم العينة مطلوب', 'Sample name is required.'),
+      );
       return;
     }
     final comp = _computedResult(state);
@@ -76,22 +93,25 @@ class _RunTestTabState extends State<RunTestTab> {
     } else {
       resultText = _resultText.text.trim();
       if (resultText.isEmpty) {
-        AppFeedback.error(context, AppText.t(
-          'أدخل النتيجة يدوياً — لا يمكن حسابها من المعادلة.',
-          'Enter the result manually — the formula cannot be computed.',
-        ));
+        AppFeedback.error(
+          context,
+          AppText.t(
+            'أدخل النتيجة يدوياً — لا يمكن حسابها من المعادلة.',
+            'Enter the result manually — the formula cannot be computed.',
+          ),
+        );
         return;
       }
     }
     try {
       final result = await context.read<RunTestCubit>().run(
-            sampleName: _sampleName.text.trim(),
-            resultText: resultText,
-            dynamicValues: dynamicValues,
-            entryCode: _entryCode.text.trim(),
-            manualResult: formulaEnabled && !autoOk,
-            user: _currentUserMap,
-          );
+        sampleName: _sampleName.text.trim(),
+        resultText: resultText,
+        dynamicValues: dynamicValues,
+        entryCode: _entryCode.text.trim(),
+        manualResult: formulaEnabled && !autoOk,
+        user: _currentUserMap,
+      );
       if (!mounted) return;
       widget.onTestRun();
       // Raise the banner while this context is still alive, then close the
@@ -124,7 +144,12 @@ class _RunTestTabState extends State<RunTestTab> {
     ];
 
     if (lowStock.isNotEmpty) {
-      AppFeedback.show(context, lines.join('\n'), isError: false, type: AppFeedbackType.neutral);
+      AppFeedback.show(
+        context,
+        lines.join('\n'),
+        isError: false,
+        type: AppFeedbackType.neutral,
+      );
     } else {
       AppFeedback.success(context, lines.join('\n'));
     }
@@ -147,7 +172,9 @@ class _RunTestTabState extends State<RunTestTab> {
     final values = <String, Object?>{};
     for (final item in analysis['items'] as List? ?? const []) {
       final m = item as Map<String, dynamic>;
-      values['${m['inventory_name'] ?? ''}'.trim()] = safeFormulaFloat(m['qty_per_sample']);
+      values['${m['inventory_name'] ?? ''}'.trim()] = safeFormulaFloat(
+        m['qty_per_sample'],
+      );
     }
     values.addAll(_effectiveValues(state));
     final missing = [
@@ -166,7 +193,9 @@ class _RunTestTabState extends State<RunTestTab> {
         'ok': missing.isEmpty,
         'value': value,
         'missing': missing,
-        'error': missing.isEmpty ? null : 'دلائل المعادلة ناقصة: ${missing.join(', ')}',
+        'error': missing.isEmpty
+            ? null
+            : 'دلائل المعادلة ناقصة: ${missing.join(', ')}',
       };
     } on ValidationError catch (e) {
       return {
@@ -189,10 +218,16 @@ class _RunTestTabState extends State<RunTestTab> {
   final Map<String, String> _listSelections = {};
 
   TextEditingController _controllerFor(String field) {
-    return _dynamicControllers.putIfAbsent(field, () => TextEditingController());
+    return _dynamicControllers.putIfAbsent(
+      field,
+      () => TextEditingController(),
+    );
   }
 
-  Map<String, dynamic> _fieldCfgOf(Map<String, dynamic> analysis, String field) {
+  Map<String, dynamic> _fieldCfgOf(
+    Map<String, dynamic> analysis,
+    String field,
+  ) {
     for (final l in analysis['field_chemical_links'] as List? ?? const []) {
       final m = l as Map<String, dynamic>;
       if ('${m['dynamic_field'] ?? ''}'.trim() == field) return m;
@@ -201,9 +236,9 @@ class _RunTestTabState extends State<RunTestTab> {
   }
 
   List<String> _listOptionsOf(Map<String, dynamic> cfg) => [
-        for (final o in (cfg['list_values'] as List?) ?? const [])
-          if ('$o'.trim().isNotEmpty) '$o'.trim(),
-      ];
+    for (final o in (cfg['list_values'] as List?) ?? const [])
+      if ('$o'.trim().isNotEmpty) '$o'.trim(),
+  ];
 
   String? _listSelectionOrFirst(String field, List<String> options) {
     final saved = _listSelections[field];
@@ -241,7 +276,9 @@ class _RunTestTabState extends State<RunTestTab> {
       if (a['id'] == state.analysisId) {
         return [
           for (final f in (a['dynamic_fields'] as List?) ?? const <dynamic>[])
-            if ('$f'.trim().isNotEmpty && '$f'.trim().toLowerCase() != 'sample name') '$f',
+            if ('$f'.trim().isNotEmpty &&
+                '$f'.trim().toLowerCase() != 'sample name')
+              '$f',
         ];
       }
     }
@@ -250,25 +287,27 @@ class _RunTestTabState extends State<RunTestTab> {
 
   Widget _dynamicFieldWidget(RunTestState state, String field) {
     final analysis = _selectedAnalysis(state);
-    final cfg = analysis == null ? const <String, dynamic>{} : _fieldCfgOf(analysis, field);
+    final cfg = analysis == null
+        ? const <String, dynamic>{}
+        : _fieldCfgOf(analysis, field);
     final kind = '${cfg['kind'] ?? 'link'}';
 
     final (IconData icon, Color color, String kindLabel) = switch (kind) {
       'value' => (
-          Icons.pin_outlined,
-          AppColors.info,
-          AppText.t('قيمة ثابتة', 'Fixed value'),
-        ),
+        Icons.pin_outlined,
+        AppColors.info,
+        AppText.t('قيمة ثابتة', 'Fixed value'),
+      ),
       'list' => (
-          Icons.view_list_outlined,
-          AppColors.accent,
-          AppText.t('قائمة', 'List'),
-        ),
+        Icons.view_list_outlined,
+        AppColors.accent,
+        AppText.t('قائمة', 'List'),
+      ),
       _ => (
-          Icons.link_outlined,
-          AppColors.success,
-          AppText.t('مرتبط', 'Linked'),
-        ),
+        Icons.link_outlined,
+        AppColors.success,
+        AppText.t('مرتبط', 'Linked'),
+      ),
     };
 
     Widget input;
@@ -276,10 +315,14 @@ class _RunTestTabState extends State<RunTestTab> {
     if (kind == 'value') {
       final v = safeFormulaFloat(cfg['fixed_value']);
       hint = v == null
-          ? AppText.t('قيمة ثابتة من إعداد التحليل — لا تُكتب هنا.',
-              'Fixed value from analysis setup — not typed here.')
-          : AppText.t('قيمة ثابتة = $v تُستخدم تلقائياً في المعادلة.',
-              'Fixed value = $v used automatically in the formula.');
+          ? AppText.t(
+              'قيمة ثابتة من إعداد التحليل — لا تُكتب هنا.',
+              'Fixed value from analysis setup — not typed here.',
+            )
+          : AppText.t(
+              'قيمة ثابتة = $v تُستخدم تلقائياً في المعادلة.',
+              'Fixed value = $v used automatically in the formula.',
+            );
       input = InputDecorator(
         decoration: const InputDecoration(
           isDense: true,
@@ -297,13 +340,19 @@ class _RunTestTabState extends State<RunTestTab> {
       final options = _listOptionsOf(cfg);
       final selected = _listSelectionOrFirst(field, options);
       hint = options.isEmpty
-          ? AppText.t('لم تُعرف قيم لهذه القائمة. عدّل التحليل.',
-              'No values defined for this list. Edit the analysis.')
+          ? AppText.t(
+              'لم تُعرف قيم لهذه القائمة. عدّل التحليل.',
+              'No values defined for this list. Edit the analysis.',
+            )
           : (selected == null
-              ? AppText.t('اختر قيمة من القائمة — تُستخدم في المعادلة.',
-                  'Pick a value from the list — used in the formula.')
-              : AppText.t('القيمة المختارة ستُستخدم في المعادلة.',
-                  'The chosen value will be used in the formula.'));
+                ? AppText.t(
+                    'اختر قيمة من القائمة — تُستخدم في المعادلة.',
+                    'Pick a value from the list — used in the formula.',
+                  )
+                : AppText.t(
+                    'القيمة المختارة ستُستخدم في المعادلة.',
+                    'The chosen value will be used in the formula.',
+                  ));
       input = DropdownButtonFormField<String>(
         key: ValueKey('list-${state.analysisId}-$field'),
         initialValue: selected,
@@ -322,15 +371,14 @@ class _RunTestTabState extends State<RunTestTab> {
         onChanged: (v) => setState(() => _listSelections[field] = v ?? ''),
       );
     } else {
-      final isLinked =
-          (int.tryParse('${cfg['inventory_id'] ?? 0}') ?? 0) > 0;
+      final isLinked = (int.tryParse('${cfg['inventory_id'] ?? 0}') ?? 0) > 0;
       final name = '${cfg['inventory_name'] ?? ''}';
       hint = isLinked
           ? AppText.t(
               'مرتبط بمادة «$name» — تُستهلك من المخزون بقيمة هذه الخانة.',
-              'Linked to «$name» — consumed from stock by this value.')
-          : AppText.t('أدخل القيمة يدوياً.',
-              'Enter the value manually.');
+              'Linked to «$name» — consumed from stock by this value.',
+            )
+          : AppText.t('أدخل القيمة يدوياً.', 'Enter the value manually.');
       input = TextField(
         controller: _controllerFor(field),
         onChanged: (_) => setState(() {}),
@@ -367,7 +415,9 @@ class _RunTestTabState extends State<RunTestTab> {
                 const SizedBox(height: 4),
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 2),
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: color.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(5),
@@ -393,9 +443,13 @@ class _RunTestTabState extends State<RunTestTab> {
               input,
               if (hint.isNotEmpty) ...[
                 const SizedBox(height: 4),
-                Text(hint,
-                    style: TextStyle(
-                        fontSize: 11.spMax, color: AppColors.textMuted)),
+                Text(
+                  hint,
+                  style: TextStyle(
+                    fontSize: 11.spMax,
+                    color: AppColors.textMuted,
+                  ),
+                ),
               ],
             ],
           ),
@@ -418,14 +472,17 @@ class _RunTestTabState extends State<RunTestTab> {
             child: Text(
               step,
               style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12.spMax),
+                color: AppColors.primary,
+                fontWeight: FontWeight.w700,
+                fontSize: 12.spMax,
+              ),
             ),
           ),
           const SizedBox(width: 8),
-          Text(label,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+          Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+          ),
         ],
       ),
     );
@@ -442,8 +499,11 @@ class _RunTestTabState extends State<RunTestTab> {
     final autoOk = formulaEnabled && _formulaAuto && comp['ok'] == true;
     final missingHint = formulaEnabled && _formulaAuto && comp['ok'] != true
         ? ('${comp['error'] ?? ''}'.isNotEmpty
-            ? '${comp['error']}'
-            : AppText.t('النتيجة لا تُحسب من المعادلة', 'Result cannot be computed from the formula'))
+              ? '${comp['error']}'
+              : AppText.t(
+                  'النتيجة لا تُحسب من المعادلة',
+                  'Result cannot be computed from the formula',
+                ))
         : null;
     final unit = '${analysis?['unit'] ?? '%'}';
 
@@ -463,11 +523,11 @@ class _RunTestTabState extends State<RunTestTab> {
             style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
           ),
           const SizedBox(height: AppSpacing.md),
-            if (state.loading && state.analyses.isNotEmpty) const AppRefreshBar(),
-            if (state.loading && state.analyses.isEmpty) ...[
-              const AppSkeletonList(rows: 6, lines: 3, height: 380),
-            ] else ...[
-              _sectionTitle('1', AppText.t('إعدادات العينة', 'Sample setup')),
+          if (state.loading && state.analyses.isNotEmpty) const AppRefreshBar(),
+          if (state.loading && state.analyses.isEmpty) ...[
+            const AppSkeletonList(rows: 6, lines: 3, height: 380),
+          ] else ...[
+            _sectionTitle('1', AppText.t('إعدادات العينة', 'Sample setup')),
             AppCard(
               padding: const EdgeInsets.all(AppSpacing.lg),
               child: Column(
@@ -484,8 +544,10 @@ class _RunTestTabState extends State<RunTestTab> {
                       for (final a in state.analyses)
                         DropdownMenuItem<int>(
                           value: (a['id'] as num).toInt(),
-                          child: Text('${a['name']} (${a['unit'] ?? '%'})',
-                              overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            '${a['name']} (${a['unit'] ?? '%'})',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                     ],
                     onChanged: (v) {
@@ -515,11 +577,15 @@ class _RunTestTabState extends State<RunTestTab> {
                           ),
                           items: [
                             DropdownMenuItem(
-                                value: 'raw_material',
-                                child: Text(AppText.t('مادة خام', 'Raw material'))),
+                              value: 'raw_material',
+                              child: Text(
+                                AppText.t('مادة خام', 'Raw material'),
+                              ),
+                            ),
                             DropdownMenuItem(
-                                value: 'product',
-                                child: Text(AppText.t('منتج', 'Product'))),
+                              value: 'product',
+                              child: Text(AppText.t('منتج', 'Product')),
+                            ),
                           ],
                           onChanged: (v) {
                             if (v != null) cubit.setSourceType(v);
@@ -545,8 +611,9 @@ class _RunTestTabState extends State<RunTestTab> {
                           Text(
                             '${AppText.t('المادة', 'Material')}: ${state.sourceName}',
                             style: TextStyle(
-                                color: AppColors.success,
-                                fontSize: 12.spMax),
+                              color: AppColors.success,
+                              fontSize: 12.spMax,
+                            ),
                           ),
                       ] else ...[
                         SizedBox(
@@ -562,8 +629,10 @@ class _RunTestTabState extends State<RunTestTab> {
                               for (final p in state.products)
                                 DropdownMenuItem<int>(
                                   value: (p['id'] as num).toInt(),
-                                  child: Text('${p['name']}',
-                                      overflow: TextOverflow.ellipsis),
+                                  child: Text(
+                                    '${p['name']}',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                             ],
                             onChanged: (v) {
@@ -593,9 +662,12 @@ class _RunTestTabState extends State<RunTestTab> {
               padding: const EdgeInsets.all(AppSpacing.lg),
               child: dynamicFields.isEmpty
                   ? Text(
-                      AppText.t('لا حقول ديناميكية لهذا التحليل.',
-                          'No dynamic fields for this analysis.'),
-                      style: TextStyle(color: AppColors.textMuted))
+                      AppText.t(
+                        'لا حقول ديناميكية لهذا التحليل.',
+                        'No dynamic fields for this analysis.',
+                      ),
+                      style: TextStyle(color: AppColors.textMuted),
+                    )
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -618,9 +690,12 @@ class _RunTestTabState extends State<RunTestTab> {
                     SwitchListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      title: Text(AppText.t(
+                      title: Text(
+                        AppText.t(
                           'حساب النتيجة تلقائياً من المعادلة',
-                          'Compute result from formula')),
+                          'Compute result from formula',
+                        ),
+                      ),
                       value: _formulaAuto,
                       onChanged: (v) => setState(() => _formulaAuto = v),
                     ),
@@ -633,14 +708,17 @@ class _RunTestTabState extends State<RunTestTab> {
                         color: AppColors.success.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                            color: AppColors.success.withValues(alpha: 0.35)),
+                          color: AppColors.success.withValues(alpha: 0.35),
+                        ),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            AppText.t('النتيجة من المعادلة',
-                                'Result from formula'),
+                            AppText.t(
+                              'النتيجة من المعادلة',
+                              'Result from formula',
+                            ),
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           Text(

@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>التقرير الشهري - {{ month_name }} {{ year }}</title>
+    {% if base_url %}<base href="{{ base_url }}">{% endif %}
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <style>
+        :root {
+            --primary-color: #000000;
+            --secondary-color: #000000;
+            --accent-color: #000000;
+            --accent-light: #e2e8f0;
+            --accent-medium: #64748b;
+            --accent-dark: #000000;
+            --accent-glow: rgba(0, 0, 0, 0.08);
+            --border-color: #c6d1dc;
+            --border-light: #dde5ef;
+            --success-bg: #d1fae5;
+            --success-text: #065f46;
+            --warning-bg: #fff3cd;
+            --warning-text: #8a5a00;
+            --partial-bg: #ffedd5;
+            --partial-text: #9a3412;
+            --danger-bg: #fee2e2;
+            --danger-text: #991b1b;
+            --muted: #5a6b7d;
+            --surface: #f4f7fb;
+            --deep-navy: #071528;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', 'IBM Plex Sans Arabic', "Segoe UI", Tahoma, sans-serif;
+            color: #1a2332;
+            background: #f8f9fa;
+            line-height: 1.35;
+            padding: 20px;
+        }
+
+        .sheet {
+            position: relative;
+            max-width: 900px;
+            margin: 0 auto;
+            border: 3px solid #000;
+            border-radius: 16px;
+            padding: 24px;
+            overflow: hidden;
+            page-break-inside: avoid;
+            background: #fff;
+            box-shadow:
+                0 0 0 1px rgba(15,40,71,0.08),
+                0 10px 50px rgba(7,21,40,0.12),
+                0 2px 10px rgba(7,21,40,0.08);
+        }
+
+        .sheet::before, .sheet::after {
+            content: '';
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            pointer-events: none;
+            z-index: 1;
+        }
+        .sheet::before {
+            top: -1px; right: -1px;
+            border-top: 3px solid var(--accent-color);
+            border-right: 3px solid var(--accent-color);
+            border-top-right-radius: 12px;
+        }
+        .sheet::after {
+            bottom: -1px; left: -1px;
+            border-bottom: 3px solid var(--accent-color);
+            border-left: 3px solid var(--accent-color);
+            border-bottom-left-radius: 12px;
+        }
+
+        .watermark {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 60px;
+            font-weight: 800;
+            letter-spacing: 8px;
+            color: rgba(15,40,71,0.03);
+            transform: rotate(-30deg);
+            pointer-events: none;
+            user-select: none;
+        }
+
+        .accent-strip {
+            height: 3px;
+            background: linear-gradient(90deg, transparent, var(--accent-color), var(--accent-medium), var(--accent-color), transparent);
+            border-radius: 3px;
+            margin-bottom: 12px;
+        }
+
+        .header {
+            display: block;
+            border-bottom: 3px solid #000;
+            padding-bottom: 14px;
+            margin-bottom: 14px;
+            text-align: center;
+            position: relative;
+        }
+        .header h1 {
+            color: var(--primary-color);
+            font-size: 20px;
+            font-weight: 900;
+            letter-spacing: 1.2px;
+            margin-bottom: 6px;
+        }
+        .header p {
+            color: var(--muted);
+            font-size: 11px;
+            font-weight: 500;
+            margin: 2px 0;
+        }
+
+        .report-audience {
+            margin: 16px auto 0;
+            max-width: 680px;
+            padding: 12px 14px;
+            background: #f1f5f9;
+            border-left: 5px solid #000;
+            border-radius: 10px;
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1.5;
+            text-align: center;
+        }
+
+        .meta-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 8px;
+            margin-bottom: 12px;
+        }
+        .meta-card {
+            background: linear-gradient(145deg, #f8faff, #eef3fa);
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 10px;
+            position: relative;
+            overflow: hidden;
+            text-align: center;
+        }
+        .meta-card::before {
+            content: '';
+            position: absolute;
+            top: 0; right: 0;
+            width: 3px; height: 100%;
+            background: linear-gradient(180deg, var(--secondary-color), var(--accent-color));
+            border-radius: 0 8px 8px 0;
+        }
+        .meta-card .label {
+            display: block;
+            font-size: 9px;
+            color: var(--muted);
+            margin-bottom: 3px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .meta-card .value {
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+
+        .section-title {
+            margin: 0 0 8px 0;
+            padding: 10px 14px;
+            color: #fff;
+            font-size: 12px;
+            font-weight: 800;
+            text-align: center;
+            letter-spacing: 0.6px;
+            background: var(--deep-navy);
+            border-radius: 10px 10px 0 0;
+            border: 1px solid #000;
+            position: relative;
+            box-shadow: inset 0 -3px 0 rgba(0,0,0,0.08);
+        }
+
+        .material-item {
+            margin-bottom: 14px;
+            border-radius: 12px;
+            background: linear-gradient(145deg, #f8faff, #eef3fa);
+            border: 2px solid #000;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            overflow: hidden;
+            page-break-inside: avoid;
+        }
+        .material-name {
+            padding: 10px 12px;
+            border-bottom: 1px solid #dde5ef;
+            font-weight: 700;
+            color: var(--primary-color);
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+        }
+        .material-stats {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 4px;
+            padding: 8px;
+            font-size: 11px;
+        }
+        .stat-box {
+            background: white;
+            border: 1px solid #e8eef5;
+            border-radius: 6px;
+            padding: 6px 8px;
+            text-align: center;
+        }
+        .stat-box .label {
+            font-size: 8px;
+            color: var(--muted);
+            margin-bottom: 2px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .stat-box .value {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--primary-color);
+        }
+        .stat-box.approved .value { color: var(--success-text); }
+        .stat-box.rejected .value { color: var(--danger-text); }
+
+        .supplier-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            margin-bottom: 12px;
+        }
+        .supplier-table th {
+            background: #a8adb8;
+            color: #000000;
+            padding: 8px 6px;
+            text-align: center;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .supplier-table td {
+            border: 1px solid var(--border-light);
+            padding: 6px 8px;
+            text-align: center;
+            font-size: 11px;
+        }
+        .supplier-table tr:nth-child(even) td {
+            background: #f8faff;
+        }
+        .supplier-table tr:hover td {
+            background: #eef3fa;
+        }
+
+        .trend-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 11px;
+            margin-bottom: 12px;
+        }
+        .trend-table th {
+            background: #a8adb8;
+            color: #000000;
+            padding: 8px 6px;
+            text-align: center;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .trend-table td {
+            border: 1px solid var(--border-light);
+            padding: 6px 8px;
+            text-align: center;
+            font-size: 11px;
+        }
+        .trend-table tr.current-month td {
+            background: #eef6ff;
+            font-weight: 600;
+        }
+        .trend-table tr:nth-child(even) td {
+            background: #f8faff;
+        }
+
+        .bar-container {
+            width: 100%;
+            height: 10px;
+            background: #e8eef5;
+            border-radius: 5px;
+            overflow: hidden;
+            display: flex;
+            margin-top: 3px;
+        }
+        .bar-segment-approved { background: #10b981; }
+        .bar-segment-conditional { background: #0ea5e9; }
+        .bar-segment-rejected { background: #ef4444; }
+
+        .recommendations-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .recommendations-list li {
+            padding: 10px 12px 10px 0;
+            border-bottom: 1px solid var(--border-light);
+            font-size: 12px;
+            line-height: 1.6;
+            position: relative;
+            padding-right: 30px;
+            color: #0f172a;
+        }
+
+        .section-note {
+            margin: 0 0 10px 0;
+            color: var(--muted);
+            font-size: 10px;
+            line-height: 1.4;
+            text-align: center;
+        }
+        .recommendations-list li:last-child {
+            border-bottom: none;
+        }
+        .recommendations-list li::before {
+            content: "→";
+            position: absolute;
+            right: 10px;
+            color: var(--accent-medium);
+            font-weight: 700;
+        }
+
+        .rate-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 700;
+        }
+        .rate-badge.high { background: var(--success-bg); color: var(--success-text); }
+        .rate-badge.medium { background: var(--warning-bg); color: var(--warning-text); }
+        .rate-badge.low { background: var(--danger-bg); color: var(--danger-text); }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--muted);
+            background: linear-gradient(145deg, #f8faff, #eef3fa);
+            border-radius: 8px;
+            border: 1px solid var(--border-light);
+        }
+
+        .footer {
+            margin-top: 20px;
+            padding-top: 12px;
+            border-top: 2px solid var(--primary-color);
+            text-align: center;
+            color: var(--muted);
+            font-size: 10px;
+        }
+
+        .section-box {
+            background: linear-gradient(145deg, #f8faff, #eef3fa);
+            border: 2px solid #000;
+            border-radius: 12px;
+            padding: 14px;
+            margin-bottom: 12px;
+            page-break-inside: avoid;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.04);
+        }
+
+        @media print {
+            body { background: white; padding: 0; }
+            .sheet { box-shadow: none; border: 1px solid #000; width: 100%; max-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="sheet">
+        <div class="watermark">{{ month_name }}</div>
+        
+        <div class="header">
+            {% if report_logo_data_uri %}
+            <div style="margin-bottom: 12px; text-align: center;">
+                <img src="{{ report_logo_data_uri }}" alt="Report Logo" style="max-height: 80px; max-width: 100%;">
+            </div>
+            {% endif %}
+            <h1>التقرير الشهري لمعامل الجودة</h1>
+            <p>{{ month_name_ar }} {{ year }}</p>
+            <p style="font-size: 10px;">{{ department_label }}</p>
+        </div>
+        
+        <div class="accent-strip"></div>
+        
+        <div class="meta-grid">
+            <div class="meta-card">
+                <span class="label">إجمالي الفحوصات</span>
+                <span class="value">{{ total }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">✅ مقبول</span>
+                <span class="value">{{ approved }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">⚠️ متابعة / جزئي</span>
+                <span class="value">{{ conditional_partial }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">❌ مرفوض كلي</span>
+                <span class="value">{{ rejected }}</span>
+            </div>
+        </div>
+
+        <div class="meta-grid" style="grid-template-columns: repeat(3, 1fr); margin-top: -4px;">
+            <div class="meta-card">
+                <span class="label">إجمالي الكمية</span>
+                <span class="value">{{ total_quantity }} <span style="font-size: 11px;">(طن)</span></span>
+            </div>
+            <div class="meta-card">
+                <span class="label">الكمية المقبولة</span>
+                <span class="value" style="color: var(--success-text);">{{ total_accepted_quantity }} <span style="font-size: 11px;">(طن)</span></span>
+            </div>
+            <div class="meta-card">
+                <span class="label">الكمية المرفوضة</span>
+                <span class="value" style="color: var(--danger-text);">{{ total_rejected_quantity }} <span style="font-size: 11px;">(طن)</span></span>
+            </div>
+        </div>
+
+        <div class="meta-grid" style="grid-template-columns: repeat(3, 1fr); margin-top: -4px;">
+            <div class="meta-card">
+                <span class="label">معدل القبول</span>
+                <span class="value" style="color: var(--success-text);">{{ approval_rate }}%</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">معدل الرفض</span>
+                <span class="value" style="color: var(--danger-text);">{{ rejection_rate }}%</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">الموردين | الخامات</span>
+                <span class="value">{{ unique_suppliers }} | {{ unique_materials }}</span>
+            </div>
+        </div>
+        
+        {% if materials %}
+        <div class="section-title">إحصائيات الخامات المستلمة | Received Materials Statistics</div>
+        
+        {% for material in materials %}
+        <div class="material-item">
+            <div class="material-name">
+                <span>{{ material.name }}</span>
+                <span style="font-size: 10px; font-weight: normal;">
+                    {{ material.count }} سجل
+                    <span class="rate-badge {{ 'high' if material.approval_rate >= 90 else ('medium' if material.approval_rate >= 70 else 'low') }}" style="margin-right: 6px;">
+                        {{ material.approval_rate }}%
+                    </span>
+                </span>
+            </div>
+            <div class="material-stats">
+                <div class="stat-box">
+                    <div class="label"> اجمالي الكمية</div>
+                    <div class="value">{{ material.total_qty }} طن</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label"> الكمية المقبولة</div>
+                    <div class="value" style="color: #10B981;">{{ material.accepted_qty }} طن</div>
+                </div>
+                <div class="stat-box">
+                    <div class="label">الكمية المرفوضة </div>
+                    <div class="value" style="color: #EF4444;">{{ material.rejected_qty }} طن</div>
+                </div>
+                <div class="stat-box approved">
+                    <div class="label">✅ مقبول</div>
+                    <div class="value">{{ material.approved }}</div>
+                </div>
+                <div class="stat-box warning">
+                    <div class="label">📦 جزئي</div>
+                    <div class="value">{{ material.partial }}</div>
+                </div>
+                <div class="stat-box rejected">
+                    <div class="label">❌ مرفوض</div>
+                    <div class="value">{{ material.rejected }}</div>
+                </div>
+            </div>
+            
+            {% if material.suppliers %}
+            <div style="padding: 8px 12px;">
+                <h4 style="font-size: 11px; font-weight: 700; color: #0F0F10; margin-bottom: 8px;">الموردين لهذه الخامة</h4>
+                <table class="supplier-table" style="margin-bottom: 0;">
+                    <thead>
+                        <tr>
+                            <th>المورد | Supplier</th>
+                            <th>عدد الفحوصات</th>
+                            <th>إجمالي الكمية</th>
+                            <th>الكمية المقبولة</th>
+                            <th>الكمية المرفوضة</th>
+                            <th>✅ مقبول</th>
+                            <th>📦 جزئي</th>
+                            <th>❌ مرفوض</th>
+                            <th>معدل القبول</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for supplier in material.suppliers %}
+                        <tr>
+                            <td style="font-weight: 600; text-align: right;">{{ supplier.name }}</td>
+                            <td>{{ supplier.count }}</td>
+                            <td>{{ supplier.total_qty }} طن</td>
+                            <td style="color: var(--success-text);">{{ supplier.accepted_qty }} طن</td>
+                            <td style="color: var(--danger-text);">{{ supplier.rejected_qty }} طن</td>
+                            <td>{{ supplier.approved }}</td>
+                            <td>{{ supplier.partial }}</td>
+                            <td>{{ supplier.rejected }}</td>
+                            <td>
+                                <span class="rate-badge {{ 'high' if supplier.approval_rate >= 90 else ('medium' if supplier.approval_rate >= 70 else 'low') }}">
+                                    {{ supplier.approval_rate }}%
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <h3>لا توجد بيانات لهذا الشهر</h3>
+        </div>
+        {% endif %}
+
+        {% if trend_months %}
+        <div class="section-title">اتجاه الموثوقية الشهري | Monthly Reliability Trend</div>
+        <table class="trend-table">
+            <thead>
+                <tr>
+                    <th>الشهر</th>
+                    <th>عدد الفحوصات</th>
+                    <th>الكمية</th>
+                    <th>✅ مقبول</th>
+                    <th>❌ مرفوض</th>
+                    <th>معدل القبول</th>
+                    <th>معدل الرفض</th>
+                    <th>التوزيع</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for month in trend_months %}
+                <tr class="{{ 'current-month' if month.is_current else '' }}">
+                    <td style="font-weight: 600;">{{ month.label }}</td>
+                    <td>{{ month.count }}</td>
+                    <td>{{ month.total_qty }} طن</td>
+                    <td>{{ month.approved }}</td>
+                    <td>{{ month.rejected }}</td>
+                    <td>
+                        <span class="rate-badge {{ 'high' if month.approval_rate >= 90 else ('medium' if month.approval_rate >= 70 else 'low' if month.approval_rate > 0 else '') }}">
+                            {{ month.approval_rate }}%
+                        </span>
+                    </td>
+                    <td>{{ month.rejection_rate }}%</td>
+                    <td style="width: 80px;">
+                        {% if month.count > 0 %}
+                        <div class="bar-container">
+                            <div class="bar-segment-approved" style="width: {{ month.approval_rate if month.approval_rate else 0 }}%;"></div>
+                            <div class="bar-segment-rejected" style="width: {{ month.rejection_rate if month.rejection_rate else 0 }}%;"></div>
+                        </div>
+                        {% else %}
+                        <span style="color: var(--muted);">—</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if recommendations %}
+        <div class="section-title">توصيات ادارية احصائية | Statistical Administrative Recommendations</div>
+        <p class="section-note">التوصيات التالية مستندة إلى تحليل بيانات دقيق للادارة الجودة وتقديم رؤية مهنية مستندة إلى الإحصائيات لدعم قرارات إدارة المشتريات والجودة.</p>
+        <p class="section-note">الجهات التي تطلع على التقرير: الادارة العالية - ادارة المشتريات و التوريدات</p>
+        <div class="section-box">
+            <ul class="recommendations-list">
+                {% for rec in recommendations %}
+                <li>{{ rec }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+        
+        <div class="footer">
+            <p style="margin-bottom: 8px; font-weight: 600; color: #d97706;">⚠️ ملاحظة هامة: الكميات الموجودة في هذا التقرير لا تأخذ كوثيقة رسمية | Important: Quantities in this report are estimates and should not be used as official documentation</p>
+            <p>تم إنشاء التقرير بواسطة نظام إدارة الجودة الداخلي | {{ now }}</p>
+        </div>
+    </div>
+    <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
+        Powered by Material Lab
+    </div>
+</body>
+</html>

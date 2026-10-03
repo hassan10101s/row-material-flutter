@@ -9,6 +9,7 @@ import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
+import '../../../design_system/tokens/app_breakpoints.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
@@ -162,7 +163,7 @@ class InspectionDetailScreen extends StatelessWidget {
                         : null,
                   ),
                 ];
-                if (constraints.maxWidth >= 760) {
+                if (constraints.maxWidth >= AppBreakpoints.medium) {
                   return Row(
                     children: [
                       Expanded(child: title),

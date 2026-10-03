@@ -17,12 +17,11 @@ class ReferenceState extends Equatable {
     bool? loading,
     String? error,
     List<Map<String, dynamic>>? materials,
-  }) =>
-      ReferenceState(
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        materials: materials ?? this.materials,
-      );
+  }) => ReferenceState(
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    materials: materials ?? this.materials,
+  );
 
   @override
   List<Object?> get props => [loading, error, materials];

@@ -1,6 +1,6 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../data/lab_repo.dart';
+import '../../domain/lab_local_repository.dart';
 import 'constants_state.dart';
 
 /// Loads the global formula constants and exposes delete for the Constants
@@ -9,7 +9,7 @@ import 'constants_state.dart';
 class ConstantsCubit extends AppCubit<ConstantsState> {
   ConstantsCubit({required this.repo}) : super(const ConstantsState());
 
-  final LabRepo repo;
+  final LabLocalRepository repo;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

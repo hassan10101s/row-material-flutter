@@ -1,7 +1,7 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../../reports/data/report_service.dart';
-import '../../data/inspection_repo.dart';
+import '../../../reports/domain/report_repository.dart';
+import '../../domain/inspection_repository.dart';
 import 'inspections_state.dart';
 
 /// Inspections ledger: loads rows and maintains the client-side query/status
@@ -10,8 +10,8 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
   InspectionsCubit({required this.repo, required this.reports})
       : super(const InspectionsState());
 
-  final InspectionRepo repo;
-  final ReportService reports;
+  final InspectionRepository repo;
+  final ReportRepository reports;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

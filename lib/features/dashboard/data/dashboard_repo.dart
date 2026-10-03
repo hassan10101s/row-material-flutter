@@ -2,11 +2,12 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../../core/database/database_helper.dart';
 import '../../../core/utils/app_dates.dart';
+import '../domain/dashboard_repository.dart';
 
 /// Inspection dashboard analytics (port of the Vue dashboard computed + the
 /// summary endpoints). All heavy lifting is done in SQL; aggregation mirrors
 /// web/src/35_dashboard_history_reports.js.
-class DashboardRepo {
+class DashboardRepo implements DashboardRepository {
   final DatabaseHelper dbHelper;
   DashboardRepo({required this.dbHelper});
 
@@ -82,6 +83,7 @@ class DashboardRepo {
   }
 
   /// Full inspection analytics object for the dashboard.
+  @override
   Future<Map<String, dynamic>> summary({
     String period = '30d',
     String? materialId,
@@ -226,6 +228,7 @@ class DashboardRepo {
   }
 
   /// Today / shift KPIs for the top of the dashboard.
+  @override
   Future<Map<String, dynamic>> todayKpis() async {
     final db = await _db;
     final today = todayIso();
@@ -431,6 +434,7 @@ class DashboardRepo {
   }
 
   /// Dropdown options for materials and suppliers for dashboard filter bars.
+  @override
   Future<DashboardFilterOptions> filterOptions() async {
     final db = await _db;
     final matRows = await db.query('reference_materials',
@@ -459,17 +463,4 @@ class DashboardRepo {
       ],
     );
   }
-}
-
-/// Dropdown options for dashboard filters.
-class DashboardFilterOptions {
-  final List<Map<String, dynamic>> materials;
-  final List<Map<String, dynamic>> suppliers;
-  final List<String> statuses;
-
-  const DashboardFilterOptions({
-    required this.materials,
-    required this.suppliers,
-    required this.statuses,
-  });
 }

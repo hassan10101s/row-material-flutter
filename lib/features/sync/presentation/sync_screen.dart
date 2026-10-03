@@ -12,6 +12,7 @@ import '../../../di/service_locator.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../design_system/tokens/app_breakpoints.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../core/constants/app_strings.dart';
 
@@ -44,13 +45,36 @@ class _SyncScreenState extends State<SyncScreen> {
     _subscription = _engine.status.listen((snapshot) {
       if (mounted) setState(() => _status = snapshot);
     });
-    unawaited(_refresh());
+    // Deferred by one frame: `_guarded` flips `_busy` with `setState`, which is
+    // illegal while the tree is still building. The load is also not urgent
+    // enough to sit ahead of the first paint.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_guarded(_refresh));
+    });
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
     super.dispose();
+  }
+
+  /// Runs [action] behind the busy flag and reports a failure to the user.
+  ///
+  /// These handlers used to be bare `try { ... } finally { ... }`. A thrown
+  /// error escaped as an *unhandled* async exception: the spinner stopped, no
+  /// banner appeared, and keep-local/keep-remote looked like a silent no-op. A
+  /// sync screen that cannot report a failed sync is worse than no sync screen,
+  /// because the user concludes the row is fine.
+  Future<void> _guarded(Future<void> Function() action) async {
+    setState(() => _busy = true);
+    try {
+      await action();
+    } on Object catch (error) {
+      if (mounted) AppFeedback.errorFrom(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   Future<void> _refresh() async {
@@ -66,45 +90,34 @@ class _SyncScreenState extends State<SyncScreen> {
     }
   }
 
-  Future<void> _syncNow() async {
-    setState(() => _busy = true);
-    try {
-      await _engine.syncNow(reason: 'manual');
-      await _refresh();
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
+  Future<void> _syncNow() =>
+      _guarded(() async {
+        await _engine.syncNow(reason: 'manual');
+        await _refresh();
+      });
 
   /// "تنزيل السجل": a pull-only cycle, for a device that just wants the
   /// server's history without pushing anything.
-  Future<void> _downloadHistory() async {
-    setState(() => _busy = true);
-    try {
-      await _engine.syncNow(reason: 'history', pullOnly: true);
-      await _refresh();
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
+  Future<void> _downloadHistory() =>
+      _guarded(() async {
+        await _engine.syncNow(reason: 'history', pullOnly: true);
+        await _refresh();
+      });
 
   /// "إعادة المحاولة": clear the backoff of every blocked row, then sync again.
-  Future<void> _retryAll() async {
-    setState(() => _busy = true);
-    try {
-      await _queue.retryBlocked();
-      await _engine.syncNow(reason: 'retry');
-      await _refresh();
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
+  Future<void> _retryAll() =>
+      _guarded(() async {
+        await _queue.retryBlocked();
+        await _engine.syncNow(reason: 'retry');
+        await _refresh();
+      });
 
-  Future<void> _retryOne(Map<String, Object?> row) async {
-    await _queue.retryRow((row['id'] as num).toInt());
-    await _engine.syncNow(reason: 'retry-one');
-    await _refresh();
-  }
+  Future<void> _retryOne(Map<String, Object?> row) =>
+      _guarded(() async {
+        await _queue.retryRow((row['id'] as num).toInt());
+        await _engine.syncNow(reason: 'retry-one');
+        await _refresh();
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -115,57 +128,90 @@ class _SyncScreenState extends State<SyncScreen> {
           ? EdgeInsets.zero
           : const EdgeInsets.all(AppSpacing.page),
       children: [
-        Row(
+        // Title on its own line, actions in a `Wrap` underneath. As one `Row` with a
+        // `Spacer` this header's minimum intrinsic width - an Arabic title plus
+        // up to three Arabic-labelled buttons - exceeds a 360dp phone, so the
+        // buttons were pushed off-screen behind a RenderFlex overflow. A `Wrap`
+        // reflows them onto a second line at any width, and `end` alignment
+        // keeps them right-aligned on desktop where they still fit on one line.
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('المزامنة', style: Theme.of(context).textTheme.headlineSmall),
-            const Spacer(),
-            if (gate.session.offline)
-              const Padding(
-                padding: EdgeInsetsDirectional.only(end: 8),
-                child: Text('جلسة محلية (بدون توكن حي)'),
-              ),
-            AppButton(
-              label: 'مزامنة الآن',
-              small: true,
-              loading: _busy,
-              icon: const Icon(Icons.sync, size: 18),
-              onPressed: _busy || !gate.online ? null : _syncNow,
-            ),
-            if ((status?.blocked ?? 0) > 0)
-              AppButton(
-                label: 'إعادة المحاولة',
-                small: true,
-                icon: const Icon(Icons.refresh, size: 18),
-                onPressed: _busy || !gate.online ? null : _retryAll,
-              ),
-            AppButton(
-              label: 'تنزيل السجل',
-              small: true,
-              icon: const Icon(Icons.cloud_download_outlined, size: 18),
-              onPressed: _busy || !gate.online ? null : _downloadHistory,
+            const SizedBox(height: AppSpacing.sm),
+            Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                if (gate.session.offline)
+                  const Text('جلسة محلية (بدون توكن حي)'),
+                AppButton(
+                  label: 'مزامنة الآن',
+                  small: true,
+                  loading: _busy,
+                  icon: const Icon(Icons.sync, size: 18),
+                  onPressed: _busy || !gate.online ? null : _syncNow,
+                ),
+                if ((status?.blocked ?? 0) > 0)
+                  AppButton(
+                    label: 'إعادة المحاولة',
+                    small: true,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    onPressed: _busy || !gate.online ? null : _retryAll,
+                  ),
+                AppButton(
+                  label: 'تنزيل السجل',
+                  small: true,
+                  icon: const Icon(Icons.cloud_download_outlined, size: 18),
+                  onPressed: _busy || !gate.online ? null : _downloadHistory,
+                ),
+              ],
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        Row(
-          children: [
-            _Tile(
-              label: 'الحالة',
-              value: status?.badge ?? '—',
-              color: _badgeColor(status),
-            ),
-            _Tile(label: 'في الانتظار', value: '${status?.pending ?? 0}'),
-            _Tile(
-              label: 'محجوب',
-              value: '${status?.blocked ?? 0}',
-              color: (status?.blocked ?? 0) > 0 ? AppColors.danger : null,
-            ),
-            _Tile(
-              label: 'تعارضات',
-              value: '${status?.conflicts ?? 0}',
-              color: (status?.conflicts ?? 0) > 0 ? AppColors.warning : null,
-            ),
-          ],
+        // Four equal-width `Expanded` tiles leave each one ~90dp on a 360dp phone, which
+        // the Arabic labels wrap into rather than fit. Below
+        // [AppBreakpoints.medium] the tiles take the full width and stack;
+        // above it they keep the original four-across row.
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = constraints.maxWidth;
+            final stacked = width < AppBreakpoints.medium;
+            final tileWidth =
+                stacked ? width : (width - AppSpacing.sm * 3) / 4;
+            return Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                _Tile(
+                  label: 'الحالة',
+                  value: status?.badge ?? '—',
+                  color: _badgeColor(status),
+                  width: tileWidth,
+                ),
+                _Tile(
+                  label: 'في الانتظار',
+                  value: '${status?.pending ?? 0}',
+                  width: tileWidth,
+                ),
+                _Tile(
+                  label: 'محجوب',
+                  value: '${status?.blocked ?? 0}',
+                  color: (status?.blocked ?? 0) > 0 ? AppColors.danger : null,
+                  width: tileWidth,
+                ),
+                _Tile(
+                  label: 'تعارضات',
+                  value: '${status?.conflicts ?? 0}',
+                  color: (status?.conflicts ?? 0) > 0 ? AppColors.warning : null,
+                  width: tileWidth,
+                ),
+              ],
+            );
+          },
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
@@ -250,22 +296,26 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _keepLocal(Map<String, Object?> row) async {
     if (!_canResolve) return _refuseOffline();
     final gate = getIt<AuthGate>();
-    await _conflicts.keepLocal(
-      (row['id'] as num).toInt(),
-      organizationId: gate.organizationId,
-      session: _SessionView(gate.session.uid, gate.session.deviceId),
-    );
-    await _refresh();
+    await _guarded(() async {
+      await _conflicts.keepLocal(
+        (row['id'] as num).toInt(),
+        organizationId: gate.organizationId,
+        session: _SessionView(gate.session.uid, gate.session.deviceId),
+      );
+      await _refresh();
+    });
   }
 
   Future<void> _keepRemote(Map<String, Object?> row) async {
     if (!_canResolve) return _refuseOffline();
     final gate = getIt<AuthGate>();
-    await _conflicts.keepRemote(
-      (row['id'] as num).toInt(),
-      organizationId: gate.organizationId,
-    );
-    await _refresh();
+    await _guarded(() async {
+      await _conflicts.keepRemote(
+        (row['id'] as num).toInt(),
+        organizationId: gate.organizationId,
+      );
+      await _refresh();
+    });
   }
 
   static String _time(DateTime? value) => value == null
@@ -293,15 +343,26 @@ class _SessionView implements AppSessionLike {
 }
 
 class _Tile extends StatelessWidget {
-  const _Tile({required this.label, required this.value, this.color});
+  const _Tile({
+    required this.label,
+    required this.value,
+    this.color,
+    required this.width,
+  });
 
   final String label;
   final String value;
   final Color? color;
 
+  /// Width assigned by the caller's [LayoutBuilder]. Explicit rather than
+  /// `Expanded`, so the tiles can live in a [Wrap] and take the full width on a
+  /// phone instead of being squeezed into ~90dp columns.
+  final double width;
+
   @override
   Widget build(BuildContext context) {
-    return Expanded(
+    return SizedBox(
+      width: width,
       child: Card(
         margin: const EdgeInsetsDirectional.only(end: AppSpacing.sm),
         child: Padding(

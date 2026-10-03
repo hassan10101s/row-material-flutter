@@ -201,29 +201,88 @@ class SyncQueue {
 
   /// Take up to [limit] ready rows, marking them `in_flight` (single-flight).
   Future<List<QueueEntry>> claim({int limit = 400}) async {
-    return (await _db).transaction<List<QueueEntry>>((txn) async {
-      final rows = await txn.query(
-        'sync_queue',
-        where: "status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
-        whereArgs: [nowIso()],
-        orderBy: 'id ASC',
-        limit: limit,
-      );
-      final claimed = <QueueEntry>[];
-      for (final row in rows) {
-        final id = (row['id'] as num).toInt();
-        final updated = await txn.update(
+    return _withDb(
+      'queue.claim',
+      (db) => tracedTransaction<List<QueueEntry>>(
+          db, 'queue.claim', (txn) async {
+        final rows = await txn.query(
           'sync_queue',
-          {
-            'status': 'in_flight',
-            'updated_at': nowIso(),
-          },
-          where: "id = ? AND status = 'pending'",
-          whereArgs: [id],
+          where: "status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
+          whereArgs: [nowIso()],
+          orderBy: 'id ASC',
+          limit: limit,
         );
-        if (updated > 0) claimed.add(QueueEntry.fromRow(row));
-      }
-      return claimed;
+        final claimed = <QueueEntry>[];
+        for (final row in rows) {
+          final id = (row['id'] as num).toInt();
+          final updated = await txn.update(
+            'sync_queue',
+            {
+              'status': 'in_flight',
+              'updated_at': nowIso(),
+            },
+            where: "id = ? AND status = 'pending'",
+            whereArgs: [id],
+          );
+          if (updated > 0) claimed.add(QueueEntry.fromRow(row));
+        }
+        return claimed;
+      }),
+    );
+  }
+
+  /// Returns every `in_flight` row to `pending` and returns how many were
+  /// recovered.
+  ///
+  /// `in_flight` is written in exactly one place — [claim] — and nothing else in
+  /// the repository moves a row back to `pending`. So any process death between
+  /// the claim and the settlement (an app kill, an OS kill, or an org
+  /// switch/restore that closes the database mid-batch) strands the row
+  /// permanently. The consequences are all silent:
+  ///
+  ///   * `countPending`/`countBadge` count `in_flight`, so the badge shows a
+  ///     pending count that never drains;
+  ///   * the Sync screen's "needs attention" list filters to `failed`/`conflict`,
+  ///     so a stranded row cannot be retried from the UI either;
+  ///   * [reconcileAfterRestore] was the only consumer, and it runs only after a
+  ///     restore.
+  ///
+  /// `retry_count` is deliberately preserved rather than reset: a push that
+  /// crashes the process every attempt must still climb towards [maxRetries]
+  /// and end up as `failed`, instead of being granted an infinite series of
+  /// fresh first attempts.
+  Future<int> recoverStalled() async {
+    return _withDb('queue.recoverStalled', (db) async {
+      return tracedTransaction(db, 'queue.recoverStalled', (txn) async {
+        final rows = await txn.query(
+          'sync_queue',
+          columns: ['id', 'retry_count'],
+          where: "status = 'in_flight'",
+        );
+        final now = nowIso();
+        var recovered = 0;
+        for (final row in rows) {
+          final attempts = (row['retry_count'] as num?)?.toInt() ?? 0;
+          final exhausted = attempts + 1 >= maxRetries;
+          final updated = await txn.update(
+            'sync_queue',
+            {
+              'status': exhausted ? 'failed' : 'pending',
+              'next_attempt_at': exhausted
+                  ? null
+                  : nowIsoAt(DateTime.now().add(backoffDelay(attempts))),
+              'last_error': exhausted
+                  ? 'interrupted mid-push (retry limit reached)'
+                  : 'interrupted mid-push',
+              'updated_at': now,
+            },
+            where: "id = ? AND status = 'in_flight'",
+            whereArgs: [(row['id'] as num).toInt()],
+          );
+          if (updated > 0) recovered++;
+        }
+        return recovered;
+      });
     });
   }
 
@@ -264,24 +323,26 @@ class SyncQueue {
   /// visible together, so the batch shares one commit.
   Future<void> settleAll(List<QueueSettlement> settlements) async {
     if (settlements.isEmpty) return;
-    await tracedTransaction(await _db, 'queue.settleAll', (txn) async {
-      for (final settlement in settlements) {
-        final entry = settlement.entry;
-        switch (settlement.kind) {
-          case QueueOutcome.done:
-            await _markDone(txn, entry, settlement.remoteVersion ?? 0);
-          case QueueOutcome.retry:
-            await _markRetry(txn, entry, settlement.error ?? 'unknown error');
-          case QueueOutcome.conflict:
-            await _markConflict(
-              txn,
-              entry,
-              direction: settlement.direction ?? 'push_rejected',
-              remotePayload: settlement.remotePayload,
-              error: settlement.error,
-            );
+    await _withDb('queue.settleAll', (db) async {
+      await tracedTransaction(db, 'queue.settleAll', (txn) async {
+        for (final settlement in settlements) {
+          final entry = settlement.entry;
+          switch (settlement.kind) {
+            case QueueOutcome.done:
+              await _markDone(txn, entry, settlement.remoteVersion ?? 0);
+            case QueueOutcome.retry:
+              await _markRetry(txn, entry, settlement.error ?? 'unknown error');
+            case QueueOutcome.conflict:
+              await _markConflict(
+                txn,
+                entry,
+                direction: settlement.direction ?? 'push_rejected',
+                remotePayload: settlement.remotePayload,
+                error: settlement.error,
+              );
+          }
         }
-      }
+      });
     });
   }
 

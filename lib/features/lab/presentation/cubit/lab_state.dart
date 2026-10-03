@@ -8,8 +8,10 @@ class LabState extends Equatable {
 
   const LabState({this.tab = 0, this.historyTick = 0});
 
-  LabState copyWith({int? tab, int? historyTick}) =>
-      LabState(tab: tab ?? this.tab, historyTick: historyTick ?? this.historyTick);
+  LabState copyWith({int? tab, int? historyTick}) => LabState(
+    tab: tab ?? this.tab,
+    historyTick: historyTick ?? this.historyTick,
+  );
 
   @override
   List<Object?> get props => [tab, historyTick];

@@ -10,28 +10,67 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
-import '../../../di/service_locator.dart';
-import '../../lab/data/lab_repo.dart';
-import '../data/reference_repo.dart';
+import '../../lab/domain/lab_result_repository.dart';
+import '../domain/reference_repository.dart';
+
+/// How the editor arranges its fields.
+///
+/// An explicit prop rather than a width or platform lookup: the shared editor is
+/// handed the arrangement by the variant that owns the chrome, so the choice is
+/// visible at the call site instead of being re-derived inside the form.
+enum MaterialEditorLayout {
+  /// Side-by-side name fields, and one row per parameter. Needs ~880dp.
+  desktop,
+
+  /// Stacked fields, one field per line. Fits a 400dp grid.
+  compact,
+}
 
 /// Full material editor — port of `MaterialsView` (web/src/42_materials_editor.js).
 /// Creates or updates a reference material with physical and chemical
-/// parameters. Self-contained: loads analyses/parameters/units itself and
-/// saves via `materials_update/create` + `lab_material_ranges_save`.
+/// parameters. Loads analyses/parameters/units itself and saves via
+/// `materials_update/create` + `lab_material_ranges_save`.
+///
+/// Chrome-free by design: the title and the action row are supplied by
+/// [actions] and hosted by the variant, so the desktop dialog and the phone
+/// route share one implementation of the form and the save path.
 class MaterialEditor extends StatefulWidget {
+  const MaterialEditor({
+    super.key,
+    required this.refRepo,
+    required this.labConfig,
+    this.materialId,
+    this.layout = MaterialEditorLayout.desktop,
+    this.actions,
+  });
+
+  /// The material being created or updated, or null to create one.
   final int? materialId;
-  const MaterialEditor({super.key, this.materialId});
+
+  /// Injected rather than resolved from `getIt`: the editor is shown inside a
+  /// dialog on desktop, which pushes onto the root navigator, so it is a sibling
+  /// of the screen's providers rather than a descendant and cannot read them.
+  final ReferenceRepository refRepo;
+
+  /// Owns the per-material acceptance bounds.
+  final LabConfigurationRepository labConfig;
+
+  final MaterialEditorLayout layout;
+
+  /// Builds the per-experience action row, handed this widget's [State].
+  final Widget Function(BuildContext context, MaterialEditorState state)?
+  actions;
 
   @override
-  State<MaterialEditor> createState() => _MaterialEditorState();
+  State<MaterialEditor> createState() => MaterialEditorState();
 }
 
 class _PhysicalParamRow {
   final TextEditingController nameCtrl;
   final TextEditingController reqCtrl;
   _PhysicalParamRow({String name = '', String requirement = ''})
-      : nameCtrl = TextEditingController(text: name),
-        reqCtrl = TextEditingController(text: requirement);
+    : nameCtrl = TextEditingController(text: name),
+      reqCtrl = TextEditingController(text: requirement);
   void dispose() {
     nameCtrl.dispose();
     reqCtrl.dispose();
@@ -50,10 +89,10 @@ class _ChemicalParamRow {
     String min = '',
     String max = '',
     String unit = '%',
-  })  : nameCtrl = TextEditingController(text: name),
-        minCtrl = TextEditingController(text: min),
-        maxCtrl = TextEditingController(text: max),
-        unitCtrl = TextEditingController(text: unit);
+  }) : nameCtrl = TextEditingController(text: name),
+       minCtrl = TextEditingController(text: min),
+       maxCtrl = TextEditingController(text: max),
+       unitCtrl = TextEditingController(text: unit);
   void dispose() {
     nameCtrl.dispose();
     minCtrl.dispose();
@@ -64,10 +103,7 @@ class _ChemicalParamRow {
 
 typedef _NameParts = ({String en, String ar});
 
-class _MaterialEditorState extends State<MaterialEditor> {
-  final _refRepo = getIt<ReferenceRepo>();
-  final _labRepo = getIt<LabRepo>();
-
+class MaterialEditorState extends State<MaterialEditor> {
   late final TextEditingController _nameEn;
   late final TextEditingController _nameAr;
   late final TextEditingController _code;
@@ -82,9 +118,28 @@ class _MaterialEditorState extends State<MaterialEditor> {
   String? _nameError;
   String? _codeError;
 
+  /// True on the phone layout, where fields stack instead of sitting side by
+  /// side. Read from [MaterialEditor.layout] rather than from the window.
+  bool get _compact => widget.layout == MaterialEditorLayout.compact;
+
+  bool get saving => _saving;
+
+  ReferenceRepository get _refRepo => widget.refRepo;
+
+  LabConfigurationRepository get _labConfig => widget.labConfig;
+
+  /// Exposed for the action row the variant builds.
+  Future<void> save() => _save();
+
   static const _rejectWords = [
-    'abnormal', 'غير طبيعي', 'غير مطابق', 'not good', 'not-good',
-    'notgood', 'pale', 'سيء',
+    'abnormal',
+    'غير طبيعي',
+    'غير مطابق',
+    'not good',
+    'not-good',
+    'notgood',
+    'pale',
+    'سيء',
   ];
 
   @override
@@ -112,7 +167,10 @@ class _MaterialEditorState extends State<MaterialEditor> {
 
   _NameParts _splitName(Object? raw) {
     final parts = '${raw ?? ''}'.split(RegExp(r'\s*\|\s*'));
-    return (en: parts.isNotEmpty ? parts[0] : '', ar: parts.length > 1 ? parts[1] : '');
+    return (
+      en: parts.isNotEmpty ? parts[0] : '',
+      ar: parts.length > 1 ? parts[1] : '',
+    );
   }
 
   ({String min, String max}) _parseRangeText(String text) {
@@ -154,9 +212,12 @@ class _MaterialEditorState extends State<MaterialEditor> {
         ];
 
         final chemRef = jsonLoads('${raw['chemical_reference_json']}');
-        final matAnalyses = await _labRepo.getMaterialAnalyses(widget.materialId!);
+        final matAnalyses = await _labConfig.getMaterialAnalyses(
+          widget.materialId!,
+        );
         final chemicalByName = <String, _ChemicalParamRow>{};
-        for (final f in (matAnalyses['chemical']?['fields'] as List? ?? const [])) {
+        for (final f
+            in (matAnalyses['chemical']?['fields'] as List? ?? const [])) {
           final fm = Map<String, dynamic>.from(f as Map);
           final name = '${fm['parameter_name'] ?? ''}'.trim();
           if (name.isEmpty) continue;
@@ -233,8 +294,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
     setState(() {});
   }
 
-  void _addChemicalRow() =>
-      setState(() => _chemical.add(_ChemicalParamRow()));
+  void _addChemicalRow() => setState(() => _chemical.add(_ChemicalParamRow()));
 
   void _removeChemicalRow(int index) {
     final row = _chemical.removeAt(index);
@@ -243,17 +303,17 @@ class _MaterialEditorState extends State<MaterialEditor> {
   }
 
   Set<String> _usedParameterIds(int excludeIndex) => {
-        for (var i = 0; i < _chemical.length; i++)
-          if (i != excludeIndex && _chemical[i].parameterId != null)
-            '${_chemical[i].parameterId}',
-      };
+    for (var i = 0; i < _chemical.length; i++)
+      if (i != excludeIndex && _chemical[i].parameterId != null)
+        '${_chemical[i].parameterId}',
+  };
 
   void _onParameterChange(_ChemicalParamRow row) {
     final p = row.parameterId == null
         ? null
         : _parameters
-            .where((x) => '${x['id']}' == '${row.parameterId}')
-            .firstOrNull;
+              .where((x) => '${x['id']}' == '${row.parameterId}')
+              .firstOrNull;
     setState(() {
       if (p == null) {
         row.nameCtrl.text = '';
@@ -262,21 +322,25 @@ class _MaterialEditorState extends State<MaterialEditor> {
       row.nameCtrl.text = '${p['parameter_name'] ?? ''}';
       row.unitCtrl.text = '${p['unit'] ?? ''}'.trim().isNotEmpty
           ? '${p['unit']}'
-          : (row.unitCtrl.text.trim().isNotEmpty ? row.unitCtrl.text.trim() : '%');
+          : (row.unitCtrl.text.trim().isNotEmpty
+                ? row.unitCtrl.text.trim()
+                : '%');
     });
   }
 
   bool _isRejectWord(String word) {
     final w = word.trim().toLowerCase();
     if (_rejectWords.contains(w)) return true;
-    if (w.contains(RegExp(r'\bno\b')) && !w.contains(RegExp(r'\bnormal\b'))) return true;
+    if (w.contains(RegExp(r'\bno\b')) && !w.contains(RegExp(r'\bnormal\b'))) {
+      return true;
+    }
     return false;
   }
 
   List<String> _suggestionChips(String text) => [
-        for (final s in text.split(RegExp(r'[,،]+')))
-          if (s.trim().isNotEmpty) s.trim(),
-      ];
+    for (final s in text.split(RegExp(r'[,،]+')))
+      if (s.trim().isNotEmpty) s.trim(),
+  ];
 
   bool _validate() {
     final nameEn = _nameEn.text.trim();
@@ -284,10 +348,14 @@ class _MaterialEditorState extends State<MaterialEditor> {
     final code = _code.text.trim();
     setState(() {
       _nameError = (nameEn.isEmpty && nameAr.isEmpty)
-          ? AppText.t('الاسم مطلوب بالإنجليزية أو العربية', 'Name is required (EN or AR).')
+          ? AppText.t(
+              'الاسم مطلوب بالإنجليزية أو العربية',
+              'Name is required (EN or AR).',
+            )
           : null;
-      _codeError =
-          code.isEmpty ? AppText.t('كود الخامة مطلوب', 'Material code is required.') : null;
+      _codeError = code.isEmpty
+          ? AppText.t('كود الخامة مطلوب', 'Material code is required.')
+          : null;
     });
     if (_nameError == null || _codeError == null) return true;
     return (_nameError == null) && (_codeError == null);
@@ -361,7 +429,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
           chemicalReference: chemicalReference,
           units: units,
         );
-        await _labRepo.saveMaterialBounds(id, boundsPayload);
+        await _labConfig.saveMaterialBounds(id, boundsPayload);
       } else {
         await _refRepo.updateMaterial(
           widget.materialId!,
@@ -371,7 +439,7 @@ class _MaterialEditorState extends State<MaterialEditor> {
           chemicalReference: chemicalReference,
           units: units,
         );
-        await _labRepo.saveMaterialBounds(widget.materialId!, boundsPayload);
+        await _labConfig.saveMaterialBounds(widget.materialId!, boundsPayload);
       }
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
@@ -385,254 +453,259 @@ class _MaterialEditorState extends State<MaterialEditor> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.all(AppSpacing.lg),
-      backgroundColor: AppColors.surface,
-      child: SizedBox(
-        width: 880.w,
-        height: 680.h,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
-              child: Text(
-                widget.materialId == null
-                    ? AppText.t('مادة جديدة', 'New Material')
-                    : AppText.t('تعديل المادة', 'Edit Material'),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            if (_loading)
-              const Expanded(
-                child: Center(child: CircularProgressIndicator()),
-              )
-            else
-              Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+    final actions = widget.actions?.call(context, this);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(
+                    horizontal: _compact ? 0 : AppSpacing.lg,
+                  ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _labeled(
-                              AppText.t('الاسم بالإنجليزية', 'English Name'),
-                              TextField(
-                                controller: _nameEn,
-                                onChanged: (_) => setState(() => _nameError = null),
-                                enabled: !_saving,
-                                decoration: InputDecoration(
-                                  isDense: true,
-                                  hintText: 'e.g. Apple Pomace',
-                                  errorText: _nameError,
-                                  border: const OutlineInputBorder(),
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: AppSpacing.md),
-                          Expanded(
-                            child: _labeled(
-                              AppText.t('الاسم بالعربية', 'Arabic Name'),
-                              TextField(
-                                controller: _nameAr,
-                                onChanged: (_) => setState(() => _nameError = null),
-                                enabled: !_saving,
-                                decoration: const InputDecoration(
-                                  isDense: true,
-                                  hintText: 'مثال: تفل تفاح',
-                                  border: OutlineInputBorder(),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      SizedBox(
-                        width: 360.w,
-                        child: _labeled(
-                          AppText.t('كود الخامة', 'Material Code'),
-                          TextField(
-                            controller: _code,
-                            onChanged: (_) => setState(() => _codeError = null),
-                            enabled: !_saving,
-                            decoration: InputDecoration(
-                              isDense: true,
-                              hintText: 'e.g. APL',
-                              errorText: _codeError,
-                              border: const OutlineInputBorder(),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
-                      _sectionTitle('الفحص الظاهري', 'Physical Parameters'),
-                      const SizedBox(height: AppSpacing.sm),
-                      AppCard(
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        child: Column(
-                          children: [
-                            for (var i = 0; i < _physical.length; i++)
-                              _physicalRow(i),
-                            const SizedBox(height: AppSpacing.sm),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: AppButton(
-                                small: true,
-                                style: AppButtonStyle.secondary,
-                                icon: Icon(Icons.add, size: 16.r),
-                                label: AppText.t('إضافة بارامتر', 'Add Parameter'),
-                                onPressed: _saving ? null : _addPhysicalRow,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
-                      _sectionTitle('التحليل الكيميائي', 'Chemical Parameters'),
-                      const SizedBox(height: AppSpacing.sm),
-                      AppCard(
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        child: Column(
-                          children: [
-                            for (var i = 0; i < _chemical.length; i++)
-                              _chemicalRow(i),
-                            const SizedBox(height: AppSpacing.sm),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: AppButton(
-                                small: true,
-                                style: AppButtonStyle.secondary,
-                                icon: Icon(Icons.add, size: 16.r),
-                                label: AppText.t('إضافة من بارامترات المرجع', 'Add from Reference Parameters'),
-                                onPressed: _saving ? null : _addChemicalRow,
-                              ),
-                            ),
-                            const SizedBox(height: AppSpacing.sm),
-                            Text(
-                              AppText.t(
-                                'تُحمَّل البارامترات من المرجع (القاموس القياسي)؛ كل بارامتر يُمثِّل اسماً متوارثاً وله حدود قبول ورفض خاصة بهذه الخامة.',
-                                'Parameters are loaded from the reference (canonical dictionary); each parameter is an inherited name with this material\'s own acceptance/rejection limits.',
-                              ),
-                              style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.lg),
-                    ],
+                    children: _fields(),
                   ),
                 ),
-              ),
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  AppButton(
-                    style: AppButtonStyle.secondary,
-                    label: AppStrings.cancel,
-                    onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  AppButton(
-                    style: AppButtonStyle.primary,
-                    loading: _saving,
-                    label: AppText.t('حفظ', 'Save'),
-                    onPressed: _saving ? null : _save,
-                  ),
-                ],
-              ),
-            ),
-          ],
+        ),
+        ?actions,
+      ],
+    );
+  }
+
+  /// The form itself, in document order.
+  List<Widget> _fields() => [
+    _nameFields(),
+    const SizedBox(height: AppSpacing.md),
+    SizedBox(
+      width: _compact ? null : 360.w,
+      child: _labeled(
+        AppText.t('كود الخامة', 'Material Code'),
+        TextField(
+          controller: _code,
+          onChanged: (_) => setState(() => _codeError = null),
+          enabled: !_saving,
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: 'e.g. APL',
+            errorText: _codeError,
+            border: const OutlineInputBorder(),
+          ),
         ),
       ),
+    ),
+    const SizedBox(height: AppSpacing.lg),
+    _sectionTitle('الفحص الظاهري', 'Physical Parameters'),
+    const SizedBox(height: AppSpacing.sm),
+    AppCard(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        children: [
+          for (var i = 0; i < _physical.length; i++) _physicalRow(i),
+          const SizedBox(height: AppSpacing.sm),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: AppButton(
+              small: true,
+              style: AppButtonStyle.secondary,
+              icon: Icon(Icons.add, size: 16.r),
+              label: AppText.t('إضافة بارامتر', 'Add Parameter'),
+              onPressed: _saving ? null : _addPhysicalRow,
+            ),
+          ),
+        ],
+      ),
+    ),
+    const SizedBox(height: AppSpacing.lg),
+    _sectionTitle('التحليل الكيميائي', 'Chemical Parameters'),
+    const SizedBox(height: AppSpacing.sm),
+    AppCard(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        children: [
+          for (var i = 0; i < _chemical.length; i++) _chemicalRow(i),
+          const SizedBox(height: AppSpacing.sm),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: AppButton(
+              small: true,
+              style: AppButtonStyle.secondary,
+              icon: Icon(Icons.add, size: 16.r),
+              label: AppText.t(
+                'إضافة من بارامترات المرجع',
+                'Add from Reference Parameters',
+              ),
+              onPressed: _saving ? null : _addChemicalRow,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            AppText.t(
+              'تُحمَّل البارامترات من المرجع (القاموس القياسي)؛ كل بارامتر يُمثِّل اسماً متوارثاً وله حدود قبول ورفض خاصة بهذه الخامة.',
+              'Parameters are loaded from the reference (canonical dictionary); each parameter is an inherited name with this material\'s own acceptance/rejection limits.',
+            ),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+          ),
+        ],
+      ),
+    ),
+    const SizedBox(height: AppSpacing.lg),
+  ];
+
+  /// English and Arabic name side by side on desktop, stacked on a phone —
+  /// two 200dp fields across a 400dp grid leaves neither usable.
+  Widget _nameFields() {
+    final en = _labeled(
+      AppText.t('الاسم بالإنجليزية', 'English Name'),
+      TextField(
+        controller: _nameEn,
+        onChanged: (_) => setState(() => _nameError = null),
+        enabled: !_saving,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: 'e.g. Apple Pomace',
+          errorText: _nameError,
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+    final ar = _labeled(
+      AppText.t('الاسم بالعربية', 'Arabic Name'),
+      TextField(
+        controller: _nameAr,
+        onChanged: (_) => setState(() => _nameError = null),
+        enabled: !_saving,
+        decoration: const InputDecoration(
+          isDense: true,
+          hintText: 'مثال: تفل تفاح',
+          border: OutlineInputBorder(),
+        ),
+      ),
+    );
+    if (_compact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          en,
+          const SizedBox(height: AppSpacing.md),
+          ar,
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(child: en),
+        const SizedBox(width: AppSpacing.md),
+        Expanded(child: ar),
+      ],
     );
   }
 
   Widget _labeled(String label, Widget child) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax)),
-          const SizedBox(height: AppSpacing.xs),
-          child,
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      child,
+    ],
+  );
 
   Widget _sectionTitle(String ar, String en) => Row(
-        children: [
-          Icon(Icons.science_outlined, size: 18.r, color: AppColors.primary),
-          const SizedBox(width: AppSpacing.sm),
-          Text(
-            AppText.t(ar, en),
-            style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
-          ),
-        ],
-      );
+    children: [
+      Icon(Icons.science_outlined, size: 18.r, color: AppColors.primary),
+      const SizedBox(width: AppSpacing.sm),
+      Text(
+        AppText.t(ar, en),
+        style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
+      ),
+    ],
+  );
 
   Widget _physicalRow(int index) {
     final row = _physical[index];
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Row(
+    final name = Expanded(
+      flex: 2,
+      child: TextField(
+        controller: row.nameCtrl,
+        enabled: !_saving,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: AppText.t('مثال: اللون', 'e.g. Color'),
+          border: const OutlineInputBorder(),
+        ),
+      ),
+    );
+    final requirement = Expanded(
+      flex: 3,
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            flex: 2,
-            child: TextField(
-              controller: row.nameCtrl,
-              enabled: !_saving,
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: AppText.t('مثال: اللون', 'e.g. Color'),
-                border: const OutlineInputBorder(),
-              ),
+          TextField(
+            controller: row.reqCtrl,
+            enabled: !_saving,
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              isDense: true,
+              hintText: AppText.t('مثال: عادي', 'e.g. Normal'),
+              border: const OutlineInputBorder(),
             ),
           ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (_suggestionChips(row.reqCtrl.text).isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
               children: [
-                TextField(
-                  controller: row.reqCtrl,
-                  enabled: !_saving,
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: AppText.t('مثال: عادي', 'e.g. Normal'),
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-                if (_suggestionChips(row.reqCtrl.text).isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 4,
-                    runSpacing: 4,
-                    children: [
-                      for (final chip in _suggestionChips(row.reqCtrl.text))
-                        _requirementChip(chip),
-                    ],
-                  ),
-                ],
+                for (final chip in _suggestionChips(row.reqCtrl.text))
+                  _requirementChip(chip),
               ],
             ),
-          ),
-          IconButton(
-            tooltip: AppStrings.delete,
-            visualDensity: VisualDensity.compact,
-            onPressed: _saving ? null : () => _removePhysicalRow(index),
-            icon: Icon(Icons.remove_circle_outline, size: 18.r, color: AppColors.danger),
-          ),
+          ],
         ],
       ),
+    );
+    final remove = IconButton(
+      tooltip: AppStrings.delete,
+      visualDensity: VisualDensity.compact,
+      onPressed: _saving ? null : () => _removePhysicalRow(index),
+      icon: Icon(
+        Icons.remove_circle_outline,
+        size: 18.r,
+        color: AppColors.danger,
+      ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: _compact
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(child: name),
+                    remove,
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                requirement,
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                name,
+                const SizedBox(width: AppSpacing.sm),
+                requirement,
+                remove,
+              ],
+            ),
     );
   }
 
@@ -656,128 +729,207 @@ class _MaterialEditorState extends State<MaterialEditor> {
     final row = _chemical[index];
     final used = _usedParameterIds(index);
     final enabled = row.parameterId != null && !_saving;
+    final dropdown = DropdownButtonFormField<int?>(
+      initialValue: row.parameterId,
+      isDense: true,
+      isExpanded: true,
+      decoration: const InputDecoration(
+        isDense: true,
+        border: OutlineInputBorder(),
+      ),
+      hint: Text(
+        AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
+        overflow: TextOverflow.ellipsis,
+        maxLines: 1,
+        softWrap: false,
+      ),
+      selectedItemBuilder: (_) => [
+        Text(
+          AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+          softWrap: false,
+        ),
+        for (final p in _parameters)
+          Text(
+            '${p['parameter_name']}',
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+            softWrap: false,
+          ),
+      ],
+      items: [
+        DropdownMenuItem<int?>(
+          value: null,
+          enabled: false,
+          child: Text(
+            AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        for (final p in _parameters)
+          DropdownMenuItem<int?>(
+            value: int.tryParse('${p['id']}'),
+            enabled: !used.contains('${p['id']}'),
+            child: Text(
+              '${p['parameter_name']}',
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+      ],
+      onChanged: _saving
+          ? null
+          : (v) {
+              row.parameterId = v;
+              _onParameterChange(row);
+            },
+    );
+    final min = TextField(
+      controller: row.minCtrl,
+      enabled: enabled,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(
+        isDense: true,
+        labelText: AppText.t('الحد الأدنى', 'Min'),
+        border: const OutlineInputBorder(),
+      ),
+    );
+    final max = TextField(
+      controller: row.maxCtrl,
+      enabled: enabled,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(
+        isDense: true,
+        labelText: AppText.t('الحد الأقصى', 'Max'),
+        border: const OutlineInputBorder(),
+      ),
+    );
+    final unit = TextField(
+      controller: row.unitCtrl,
+      enabled: enabled,
+      decoration: InputDecoration(
+        isDense: true,
+        labelText: AppText.t('الوحدة', 'Unit'),
+        border: const OutlineInputBorder(),
+        suffixIcon: PopupMenuButton<String>(
+          enabled: enabled,
+          tooltip: AppText.t('اقتراحات الوحدات', 'Unit suggestions'),
+          onSelected: (v) => setState(() => row.unitCtrl.text = v),
+          itemBuilder: (_) => [
+            for (final u in _uniqueUnitSuggestions)
+              PopupMenuItem(value: u, child: Text(u)),
+          ],
+          icon: Icon(Icons.arrow_drop_down, size: 18.r),
+        ),
+      ),
+    );
+    final remove = IconButton(
+      tooltip: AppStrings.delete,
+      visualDensity: VisualDensity.compact,
+      onPressed: _saving ? null : () => _removeChemicalRow(index),
+      icon: Icon(
+        Icons.remove_circle_outline,
+        size: 18.r,
+        color: AppColors.danger,
+      ),
+    );
+
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            flex: 3,
-            child: DropdownButtonFormField<int?>(
-              initialValue: row.parameterId,
-              isDense: true,
-              isExpanded: true,
-              decoration: const InputDecoration(
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
-              hint: Text(
-                AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-                softWrap: false,
-              ),
-              selectedItemBuilder: (_) => [
-                Text(
-                  AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                  softWrap: false,
-                ),
-                for (final p in _parameters)
-                  Text(
-                    '${p['parameter_name']}',
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                    softWrap: false,
-                  ),
-              ],
-              items: [
-                DropdownMenuItem<int?>(
-                  value: null,
-                  enabled: false,
-                  child: Text(
-                    AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                for (final p in _parameters)
-                  DropdownMenuItem<int?>(
-                    value: int.tryParse('${p['id']}'),
-                    enabled: !used.contains('${p['id']}'),
-                    child: Text(
-                      '${p['parameter_name']}',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-              ],
-              onChanged: _saving
-                  ? null
-                  : (v) {
-                      row.parameterId = v;
-                      _onParameterChange(row);
-                    },
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          SizedBox(
-            width: 90.w,
-            child: TextField(
-              controller: row.minCtrl,
-              enabled: enabled,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                isDense: true,
-                labelText: AppText.t('الحد الأدنى', 'Min'),
-                border: const OutlineInputBorder(),
-              ),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          SizedBox(
-            width: 90.w,
-            child: TextField(
-              controller: row.maxCtrl,
-              enabled: enabled,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                isDense: true,
-                labelText: AppText.t('الحد الأقصى', 'Max'),
-                border: const OutlineInputBorder(),
-              ),
-            ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          SizedBox(
-            width: 110.w,
-            child: TextField(
-              controller: row.unitCtrl,
-              enabled: enabled,
-              decoration: InputDecoration(
-                isDense: true,
-                labelText: AppText.t('الوحدة', 'Unit'),
-                border: const OutlineInputBorder(),
-                suffixIcon: PopupMenuButton<String>(
-                  enabled: enabled,
-                  tooltip: AppText.t('اقتراحات الوحدات', 'Unit suggestions'),
-                  onSelected: (v) => setState(() => row.unitCtrl.text = v),
-                  itemBuilder: (_) => [
-                    for (final u in _uniqueUnitSuggestions)
-                      PopupMenuItem(value: u, child: Text(u)),
+      child: _compact
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                dropdown,
+                const SizedBox(height: AppSpacing.sm),
+                // min and max stay paired: they are read as one range, and
+                // splitting them across two lines makes the pairing unclear.
+                Row(
+                  children: [
+                    Expanded(child: min),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(child: max),
                   ],
-                  icon: Icon(Icons.arrow_drop_down, size: 18.r),
                 ),
-              ),
+                const SizedBox(height: AppSpacing.sm),
+                Row(
+                  children: [
+                    Expanded(child: unit),
+                    remove,
+                  ],
+                ),
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 3, child: dropdown),
+                const SizedBox(width: AppSpacing.sm),
+                SizedBox(width: 90.w, child: min),
+                const SizedBox(width: AppSpacing.sm),
+                SizedBox(width: 90.w, child: max),
+                const SizedBox(width: AppSpacing.sm),
+                SizedBox(width: 110.w, child: unit),
+                remove,
+              ],
             ),
-          ),
-          IconButton(
-            tooltip: AppStrings.delete,
-            visualDensity: VisualDensity.compact,
-            onPressed: _saving ? null : () => _removeChemicalRow(index),
-            icon: Icon(Icons.remove_circle_outline, size: 18.r, color: AppColors.danger),
-          ),
-        ],
-      ),
     );
   }
 }
+
+/// Cancel + Save, the chrome both experiences show.
+class MaterialEditorActions extends StatelessWidget {
+  const MaterialEditorActions({
+    super.key,
+    required this.state,
+    this.compact = false,
+  });
+
+  final MaterialEditorState state;
+
+  /// Stacks the buttons and spans them, which is what a 400dp grid wants.
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final cancel = AppButton(
+      style: AppButtonStyle.secondary,
+      label: AppStrings.cancel,
+      onPressed: state.saving ? null : () => Navigator.of(context).pop(false),
+    );
+    final save = AppButton(
+      style: AppButtonStyle.primary,
+      loading: state.saving,
+      label: AppText.t('حفظ', 'Save'),
+      onPressed: state.saving ? null : state.save,
+    );
+
+    return Padding(
+      padding: EdgeInsets.all(_pad),
+      child: compact
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                save,
+                const SizedBox(height: AppSpacing.sm),
+                cancel,
+              ],
+            )
+          : Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                cancel,
+                const SizedBox(width: AppSpacing.md),
+                save,
+              ],
+            ),
+    );
+  }
+
+  double get _pad => compact ? AppSpacing.md : AppSpacing.lg;
+}
+
+/// Dialog/route title for the create/edit chrome, shared by both experiences.
+String materialEditorTitle(bool isNew) => isNew
+    ? AppText.t('مادة جديدة', 'New Material')
+    : AppText.t('تعديل المادة', 'Edit Material');

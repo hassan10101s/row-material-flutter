@@ -11,15 +11,17 @@ import '../../../core/utils/app_format.dart';
 import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
+import '../../../design_system/tokens/app_breakpoints.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_autocomplete.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_dialogs.dart';
 import '../../../design_system/widgets/app_field.dart';
 import '../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../di/service_locator.dart';
 import '../../lab/core/formula_engine.dart';
-import '../data/inspection_repo.dart';
+import '../domain/inspection_repository.dart';
 import 'cubit/inspection_form_cubit.dart';
 import 'cubit/inspection_form_state.dart';
 
@@ -297,8 +299,86 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   final _materialController = TextEditingController();
   final _materialFocus = FocusNode();
   int get _sampleCount => _sampleNames.length;
+
+  /// True once the user has edited anything. Gates the unsaved-changes
+  /// [PopScope] below so a half-typed inspection is not discarded by a
+  /// back gesture or an app-bar back button.
+  bool _dirty = false;
+
+  /// Set while the screen writes to a controller itself, so the auto-filled
+  /// entry code and material label do not count as user edits. Listeners fire
+  /// synchronously from `text=`, so this brackets them exactly.
+  bool _programmaticWrite = false;
+
+  /// Controllers with a dirty listener attached, so disposed ones can be
+  /// unregistered and [initState] can seed the fixed ones once.
+  final List<TextEditingController> _watched = [];
+
+  /// Marks the form as user-edited on change.
+  ///
+  /// [setState] is required, not optional: `PopScope` caches `canPop` in its
+  /// State, so the guard stays inert until this rebuilds. Safe here because
+  /// every listener trigger is either a user gesture or a write already
+  /// suppressed by [_programmaticWrite]; none run during build.
+  void _markDirty() {
+    if (_programmaticWrite || _dirty || !mounted) return;
+    setState(() => _dirty = true);
+  }
+
+  /// Writes [value] to [c] without registering it as a user edit.
+  void _setText(TextEditingController c, String value) {
+    _programmaticWrite = true;
+    c.text = value;
+    _programmaticWrite = false;
+  }
+
+  void _watch(Iterable<TextEditingController> controllers) {
+    for (final c in controllers) {
+      if (_watched.contains(c)) continue;
+      c.addListener(_markDirty);
+      _watched.add(c);
+    }
+  }
+
+  /// Detaches and forgets [c] before it is disposed, so a rebuilt results grid
+  /// does not accumulate listeners on controllers it no longer owns.
+  void _unwatch(TextEditingController c) {
+    if (_watched.remove(c)) c.removeListener(_markDirty);
+  }
+
+  /// [_unwatch] followed by disposal, for controllers leaving the tree.
+  void _dispose(TextEditingController c) {
+    _unwatch(c);
+    c.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _watch([
+      _date,
+      _materialController,
+      _expiry,
+      _supplier,
+      _truck,
+      _qty,
+      _sampleTaker,
+      _entryCode,
+      _decisionReason,
+      _followUp,
+      _rejectedQty,
+      ..._sampleNames,
+      ..._physical.values.expand((l) => l),
+      ..._chemical.values.expand((l) => l),
+    ]);
+  }
+
   @override
   void dispose() {
+    for (final c in _watched) {
+      c.removeListener(_markDirty);
+    }
+    _watched.clear();
     _materialController.dispose();
     _materialFocus.dispose();
     for (final c in [
@@ -336,8 +416,10 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     if (st.materialId == id) {
       for (final m in st.materials) {
         if ((m['id'] as num).toInt() == id) {
-          _materialController.text =
-              '${m['material_name']} (${m['material_code']})';
+          _setText(
+            _materialController,
+            '${m['material_name']} (${m['material_code']})',
+          );
           break;
         }
       }
@@ -357,7 +439,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   ) {
     for (final list in target.values) {
       for (final c in list) {
-        c.dispose();
+        _dispose(c);
       }
     }
     target.clear();
@@ -370,6 +452,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
         for (var i = 0; i < _sampleCount; i++) TextEditingController(),
       ];
     });
+    _watch(target.values.expand((l) => l));
   }
 
   void _addSample() {
@@ -381,10 +464,14 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       return;
     }
     setState(() {
-      _sampleNames.add(TextEditingController());
+      final name = TextEditingController();
+      _sampleNames.add(name);
+      _watch([name]);
       for (final map in [_physical, _chemical]) {
         for (final entry in map.entries) {
-          entry.value.add(TextEditingController());
+          final c = TextEditingController();
+          entry.value.add(c);
+          _watch([c]);
         }
       }
     });
@@ -393,11 +480,11 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   void _removeSample(int index) {
     if (_sampleCount <= 1) return;
     setState(() {
-      _sampleNames.removeAt(index).dispose();
+      _dispose(_sampleNames.removeAt(index));
       for (final map in [_physical, _chemical]) {
         for (final entry in map.entries) {
           if (index < entry.value.length) {
-            entry.value.removeAt(index).dispose();
+            _dispose(entry.value.removeAt(index));
           }
         }
       }
@@ -480,6 +567,8 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
         context,
         AppText.t('تم حفظ الفحص', 'Inspection saved.'),
       );
+      // Saved: clear the guard so this pop is not intercepted and re-confirmed.
+      _dirty = false;
       final onSaved = widget.onSaved;
       if (onSaved != null) {
         onSaved();
@@ -497,52 +586,82 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     );
   }
 
+  /// Confirms discarding edits, then pops with [result]. Reached only when
+  /// [PopScope] has already blocked a pop, i.e. the form is dirty.
+  Future<void> _confirmDiscardAndPop(Object? result) async {
+    final discard = await showAppConfirm(
+      context,
+      danger: true,
+      icon: Icons.warning_amber_rounded,
+      title: AppText.t('تجاهل التعديلات؟', 'Discard your changes?'),
+      message: AppText.t(
+        'لديك تعديلات لم يتم حفظها. إذا خرجت الآن فستفقدها.',
+        'You have unsaved changes. Leaving now will lose them.',
+      ),
+      confirmLabel: AppText.t('تجاهل', 'Discard'),
+    );
+    if (!discard || !mounted) return;
+    _dirty = false;
+    Navigator.of(context).pop(result);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return BlocListener<InspectionFormCubit, InspectionFormState>(
-      listenWhen: (prev, curr) =>
-          prev.refRevision != curr.refRevision ||
-          prev.entryCode != curr.entryCode,
-      listener: (context, state) {
-        if (state.refRevision != 0) {
-          _rebuildResults(_physical, state.physicalReference, 'physical');
-          _rebuildResults(_chemical, state.chemicalReference, 'chemical');
-        }
-        if (_entryCode.text != state.entryCode && state.entryCode.isNotEmpty) {
-          _entryCode.text = state.entryCode;
-        }
+    return PopScope<Object?>(
+      canPop: !_dirty,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        // Covers the back gesture, the app-bar back button, and the Cancel
+        // button: all of them route through `Navigator.pop`, so the single
+        // guard below is enough.
+        _confirmDiscardAndPop(result);
       },
-      child: _FormBody(
-        date: _date,
-        expiry: _expiry,
-        supplier: _supplier,
-        truck: _truck,
-        qty: _qty,
-        sampleTaker: _sampleTaker,
-        entryCode: _entryCode,
-        decisionReason: _decisionReason,
-        followUp: _followUp,
-        rejectedQty: _rejectedQty,
-        sampleNames: _sampleNames,
-        materialController: _materialController,
-        materialFocus: _materialFocus,
-        onChangeMaterial: _changeMaterial,
-        physical: _physical,
-        chemical: _chemical,
-        sampleCount: _sampleCount,
-        onSelectMaterial: _selectMaterial,
-        onAddSample: _addSample,
-        onRemoveSample: _removeSample,
-        onRegenerateEntry: () async {
-          if (context.read<InspectionFormCubit>().state.materialId == null) {
-            return;
+      child: BlocListener<InspectionFormCubit, InspectionFormState>(
+        listenWhen: (prev, curr) =>
+            prev.refRevision != curr.refRevision ||
+            prev.entryCode != curr.entryCode,
+        listener: (context, state) {
+          if (state.refRevision != 0) {
+            _rebuildResults(_physical, state.physicalReference, 'physical');
+            _rebuildResults(_chemical, state.chemicalReference, 'chemical');
           }
-          final date = _date.text.trim().isEmpty
-              ? todayIso()
-              : _date.text.trim();
-          await context.read<InspectionFormCubit>().regenerateEntryCode(date);
+          if (_entryCode.text != state.entryCode &&
+              state.entryCode.isNotEmpty) {
+            _setText(_entryCode, state.entryCode);
+          }
         },
-        onSave: _save,
+        child: _FormBody(
+          date: _date,
+          expiry: _expiry,
+          supplier: _supplier,
+          truck: _truck,
+          qty: _qty,
+          sampleTaker: _sampleTaker,
+          entryCode: _entryCode,
+          decisionReason: _decisionReason,
+          followUp: _followUp,
+          rejectedQty: _rejectedQty,
+          sampleNames: _sampleNames,
+          materialController: _materialController,
+          materialFocus: _materialFocus,
+          onChangeMaterial: _changeMaterial,
+          physical: _physical,
+          chemical: _chemical,
+          sampleCount: _sampleCount,
+          onSelectMaterial: _selectMaterial,
+          onAddSample: _addSample,
+          onRemoveSample: _removeSample,
+          onRegenerateEntry: () async {
+            if (context.read<InspectionFormCubit>().state.materialId == null) {
+              return;
+            }
+            final date = _date.text.trim().isEmpty
+                ? todayIso()
+                : _date.text.trim();
+            await context.read<InspectionFormCubit>().regenerateEntryCode(date);
+          },
+          onSave: _save,
+        ),
       ),
     );
   }
@@ -975,7 +1094,9 @@ class _FormBody extends StatelessWidget {
   Widget _scrollableGrid(Widget grid) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        const minWidth = 780.0;
+        // Below this the side-by-side parameter grid is narrower than a single
+        // readable cell, so it scrolls horizontally instead of squeezing.
+        const minWidth = AppBreakpoints.medium + 60;
         final maxW = constraints.maxWidth;
         final width = (maxW.isFinite && maxW > minWidth) ? maxW : minWidth;
         return SingleChildScrollView(

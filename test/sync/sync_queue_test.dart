@@ -447,6 +447,130 @@ void main() {
     });
   });
 
+  group('recoverStalled', () {
+    test('a row stranded in_flight by a crash returns to pending', () async {
+      // The regression this guards: `claim()` sets in_flight, and if the process
+      // dies before `markDone`/`markRetry` the row was never claimable again.
+      // The user's edits were stranded until they reinstalled the app.
+      final id = await insertSample('QC-STALL');
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-STALL',
+            localRef: id,
+            operation: 'update',
+            payload: const {'decisionStatus': 'APPROVED'},
+            baseVersion: 2,
+          ));
+      final claimed = await queue.claim();
+      expect(claimed, hasLength(1));
+      expect((await queue.listQueue()).single['status'], 'in_flight');
+      expect(await queue.claim(), isEmpty, reason: 'single-flight still holds');
+
+      expect(await queue.recoverStalled(), 1);
+
+      final row = (await queue.listQueue()).single;
+      expect(row['status'], 'pending');
+      expect(row['last_error'], 'interrupted mid-push');
+      expect(row['retry_count'], 0, reason: 'a crash is not a failed attempt');
+      expect(row['next_attempt_at'], isNotNull, reason: 'backoff is re-armed');
+    });
+
+    test('a recovered row is claimable again and still carries its payload',
+        () async {
+      final id = await insertSample('QC-STALL2');
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-STALL2',
+            localRef: id,
+            operation: 'update',
+            payload: const {'decisionStatus': 'REJECTED'},
+            baseVersion: 7,
+          ));
+      await queue.claim();
+      await queue.recoverStalled();
+
+      // Backoff is armed, so clear it the way a real sync cycle would.
+      await fixture.db.update(
+        'sync_queue',
+        {'next_attempt_at': null},
+        where: "status = 'pending'",
+      );
+      final reclaimed = await queue.claim();
+      expect(reclaimed, hasLength(1));
+      expect(reclaimed.single.payload['decisionStatus'], 'REJECTED');
+      expect(reclaimed.single.baseVersion, 7);
+    });
+
+    test('a stranded row that had exhausted its retries fails instead of looping',
+        () async {
+      final id = await insertSample('QC-STALL3');
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-STALL3',
+            localRef: id,
+            operation: 'create',
+            payload: const {},
+          ));
+      await queue.claim();
+      // Simulate the row already having burned its budget before it stranded.
+      await fixture.db.update(
+        'sync_queue',
+        {'retry_count': SyncQueue.maxRetries - 1},
+        where: '1 = 1',
+      );
+
+      expect(await queue.recoverStalled(), 1);
+
+      final row = (await queue.listQueue()).single;
+      expect(row['status'], 'failed');
+      expect(row['next_attempt_at'], isNull, reason: 'a failed row waits for retry');
+      expect(row['last_error'], contains('retry limit'));
+      expect(await queue.countBlocked(), 1, reason: 'surfaces on the sync badge');
+    });
+
+    test('recovery leaves pending, failed and conflict rows alone', () async {
+      final id = await insertSample('QC-STALL4');
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-STALL4',
+            localRef: id,
+            operation: 'create',
+            payload: const {},
+          ));
+      final pendingBefore = (await queue.listQueue()).single;
+
+      // Nothing is in_flight: recovery must be a no-op, not a requeue of work.
+      expect(await queue.recoverStalled(), 0);
+      final pendingAfter = (await queue.listQueue()).single;
+      expect(pendingAfter['status'], 'pending');
+      expect(pendingAfter['last_error'], pendingBefore['last_error']);
+      expect(pendingAfter['next_attempt_at'], pendingBefore['next_attempt_at']);
+      expect(pendingAfter['updated_at'], pendingBefore['updated_at']);
+    });
+
+    test('recovery is idempotent: a second pass finds nothing left to fix',
+        () async {
+      final id = await insertSample('QC-STALL5');
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-STALL5',
+            localRef: id,
+            operation: 'update',
+            payload: const {},
+          ));
+      await queue.claim();
+
+      expect(await queue.recoverStalled(), 1);
+      // Must not touch the row again - `syncNow()` calls this on every run.
+      expect(await queue.recoverStalled(), 0);
+    });
+  });
+
   test('purgeSolved drops rows whose local row disappeared, keeps tombstones',
       () async {
     final goneId = await insertSample('QC-12');

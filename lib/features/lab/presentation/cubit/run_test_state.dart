@@ -35,29 +35,28 @@ class RunTestState extends Equatable {
     String? sourceName,
     int? productId,
     bool? running,
-  }) =>
-      RunTestState(
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        analyses: analyses ?? this.analyses,
-        products: products ?? this.products,
-        analysisId: analysisId ?? this.analysisId,
-        sourceType: sourceType ?? this.sourceType,
-        sourceName: sourceName ?? this.sourceName,
-        productId: productId ?? this.productId,
-        running: running ?? this.running,
-      );
+  }) => RunTestState(
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    analyses: analyses ?? this.analyses,
+    products: products ?? this.products,
+    analysisId: analysisId ?? this.analysisId,
+    sourceType: sourceType ?? this.sourceType,
+    sourceName: sourceName ?? this.sourceName,
+    productId: productId ?? this.productId,
+    running: running ?? this.running,
+  );
 
   @override
   List<Object?> get props => [
-        loading,
-        error,
-        analyses,
-        products,
-        analysisId,
-        sourceType,
-        sourceName,
-        productId,
-        running,
-      ];
+    loading,
+    error,
+    analyses,
+    products,
+    analysisId,
+    sourceType,
+    sourceName,
+    productId,
+    running,
+  ];
 }

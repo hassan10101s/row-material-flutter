@@ -59,6 +59,10 @@ dependencies:
   uuid: ^4.6.0
   google_sign_in: 6.3.0
   google_sign_in_dartio: 0.3.0
+  open_filex: ^4.7.0
+  share_plus: ^12.0.2
+  image_picker: ^1.2.3
+  workmanager: ^0.10.10
 
   # `device_info_plus` was dropped on purpose: the device registry only needs
   # `Platform.operatingSystemVersion` (dart:io), and the plugin's `web: ^1.1.0`

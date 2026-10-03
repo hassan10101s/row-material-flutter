@@ -9,11 +9,13 @@ import '../../../design_system/widgets/app_skeleton.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/auth_gate.dart';
+import '../../../core/app_paths.dart';
 import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/locale/locale_service.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../../di/platform_ports.dart';
 import '../../../core/utils/logo_encoding.dart';
 
 import '../../../design_system/feedback/app_feedback.dart';
@@ -217,6 +219,67 @@ class _GeneralPanelState extends State<_GeneralPanel> {
     AppFeedback.success(context, 'تمت إزالة الشعار');
   }
 
+  /// Pick the folder where report PDFs are saved (`export_root_path`).
+  Future<void> _pickExportPath() async {
+    final picker = folderPicker();
+    if (!picker.supported) {
+      // Guarded here as well as in the UI: the button can still be reached by
+      // keyboard, and a silent no-op picker is indistinguishable from a hang.
+      if (!mounted) return;
+      AppFeedback.info(
+        context,
+        AppText.t(
+          'لا يمكن اختيار مجلد على هذا الجهاز، يتم الحفظ داخل مساحة التطبيق',
+          'This device cannot choose a folder; reports are saved inside the app',
+        ),
+      );
+      return;
+    }
+    final current = context.read<GeneralSettingsCubit>().state.exportRootPath;
+    final picked = await picker.pick(
+      startDirectory: current.isEmpty ? null : current,
+      dialogTitle: AppText.t('اختر مجلد حفظ التقارير', 'Choose reports save folder'),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      await context.read<GeneralSettingsCubit>().saveExportRootPath(picked);
+      if (!mounted) return;
+      AppFeedback.success(
+        context,
+        AppText.t('تم حفظ مجلد الحفظ', 'Save folder updated'),
+      );
+    } on AppError catch (e) {
+      if (mounted) AppFeedback.error(context, e.message);
+    } catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    }
+  }
+
+  /// Open the configured folder in the file manager; falls back to the app's
+  /// default exports folder when none is configured.
+  Future<void> _openExportPath() async {
+    String? path = context.read<GeneralSettingsCubit>().state.exportRootPath;
+    if (path.isEmpty) {
+      try {
+        path = (await getIt<AppPaths>().exportsRoot()).path;
+      } catch (_) {
+        if (mounted) {
+          AppFeedback.error(
+              context, AppText.t('تعذر فتح المجلد', 'Could not open the folder'));
+        }
+        return;
+      }
+    }
+    if (!fileDelivery().canReveal) return;
+    final opened = await fileDelivery().reveal(path);
+    if (!opened && mounted) {
+      AppFeedback.error(
+        context,
+        AppText.t('تعذر فتح المجلد', 'Could not open the folder'),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<GeneralSettingsCubit>().state;
@@ -242,6 +305,14 @@ class _GeneralPanelState extends State<_GeneralPanel> {
               dataUri: state.logoDataUri,
               onPick: _pickLogo,
               onRemove: _removeLogo,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            _ExportPathSection(
+              path: state.exportRootPath,
+              canPick: folderPicker().supported,
+              canOpen: fileDelivery().canReveal,
+              onPick: _pickExportPath,
+              onOpen: _openExportPath,
             ),
             const SizedBox(height: AppSpacing.md),
             AppButton(
@@ -419,6 +490,94 @@ class _ReportLogoSection extends StatelessWidget {
   );
   Uint8List get _logoBytes =>
       base64Decode(dataUri.substring(dataUri.indexOf(',') + 1));
+}
+
+class _ExportPathSection extends StatelessWidget {
+  final String path;
+  final VoidCallback onPick;
+  final VoidCallback onOpen;
+
+  /// Whether this platform can choose a save folder. False on Android, where
+  /// the app has no folder picker and no permission to write outside its
+  /// sandbox - the button is hidden rather than shown and ignored.
+  final bool canPick;
+
+  /// Whether this platform can show a file manager on that folder.
+  final bool canOpen;
+
+  const _ExportPathSection({
+    required this.path,
+    required this.onPick,
+    required this.onOpen,
+    required this.canPick,
+    required this.canOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final tail = path.split('\\').last.split('/').last;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'مجلد حفظ تقارير PDF',
+          style: TextStyle(fontSize: 14.spMax, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          path.isNotEmpty
+              ? tail
+              : AppText.t(
+                  'غير محدد — سيتم الحفظ في مجلد التطبيق الافتراضي',
+                  'Not set — reports are saved to the app default folder',
+                ),
+          style: TextStyle(
+            fontSize: 13.spMax,
+            color: AppColors.textMuted,
+          ),
+        ),
+        // Explain the fixed location instead of leaving an unexplained missing
+        // button: on mobile the location is a deliberate choice, not a setting
+        // the user forgot.
+        if (!canPick)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xs),
+            child: Text(
+              AppText.t(
+                'يُحفظ في مساحة التطبيق على هذا الجهاز، ويمكن مشاركته عند إنشاء التقرير',
+                'On this device reports are saved inside the app and can be shared when created',
+              ),
+              style: TextStyle(
+                fontSize: 12.spMax,
+                color: AppColors.textMuted,
+              ),
+            ),
+          ),
+        if (canPick || canOpen)
+          Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
+            child: Row(
+              children: [
+                if (canPick)
+                  AppButton(
+                    label: 'اختيار مجلد',
+                    icon: Icon(Icons.folder_open_outlined, size: 16.r),
+                    onPressed: onPick,
+                  ),
+                if (canPick && canOpen) const SizedBox(width: AppSpacing.sm),
+                if (canOpen)
+                  AppButton(
+                    label: 'فتح',
+                    style: AppButtonStyle.secondary,
+                    icon: Icon(Icons.launch, size: 16.r),
+                    onPressed: onOpen,
+                  ),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class _DatabasePanel extends StatelessWidget {

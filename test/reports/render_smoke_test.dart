@@ -265,26 +265,28 @@ void serviceGroup() {
   });
 
   group('report_service against seeded DB', () {
-    test('inspection report', () async {
+    // Real HTML→PDF via headless Edge can be slow when the full suite runs in
+    // parallel, so give these service tests room instead of the 30s default.
+    test('inspection report', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.inspectionReport(1);
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, 'Sugar_QC-2026-001.pdf');
     });
 
-    test('sample label', () async {
+    test('sample label', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.sampleLabelPdf(1);
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, startsWith('Label_QC-2026-001_'));
       expect(doc.title, 'Label_QC-2026-001');
     });
 
-    test('batch labels', () async {
+    test('batch labels', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.batchLabelsPdf([1]);
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, startsWith('BatchLabels_1_'));
     });
 
-    test('daily report', () async {
+    test('daily report', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.dailyReport('2026-09-01');
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, 'تقرير_اليومي_2026-09-01.pdf');
@@ -292,32 +294,32 @@ void serviceGroup() {
       expect(_isPdf(day.bytes), isTrue);
     });
 
-    test('monthly report with trend', () async {
+    test('monthly report with trend', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.monthlyReport(month: 9, year: 2026);
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, 'تقرير_الشهري_202609.pdf');
     });
 
-    test('yearly report', () async {
+    test('yearly report', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.yearlyReport(year: 2026);
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, 'تقرير_السنوي_2026.pdf');
     });
 
-    test('follow-up report', () async {
+    test('follow-up report', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.followUpReport([1], dateStr: '2026-09-20');
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, startsWith('تقرير_المتابعة_2026-09-20_'));
     });
 
-    test('lab report (daily)', () async {
+    test('lab report (daily)', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.labReport(type: 'daily', dateStr: '2026-09-05');
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, startsWith('تقرير_المختبر_daily_'));
       expect(doc.title, 'التقرير اليومي - 2026-09-05');
     });
 
-    test('save report to export dir tree', () async {
+    test('save report to export dir tree', timeout: Timeout(const Duration(minutes: 3)), () async {
       final db = await _dbHelper.database;
       await db.insert('settings', {
         'key': 'export_root_path',

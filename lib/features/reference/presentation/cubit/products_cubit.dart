@@ -1,13 +1,15 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../../lab/data/lab_repo.dart';
+import '../../../lab/domain/lab_result_repository.dart';
 import 'products_state.dart';
 
 /// Loads products + analyses for the Products tab of the Reference app.
+/// Products and analyses are lab *configuration*, so this tab depends on
+/// [LabConfigurationRepository] rather than the lab's concrete data class.
 class ProductsCubit extends AppCubit<ProductsState> {
   ProductsCubit({required this.repo}) : super(const ProductsState());
 
-  final LabRepo repo;
+  final LabConfigurationRepository repo;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

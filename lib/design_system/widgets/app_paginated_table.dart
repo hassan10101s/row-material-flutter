@@ -14,18 +14,32 @@ import 'app_empty_state.dart';
 /// Columns stretch to the available width, weighted by [AppPaginatedTable
 /// .columnFlex] (or equally when omitted). Below [AppPaginatedTable
 /// .minTableWidth] the table scrolls horizontally instead of squeezing.
+///
+/// Deliberately has **no** form-factor branch (responsive guard rule 4). The
+/// table is a desktop surface; a phone gets [AppAdaptiveList]. The two knobs
+/// that differ per experience - [height] and [rowHeight] - are therefore
+/// parameters, supplied by the variant that calls this widget.
 class AppPaginatedTable extends StatefulWidget {
   final List<String> headers;
   final List<List<Widget>> rows;
   final void Function(int index)? onRowTap;
   final int rowsPerPage;
-  final double height;
+
+  /// Fixed body height, or `null` to fill whatever the caller offers. The
+  /// default stays `470` so every existing call site keeps its authored
+  /// height unchanged.
+  final double? height;
+
   final double minTableWidth;
   final List<double>? columnFlex;
   final Widget? empty;
   final String? totalLabel;
   final bool loading;
   final Widget? headerTrailing;
+
+  /// Height of one body row. 52 is the desktop authored value; the mobile
+  /// variant passes a larger value for a finger-sized target.
+  final double rowHeight;
 
   const AppPaginatedTable({
     super.key,
@@ -40,6 +54,7 @@ class AppPaginatedTable extends StatefulWidget {
     this.totalLabel,
     this.loading = false,
     this.headerTrailing,
+    this.rowHeight = 52,
   });
 
   @override
@@ -68,64 +83,66 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
             (leftIndex + widget.rowsPerPage).clamp(0, widget.rows.length),
           );
 
-    return AppCard(
+    final card = AppCard(
       padding: EdgeInsets.zero,
-      child: SizedBox(
-        height: widget.height,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final scrollable =
-                      constraints.maxWidth < widget.minTableWidth;
-                  final width = scrollable
-                      ? widget.minTableWidth
-                      : constraints.maxWidth;
-                  final widths = _columnWidths(width);
-                  final table = Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _header(context, widths),
-                      const Divider(height: 1),
-                      Expanded(
-                        child: widget.loading
-                            ? _loadingBody()
-                            : pageRows.isEmpty
-                            ? _emptyBody()
-                            : ListView.builder(
-                                padding: EdgeInsets.zero,
-                                itemCount: pageRows.length,
-                                itemExtent: 52,
-                                itemBuilder: (context, index) {
-                                  final row = pageRows[index];
-                                  final realIndex = leftIndex + index;
-                                  return _dataRow(
-                                    context,
-                                    widths,
-                                    row,
-                                    realIndex: realIndex,
-                                  );
-                                },
-                              ),
-                      ),
-                    ],
-                  );
-                  if (!scrollable) return table;
-                  return SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(width: widget.minTableWidth, child: table),
-                  );
-                },
-              ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final scrollable =
+                    constraints.maxWidth < widget.minTableWidth;
+                final width = scrollable
+                    ? widget.minTableWidth
+                    : constraints.maxWidth;
+                final widths = _columnWidths(width);
+                final table = Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _header(context, widths),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: widget.loading
+                          ? _loadingBody()
+                          : pageRows.isEmpty
+                          ? _emptyBody()
+                          : ListView.builder(
+                              padding: EdgeInsets.zero,
+                              itemCount: pageRows.length,
+                              itemExtent: widget.rowHeight,
+                              itemBuilder: (context, index) {
+                                final row = pageRows[index];
+                                final realIndex = leftIndex + index;
+                                return _dataRow(
+                                  context,
+                                  widths,
+                                  row,
+                                  realIndex: realIndex,
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                );
+                if (!scrollable) return table;
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(width: widget.minTableWidth, child: table),
+                );
+              },
             ),
-            const Divider(height: 1),
-            _footer(context, widget.rows.length),
-          ],
-        ),
+          ),
+          const Divider(height: 1),
+          _footer(context, widget.rows.length),
+        ],
       ),
     );
+
+    // `height == null` means "fill what the caller offers": the caller wraps
+    // this in an Expanded and the Column above resolves its own height.
+    final height = widget.height;
+    return height == null ? card : SizedBox(height: height, child: card);
   }
 
   /// Column widths in logical px for the given total table width.
@@ -187,7 +204,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     return InkWell(
       onTap: widget.onRowTap == null ? null : () => widget.onRowTap!(realIndex),
       child: SizedBox(
-        height: 52,
+        height: widget.rowHeight,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
           child: Row(

@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <title>{{ title }}</title>
+    {% if base_url %}<base href="{{ base_url }}">{% endif %}
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <style>
+      @page {
+        size: A4;
+        margin: 9mm 8mm;
+      }
+
+      :root {
+        --navy-900: #000000;
+        --navy-800: #000000;
+        --navy-700: #1a1a1a;
+        --gold-500: #c4972f;
+        --gold-100: #fbf2dc;
+        --slate-900: #182537;
+        --slate-700: #43566d;
+        --slate-500: #6d7f93;
+        --slate-300: #ccd6e2;
+        --slate-200: #dde5ef;
+        --slate-100: #f3f6fa;
+        --white: #ffffff;
+        --success-bg: #e3f7ef;
+        --success-text: #0b6b47;
+        --warning-bg: #fff3dc;
+        --warning-text: #9b5d00;
+        --danger-bg: #fde7e7;
+        --danger-text: #a12626;
+        --shadow: 0 14px 34px rgba(11, 31, 51, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: 'Inter', 'IBM Plex Sans Arabic', "Segoe UI", Tahoma, Arial, sans-serif;
+        color: var(--slate-900);
+        background: var(--white);
+        line-height: 1.45;
+      }
+
+      .page {
+        position: relative;
+        overflow: hidden;
+      }
+
+      .page::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: radial-gradient(
+            circle at top right,
+            rgba(15, 139, 141, 0.08),
+            transparent 28%
+          ),
+          radial-gradient(
+            circle at bottom left,
+            rgba(196, 151, 47, 0.08),
+            transparent 30%
+          );
+        pointer-events: none;
+      }
+
+      .report-shell {
+        position: relative;
+        z-index: 1;
+        border: 1px solid var(--slate-300);
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: var(--shadow);
+        background: var(--white);
+      }
+
+      .top-band {
+        height: 8px;
+        background: linear-gradient(90deg, #000000, #334155, #000000);
+      }
+
+      .header {
+        padding: 18px 20px 14px;
+        border-bottom: 1px solid var(--slate-200);
+        background: linear-gradient(
+          180deg,
+          rgba(243, 246, 250, 0.9),
+          rgba(255, 255, 255, 1)
+        );
+      }
+
+      .header-grid {
+        display: grid;
+        grid-template-columns: 112px 1fr 112px;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand-logo {
+        width: 92px;
+        height: 92px;
+        margin: 0 auto;
+        object-fit: contain;
+        display: block;
+      }
+
+      .brand-center {
+        text-align: center;
+      }
+
+      .eyebrow {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        background: var(--gold-100);
+        color: var(--gold-500);
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.9px;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .title {
+        margin: 0;
+        color: var(--navy-900);
+        font-size: 24px;
+        font-weight: 900;
+        letter-spacing: 0.2px;
+      }
+
+      .subtitle {
+        margin: 6px 0 0;
+        color: var(--slate-700);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .body {
+        padding: 18px 20px 20px;
+      }
+
+      .summary-grid {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+
+      .summary-card {
+        border: 1px solid var(--slate-200);
+        border-radius: 14px;
+        padding: 12px;
+        background: var(--white);
+        min-height: 92px;
+      }
+
+      .summary-card .summary-label {
+        display: block;
+        color: var(--slate-500);
+        font-size: 10px;
+        font-weight: 700;
+        text-transform: uppercase;
+        margin-bottom: 8px;
+      }
+
+      .summary-card .summary-value {
+        display: block;
+        font-size: 24px;
+        font-weight: 900;
+        color: var(--navy-900);
+        line-height: 1;
+      }
+
+      .summary-card .summary-note {
+        display: block;
+        margin-top: 7px;
+        font-size: 11px;
+        color: var(--slate-700);
+        font-weight: 600;
+      }
+
+      .summary-card.primary {
+        background: linear-gradient(145deg, var(--navy-900), var(--navy-700));
+        border-color: transparent;
+      }
+
+      .summary-card.primary .summary-label,
+      .summary-card.primary .summary-value,
+      .summary-card.primary .summary-note {
+        color: var(--white);
+      }
+
+      .summary-card.success {
+        background: var(--success-bg);
+      }
+
+      .summary-card.success .summary-value {
+        color: var(--success-text);
+      }
+
+      .summary-card.warning {
+        background: var(--warning-bg);
+      }
+
+      .summary-card.warning .summary-value {
+        color: var(--warning-text);
+      }
+
+      .summary-card.danger {
+        background: var(--danger-bg);
+      }
+
+      .summary-card.danger .summary-value {
+        color: var(--danger-text);
+      }
+
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin: 14px 0 10px;
+      }
+
+      .section-title {
+        margin: 0;
+        font-size: 16px;
+        font-weight: 900;
+        color: var(--navy-900);
+      }
+
+      .section-caption {
+        color: var(--slate-500);
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .sources-list {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+      }
+
+      .source-card {
+        border: 1px solid var(--slate-200);
+        border-radius: 16px;
+        overflow: hidden;
+        background: linear-gradient(180deg, #fbfdff, #ffffff);
+        page-break-inside: avoid;
+      }
+
+      .source-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 14px;
+        background: linear-gradient(135deg, var(--navy-800), var(--navy-700));
+      }
+
+      .source-title {
+        margin: 0;
+        color: var(--white);
+        font-size: 15px;
+        font-weight: 800;
+      }
+
+      .source-badge {
+        background: rgba(255, 255, 255, 0.14);
+        color: var(--white);
+        border-radius: 999px;
+        padding: 4px 12px;
+        font-size: 11px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .source-meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+        padding: 10px 14px;
+        background: var(--slate-100);
+        border-bottom: 1px solid var(--slate-200);
+      }
+
+      .source-meta-item {
+        font-size: 12px;
+        color: var(--slate-700);
+        font-weight: 700;
+      }
+
+      .source-meta-item b {
+        color: var(--navy-900);
+      }
+
+      .table-wrap {
+        padding: 12px 14px 14px;
+        overflow-x: auto;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 11.5px;
+      }
+
+      thead th {
+        background: var(--slate-100);
+        color: var(--slate-700);
+        font-size: 10px;
+        font-weight: 800;
+        text-transform: uppercase;
+        padding: 8px 6px;
+        border-bottom: 2px solid var(--slate-200);
+        text-align: right;
+        white-space: nowrap;
+      }
+
+      tbody td {
+        padding: 7px 6px;
+        border-bottom: 1px solid var(--slate-200);
+        vertical-align: middle;
+      }
+
+      tbody tr:last-child td {
+        border-bottom: none;
+      }
+
+      .status-cell {
+        border-radius: 999px;
+        padding: 3px 10px;
+        font-size: 10.5px;
+        font-weight: 800;
+        white-space: nowrap;
+        text-align: center;
+        border: 1px solid rgba(0,0,0,0.05);
+        display: inline-block;
+      }
+
+      .status-cell.out {
+        color: var(--danger-text);
+        background-color: var(--danger-bg);
+      }
+
+      .status-cell.in {
+        color: var(--success-text);
+        background-color: var(--success-bg);
+      }
+
+      .status-cell.none {
+        color: var(--slate-500);
+        background-color: var(--slate-100);
+      }
+
+      .result-cell.out {
+        color: var(--danger-text);
+        font-weight: 800;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 40px 20px;
+        color: var(--slate-500);
+      }
+
+      .empty-state h3 {
+        color: var(--slate-700);
+        margin: 0 0 6px;
+      }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 14px 20px;
+        background: var(--slate-900);
+        color: var(--white);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="report-shell">
+        <div class="top-band"></div>
+
+        <div class="header">
+          <div class="header-grid">
+            <div class="header-side"></div>
+            <div class="brand-center">
+              {% if report_logo_data_uri %}
+              <img src="{{ report_logo_data_uri }}" class="brand-logo" alt="Material Lab" />
+              {% endif %}
+              <span class="eyebrow">Lab Tests | تحاليل المعمل</span>
+              <h1 class="title">{{ title }}</h1>
+              <p class="subtitle">{{ period_label }}</p>
+            </div>
+            <div class="header-side"></div>
+          </div>
+        </div>
+
+        <div class="body">
+          <div class="summary-grid">
+            <div class="summary-card primary">
+              <span class="summary-label">Total Tests</span>
+              <span class="summary-value">{{ total }}</span>
+              <span class="summary-note">إجمالي التحاليل</span>
+            </div>
+            <div class="summary-card success">
+              <span class="summary-label">Within Range</span>
+              <span class="summary-value">{{ in_count }}</span>
+              <span class="summary-note">ضمن النطاق</span>
+            </div>
+            <div class="summary-card danger">
+              <span class="summary-label">Out of Range</span>
+              <span class="summary-value">{{ out_count }}</span>
+              <span class="summary-note">خارج النطاق</span>
+            </div>
+            <div class="summary-card warning">
+              <span class="summary-label">No Range</span>
+              <span class="summary-value">{{ no_range_count }}</span>
+              <span class="summary-note">بدون نطاق محدد</span>
+            </div>
+            <div class="summary-card">
+              <span class="summary-label">Sources</span>
+              <span class="summary-value">{{ unique_sources }}</span>
+              <span class="summary-note">خامات / منتجات</span>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <h2 class="section-title">تفاصيل التحاليل</h2>
+            <div class="section-caption">Per-Source Test Details</div>
+          </div>
+
+          {% if sections %}
+          <div class="sources-list">
+            {% for source in sections %}
+            <section class="source-card">
+              <div class="source-header">
+                <h3 class="source-title">{{ source.name }}</h3>
+                <span class="source-badge">{{ source.type_label }} · {{ source.count }} تحليل</span>
+              </div>
+              <div class="source-meta">
+                <div class="source-meta-item">إجمالي التحاليل: <b>{{ source.count }}</b></div>
+                <div class="source-meta-item">خارج النطاق: <b>{{ source.out_count }}</b></div>
+                <div class="source-meta-item">مصدر: <b>{{ source.type_label }}</b></div>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="width: 3%">#</th>
+                      <th style="width: 11%">الوقت</th>
+                      <th style="width: 13%">العينة</th>
+                      <th style="width: 10%">كود الدخول</th>
+                      <th style="width: 14%">التحليل</th>
+                      <th style="width: 12%">النتيجة</th>
+                      <th style="width: 14%">النطاق المعياري</th>
+                      <th style="width: 12%">الحالة</th>
+                      <th style="width: 11%">بواسطة</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for row in source.rows %}
+                    <tr>
+                      <td>{{ row.index }}</td>
+                      <td dir="ltr">{{ row.tested_at }}</td>
+                      <td>{{ row.sample_name }}</td>
+                      <td dir="ltr">{{ row.entry_code }}</td>
+                      <td>{{ row.analysis_name }}</td>
+                      <td class="result-cell {{ row.range_state }}">{{ row.result_text }}</td>
+                      <td>{{ row.range_text }}</td>
+                      <td>
+                        <span class="status-cell {{ row.range_state }}">
+                          {% if row.range_state == 'out' %}خارج النطاق{% elif row.range_state == 'in' %}ضمن النطاق{% else %}بدون نطاق{% endif %}
+                        </span>
+                      </td>
+                      <td>{{ row.tested_by_name }}</td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            {% endfor %}
+          </div>
+          {% else %}
+          <div class="empty-state">
+            <h3>لا توجد تحاليل مطابقة لمعايير الفترة</h3>
+            <p>لم يتم العثور على بيانات.</p>
+          </div>
+          {% endif %}
+        </div>
+
+        <div class="footer">
+          <div><strong>Material Lab</strong> | نظام المعمل الداخلي</div>
+          <div>Prepared Automatically by {{ department_label }}</div>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
+        Powered by Material Lab
+    </div>
+  </body>
+</html>

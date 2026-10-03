@@ -7,6 +7,7 @@ import '../../../core/sync/entity_registry.dart';
 import '../../../core/sync/sync_queue.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../organizations/data/member_write_guard.dart';
+import '../domain/lab_local_repository.dart';
 import '../domain/lab_result_repository.dart';
 import 'lab_repo.dart';
 
@@ -27,7 +28,8 @@ import 'lab_repo.dart';
 /// Plan §6.3: lab results + lab configuration replicate; inventory, consumption
 /// and the worksheet stay device-local but are still guarded.
 class OfflineFirstLabRepository extends LabRepo
-    implements LabResultRepository, LabConfigurationRepository {
+    implements LabResultRepository, LabLocalRepository,
+        LabConfigurationRepository {
   OfflineFirstLabRepository({
     required super.dbHelper,
     required this.guard,
