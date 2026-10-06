@@ -6,6 +6,7 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/responsive/form_factor.dart';
+import 'package:material_lab/design_system/widgets/app_window.dart';
 import 'package:material_lab/features/lab/domain/lab_local_repository.dart';
 import 'package:material_lab/features/lab/domain/lab_result_repository.dart';
 import 'package:material_lab/features/lab/presentation/cubit/constants_cubit.dart';
@@ -335,13 +336,15 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    // The unified window chrome, not a bare AlertDialog: every desktop
+    // editor inherits AppWindow.
     testWidgets('the desktop editor is a dialog', (tester) async {
       await pumpAs(tester, AppFormFactor.desktop, constantsHost());
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AppWindow), findsNothing);
 
       await tester.tap(find.text('Add constant'));
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(AppWindow), findsOneWidget);
 
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
@@ -352,7 +355,7 @@ void main() {
       tester,
     ) async {
       await pumpAs(tester, AppFormFactor.mobile, constantsHost());
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AppWindow), findsNothing);
 
       await tester.tap(find.text('Add constant'));
       await tester.pumpAndSettle();
@@ -362,7 +365,7 @@ void main() {
       // behind the opaque route, hence one and not two.
       expect(find.byType(Scaffold), findsOneWidget);
       expect(find.byType(AppBar), findsOneWidget);
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AppWindow), findsNothing);
       // The route's title, not the button behind it.
       expect(find.text('Add constant'), findsOneWidget);
     });
@@ -433,11 +436,11 @@ void main() {
 
     testWidgets('the desktop unit editor is a dialog', (tester) async {
       await pumpAs(tester, AppFormFactor.desktop, unitsHost());
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AppWindow), findsNothing);
 
       await tester.tap(find.text('New Unit'));
       await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(AppWindow), findsOneWidget);
 
       await tester.tap(find.text('Cancel'));
       await tester.pumpAndSettle();
@@ -446,13 +449,13 @@ void main() {
 
     testWidgets('the phone unit editor is a full-screen route', (tester) async {
       await pumpAs(tester, AppFormFactor.mobile, unitsHost());
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AppWindow), findsNothing);
 
       await tester.tap(find.text('New Unit'));
       await tester.pumpAndSettle();
       expect(find.byType(Scaffold), findsOneWidget);
       expect(find.byType(AppBar), findsOneWidget);
-      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.byType(AppWindow), findsNothing);
     });
 
     testWidgets(

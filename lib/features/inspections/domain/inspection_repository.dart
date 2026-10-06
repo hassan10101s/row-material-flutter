@@ -31,12 +31,13 @@ abstract interface class SampleRepository {
 
   Future<List<Map<String, dynamic>>> list({
     String query = '',
-    int limit = 5000,
+    String status = '',
+    int limit = 50,
     int offset = 0,
     String orderBy = 'id DESC',
   });
 
-  Future<int> count({String query = ''});
+  Future<int> count({String query = '', String status = ''});
 
   Future<Map<String, dynamic>> getById(int id);
 }
@@ -91,12 +92,13 @@ abstract interface class InspectionRepository {
 
   Future<List<Map<String, dynamic>>> list({
     String query = '',
-    int limit = 5000,
+    String status = '',
+    int limit = 50,
     int offset = 0,
     String orderBy = 'id DESC',
   });
 
-  Future<int> count({String query = ''});
+  Future<int> count({String query = '', String status = ''});
 
   Future<List<Map<String, dynamic>>> getStatusHistory(int inspectionId);
 

@@ -177,16 +177,17 @@ class _MembersScreenState extends State<MembersScreen> {
                       _run(() => _repo!.removeMember(memberId: m.id)),
                 ),
               if (_members.isEmpty && !_busy)
-                const Padding(
-                  padding: EdgeInsets.all(24),
-                  child: Text('لا يوجد أعضاء بعد — أضف أول دعوة.'),
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text(AppText.t('لا يوجد أعضاء بعد — أضف أول دعوة.',
+                      'No members yet — add the first invite.')),
                 ),
             ],
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
         Text(
-          'إضافة عضو',
+          AppText.t('إضافة عضو', 'Add member'),
           style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: AppSpacing.sm),

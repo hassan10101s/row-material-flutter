@@ -12,6 +12,7 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_entity_autocomplete.dart';
 import '../../../di/service_locator.dart';
 import '../core/formula_engine.dart';
 import 'cubit/run_test_cubit.dart';
@@ -215,10 +216,23 @@ class _RunTestTabState extends State<RunTestTab> {
   final Map<String, String> _listSelections = {};
 
   TextEditingController _controllerFor(String field) {
+    // Prune controllers for fields that no longer exist (analysis switch):
+    // otherwise stale values + undisposed controllers leak across analyses.
     return _dynamicControllers.putIfAbsent(
       field,
       () => TextEditingController(),
     );
+  }
+
+  void _pruneDynamicControllers(List<String> liveFields) {
+    final live = liveFields.toSet();
+    final stale = [
+      for (final key in _dynamicControllers.keys)
+        if (!live.contains(key)) key,
+    ];
+    for (final key in stale) {
+      _dynamicControllers.remove(key)?.dispose();
+    }
   }
 
   Map<String, dynamic> _fieldCfgOf(
@@ -271,12 +285,14 @@ class _RunTestTabState extends State<RunTestTab> {
   List<String> _dynamicFieldsOf(RunTestState state) {
     for (final a in state.analyses) {
       if (a['id'] == state.analysisId) {
-        return [
+        final fields = [
           for (final f in (a['dynamic_fields'] as List?) ?? const <dynamic>[])
             if ('$f'.trim().isNotEmpty &&
                 '$f'.trim().toLowerCase() != 'sample name')
               '$f',
         ];
+        _pruneDynamicControllers(fields);
+        return fields;
       }
     }
     return const [];
@@ -379,6 +395,9 @@ class _RunTestTabState extends State<RunTestTab> {
       input = TextField(
         controller: _controllerFor(field),
         onChanged: (_) => setState(() {}),
+        keyboardType:
+            const TextInputType.numberWithOptions(decimal: true, signed: true),
+        textInputAction: TextInputAction.next,
         decoration: InputDecoration(
           labelText: AppText.t(field, 'Dynamic value: $field'),
           isDense: true,
@@ -582,31 +601,31 @@ class _RunTestTabState extends State<RunTestTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  DropdownButtonFormField<int>(
-                    initialValue: state.analysisId,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      labelText: AppText.t('التحليل', 'Analysis'),
-                      isDense: true,
+                  AppEntityAutocomplete(
+                    options: state.analyses,
+                    selectedId: state.analysisId,
+                    label: AppText.t('التحليل', 'Analysis'),
+                    hint: AppText.t(
+                      'ابحث باسم التحليل…',
+                      'Search analyses…',
                     ),
-                    items: [
-                      for (final a in state.analyses)
-                        DropdownMenuItem<int>(
-                          value: (a['id'] as num).toInt(),
-                          child: Text(
-                            '${a['name']} (${a['unit'] ?? '%'})',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() {
-                          _formulaAuto = true;
-                          _listSelections.clear();
-                        });
-                        cubit.selectAnalysis(v);
-                      }
+                    prefixIcon: Icons.science_outlined,
+                    displayOf: (a) =>
+                        '${a['name']} (${a['unit'] ?? '%'})',
+                    filter: (a, q) => entityMatches(a, q, [
+                      (r) => '${r['name'] ?? ''}',
+                      (r) => '${r['unit'] ?? ''}',
+                    ]),
+                    onSelected: (v) {
+                      setState(() {
+                        _formulaAuto = true;
+                        _listSelections.clear();
+                        for (final c in _dynamicControllers.values) {
+                          c.dispose();
+                        }
+                        _dynamicControllers.clear();
+                      });
+                      cubit.selectAnalysis((v as num).toInt());
                     },
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -644,94 +663,67 @@ class _RunTestTabState extends State<RunTestTab> {
                       if (state.sourceType == 'raw_material') ...[
                         SizedBox(
                           width: 300.w,
-                          child: DropdownButtonFormField<int>(
-                            initialValue:
-                                state.rawMaterials.any(
-                                  (row) =>
-                                      '${row['id']}' ==
-                                      '${state.rawMaterialId}',
-                                )
-                                ? state.rawMaterialId
-                                : null,
-                            isExpanded: true,
-                            decoration: InputDecoration(
-                              labelText: AppText.t('الخامة', 'Raw material'),
-                              isDense: true,
+                          child: AppEntityAutocomplete(
+                            options: state.rawMaterials,
+                            selectedId: state.rawMaterialId,
+                            label: AppText.t('الخامة', 'Raw material'),
+                            hint: AppText.t(
+                              'ابحث باسم الخامة أو الكود…',
+                              'Search materials…',
                             ),
-                            items: [
-                              for (final material in state.rawMaterials)
-                                DropdownMenuItem<int>(
-                                  value: int.tryParse('${material['id']}'),
-                                  child: Text(
-                                    '${material['material_name']}'
-                                    ' (${material['material_code']})',
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                            ],
-                            onChanged: (id) {
-                              if (id != null) cubit.selectRawMaterial(id);
+                            prefixIcon: Icons.inventory_2_outlined,
+                            displayOf: (m) =>
+                                '${m['material_name']} (${m['material_code']})',
+                            filter: (m, q) => entityMatches(m, q, [
+                              (r) => '${r['material_name'] ?? ''}',
+                              (r) => '${r['material_code'] ?? ''}',
+                            ]),
+                            onSelected: (id) {
+                              if (id != null) {
+                                cubit.selectRawMaterial((id as num).toInt());
+                              }
                             },
+                            onCleared: null,
                           ),
                         ),
                         SizedBox(
                           width: 350.w,
-                          child: DropdownButtonFormField<int>(
-                            initialValue:
-                                state.inspections.any(
-                                  (row) =>
-                                      '${row['id']}' ==
-                                      '${state.selectedInspection['id'] ?? ''}',
-                                )
-                                ? int.tryParse(
-                                    '${state.selectedInspection['id']}',
+                          child: AppEntityAutocomplete(
+                            options: state.inspections,
+                            selectedId: state.selectedInspection['id'],
+                            label: AppText.t(
+                              'رقم محضر الفحص',
+                              'Inspection record',
+                            ),
+                            hint: AppText.t(
+                              'ابحث برقم القيد أو المورد…',
+                              'Search records…',
+                            ),
+                            prefixIcon: Icons.receipt_long_outlined,
+                            helperText: state.loadingInspections
+                                ? AppText.t(
+                                    'جارٍ تحميل المحاضر…',
+                                    'Loading inspection records…',
                                   )
                                 : null,
-                            isExpanded: true,
-                            decoration: InputDecoration(
-                              labelText: AppText.t(
-                                'رقم محضر الفحص',
-                                'Inspection record',
-                              ),
-                              isDense: true,
-                              helperText: state.loadingInspections
-                                  ? AppText.t(
-                                      'جارٍ تحميل المحاضر…',
-                                      'Loading inspection records…',
-                                    )
-                                  : null,
-                            ),
-                            items: [
-                              for (final record in state.inspections)
-                                DropdownMenuItem<int>(
-                                  value: int.tryParse('${record['id']}'),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        '${record['entry_code']} · '
-                                        '${record['inspection_date']}',
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      Text(
-                                        '${AppText.t('المورد', 'Supplier')}: '
-                                        '${record['supplier'] ?? '—'} · '
-                                        '${AppText.t('السيارة', 'Vehicle')}: '
-                                        '${record['truck_number'] ?? '—'}',
-                                        style: TextStyle(
-                                          color: AppColors.textMuted,
-                                          fontSize: 11.spMax,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                            ],
-                            onChanged: (id) {
-                              if (id != null) cubit.selectInspection(id);
+                            enabled: !state.loadingInspections,
+                            displayOf: (r) =>
+                                '${r['entry_code']} · ${r['inspection_date']}',
+                            subtitleOf: (r) =>
+                                '${AppText.t('المورد', 'Supplier')}: '
+                                '${r['supplier'] ?? '—'} · '
+                                '${AppText.t('السيارة', 'Vehicle')}: '
+                                '${r['truck_number'] ?? '—'}',
+                            filter: (r, q) => entityMatches(r, q, [
+                              (x) => '${x['entry_code'] ?? ''}',
+                              (x) => '${x['supplier'] ?? ''}',
+                              (x) => '${x['truck_number'] ?? ''}',
+                              (x) => '${x['inspection_date'] ?? ''}',
+                            ]),
+                            onSelected: (id) {
+                              if (id != null) {
+                                cubit.selectInspection((id as num).toInt());
+                              }
                             },
                           ),
                         ),
@@ -764,44 +756,31 @@ class _RunTestTabState extends State<RunTestTab> {
                           else
                             SizedBox(
                               width: 220.w,
-                              child: DropdownButtonFormField<String>(
-                                initialValue:
-                                    (state.selectedInspection['sample_names']
-                                                as List?)
-                                            ?.map((name) => '$name'.trim())
-                                            .where((name) => name.isNotEmpty)
-                                            .contains(
-                                              state.selectedSampleName,
-                                            ) ==
-                                        true
-                                    ? state.selectedSampleName
-                                    : null,
-                                isExpanded: true,
-                                decoration: InputDecoration(
-                                  labelText: AppText.t(
-                                    'العينة في المحضر',
-                                    'Inspection sample',
-                                  ),
-                                  isDense: true,
-                                ),
-                                items: [
+                              child: AppEntityAutocomplete(
+                                options: [
                                   for (final name
-                                      in (state.selectedInspection['sample_names']
+                                      in (state.selectedInspection[
+                                                  'sample_names']
                                               as List? ??
                                           const []))
                                     if ('$name'.trim().isNotEmpty)
-                                      DropdownMenuItem<String>(
-                                        value: '$name'.trim(),
-                                        child: Text(
-                                          '$name',
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
+                                      {'id': '$name'.trim(), 'name': '$name'.trim()},
                                 ],
-                                onChanged: (name) {
-                                  if (name != null) {
-                                    cubit.selectInspectionSample(name);
-                                  }
+                                selectedId: state.selectedSampleName,
+                                label: AppText.t(
+                                  'العينة في المحضر',
+                                  'Inspection sample',
+                                ),
+                                hint: AppText.t(
+                                  'ابحث باسم العينة…',
+                                  'Search samples…',
+                                ),
+                                displayOf: (r) => '${r['name']}',
+                                filter: (r, q) => entityMatches(r, q, [
+                                  (x) => '${x['name'] ?? ''}',
+                                ]),
+                                onSelected: (name) {
+                                  cubit.selectInspectionSample('$name');
                                 },
                               ),
                             ),
@@ -809,25 +788,23 @@ class _RunTestTabState extends State<RunTestTab> {
                       ] else ...[
                         SizedBox(
                           width: 280.w,
-                          child: DropdownButtonFormField<int>(
-                            initialValue: state.productId,
-                            isExpanded: true,
-                            decoration: InputDecoration(
-                              labelText: AppText.t('المنتج', 'Product'),
-                              isDense: true,
+                          child: AppEntityAutocomplete(
+                            options: state.products,
+                            selectedId: state.productId,
+                            label: AppText.t('المنتج', 'Product'),
+                            hint: AppText.t(
+                              'ابحث باسم المنتج…',
+                              'Search products…',
                             ),
-                            items: [
-                              for (final p in state.products)
-                                DropdownMenuItem<int>(
-                                  value: (p['id'] as num).toInt(),
-                                  child: Text(
-                                    '${p['name']}',
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                            ],
-                            onChanged: (v) {
-                              if (v != null) cubit.selectProduct(v);
+                            prefixIcon: Icons.category_outlined,
+                            displayOf: (p) => '${p['name']}',
+                            filter: (p, q) => entityMatches(p, q, [
+                              (r) => '${r['name'] ?? ''}',
+                            ]),
+                            onSelected: (v) {
+                              if (v != null) {
+                                cubit.selectProduct((v as num).toInt());
+                              }
                             },
                           ),
                         ),
@@ -928,6 +905,10 @@ class _RunTestTabState extends State<RunTestTab> {
                   else ...[
                     TextField(
                       controller: _resultText,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _run(),
                       decoration: InputDecoration(
                         labelText: formulaEnabled
                             ? AppText.t('النتيجة اليدوية', 'Manual result')

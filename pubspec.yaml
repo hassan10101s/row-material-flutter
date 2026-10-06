@@ -72,6 +72,12 @@ dependencies:
   # constraint is incompatible with the sqlite3 2.x line required by
   # `sqflite_common_ffi`.
 
+dependency_overrides:
+  # FirebaseAuth's Android ID-token listener can run on a Firebase worker
+  # thread; use the local copy that posts those events to Android's main thread.
+  firebase_auth:
+    path: third_party/firebase_auth
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

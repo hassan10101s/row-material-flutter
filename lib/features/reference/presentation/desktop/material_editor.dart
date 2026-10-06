@@ -1,16 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 
-import '../../../../design_system/tokens/app_colors.dart';
-import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../../../lab/domain/lab_result_repository.dart';
 import '../../domain/reference_repository.dart';
 import '../material_editor.dart';
 
-/// The material editor as the 880x680 dialog it has always been.
+/// The material editor as a unified window dialog (880x680).
 ///
-/// The dialog shell and the title stay here; [MaterialEditor] supplies only the
-/// form, so the desktop screen renders exactly as it did before the split.
+/// The shell is the design-system [AppWindow]; [MaterialEditor] supplies only
+/// the form (it manages its own scroll + action row, hence `scrollBody` is
+/// off), so the desktop screen keeps its exact layout in the shared chrome.
 class DesktopMaterialEditor extends StatelessWidget {
   const DesktopMaterialEditor({
     super.key,
@@ -25,41 +24,17 @@ class DesktopMaterialEditor extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.all(AppSpacing.lg),
-      backgroundColor: AppColors.surface,
-      child: SizedBox(
-        width: 880.w,
-        height: 680.h,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.lg,
-                AppSpacing.lg,
-                AppSpacing.lg,
-                0,
-              ),
-              child: Text(
-                materialEditorTitle(materialId == null),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Expanded(
-              child: MaterialEditor(
-                refRepo: refRepo,
-                labConfig: labConfig,
-                materialId: materialId,
-                actions: (_, state) => MaterialEditorActions(state: state),
-              ),
-            ),
-          ],
-        ),
+    return AppWindow(
+      title: materialEditorTitle(materialId == null),
+      icon: Icons.science_outlined,
+      size: AppWindowSize.lg,
+      height: 680,
+      scrollBody: false,
+      child: MaterialEditor(
+        refRepo: refRepo,
+        labConfig: labConfig,
+        materialId: materialId,
+        actions: (_, state) => MaterialEditorActions(state: state),
       ),
     );
   }

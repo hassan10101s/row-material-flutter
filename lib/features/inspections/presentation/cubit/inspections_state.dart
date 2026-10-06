@@ -1,7 +1,11 @@
 import 'package:flutter/foundation.dart' show immutable;
 import 'package:equatable/equatable.dart';
 
-/// Inspections ledger state: all rows plus the client-filtered [visible] list.
+/// Inspections ledger state: server-filtered page plus its total.
+///
+/// `rows`/`visible` are the current page (server already applied query+status);
+/// keeping both preserves the existing screen/export call sites while the
+/// source of truth moved from in-memory filtering to SQLite LIMIT/OFFSET.
 @immutable
 class InspectionsState extends Equatable {
   final List<Map<String, dynamic>> rows;
@@ -11,6 +15,9 @@ class InspectionsState extends Equatable {
   final bool loading;
   final bool exporting;
   final String? error;
+  final int page;
+  final int pageSize;
+  final int total;
 
   const InspectionsState({
     this.rows = const [],
@@ -20,6 +27,9 @@ class InspectionsState extends Equatable {
     this.loading = true,
     this.exporting = false,
     this.error,
+    this.page = 0,
+    this.pageSize = 50,
+    this.total = 0,
   });
 
   InspectionsState copyWith({
@@ -30,6 +40,9 @@ class InspectionsState extends Equatable {
     bool? loading,
     bool? exporting,
     String? error,
+    int? page,
+    int? pageSize,
+    int? total,
   }) =>
       InspectionsState(
         rows: rows ?? this.rows,
@@ -39,8 +52,12 @@ class InspectionsState extends Equatable {
         loading: loading ?? this.loading,
         exporting: exporting ?? this.exporting,
         error: error ?? this.error,
+        page: page ?? this.page,
+        pageSize: pageSize ?? this.pageSize,
+        total: total ?? this.total,
       );
 
   @override
-  List<Object?> get props => [rows, visible, query, status, loading, exporting, error];
+  List<Object?> get props =>
+      [rows, visible, query, status, loading, exporting, error, page, pageSize, total];
 }

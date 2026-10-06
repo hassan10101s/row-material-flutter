@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -18,12 +19,21 @@ void main() {
   late _ReportServiceMock repo;
   late ReportsCubit cubit;
 
+  setUpAll(() {
+    registerFallbackValue(ReportDoc(filename: 'x.pdf', bytes: Uint8List(0)));
+  });
+
   setUp(() {
     // The UI strings are chosen by a global; pin them so the finders below are
     // stable.
     AppText.useLanguage('en');
     repo = _ReportServiceMock();
     cubit = ReportsCubit(repo: repo);
+    // The cubit persists every report before announcing it; a bare filename
+    // is what the old code handed to the export sheet (and nothing could
+    // open it). Stub the write so the happy-path tests assert a real path.
+    when(() => repo.saveReport(any())).thenAnswer((invocation) async => File(
+        'C:/exports/${(invocation.positionalArguments.single as ReportDoc).filename}'));
   });
 
   tearDown(() => cubit.close());
@@ -165,6 +175,26 @@ void main() {
       await tester.pumpAndSettle();
 
       verify(() => repo.dailyReport('2026-02-28')).called(1);
+    });
+
+    testWidgets('a finished report is saved to disk before announcing it',
+        (tester) async {
+      await pump(tester);
+
+      when(() => repo.dailyReport(any()))
+          .thenAnswer((_) async => ReportDoc(filename: 'd.pdf', bytes: Uint8List(0)));
+
+      await tester.enterText(field('Date (YYYY-MM-DD)'), '2026-02-28');
+      await tester.pump();
+
+      await tester.tap(button(0));
+      await tester.pumpAndSettle();
+
+      // The export sheet can only open a real file: the cubit must persist
+      // the bytes and announce the written path, not the bare filename.
+      verify(() => repo.saveReport(any(that: isA<ReportDoc>()))).called(1);
+      expect(cubit.state.lastExport, endsWith('d.pdf'));
+      expect(cubit.state.lastExport, isNot('d.pdf'));
     });
   });
 }

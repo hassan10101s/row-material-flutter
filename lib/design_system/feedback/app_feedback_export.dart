@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_strings.dart';
@@ -34,10 +36,8 @@ class AppFeedbackExport {
     // widget test, an early error path) must not turn that success into a crash,
     // so the port is resolved through the shared helper.
     final delivery = fileDelivery();
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    // A banner is already on screen; a modal sheet on top of it would stack two
-    // transient surfaces and hide the one that explains what happened.
-    messenger?.hideCurrentSnackBar();
+    // All feedback now goes through the top AppFeedback overlay, so there is
+    // no bottom ScaffoldMessenger snackbar left to hide here.
 
     if (!delivery.canReveal && !delivery.canShare) {
       AppFeedback.show(
@@ -51,13 +51,38 @@ class AppFeedbackExport {
       return;
     }
 
-    await showModalBottomSheet<void>(
+    // Phones keep the bottom sheet (thumb reach); desktops get a centered
+    // half-screen dialog — a bottom sheet on a 1080p window looks broken and
+    // forces the eye to the very bottom edge for two buttons.
+    if (Platform.isAndroid || Platform.isIOS) {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => _ExportSheet(
+          filePath: filePath,
+          documentName: documentName,
+          delivery: delivery,
+        ),
+      );
+      return;
+    }
+
+    await showDialog<void>(
       context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => _ExportSheet(
-        filePath: filePath,
-        documentName: documentName,
-        delivery: delivery,
+      builder: (dialogContext) => Dialog(
+        insetPadding:
+            const EdgeInsets.symmetric(horizontal: 64, vertical: 48),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 480),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+            child: _ExportSheet(
+              filePath: filePath,
+              documentName: documentName,
+              delivery: delivery,
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
+import '../../domain/parameter_type.dart';
 import '../../domain/reference_repository.dart';
 import 'params_state.dart';
 
@@ -17,10 +18,18 @@ class ParamsCubit extends AppCubit<ParamsState> {
   final bool loadUnits;
 
   ParamsCubit.chemical({required ReferenceRepository repo})
-    : this(repo: repo, parameterType: 'chemical', loadUnits: true);
+    : this(
+          repo: repo,
+          parameterType: ParameterType.chemical.value,
+          loadUnits: true,
+        );
 
   ParamsCubit.physical({required ReferenceRepository repo})
-    : this(repo: repo, parameterType: 'physical', loadUnits: true);
+    : this(
+          repo: repo,
+          parameterType: ParameterType.physical.value,
+          loadUnits: true,
+        );
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

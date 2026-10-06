@@ -1,9 +1,8 @@
-import 'dart:convert';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import '../entity_registry.dart';
+import '../sync_codec.dart';
 import 'remote_data_source.dart';
 
 /// Firestore implementation of the remote seam (plan §5/P6).
@@ -59,14 +58,25 @@ class FirestoreDataSource implements RemoteDataSource {
     required Map<String, dynamic> data,
     required int baseVersion,
   }) async {
-    final bytes = jsonEncode(data).toLowerCase().codeUnits.length;
+    // Sanitized first: a stray Timestamp/DateTime in the queued payload must
+    // size-estimate instead of throwing `Instance of 'Timestamp'`.
+    final safeData = SyncCodec.sanitizeMap(data);
+    final bytes = SyncCodec.byteSize(safeData);
     if (bytes > maxPayloadBytes) {
       return PushResult.oversized('Document exceeds $maxPayloadBytes bytes ($bytes)');
     }
     final ref = _orgCollection(organizationId, collection).doc(documentId);
     final snapshot = await ref.get();
     final exists = snapshot.exists;
-    final current = exists ? snapshot.data() ?? const <String, dynamic>{} : const <String, dynamic>{};
+    final rawCurrent =
+        exists ? snapshot.data() ?? const <String, dynamic>{} : const <String, dynamic>{};
+    // The raw snapshot carries Firestore Timestamp objects; the conflict row
+    // is JSON, so hand out the sanitized copy. This was the exact
+    // `Converting object ... Instance of 'Timestamp'` crash:
+    // PushWorker did jsonEncode(result.remote) on the raw map.
+    final current = exists
+        ? SyncCodec.sanitizeMap(Map<String, dynamic>.from(rawCurrent))
+        : const <String, dynamic>{};
     final currentVersion = (current['version'] as num?)?.toInt() ?? 0;
 
     // The Rules enforce this too; checking client-side turns a rejected write
@@ -79,14 +89,19 @@ class FirestoreDataSource implements RemoteDataSource {
       );
     }
 
-    final payload = _materialize(data, version: baseVersion + 1);
+    final payload = _materialize(safeData, version: baseVersion + 1);
     try {
       if (!exists) {
         await ref.set(payload);
       } else {
         await ref.update(payload);
       }
-      return PushResult.success(baseVersion + 1, payload: jsonEncode(payload));
+      // Never encode the materialized map: it holds FieldValue.serverTimestamp()
+      // instances which jsonEncode cannot represent. Log the sanitized
+      // pre-materialized form + version instead (same bytes the size guard saw).
+      final logged = Map<String, dynamic>.from(safeData)
+        ..['version'] = baseVersion + 1;
+      return PushResult.success(baseVersion + 1, payload: SyncCodec.encodeMap(logged));
     } on FirebaseException catch (e) {
       return _classify(e, current);
     } on Object catch (e) {
@@ -101,10 +116,12 @@ class FirestoreDataSource implements RemoteDataSource {
     required String documentId,
     required Map<String, dynamic> data,
   }) async {
-    final payload = _materialize(data, version: 1);
+    final safeData = SyncCodec.sanitizeMap(data);
+    final payload = _materialize(safeData, version: 1);
     try {
       await _orgCollection(organizationId, collection).doc(documentId).set(payload);
-      return PushResult.success(1, payload: jsonEncode(payload));
+      final logged = Map<String, dynamic>.from(safeData)..['version'] = 1;
+      return PushResult.success(1, payload: SyncCodec.encodeMap(logged));
     } on FirebaseException catch (e) {
       return _classify(e, null);
     } on Object catch (e) {
@@ -200,7 +217,7 @@ class FirestoreDataSource implements RemoteDataSource {
     required Map<String, dynamic> data,
   }) async {
     await _orgCollection(organizationId, SyncCollection.devices).doc(deviceId).set(
-          _materialize(data, version: 1),
+          _materialize(SyncCodec.sanitizeMap(data), version: 1),
           SetOptions(merge: true),
         );
   }
@@ -278,11 +295,17 @@ class FirestoreDataSource implements RemoteDataSource {
 
   static Object? _sqliteSafeValue(Object? value) {
     if (value is Timestamp) return value.toDate().toIso8601String();
+    if (value is DateTime) return value.toIso8601String();
     if (value is List) return [for (final v in value) _sqliteSafeValue(v)];
     if (value is Map) {
       return {
         for (final e in value.entries) '${e.key}': _sqliteSafeValue(e.value),
       };
+    }
+    // Defensive: FieldValue / GeoPoint / Blob must never reach SQLite or JSON.
+    // Delegate to the shared codec so pull and push agree on the string form.
+    if (value != null && value is! num && value is! bool && value is! String) {
+      return SyncCodec.sanitizeValue(value);
     }
     return value;
   }
@@ -300,18 +323,28 @@ class FirestoreDataSource implements RemoteDataSource {
   }
 
   static PushResult _classify(FirebaseException e, Map<String, dynamic>? current) {
+    // Belt-and-braces: callers already sanitize, but a raw snapshot must never
+    // become JSON-encodable `remote` downstream in PushWorker.
+    Map<String, dynamic>? safeRemote;
+    if (current != null) {
+      try {
+        safeRemote = SyncCodec.sanitizeMap(current);
+      } catch (_) {
+        safeRemote = const <String, dynamic>{};
+      }
+    }
     switch (e.code) {
       case 'permission-denied':
       case 'unauthenticated':
       case 'failed-precondition':
       case 'invalid-argument':
-        return PushResult.rejected(e.message ?? e.code, remote: current);
+        return PushResult.rejected(e.message ?? e.code, remote: safeRemote);
       case 'not-found':
         return PushResult.rejected(e.message ?? e.code, remote: null);
       case 'failed-precondition-quota':
       case 'resource-exhausted':
       case 'resource-exhausted-quota':
-        return PushResult.rejected(e.message ?? e.code, remote: current);
+        return PushResult.rejected(e.message ?? e.code, remote: safeRemote);
       case 'unavailable':
       case 'deadline-exceeded':
       case 'internal':

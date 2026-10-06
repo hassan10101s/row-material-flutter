@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
+import 'app_window.dart';
 
 /// The "really delete this?" confirmation used by every master-data tab.
 ///
@@ -9,6 +10,8 @@ import '../tokens/app_colors.dart';
 /// and the same danger colour. When that lives in a dialog per tab, the fourth
 /// tab gets a green confirm button because somebody copy-pasted it. So it lives
 /// here once and the variants cannot drift.
+///
+/// Renders in the unified [AppWindow] chrome like every other dialog.
 class AppDeleteConfirmDialog extends StatelessWidget {
   const AppDeleteConfirmDialog({
     super.key,
@@ -54,9 +57,11 @@ class AppDeleteConfirmDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(title),
-      content: Text('${AppText.t('حذف', 'Delete')} "$name"?'),
+    return AppWindow(
+      title: title,
+      icon: Icons.delete_outline,
+      accent: AppColors.danger,
+      size: AppWindowSize.sm,
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(false),
@@ -68,6 +73,7 @@ class AppDeleteConfirmDialog extends StatelessWidget {
           child: Text(confirmLabel ?? AppStrings.delete),
         ),
       ],
+      child: Text('${AppText.t('حذف', 'Delete')} "$name"؟'),
     );
   }
 }

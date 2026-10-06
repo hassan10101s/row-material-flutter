@@ -119,6 +119,15 @@ class _SyncScreenState extends State<SyncScreen> {
         await _refresh();
       });
 
+  /// "تجاهل الكل": dismiss every unresolved conflict without picking a side.
+  /// Purely local (no sync cycle), so it also works offline — the stale rows
+  /// just stop blocking the badge until fresh writes re-queue themselves.
+  Future<void> _dismissAll() =>
+      _guarded(() async {
+        await _queue.dismissAllConflicts();
+        await _refresh();
+      });
+
   @override
   Widget build(BuildContext context) {
     final gate = getIt<AuthGate>();
@@ -137,7 +146,8 @@ class _SyncScreenState extends State<SyncScreen> {
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('المزامنة', style: Theme.of(context).textTheme.headlineSmall),
+            Text(AppText.t('المزامنة', 'Sync'),
+                style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: AppSpacing.sm),
             Wrap(
               alignment: WrapAlignment.end,
@@ -146,9 +156,10 @@ class _SyncScreenState extends State<SyncScreen> {
               runSpacing: AppSpacing.sm,
               children: [
                 if (gate.session.offline)
-                  const Text('جلسة محلية (بدون توكن حي)'),
+                  Text(AppText.t(
+                      'جلسة محلية (بدون توكن حي)', 'Local session (no live token)')),
                 AppButton(
-                  label: 'مزامنة الآن',
+                  label: AppText.t('مزامنة الآن', 'Sync now'),
                   small: true,
                   loading: _busy,
                   icon: const Icon(Icons.sync, size: 18),
@@ -156,13 +167,20 @@ class _SyncScreenState extends State<SyncScreen> {
                 ),
                 if ((status?.blocked ?? 0) > 0)
                   AppButton(
-                    label: 'إعادة المحاولة',
+                    label: AppText.t('إعادة المحاولة', 'Retry'),
                     small: true,
                     icon: const Icon(Icons.refresh, size: 18),
                     onPressed: _busy || !gate.online ? null : _retryAll,
                   ),
+                if ((status?.conflicts ?? 0) > 0)
+                  AppButton(
+                    label: AppText.t('تجاهل الكل', 'Dismiss all'),
+                    small: true,
+                    icon: const Icon(Icons.clear_all, size: 18),
+                    onPressed: _busy ? null : _dismissAll,
+                  ),
                 AppButton(
-                  label: 'تنزيل السجل',
+                  label: AppText.t('تنزيل السجل', 'Download log'),
                   small: true,
                   icon: const Icon(Icons.cloud_download_outlined, size: 18),
                   onPressed: _busy || !gate.online ? null : _downloadHistory,
@@ -235,12 +253,12 @@ class _SyncScreenState extends State<SyncScreen> {
         ],
         const SizedBox(height: AppSpacing.lg),
         Text(
-          'الطابور',
+          AppText.t('الطابور', 'Queue'),
           style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: AppSpacing.sm),
         if (_queueRows.isEmpty)
-          const Text('لا توجد عناصر في الطابور.')
+          Text(AppText.t('لا توجد عناصر في الطابور.', 'Queue is empty.'))
         else
           Card(
             child: Column(
@@ -257,12 +275,13 @@ class _SyncScreenState extends State<SyncScreen> {
           ),
         const SizedBox(height: AppSpacing.lg),
         Text(
-          'التعارضات',
+          AppText.t('التعارضات', 'Conflicts'),
           style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: AppSpacing.sm),
         if (_rows.isEmpty)
-          const Text('لا توجد تعارضات — كل البيانات متزامنة.')
+          Text(AppText.t(
+              'لا توجد تعارضات — كل البيانات متزامنة.', 'No conflicts — all data is synced.'))
         else
           Card(
             child: Column(
@@ -402,13 +421,16 @@ class _QueueRow extends StatelessWidget {
   final Map<String, Object?> row;
   final VoidCallback? onRetry;
 
-  static const Map<String, String> _statusAr = {
-    'pending': 'في الانتظار',
-    'in_flight': 'جارٍ الإرسال',
-    'failed': 'فشل',
-    'conflict': 'تعارض',
-    'blocked': 'محجوب',
-  };
+  static String _statusLabel(String status) {
+    return switch (status) {
+      'pending' => AppText.t('في الانتظار', 'Pending'),
+      'in_flight' => AppText.t('جارٍ الإرسال', 'Sending'),
+      'failed' => AppText.t('فشل', 'Failed'),
+      'conflict' => AppText.t('تعارض', 'Conflict'),
+      'blocked' => AppText.t('محجوب', 'Blocked'),
+      _ => status,
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -420,14 +442,16 @@ class _QueueRow extends StatelessWidget {
       title: Text('${row['entity_type']} · ${row['entity_id']}'),
       subtitle: Text(
         [
-          _statusAr[status] ?? status,
+          _statusLabel(status),
           '${row['operation']}',
-          if (retryCount > 0) 'محاولات: $retryCount',
+          if (retryCount > 0)
+            AppText.t('محاولات: $retryCount', 'Attempts: $retryCount'),
           if (error != null && '$error'.isNotEmpty) '$error',
         ].join(' · '),
       ),
       trailing: status == 'failed' || status == 'conflict'
-          ? TextButton(onPressed: onRetry, child: const Text('إعادة'))
+          ? TextButton(
+              onPressed: onRetry, child: Text(AppText.t('إعادة', 'Retry')))
           : null,
     );
   }
@@ -453,10 +477,12 @@ class _ConflictRow extends StatelessWidget {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextButton(onPressed: onKeepLocal, child: const Text('إبقاء المحلي')),
+          TextButton(
+              onPressed: onKeepLocal,
+              child: Text(AppText.t('إبقاء المحلي', 'Keep local'))),
           TextButton(
             onPressed: onKeepRemote,
-            child: const Text('إبقاء الخادم'),
+            child: Text(AppText.t('إبقاء الخادم', 'Keep server')),
           ),
         ],
       ),

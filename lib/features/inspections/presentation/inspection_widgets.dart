@@ -6,6 +6,8 @@ import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../design_system/widgets/app_dropdown.dart';
+import '../../../design_system/widgets/app_window.dart';
 import '../../../app/auth_gate.dart';
 import '../../../di/service_locator.dart';
 import '../domain/inspection_repository.dart';
@@ -27,10 +29,9 @@ CheckResult checkResultPass({
   if (!numeric || vText.isEmpty) return const CheckResult(pass: null, note: '');
   final v = double.tryParse(vText.replaceAll(',', '.'));
   if (v == null) return const CheckResult(pass: null, note: '');
-  final nums = RegExp(r'\d+\.?\d*')
-      .allMatches(reference)
-      .map((m) => double.parse(m.group(0)!))
-      .toList();
+  final nums = RegExp(
+    r'\d+\.?\d*',
+  ).allMatches(reference).map((m) => double.parse(m.group(0)!)).toList();
   bool? pass;
   if (nums.length >= 2) {
     final lower = nums[0] < nums[1] ? nums[0] : nums[1];
@@ -60,9 +61,15 @@ class InfoItem extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
+        Text(
+          label,
+          style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+        ),
         const SizedBox(height: AppSpacing.xxs),
-        Text(value, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.spMax)),
+        Text(
+          value,
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14.spMax),
+        ),
       ],
     );
   }
@@ -84,14 +91,16 @@ class DecisionDialog extends StatefulWidget {
 
 class _DecisionDialogState extends State<DecisionDialog> {
   final _repo = getIt<InspectionRepository>();
-  late String _status =
-      '${widget.inspection['decision_status'] ?? 'APPROVED'}';
-  late final TextEditingController _reason =
-      TextEditingController(text: '${widget.inspection['decision_reason'] ?? ''}');
-  late final TextEditingController _followUp =
-      TextEditingController(text: '${widget.inspection['follow_up_note'] ?? ''}');
-  late final TextEditingController _rejected =
-      TextEditingController(text: '${widget.inspection['rejected_quantity'] ?? ''}');
+  late String _status = '${widget.inspection['decision_status'] ?? 'APPROVED'}';
+  late final TextEditingController _reason = TextEditingController(
+    text: '${widget.inspection['decision_reason'] ?? ''}',
+  );
+  late final TextEditingController _followUp = TextEditingController(
+    text: '${widget.inspection['follow_up_note'] ?? ''}',
+  );
+  late final TextEditingController _rejected = TextEditingController(
+    text: '${widget.inspection['rejected_quantity'] ?? ''}',
+  );
   bool _saving = false;
 
   @override
@@ -118,7 +127,12 @@ class _DecisionDialogState extends State<DecisionDialog> {
           'follow_up_note': _followUp.text.trim(),
           'rejected_quantity': _rejected.text.trim(),
         },
-        UserContext(id: user.id, uid: user.uid, fullName: user.fullName, role: user.role),
+        UserContext(
+          id: user.id,
+          uid: user.uid,
+          fullName: user.fullName,
+          role: user.role,
+        ),
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
@@ -132,68 +146,14 @@ class _DecisionDialogState extends State<DecisionDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-            title: Text(AppText.t('تحديث القرار', 'Update decision')),
-      content: SizedBox(
-        width: 460.w,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: _status,
-                isExpanded: true,
-                        decoration: InputDecoration(labelText: AppText.t('القرار', 'Decision'), isDense: true),
-                        items: [
-                          DropdownMenuItem(value: 'APPROVED', child: Text(AppText.t('قبول نهائي', 'Approved'))),
-                    DropdownMenuItem(
-                      value: 'CONDITIONAL_APPROVAL', child: Text(AppText.t('قبول مشروط', 'Conditional'))),
-                    DropdownMenuItem(
-                      value: 'PARTIAL_REJECTION', child: Text(AppText.t('رفض جزئي', 'Partial rejection'))),
-                    DropdownMenuItem(
-                      value: 'FULL_REJECTION', child: Text(AppText.t('رفض كامل', 'Full rejection'))),
-                ],
-                onChanged: (v) {
-                  if (v != null) setState(() => _status = v);
-                },
-              ),
-              if (_status == 'CONDITIONAL_APPROVAL') ...[
-                const SizedBox(height: AppSpacing.md),
-                TextField(
-                  controller: _followUp,
-                  maxLines: 3,
-                          decoration: InputDecoration(
-                            labelText: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
-                            isDense: true,
-                          ),
-                ),
-              ],
-              if (_status == 'PARTIAL_REJECTION') ...[
-                const SizedBox(height: AppSpacing.md),
-                TextField(
-                  controller: _rejected,
-                          decoration: InputDecoration(
-                            labelText: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
-                            isDense: true,
-                          ),
-                ),
-              ],
-              if (_status == 'PARTIAL_REJECTION' || _status == 'FULL_REJECTION') ...[
-                const SizedBox(height: AppSpacing.md),
-                TextField(
-                  controller: _reason,
-                  maxLines: 3,
-                          decoration: InputDecoration(
-                            labelText: AppText.t('سبب القرار', 'Decision reason'),
-                            isDense: true,
-                          ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
+    // A legacy `decision_status` in the row used to crash this dialog on open
+    // (`There should be exactly one item...`); [AppDropdown] shows it as a
+    // disabled row until a valid decision is picked.
+    return AppWindow(
+      title: AppText.t('تحديث القرار', 'Update decision'),
+      icon: Icons.rule_outlined,
+      size: AppWindowSize.sm,
+      maxWidth: 460,
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(false),
@@ -202,7 +162,7 @@ class _DecisionDialogState extends State<DecisionDialog> {
         FilledButton(
           onPressed: _saving ? null : _save,
           child: _saving
-? SizedBox(
+              ? SizedBox(
                   width: 18.r,
                   height: 18.r,
                   child: CircularProgressIndicator(strokeWidth: 2),
@@ -210,6 +170,70 @@ class _DecisionDialogState extends State<DecisionDialog> {
               : Text(AppStrings.save),
         ),
       ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AppDropdown<String>(
+            value: _status,
+            labelText: AppText.t('القرار', 'Decision'),
+            items: [
+              AppDropdownItem(
+                value: 'APPROVED',
+                label: AppText.t('قبول نهائي', 'Approved'),
+              ),
+              AppDropdownItem(
+                value: 'CONDITIONAL_APPROVAL',
+                label: AppText.t('قبول مشروط', 'Conditional'),
+              ),
+              AppDropdownItem(
+                value: 'PARTIAL_REJECTION',
+                label: AppText.t('رفض جزئي', 'Partial rejection'),
+              ),
+              AppDropdownItem(
+                value: 'FULL_REJECTION',
+                label: AppText.t('رفض كامل', 'Full rejection'),
+              ),
+            ],
+            onChanged: (v) {
+              if (v != null) setState(() => _status = v);
+            },
+          ),
+          if (_status == 'CONDITIONAL_APPROVAL') ...[
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _followUp,
+              maxLines: 3,
+              decoration: InputDecoration(
+                labelText: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
+                isDense: true,
+              ),
+            ),
+          ],
+          if (_status == 'PARTIAL_REJECTION') ...[
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _rejected,
+              decoration: InputDecoration(
+                labelText: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
+                isDense: true,
+              ),
+            ),
+          ],
+          if (_status == 'PARTIAL_REJECTION' ||
+              _status == 'FULL_REJECTION') ...[
+            const SizedBox(height: AppSpacing.md),
+            TextField(
+              controller: _reason,
+              maxLines: 3,
+              decoration: InputDecoration(
+                labelText: AppText.t('سبب القرار', 'Decision reason'),
+                isDense: true,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

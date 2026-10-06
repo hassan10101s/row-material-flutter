@@ -6,6 +6,7 @@ import '../database/database_helper.dart';
 import '../database/db_trace.dart';
 import '../utils/app_dates.dart';
 import 'entity_registry.dart';
+import 'sync_codec.dart';
 
 /// One `sync_queue` row.
 class QueueEntry {
@@ -152,7 +153,9 @@ class SyncQueue {
       limit: 1,
     );
     final now = nowIso();
-    final encoded = jsonEncode(payload);
+    // Sanitized: enqueue runs inside the business txn, so a Timestamp in the
+    // payload must not abort the local write with `Instance of 'Timestamp'`.
+    final encoded = SyncCodec.encodeMap(payload);
     if (existing.isEmpty) {
       await txn.insert('sync_queue', {
         'entity_type': entityType,
@@ -435,7 +438,7 @@ class SyncQueue {
       'entity_type': entry.entityType,
       'entity_id': entry.entityId,
       'direction': direction,
-      'local_payload': jsonEncode(entry.payload),
+      'local_payload': SyncCodec.encodeMap(entry.payload),
       'remote_payload': remotePayload,
       'detected_at': nowIso(),
       'resolution': null,
@@ -508,6 +511,38 @@ class SyncQueue {
       whereArgs: [conflictId],
     );
   }
+
+  /// Dismiss every unresolved conflict without picking a side
+  /// (`resolution='ignored'`).
+  ///
+  /// Escape hatch for stale conflicts — e.g. payloads queued before a schema
+  /// change during development that can never push cleanly again. Unlike
+  /// [resolveConflict] no data direction is chosen: the parked `conflict`
+  /// queue rows (which hold the stale payloads) are dropped and the history
+  /// stays in `sync_conflicts` for inspection. Local rows keep whatever
+  /// `sync_state` they have; the next edit re-queues a fresh payload built
+  /// from the current schema, so dismissed state self-heals on next write.
+  /// Returns how many conflicts were dismissed.
+  Future<int> dismissAllConflicts() => _withDb(
+        'queue.dismissAll',
+        (db) => tracedTransaction<int>(db, 'queue.dismissAll', (txn) async {
+          final dismissed = await txn.update(
+            'sync_conflicts',
+            {
+              'resolution': 'ignored',
+              'resolved_at': nowIso(),
+            },
+            where: 'resolution IS NULL',
+          );
+          if (dismissed > 0) {
+            await txn.delete(
+              'sync_queue',
+              where: "status = 'conflict'",
+            );
+          }
+          return dismissed;
+        }),
+      );
 
   /// Manual retry from the Sync screen: `failed`/`conflict` → `pending`.
   Future<int> retryBlocked({String? entityType}) async {
@@ -588,7 +623,7 @@ class SyncQueue {
               WHERE status IN ('failed','conflict')) AS blocked,
             (SELECT COUNT(*) FROM sync_conflicts
               WHERE resolution IS NULL
-                 OR resolution NOT IN ('keep_local','keep_remote')) AS conflicts
+                 OR resolution NOT IN ('keep_local','keep_remote','ignored')) AS conflicts
         ''');
         final row = rows.first;
         return SyncQueueCounts(
@@ -610,7 +645,7 @@ class SyncQueue {
   Future<int> countConflicts() => _withDb('queue.countConflicts', (db) async {
         final rows = await db.rawQuery(
           "SELECT COUNT(*) AS c FROM sync_conflicts WHERE resolution IS NULL "
-          "OR resolution NOT IN ('keep_local','keep_remote')",
+          "OR resolution NOT IN ('keep_local','keep_remote','ignored')",
         );
         return (rows.first['c'] as num).toInt();
       });

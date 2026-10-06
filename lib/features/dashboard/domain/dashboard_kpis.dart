@@ -258,6 +258,138 @@ class TrendPoint extends Equatable {
   List<Object?> get props => [label, total, approvalRate, passRate];
 }
 
+/// Supplier scorecard row (data-scientist upgrade).
+///
+/// [tier] is A (>=90%), B (75–90%), C (60–75%), D (<60%) or '—' when
+/// [total] is 0. [score] is a 0–100 composite: 70% approval + 30% volume
+/// confidence, so a 1/1 supplier never outranks a 95/100 one.
+class SupplierScore extends Equatable {
+  const SupplierScore({
+    required this.name,
+    this.total = 0,
+    this.approved = 0,
+    this.conditional = 0,
+    this.rejected = 0,
+    this.approvalRate = 0.0,
+    this.rejectedQtyRatio = 0.0,
+    this.tier = '—',
+    this.score = 0.0,
+  });
+
+  final String name;
+  final int total;
+  final int approved;
+  final int conditional;
+  final int rejected;
+  final double approvalRate;
+  final double rejectedQtyRatio;
+  final String tier;
+  final double score;
+
+  @override
+  List<Object?> get props => [
+        name, total, approved, conditional, rejected, approvalRate,
+        rejectedQtyRatio, tier, score,
+      ];
+}
+
+/// Pareto entry: share of total rejections + running cumulative share.
+///
+/// Sorted descending by [count]. [cumulativePct] lets the UI draw the
+/// 80/20 cutoff line without recomputing.
+class ParetoEntry extends Equatable {
+  const ParetoEntry({
+    required this.label,
+    this.count = 0,
+    this.pct = 0.0,
+    this.cumulativePct = 0.0,
+  });
+
+  final String label;
+  final int count;
+  final double pct;
+  final double cumulativePct;
+
+  @override
+  List<Object?> get props => [label, count, pct, cumulativePct];
+}
+
+/// Forecast point: actual approval rate + 3-month moving average +
+/// optional next-month linear forecast (only set on the last point).
+class ForecastPoint extends Equatable {
+  const ForecastPoint({
+    required this.label,
+    this.actual = 0.0,
+    this.movingAvg,
+    this.forecast,
+    this.hasData = false,
+  });
+
+  final String label;
+  final double actual;
+  final double? movingAvg;
+  final double? forecast;
+  final bool hasData;
+
+  @override
+  List<Object?> get props => [label, actual, movingAvg, forecast, hasData];
+}
+
+/// Stability of monthly approval rates (SPC-lite).
+///
+/// Computed over months with data only. [volatility] is 'low' (stdDev ≤ 5),
+/// 'medium' (≤ 12) or 'high' (> 12). Null [stdDev] means fewer than
+/// 2 months of data — unknown, not zero.
+class StabilityKpis extends Equatable {
+  const StabilityKpis({
+    this.stdDev,
+    this.range = 0.0,
+    this.minRate = 0.0,
+    this.maxRate = 0.0,
+    this.volatility = 'unknown',
+    this.sampleN = 0,
+  });
+
+  final double? stdDev;
+  final double range;
+  final double minRate;
+  final double maxRate;
+  final String volatility;
+  final int sampleN;
+
+  @override
+  List<Object?> get props =>
+      [stdDev, range, minRate, maxRate, volatility, sampleN];
+}
+
+/// Data-completeness audit for the filtered inspection set.
+///
+/// Missing supplier/expiry and pending decisions silently bias every rate
+/// on the dashboard, so they are surfaced as first-class KPIs.
+class DataQualityKpis extends Equatable {
+  const DataQualityKpis({
+    this.total = 0,
+    this.missingSupplier = 0,
+    this.missingExpiry = 0,
+    this.pending = 0,
+    this.completenessPct = 100.0,
+    this.pendingPct = 0.0,
+  });
+
+  final int total;
+  final int missingSupplier;
+  final int missingExpiry;
+  final int pending;
+  final double completenessPct;
+  final double pendingPct;
+
+  @override
+  List<Object?> get props => [
+        total, missingSupplier, missingExpiry, pending, completenessPct,
+        pendingPct,
+      ];
+}
+
 /// One-shot aggregate for the whole dashboard.
 class DashboardBundle extends Equatable {
   const DashboardBundle({
@@ -269,6 +401,12 @@ class DashboardBundle extends Equatable {
     this.sopGoals = const SopGoalKpis(),
     this.inventory = const InventoryKpis(),
     this.trend = const [],
+    this.supplierScores = const [],
+    this.materialPareto = const [],
+    this.supplierPareto = const [],
+    this.forecast = const [],
+    this.stability = const StabilityKpis(),
+    this.dataQuality = const DataQualityKpis(),
   });
 
   final VolumeKpis volume;
@@ -279,8 +417,17 @@ class DashboardBundle extends Equatable {
   final SopGoalKpis sopGoals;
   final InventoryKpis inventory;
   final List<TrendPoint> trend;
+  final List<SupplierScore> supplierScores;
+  final List<ParetoEntry> materialPareto;
+  final List<ParetoEntry> supplierPareto;
+  final List<ForecastPoint> forecast;
+  final StabilityKpis stability;
+  final DataQualityKpis dataQuality;
 
   @override
-  List<Object?> get props =>
-      [volume, quality, lab, qc, ncr, sopGoals, inventory, trend];
+  List<Object?> get props => [
+        volume, quality, lab, qc, ncr, sopGoals, inventory, trend,
+        supplierScores, materialPareto, supplierPareto, forecast,
+        stability, dataQuality,
+      ];
 }

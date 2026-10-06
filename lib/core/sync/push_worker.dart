@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:math';
 
 import '../auth/app_session.dart';
@@ -9,6 +8,7 @@ import '../utils/app_dates.dart';
 import 'audit_logger.dart';
 import 'entity_registry.dart';
 import 'remote/remote_data_source.dart';
+import 'sync_codec.dart';
 import 'sync_metadata.dart';
 import 'sync_queue.dart';
 
@@ -114,10 +114,13 @@ class PushWorker {
     // They were fully serial, so a 400-row batch paid 400 round-trip latencies
     // back to back. Entities are independent documents, so overlapping them is
     // safe; the cap keeps the socket pool and the Firestore rate limit in view.
+    // Each push is individually guarded: a poisoned remote map or a throwing
+    // data-source must degrade to retry/conflict for that entry, never abort
+    // the whole 400-row batch (the old jsonEncode(Timestamp) crash did).
     final results = await _mapWithConcurrency(
       sendable,
       effectiveConcurrency,
-      (entry) => _pushOne(entry),
+      (entry) => _pushOneGuarded(entry),
     );
 
     for (var i = 0; i < results.length; i++) {
@@ -132,7 +135,9 @@ class PushWorker {
           settlements.add(QueueSettlement.conflict(
             entry,
             direction: 'push_rejected',
-            remotePayload: result.remote == null ? null : jsonEncode(result.remote),
+            // Never throws: sanitized + try/catch inside. Previously a raw
+            // Firestore Timestamp here crashed the entire batch.
+            remotePayload: SyncCodec.tryEncodeMap(result.remote),
             error: result.error,
           ));
           final target = entry;
@@ -180,6 +185,17 @@ class PushWorker {
       failed: failed,
       lastError: lastError,
     );
+  }
+
+  /// Per-entry guard: the data-source contract returns [PushResult], but a
+  /// hostile map (raw Timestamp) or a throwing implementation must not escape
+  /// as an unhandled exception and strand the batch in `in_flight`.
+  Future<PushResult> _pushOneGuarded(QueueEntry entry) async {
+    try {
+      return await _pushOne(entry);
+    } on Object catch (e) {
+      return PushResult.retryable('$e');
+    }
   }
 
   /// The remote call for one entry, tombstone or document.

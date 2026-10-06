@@ -815,7 +815,7 @@ void main() {
           (await repo.summary(period: 'all'))['comparison'] as Map;
       expect(comparison['approvalDeltaSign'], '');
       expect(comparison['approvalDelta'], '100.0');
-      expect(comparison['label'], 'انخفاض عن الشهر السابق (-100.0%)');
+      expect(comparison['label'], 'أقل من الشهر اللي فات (-100.0%)');
     });
 
     test('the month-over-month insight card fires on real movement', () async {
@@ -840,9 +840,9 @@ void main() {
       }
 
       final cards = (await repo.summary(period: 'all'))['insightCards'] as List;
-      expect(cards.map((c) => '${c['title']}'), contains('اتجاه تحسن'));
+      expect(cards.map((c) => '${c['title']}'), contains('الوضع بيتحسن'));
       expect(cards.map((c) => '${c['title']}'),
-          isNot(contains('اتجاه انخفاض')));
+          isNot(contains('الوضع بينزل')));
     });
 
     test('recommendations fire on the documented thresholds', () async {
@@ -934,7 +934,7 @@ void main() {
 
       final recs = (await repo.summary(period: 'all'))['recommendations'] as List;
       expect(recs, hasLength(1));
-      expect('${recs.single}', contains('الأداء العام جيد'));
+      expect('${recs.single}', contains('الوضع كويس'));
     });
 
     test('the approval tone is success at >=90% and danger below 70%', () async {
@@ -988,7 +988,7 @@ void main() {
           status: 'APPROVED');
 
       final cards = (await repo.summary(period: 'all'))['insightCards'] as List;
-      final high = cards.firstWhere((c) => c['title'] == 'نسبة رفض مرتفعة');
+      final high = cards.firstWhere((c) => c['title'] == 'رفض عالي');
       expect(high['tone'], 'danger');
       expect('${high['description']}', contains('75.0'),
           reason: 'the card quotes the real rate: 3 rejections of 4 rows');

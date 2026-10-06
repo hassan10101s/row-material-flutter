@@ -13,6 +13,7 @@ import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../cubit/units_cubit.dart';
 import '../cubit/units_state.dart';
 import '../units_editor.dart';
@@ -31,20 +32,15 @@ class DesktopUnitsTab extends StatelessWidget {
     Map<String, dynamic>? unit,
   ]) async {
     final cubit = context.read<UnitsCubit>();
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(unitsEditorTitle(unit == null)),
-        content: SizedBox(
-          width: 420.w,
-          child: SingleChildScrollView(
-            child: UnitsEditor(
-              onSubmit: cubit.upsert,
-              unit: unit,
-              actions: (_, state) => UnitsEditorActions(state: state),
-            ),
-          ),
-        ),
+    final saved = await showAppWindow<bool>(
+      context,
+      title: unitsEditorTitle(unit == null),
+      icon: Icons.straighten_outlined,
+      size: AppWindowSize.sm,
+      child: UnitsEditor(
+        onSubmit: cubit.upsert,
+        unit: unit,
+        actions: (_, state) => UnitsEditorActions(state: state),
       ),
     );
     if (saved != true || !context.mounted) return;

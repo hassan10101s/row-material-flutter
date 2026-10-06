@@ -25,6 +25,14 @@ class AppPaginatedTable extends StatefulWidget {
   final void Function(int index)? onRowTap;
   final int rowsPerPage;
 
+  /// Server-driven pagination: when [total] + [onPageChanged] are supplied,
+  /// the footer pages through the remote total and asks the owner to fetch
+  /// each page (DB LIMIT/OFFSET). [page] is zero-based. When null, the legacy
+  /// in-memory slicing over [rows] is used.
+  final int? total;
+  final int? page;
+  final Future<void> Function(int page)? onPageChanged;
+
   /// Fixed body height, or `null` to fill whatever the caller offers. The
   /// default stays `470` so every existing call site keeps its authored
   /// height unchanged.
@@ -55,7 +63,13 @@ class AppPaginatedTable extends StatefulWidget {
     this.loading = false,
     this.headerTrailing,
     this.rowHeight = 52,
+    this.total,
+    this.page,
+    this.onPageChanged,
   });
+
+  /// True when the owner drives pagination (DB LIMIT/OFFSET).
+  bool get isServerDriven => total != null && onPageChanged != null;
 
   @override
   State<AppPaginatedTable> createState() => _AppPaginatedTableState();
@@ -64,24 +78,56 @@ class AppPaginatedTable extends StatefulWidget {
 class _AppPaginatedTableState extends State<AppPaginatedTable> {
   int _page = 0;
 
-  int get _pageCount =>
-      (widget.rows.length / widget.rowsPerPage).ceil().clamp(1, 1 << 31);
+  @override
+  void didUpdateWidget(covariant AppPaginatedTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Client mode: a shorter list (e.g. new filter) must not strand the user
+    // on a page past the end. Server mode is owned by the caller via [page].
+    if (!_server && oldWidget.rows.length != widget.rows.length) {
+      _page = _page.clamp(0, _pageCount - 1);
+    }
+  }
 
-  int get _effectivePage => _page.clamp(0, _pageCount - 1);
+  bool get _server => widget.isServerDriven;
+
+  int get _pageCount {
+    final total = _server ? widget.total! : widget.rows.length;
+    final per = widget.rowsPerPage;
+    return (total / per).ceil().clamp(1, 1 << 31);
+  }
+
+  int get _effectivePage =>
+      (_server ? (widget.page ?? 0) : _page).clamp(0, _pageCount - 1);
 
   void _changePage(int delta) {
-    setState(() => _page = (_effectivePage + delta).clamp(0, _pageCount - 1));
+    final next = (_effectivePage + delta).clamp(0, _pageCount - 1);
+    if (_server) {
+      widget.onPageChanged!(next);
+      return;
+    }
+    setState(() => _page = next);
   }
 
   @override
   Widget build(BuildContext context) {
-    final leftIndex = _effectivePage * widget.rowsPerPage;
-    final pageRows = leftIndex >= widget.rows.length
-        ? const <List<Widget>>[]
-        : widget.rows.sublist(
-            leftIndex,
-            (leftIndex + widget.rowsPerPage).clamp(0, widget.rows.length),
-          );
+    // Server mode: the owner already fetched exactly this page; the widget
+    // only slices defensively. Client mode: slice the full in-memory list.
+    final List<List<Widget>> pageRows;
+    final int leftIndex;
+    if (_server) {
+      leftIndex = 0;
+      pageRows = widget.rows.length <= widget.rowsPerPage
+          ? widget.rows
+          : widget.rows.sublist(0, widget.rowsPerPage);
+    } else {
+      leftIndex = _effectivePage * widget.rowsPerPage;
+      pageRows = leftIndex >= widget.rows.length
+          ? const <List<Widget>>[]
+          : widget.rows.sublist(
+              leftIndex,
+              (leftIndex + widget.rowsPerPage).clamp(0, widget.rows.length),
+            );
+    }
 
     final card = AppCard(
       padding: EdgeInsets.zero,
@@ -113,7 +159,10 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
                               itemExtent: widget.rowHeight,
                               itemBuilder: (context, index) {
                                 final row = pageRows[index];
-                                final realIndex = leftIndex + index;
+                                // Client mode indexes into the full list;
+                                // server mode indexes into the fetched page.
+                                final realIndex =
+                                    _server ? index : leftIndex + index;
                                 return _dataRow(
                                   context,
                                   widths,
@@ -134,7 +183,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
             ),
           ),
           const Divider(height: 1),
-          _footer(context, widget.rows.length),
+          _footer(context, _server ? widget.total! : widget.rows.length),
         ],
       ),
     );
@@ -293,6 +342,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
   }
 
   int get pageRowsLength {
+    if (_server) return widget.rows.length.clamp(0, widget.rowsPerPage);
     final left = _effectivePage * widget.rowsPerPage;
     if (left >= widget.rows.length) return 0;
     return (widget.rows.length - left).clamp(0, widget.rowsPerPage);

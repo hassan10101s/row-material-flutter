@@ -3,12 +3,14 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_enums.dart';
 import '../domain/qc_goal.dart';
 import 'cubit/qc_goals_cubit.dart';
@@ -51,9 +53,8 @@ class QcGoalsScreen extends StatelessWidget {
       ),
       body: BlocConsumer<QcGoalsCubit, QcGoalsState>(
         listenWhen: (a, b) => a.error != b.error && b.error != null,
-        listener: (context, state) => ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(state.error!))),
+        listener: (context, state) =>
+            AppFeedback.error(context, state.error!),
         builder: (context, state) {
           if (state.loading && state.goals.isEmpty) {
             return const Center(child: CircularProgressIndicator());
@@ -116,11 +117,15 @@ class QcGoalsScreen extends StatelessWidget {
 
   void _openFilters(BuildContext context) {
     final cubit = context.read<QcGoalsCubit>();
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) =>
-          BlocProvider.value(value: cubit, child: const _GoalFilterSheet()),
+    showAppOverlay<void>(
+      context,
+      title: AppText.t('فلاتر الأهداف', 'Goal filters'),
+      icon: Icons.filter_alt_outlined,
+      size: AppWindowSize.sm,
+      builder: (_, _) => BlocProvider.value(
+        value: cubit,
+        child: const _GoalFilterSheet(),
+      ),
     );
   }
 }
@@ -428,27 +433,12 @@ class _GoalFilterSheetState extends State<_GoalFilterSheet> {
       bloc: cubit,
       builder: (context, state) {
         final f = state.filters;
-        return Padding(
-          padding: EdgeInsets.only(
-            left: AppSpacing.lg,
-            right: AppSpacing.lg,
-            top: AppSpacing.lg,
-            bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppText.t('فلاتر الأهداف', 'Goal filters'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16.spMax,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(AppText.t('الحالة', 'Status')),
+        // Chrome (title, padding, scroll) comes from the overlay host.
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(AppText.t('الحالة', 'Status')),
                 const SizedBox(height: AppSpacing.xs),
                 Wrap(
                   spacing: AppSpacing.xs,
@@ -510,14 +500,12 @@ class _GoalFilterSheetState extends State<_GoalFilterSheet> {
                   onChanged: (v) =>
                       cubit.applyFilters(f.copyWith(overdueOnly: v)),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
+                AppWindow.footer(
+                  actions: [
                     TextButton(
                       onPressed: () => cubit.clearFilters(),
                       child: Text(AppText.t('مسح', 'Clear')),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
                     FilledButton(
                       onPressed: () {
                         cubit.applyFilters(
@@ -530,9 +518,7 @@ class _GoalFilterSheetState extends State<_GoalFilterSheet> {
                   ],
                 ),
               ],
-            ),
-          ),
-        );
+            );
       },
     );
   }

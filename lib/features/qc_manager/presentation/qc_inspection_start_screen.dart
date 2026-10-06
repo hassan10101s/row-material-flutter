@@ -7,10 +7,12 @@ import '../../../../core/auth/permissions.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../design_system/animations/app_animations.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../design_system/widgets/app_entity_autocomplete.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../domain/qc_enums.dart';
@@ -87,9 +89,7 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
   }
 
   void _warn(BuildContext context, String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    AppFeedback.error(context, message);
   }
 
   /// Builds the header row and hands it to the register.
@@ -193,20 +193,28 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
                   padding: const EdgeInsets.all(AppSpacing.md),
                   children: [
                     _label(AppText.t('قائمة الفحص', 'Checklist')),
-                    DropdownButtonFormField<int>(
-                      initialValue: _templateId,
-                      isExpanded: true,
-                      items: [
+                    AppEntityAutocomplete(
+                      options: [
                         for (final t in templates)
-                          DropdownMenuItem(
-                            value: t.templateId,
-                            child: Text(
-                              '${t.code} — ${t.name}',
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
+                          {
+                            'id': t.templateId,
+                            'code': t.code,
+                            'name': t.name,
+                          },
                       ],
-                      onChanged: (v) => setState(() => _templateId = v),
+                      selectedId: _templateId,
+                      hint: AppText.t(
+                        'ابحث برقم أو اسم القائمة…',
+                        'Search checklists…',
+                      ),
+                      prefixIcon: Icons.checklist_outlined,
+                      displayOf: (t) => '${t['code']} — ${t['name']}',
+                      filter: (t, q) => entityMatches(t, q, [
+                        (r) => '${r['code'] ?? ''}',
+                        (r) => '${r['name'] ?? ''}',
+                      ]),
+                      onSelected: (v) => setState(
+                          () => _templateId = (v as num).toInt()),
                     ),
                     if (selected != null) ...[
                       const SizedBox(height: AppSpacing.sm),

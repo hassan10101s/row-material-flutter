@@ -311,9 +311,38 @@ class InspectionRepo {
 
   // ── List / Get ────────────────────────────────────────────────
 
+  /// Lean ledger columns: heavy blobs (`report_html`, `snapshot_json`,
+  /// result/reference JSON) are excluded so paging 50 rows never drags
+  /// kilobytes of HTML per row. Detail screens use [getById] (full row).
+  static const List<String> ledgerColumns = [
+    'id',
+    'entry_code',
+    'material_id',
+    'material_name',
+    'material_code',
+    'inspection_date',
+    'expiry_date',
+    'supplier',
+    'truck_number',
+    'quantity',
+    'sample_taken_by',
+    'decision_status',
+    'decision_reason',
+    'follow_up_note',
+    'rejected_quantity',
+    'sample_names_json',
+    'decision_version',
+    'created_by',
+    'created_by_name',
+    'created_at',
+    'updated_at',
+    'deleted_at',
+  ];
+
   Future<List<Map<String, dynamic>>> list({
     String query = '',
-    int limit = 5000,
+    String status = '',
+    int limit = 50,
     int offset = 0,
     String orderBy = 'id DESC',
     bool includeDeleted = false,
@@ -322,18 +351,26 @@ class InspectionRepo {
     // Tombstoned rows (V2 `delete`) stay on disk so the deletion can replicate
     // and be audited, but they are not part of the working set.
     final alive = includeDeleted ? '' : aliveFilter;
-    if (query.trim().isEmpty) {
-      final rows = await db.query('inspections',
-          where: alive, orderBy: orderBy, limit: limit, offset: offset);
-      return [for (final r in rows) serializeInspectionRow(Map<String, dynamic>.from(r))];
+    final conditions = <String>[];
+    final args = <Object?>[];
+    if (alive.isNotEmpty) conditions.add(alive);
+    final trimmed = query.trim();
+    if (trimmed.isNotEmpty) {
+      final like = '%$trimmed%';
+      conditions.add(
+          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)');
+      args.addAll([like, like, like, like]);
     }
-    final like = '%${query.trim()}%';
+    if (status.trim().isNotEmpty) {
+      conditions.add('decision_status = ?');
+      args.add(status.trim());
+    }
+    final where = conditions.isEmpty ? null : conditions.join(' AND ');
     final rows = await db.query(
       'inspections',
-      where: alive.isEmpty
-          ? '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)'
-          : '$alive AND (entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)',
-      whereArgs: [like, like, like, like],
+      columns: ledgerColumns,
+      where: where,
+      whereArgs: where == null ? null : args,
       orderBy: orderBy,
       limit: limit,
       offset: offset,
@@ -344,31 +381,50 @@ class InspectionRepo {
   /// Rows a user may still see; a tombstone hides the row from every list.
   static const String aliveFilter = 'deleted_at IS NULL';
 
-  Future<int> count({String query = '', bool includeDeleted = false}) async {
+  Future<int> count(
+      {String query = '', String status = '', bool includeDeleted = false}) async {
     final db = await _db;
     final alive = includeDeleted ? '' : aliveFilter;
-    final aliveSql = alive.isEmpty ? '' : ' WHERE $alive';
-    if (query.trim().isEmpty) {
-      return Sqflite.firstIntValue(
-              await db.rawQuery('SELECT COUNT(*) AS c FROM inspections$aliveSql')) ??
-          0;
+    final conditions = <String>[];
+    final args = <Object?>[];
+    if (alive.isNotEmpty) conditions.add(alive);
+    final trimmed = query.trim();
+    if (trimmed.isNotEmpty) {
+      final like = '%$trimmed%';
+      conditions.add(
+          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)');
+      args.addAll([like, like, like, like]);
     }
-    final like = '%${query.trim()}%';
-    final condition =
-        '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)';
+    if (status.trim().isNotEmpty) {
+      conditions.add('decision_status = ?');
+      args.add(status.trim());
+    }
+    final where = conditions.isEmpty ? '' : ' WHERE ${conditions.join(' AND ')}';
     return Sqflite.firstIntValue(await db.rawQuery(
-            'SELECT COUNT(*) AS c FROM inspections'
-            '${alive.isEmpty ? '' : ' WHERE $alive AND'}$condition',
-            [like, like, like, like])) ??
+            'SELECT COUNT(*) AS c FROM inspections$where',
+            where.isEmpty ? null : args)) ??
         0;
   }
 
   Future<Map<String, dynamic>> getById(int id, {DatabaseExecutor? exec, bool includeDeleted = true}) async {
     final db = exec ?? await _db;
-    final rows = await db.query('inspections', where: 'id = ?', whereArgs: [id]);
+    // Parallel: row + history are independent given the same id.
+    final settled = await Future.wait([
+      db.query('inspections', where: 'id = ?', whereArgs: [id]),
+      db.query(
+        'inspection_status_history',
+        where: 'inspection_id = ?',
+        whereArgs: [id],
+        orderBy: 'version DESC, id DESC',
+      ),
+    ]);
+    final rows = settled[0];
     if (rows.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
     final serialized = serializeInspectionRow(Map<String, dynamic>.from(rows.first));
-    serialized['status_history'] = await getStatusHistory(id, exec: exec);
+    serialized['status_history'] = [
+      for (final r in settled[1])
+        Map<String, dynamic>.from(r),
+    ];
     return serialized;
   }
 

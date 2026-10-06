@@ -84,12 +84,25 @@ class SyncStatusController extends ChangeNotifier {
     unawaited(refresh());
   }
 
+  /// Badge refresh in **two** round trips instead of four.
+  ///
+  /// `countPending` + `countBlocked` were two separate messages to the single
+  /// FFI isolate, and `lastPushAt` + `lastPullAt` two more — all fired from a
+  /// 20 s timer that collides with `SyncEngine.syncNow` and the dashboard's
+  /// own `Future.wait` load at bootstrap. `countBadge` returns pending +
+  /// blocked in one statement and `readAll` fetches both timestamps in one.
   Future<void> refresh() async {
     try {
-      final pending = await queue.countPending();
-      final blocked = await queue.countBlocked();
-      final push = await metadata.lastPushAt();
-      final pull = await metadata.lastPullAt();
+      final results = await Future.wait([
+        queue.countBadge(),
+        metadata.readAll([SyncMetadata.lastPushAtKey, SyncMetadata.lastPullAtKey]),
+      ]);
+      final badge = results[0] as SyncQueueCounts;
+      final keys = results[1] as Map<String, String>;
+      final push = _asDate(keys[SyncMetadata.lastPushAtKey]);
+      final pull = _asDate(keys[SyncMetadata.lastPullAtKey]);
+      final pending = badge.pending;
+      final blocked = badge.blocked;
       final last = _latest(push, pull);
       final next = SyncBadgeStatus(
         online: _isOnline(),
@@ -114,6 +127,9 @@ class SyncStatusController extends ChangeNotifier {
     if (b == null) return a;
     return a.isAfter(b) ? a : b;
   }
+
+  static DateTime? _asDate(String? iso) =>
+      (iso == null || iso.isEmpty) ? null : DateTime.tryParse(iso);
 
   @override
   void dispose() {

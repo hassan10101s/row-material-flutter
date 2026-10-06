@@ -17,6 +17,7 @@ import '../../../design_system/widgets/app_empty_state.dart';
 import '../../../design_system/widgets/app_paginated_table.dart';
 import '../../../design_system/widgets/app_skeleton.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
+import '../../../design_system/widgets/app_window.dart';
 import '../../../di/service_locator.dart';
 import '../../reference/domain/reference_repository.dart';
 import '../../reports/domain/report_repository.dart';
@@ -40,17 +41,33 @@ const _allStatuses = [
 class InspectionsScreen extends StatelessWidget {
   const InspectionsScreen({super.key});
   Future<void> _newInspection(BuildContext context) async {
-    final saved = await Navigator.of(context).push<bool>(
-      AppPageRoute(
-        builder: (_) => BlocProvider(
-          create: (c) => InspectionFormCubit(
-            repo: getIt<InspectionRepository>(),
-            reference: getIt<ReferenceRepository>(),
-          )..loadMaterials(),
-          child: const InspectionFormScreen(),
-        ),
-      ),
-    );
+    final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+    final saved = wide
+        ? await showAppWindow<bool>(
+            context,
+            title: AppText.t('فحص خامة جديد', 'New Material Inspection'),
+            icon: Icons.add_task,
+            size: AppWindowSize.lg,
+            scrollBody: false,
+            child: BlocProvider(
+              create: (c) => InspectionFormCubit(
+                repo: getIt<InspectionRepository>(),
+                reference: getIt<ReferenceRepository>(),
+              )..loadMaterials(),
+              child: const InspectionFormScreen(),
+            ),
+          )
+        : await Navigator.of(context).push<bool>(
+            AppPageRoute(
+              builder: (_) => BlocProvider(
+                create: (c) => InspectionFormCubit(
+                  repo: getIt<InspectionRepository>(),
+                  reference: getIt<ReferenceRepository>(),
+                )..loadMaterials(),
+                child: const InspectionFormScreen(),
+              ),
+            ),
+          );
     if (saved == true && context.mounted) {
       context.read<InspectionsCubit>().load();
     }
@@ -73,19 +90,37 @@ class InspectionsScreen extends StatelessWidget {
   }
 
   Future<void> _pushDetail(BuildContext context, int id) async {
-    final changed = await Navigator.of(context).push<bool>(
-      AppPageRoute(
-        builder: (_) => BlocProvider(
-          create: (c) => InspectionDetailCubit(
-            inspectionId: id,
-            repo: getIt<InspectionRepository>(),
-            reports: getIt<ReportRepository>(),
-            labResults: getIt<LabResultRepository>(),
-          )..load(),
-          child: InspectionDetailScreen(inspectionId: id),
-        ),
-      ),
-    );
+    final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+    final changed = wide
+        ? await showAppWindow<bool>(
+            context,
+            title: AppText.t('تفاصيل الفحص', 'Inspection Details'),
+            icon: Icons.fact_check_outlined,
+            size: AppWindowSize.lg,
+            scrollBody: false,
+            child: BlocProvider(
+              create: (c) => InspectionDetailCubit(
+                inspectionId: id,
+                repo: getIt<InspectionRepository>(),
+                reports: getIt<ReportRepository>(),
+                labResults: getIt<LabResultRepository>(),
+              )..load(),
+              child: InspectionDetailScreen(inspectionId: id),
+            ),
+          )
+        : await Navigator.of(context).push<bool>(
+            AppPageRoute(
+              builder: (_) => BlocProvider(
+                create: (c) => InspectionDetailCubit(
+                  inspectionId: id,
+                  repo: getIt<InspectionRepository>(),
+                  reports: getIt<ReportRepository>(),
+                  labResults: getIt<LabResultRepository>(),
+                )..load(),
+                child: InspectionDetailScreen(inspectionId: id),
+              ),
+            ),
+          );
     if (changed == true && context.mounted) {
       context.read<InspectionsCubit>().load();
     }
@@ -162,7 +197,7 @@ class InspectionsScreen extends StatelessWidget {
             LayoutBuilder(
               builder: (context, constraints) {
                 final search = TextField(
-                  onChanged: cubit.setQuery,
+                  onChanged: (v) => cubit.setQuery(v),
                   decoration: InputDecoration(
                     labelText: AppText.t('بحث', 'Search'),
                     isDense: true,
@@ -243,6 +278,10 @@ class InspectionsScreen extends StatelessWidget {
             ] else
               AppPaginatedTable(
                 columnFlex: const [1.0, 1.15, 2.6, 1.8, 0.95, 1.25, 1.4],
+                rowsPerPage: state.pageSize,
+                total: state.total,
+                page: state.page,
+                onPageChanged: cubit.setPage,
                 headers: [
                   AppText.t('رقم القيد', 'Entry'),
                   AppText.t('التاريخ', 'Date'),
@@ -306,7 +345,7 @@ class InspectionsScreen extends StatelessWidget {
                 ],
                 onRowTap: (index) => _openDetail(context, state.visible[index]),
                 totalLabel:
-                    '${state.visible.length} ${AppText.t('فحص', 'inspections')}',
+                    '${state.total} ${AppText.t('فحص', 'inspections')}',
               ),
           ],
         ),

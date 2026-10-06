@@ -5,11 +5,12 @@ import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../domain/parameter_type.dart';
 
 /// Dialog title for the create/edit chrome, shared by both experiences.
 String paramEditorTitle(String parameterType, bool isNew) {
   if (!isNew) return AppText.t('تعديل البارامتر', 'Edit Parameter');
-  return parameterType == 'chemical'
+  return ParameterType.ofDb(parameterType).isChemical
       ? AppText.t('بارامتر كيميائي', 'Chemical Parameter')
       : AppText.t('بارامتر ظاهري', 'Physical Aspect');
 }

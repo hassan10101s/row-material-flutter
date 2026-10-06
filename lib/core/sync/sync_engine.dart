@@ -399,12 +399,20 @@ class SyncEngine {
   /// came from `listConflicts(limit: 1000)`, which pulled a thousand whole rows
   /// across the isolate boundary to produce an integer.
   Future<SyncStatusSnapshot> _current() async {
-    final badge = await queue.countBadge();
-    final keys = await metadata.readAll([
-      SyncMetadata.lastPullAtKey,
-      SyncMetadata.lastPushAtKey,
-      SyncMetadata.lastErrorKey,
+    // Parallel, not sequential: each of these is a message to the single FFI
+    // isolate, and awaiting them one after another doubles the badge latency
+    // whenever the connection is busy (bootstrap, dashboard load). Neither
+    // holds the lock while the other runs, so overlapping is safe.
+    final results = await Future.wait([
+      queue.countBadge(),
+      metadata.readAll([
+        SyncMetadata.lastPullAtKey,
+        SyncMetadata.lastPushAtKey,
+        SyncMetadata.lastErrorKey,
+      ]),
     ]);
+    final badge = results[0] as SyncQueueCounts;
+    final keys = results[1] as Map<String, String>;
     final lastError = keys[SyncMetadata.lastErrorKey] ?? '';
     return SyncStatusSnapshot(
       online: connectivity.isOnline,

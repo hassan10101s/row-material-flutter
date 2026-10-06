@@ -8,6 +8,7 @@ import '../../../design_system/feedback/app_error_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
+import '../../../design_system/widgets/app_dialogs.dart';
 import 'cubit/login_cubit.dart';
 import 'cubit/login_state.dart';
 
@@ -69,18 +70,13 @@ class LoginScreen extends StatelessWidget {
                           ),
                           const SizedBox(height: AppSpacing.lg),
                           TextButton.icon(
-                            onPressed: () => showDialog<void>(
-                              context: context,
-                              builder: (c) => AlertDialog(
-                                title: Text(AppText.t('الدعم', 'Support')),
-                                content: const Text(
-                                    'للحصول على الدعم تواصل عبر واتساب على الرقم 201213473838\nSupport via WhatsApp: +201213473838'),
-                                actions: [
-                                  TextButton(
-                                      onPressed: () => Navigator.of(c).pop(),
-                                      child: Text(AppText.t('حسناً', 'OK'))),
-                                ],
-                              ),
+                            onPressed: () => showAppAlert(
+                              context,
+                              title: AppText.t('الدعم', 'Support'),
+                              message:
+                                  'للحصول على الدعم تواصل عبر واتساب على الرقم 201213473838\nSupport via WhatsApp: +201213473838',
+                              okLabel: AppText.t('حسناً', 'OK'),
+                              icon: Icons.support_agent,
                             ),
                             icon: Icon(Icons.support_agent, size: 18.r),
                             label: Text(AppText.t('الدعم', 'Support')),

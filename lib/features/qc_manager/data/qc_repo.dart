@@ -821,8 +821,10 @@ class QcInspectionRepo extends QcLocalRepo {
         orderBy: 'order_index ASC',
       );
       final stamp = nowIso();
+      // Batched: I inserts in one round-trip (was I sequential awaits).
+      final batch = (txn as dynamic).batch() as dynamic;
       for (final item in qcDecode(itemRows, QcItem.fromMap)) {
-        await txn.insert('qc_responses', {
+        batch.insert('qc_responses', {
           'inspection_id': inspectionId,
           'item_id': item.itemId,
           'section_id': item.sectionId,
@@ -831,6 +833,7 @@ class QcInspectionRepo extends QcLocalRepo {
           'updated_at': stamp,
         });
       }
+      await batch.commit(noResult: true);
       return inspectionId;
     }
 

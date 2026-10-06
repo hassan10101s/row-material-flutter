@@ -2,11 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../tokens/app_colors.dart';
-import '../tokens/app_spacing.dart';
-import '../widgets/app_button.dart';
+import 'app_button.dart';
+import 'app_window.dart';
 
 /// Confirmation dialog consistent with the app design system.
 /// Returns `true` when the user confirms.
+///
+/// Renders in the unified [AppWindow] chrome like every other dialog.
 Future<bool> showAppConfirm(
   BuildContext context, {
   required String title,
@@ -16,78 +18,29 @@ Future<bool> showAppConfirm(
   bool danger = false,
   IconData icon = Icons.help_outline,
 }) async {
-  final result = await showDialog<bool>(
-    context: context,
-    barrierDismissible: true,
-    builder: (c) => Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
+  final result = await showAppWindow<bool>(
+    context,
+    title: title,
+    icon: icon,
+    accent: danger ? AppColors.danger : AppColors.primary,
+    size: AppWindowSize.sm,
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(false),
+        child: Text(cancelLabel ?? 'إلغاء'),
       ),
-      backgroundColor: AppColors.surface,
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(9),
-                    decoration: BoxDecoration(
-                      color: (danger ? AppColors.danger : AppColors.primary)
-                          .withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(AppRadii.md),
-                    ),
-                    child: Icon(
-                      icon,
-                      size: 20.r,
-                      color: danger ? AppColors.danger : AppColors.primary,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 16.spMax,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textStrong,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Text(
-                message,
-                style: TextStyle(
-                  fontSize: 14.spMax,
-                  height: 1.5,
-                  color: AppColors.textMuted,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton(
-                    onPressed: () => Navigator.of(c).pop(false),
-                    child: Text(cancelLabel ?? 'إلغاء'),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  AppButton(
-                    label: confirmLabel ?? 'تأكيد',
-                    style: danger ? AppButtonStyle.danger : AppButtonStyle.primary,
-                    onPressed: () => Navigator.of(c).pop(true),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
+      AppButton(
+        label: confirmLabel ?? 'تأكيد',
+        style: danger ? AppButtonStyle.danger : AppButtonStyle.primary,
+        onPressed: () => Navigator.of(context).pop(true),
+      ),
+    ],
+    child: Text(
+      message,
+      style: TextStyle(
+        fontSize: 14.spMax,
+        height: 1.5,
+        color: AppColors.textMuted,
       ),
     ),
   );
@@ -95,68 +48,37 @@ Future<bool> showAppConfirm(
 }
 
 /// Simple alert dialog consistent with the app design system.
+///
+/// Renders in the unified [AppWindow] chrome like every other dialog.
 Future<void> showAppAlert(
   BuildContext context, {
   required String title,
   String? message,
   String? okLabel,
   IconData icon = Icons.info_outline,
-}) async {
-  await showDialog<void>(
-    context: context,
-    builder: (c) => Dialog(
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
+}) {
+  return showAppWindow<void>(
+    context,
+    title: title,
+    icon: icon,
+    accent: AppColors.info,
+    size: AppWindowSize.sm,
+    actions: [
+      AppButton(
+        label: okLabel ?? 'حسناً',
+        style: AppButtonStyle.secondary,
+        onPressed: () => Navigator.of(context).pop(),
       ),
-      backgroundColor: AppColors.surface,
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(icon, size: 22.r, color: AppColors.info),
-                  const SizedBox(width: AppSpacing.md),
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: TextStyle(
-                        fontSize: 16.spMax,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textStrong,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              if (message != null) ...[
-                const SizedBox(height: AppSpacing.md),
-                Text(
-                  message,
-                  style: TextStyle(
-                    fontSize: 14.spMax,
-                    height: 1.5,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-              ],
-              const SizedBox(height: AppSpacing.xl),
-              Align(
-                alignment: Alignment.centerRight,
-                child: AppButton(
-                  label: okLabel ?? 'حسناً',
-                  style: AppButtonStyle.secondary,
-                  onPressed: () => Navigator.of(c).pop(),
-                ),
-              ),
-            ],
+    ],
+    child: message == null
+        ? const SizedBox.shrink()
+        : Text(
+            message,
+            style: TextStyle(
+              fontSize: 14.spMax,
+              height: 1.5,
+              color: AppColors.textMuted,
+            ),
           ),
-        ),
-      ),
-    ),
   );
 }

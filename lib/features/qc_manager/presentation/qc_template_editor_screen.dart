@@ -5,11 +5,14 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../design_system/animations/app_animations.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_card.dart';
+import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_enums.dart';
 import '../domain/qc_template.dart';
 import 'cubit/qc_templates_cubit.dart';
@@ -71,13 +74,13 @@ class QcTemplateEditorScreen extends StatelessWidget {
           (a.error != b.error && b.error != null) ||
           (a.notice != b.notice && b.notice != null),
       listener: (context, state) {
-        final text = state.error ?? state.notice;
-        if (text == null) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(text)));
-        if (state.error != null) detail.clearError();
-        if (state.notice != null) detail.clearNotice();
+        if (state.error != null) {
+          AppFeedback.error(context, state.error!);
+          detail.clearError();
+        } else if (state.notice != null) {
+          AppFeedback.success(context, state.notice!);
+          detail.clearNotice();
+        }
       },
       builder: (context, state) {
         final template = state.template;
@@ -191,10 +194,12 @@ class _Tree extends StatelessWidget {
 
   void _editItem(BuildContext context, QcItem item) {
     final cubit = context.read<QcTemplateDetailCubit>();
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => _ItemSheet(
+    showAppOverlay<void>(
+      context,
+      title: AppText.t('البند', 'Item'),
+      icon: Icons.checklist_outlined,
+      size: AppWindowSize.sm,
+      builder: (_, _) => _ItemSheet(
         item: item,
         // The write happens here, on a copy the sheet builds. Letting the sheet
         // hold a cubit instead would put the tree's state under a modal's
@@ -265,13 +270,10 @@ class _PromptDialogState extends State<_PromptDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.title),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        decoration: InputDecoration(labelText: widget.label),
-      ),
+    return AppWindow(
+      title: widget.title,
+      icon: Icons.edit_outlined,
+      size: AppWindowSize.sm,
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
@@ -282,6 +284,11 @@ class _PromptDialogState extends State<_PromptDialog> {
           child: Text(widget.confirmLabel),
         ),
       ],
+      child: TextField(
+        controller: _controller,
+        autofocus: true,
+        decoration: InputDecoration(labelText: widget.label),
+      ),
     );
   }
 }
@@ -526,21 +533,10 @@ class _DuplicateDialogState extends State<_DuplicateDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(AppText.t('نسخة جديدة', 'New version')),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextField(
-            controller: _name,
-            decoration: InputDecoration(labelText: AppText.t('الاسم', 'Name')),
-          ),
-          TextField(
-            controller: _code,
-            decoration: InputDecoration(labelText: AppText.t('الرمز', 'Code')),
-          ),
-        ],
-      ),
+    return AppWindow(
+      title: AppText.t('نسخة جديدة', 'New version'),
+      icon: Icons.content_copy_outlined,
+      size: AppWindowSize.sm,
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
@@ -553,6 +549,19 @@ class _DuplicateDialogState extends State<_DuplicateDialog> {
           child: Text(AppText.t('نسخ', 'Duplicate')),
         ),
       ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _name,
+            decoration: InputDecoration(labelText: AppText.t('الاسم', 'Name')),
+          ),
+          TextField(
+            controller: _code,
+            decoration: InputDecoration(labelText: AppText.t('الرمز', 'Code')),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -767,106 +776,90 @@ class _ItemSheetState extends State<_ItemSheet> {
   Widget build(BuildContext context) {
     final wantsOptions =
         _type == QcItemType.dropdown || _type == QcItemType.multiSelect;
-    return Padding(
-      padding: EdgeInsets.only(
-        left: AppSpacing.lg,
-        right: AppSpacing.lg,
-        top: AppSpacing.lg,
-        bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              AppText.t('البند', 'Item'),
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16.spMax),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _label,
-              decoration: InputDecoration(
-                labelText: AppText.t('نص البند', 'Item label'),
-                border: const OutlineInputBorder(),
+    // Chrome (title, padding, scroll) comes from the overlay that hosts this
+    // sheet; only the fields live here so desktop and phones share one look.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _label,
+          decoration: InputDecoration(
+            labelText: AppText.t('نص البند', 'Item label'),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        AppDropdown<String>(
+          value: _type,
+          labelText: AppText.t('النوع', 'Type'),
+          items: [
+            for (final t in QcItemType.all)
+              AppDropdownItem(value: t, label: _ItemRow._typeLabel(t)),
+          ],
+          onChanged: (v) => setState(() => _type = v ?? _type),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        TextField(
+          controller: _unit,
+          decoration: InputDecoration(
+            labelText: AppText.t('الوحدة', 'Unit'),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        if (wantsOptions) ...[
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            controller: _options,
+            decoration: InputDecoration(
+              labelText: AppText.t(
+                'الخيارات (مفصولة بفاصلة)',
+                'Options (comma separated)',
               ),
+              border: const OutlineInputBorder(),
             ),
-            const SizedBox(height: AppSpacing.sm),
-            DropdownButtonFormField<String>(
-              initialValue: QcItemType.all.contains(_type) ? _type : null,
-              decoration: InputDecoration(
-                labelText: AppText.t('النوع', 'Type'),
-                border: const OutlineInputBorder(),
-                isDense: true,
-              ),
-              items: [
-                for (final t in QcItemType.all)
-                  DropdownMenuItem(
-                    value: t,
-                    child: Text(_ItemRow._typeLabel(t)),
-                  ),
-              ],
-              onChanged: (v) => setState(() => _type = v ?? _type),
+          ),
+        ],
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _required,
+          title: Text(AppText.t('إلزامي', 'Required')),
+          onChanged: (v) => setState(() => _required = v),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _allowNa,
+          title: Text(AppText.t('يسمح بـ N/A', 'Allows N/A')),
+          onChanged: (v) => setState(() => _allowNa = v),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _critical,
+          title: Text(AppText.t('بند حرج', 'Critical item')),
+          subtitle: Text(
+            AppText.t(
+              'فشله يرفع عدم مطابقة حرج',
+              'Failing it raises a critical NC',
             ),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: _unit,
-              decoration: InputDecoration(
-                labelText: AppText.t('الوحدة', 'Unit'),
-                border: const OutlineInputBorder(),
-              ),
-            ),
-            if (wantsOptions) ...[
-              const SizedBox(height: AppSpacing.sm),
-              TextField(
-                controller: _options,
-                decoration: InputDecoration(
-                  labelText: AppText.t(
-                    'الخيارات (مفصولة بفاصلة)',
-                    'Options (comma separated)',
-                  ),
-                  border: const OutlineInputBorder(),
-                ),
-              ),
-            ],
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _required,
-              title: Text(AppText.t('إلزامي', 'Required')),
-              onChanged: (v) => setState(() => _required = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _allowNa,
-              title: Text(AppText.t('يسمح بـ N/A', 'Allows N/A')),
-              onChanged: (v) => setState(() => _allowNa = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _critical,
-              title: Text(AppText.t('بند حرج', 'Critical item')),
-              subtitle: Text(
-                AppText.t(
-                  'فشله يرفع عدم مطابقة حرج',
-                  'Failing it raises a critical NC',
-                ),
-                style: const TextStyle(fontSize: 12),
-              ),
-              onChanged: (v) => setState(() => _critical = v),
-            ),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              value: _evidenceIfFail,
-              title: Text(
-                AppText.t(
-                  'يطلب دليلًا عند الفشل',
-                  'Requires evidence on failure',
-                ),
-              ),
-              onChanged: (v) => setState(() => _evidenceIfFail = v),
-            ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
+            style: const TextStyle(fontSize: 12),
+          ),
+          onChanged: (v) => setState(() => _critical = v),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _evidenceIfFail,
+          title: Text(
+            AppText.t('يطلب دليلًا عند الفشل', 'Requires evidence on failure'),
+          ),
+          onChanged: (v) => setState(() => _evidenceIfFail = v),
+        ),
+            // Three buttons never fit one 376dp footer row: a Wrap folds
+            // them instead of overflowing (the unified footer stays a Row
+            // for the usual one/two-button case).
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
               children: [
                 TextButton(
                   onPressed: () {
@@ -878,12 +871,10 @@ class _ItemSheetState extends State<_ItemSheet> {
                     style: TextStyle(color: AppColors.danger),
                   ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
                   child: Text(AppText.t('إلغاء', 'Cancel')),
                 ),
-                const SizedBox(width: AppSpacing.sm),
                 FilledButton(
                   onPressed: () {
                     final options = _options.text
@@ -909,9 +900,7 @@ class _ItemSheetState extends State<_ItemSheet> {
                 ),
               ],
             ),
-          ],
-        ),
-      ),
+      ],
     );
   }
 }

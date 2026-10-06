@@ -260,10 +260,9 @@ packages:
   firebase_auth:
     dependency: "direct main"
     description:
-      name: firebase_auth
-      sha256: "144fa22926b629e797ecc757db5d31b145aeedf6018160296dae945d98a98fb5"
-      url: "https://pub.dev"
-    source: hosted
+      path: "third_party/firebase_auth"
+      relative: true
+    source: path
     version: "6.7.0"
   firebase_auth_platform_interface:
     dependency: transitive

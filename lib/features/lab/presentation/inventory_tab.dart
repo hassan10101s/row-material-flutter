@@ -11,6 +11,8 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_dropdown.dart';
+import '../../../design_system/widgets/app_window.dart';
 import '../../../app/auth_gate.dart';
 import '../../../di/service_locator.dart';
 import '../core/formula_engine.dart' show inventoryUnits;
@@ -261,76 +263,12 @@ class _InventoryDialogState extends State<_InventoryDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.item == null ? 'إضافة مادة' : 'تعديل مادة'),
-      content: SizedBox(
-        width: 420.w,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _name,
-                decoration: const InputDecoration(
-                  labelText: 'الاسم',
-                  isDense: true,
-                ),
-              ),
-              DropdownButtonFormField<String>(
-                initialValue: _category,
-                decoration: const InputDecoration(
-                  labelText: 'النوع',
-                  isDense: true,
-                ),
-                items: const [
-                  DropdownMenuItem(value: 'liquid', child: Text('سائل')),
-                  DropdownMenuItem(value: 'powder', child: Text('مسحوق')),
-                ],
-                onChanged: (v) {
-                  if (v != null) setState(() => _category = v);
-                },
-              ),
-              DropdownButtonFormField<String>(
-                initialValue: _unit,
-                decoration: const InputDecoration(
-                  labelText: 'الوحدة',
-                  isDense: true,
-                ),
-                items: [
-                  for (final u in inventoryUnits)
-                    DropdownMenuItem(value: u, child: Text(u)),
-                ],
-                onChanged: (v) {
-                  if (v != null) setState(() => _unit = v);
-                },
-              ),
-              if (widget.item == null)
-                TextField(
-                  controller: _qty,
-                  decoration: const InputDecoration(
-                    labelText: 'الكمية',
-                    isDense: true,
-                  ),
-                ),
-              TextField(
-                controller: _min,
-                decoration: const InputDecoration(
-                  labelText: 'الحد الأدنى',
-                  isDense: true,
-                ),
-              ),
-              TextField(
-                controller: _description,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'الوصف',
-                  isDense: true,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return AppWindow(
+      title: widget.item == null
+          ? AppText.t('إضافة مادة', 'Add item')
+          : AppText.t('تعديل مادة', 'Edit item'),
+      icon: Icons.inventory_2_outlined,
+      size: AppWindowSize.sm,
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(false),
@@ -347,6 +285,71 @@ class _InventoryDialogState extends State<_InventoryDialog> {
               : Text(AppStrings.save),
         ),
       ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: _name,
+            decoration: InputDecoration(
+              labelText: AppText.t('الاسم', 'Name'),
+              isDense: true,
+            ),
+          ),
+          // Legacy rows can carry a category/unit outside the fixed lists;
+          // [AppDropdown] shows those as disabled instead of crashing.
+          AppDropdown<String>(
+            value: _category,
+            labelText: AppText.t('النوع', 'Type'),
+            items: [
+              AppDropdownItem(
+                value: 'liquid',
+                label: AppText.t('سائل', 'Liquid'),
+              ),
+              AppDropdownItem(
+                value: 'powder',
+                label: AppText.t('مسحوق', 'Powder'),
+              ),
+            ],
+            onChanged: (v) {
+              if (v != null) setState(() => _category = v);
+            },
+          ),
+          AppDropdown<String>(
+            value: _unit,
+            labelText: AppText.t('الوحدة', 'Unit'),
+            items: [
+              for (final u in inventoryUnits)
+                AppDropdownItem(value: u, label: u),
+            ],
+            onChanged: (v) {
+              if (v != null) setState(() => _unit = v);
+            },
+          ),
+          if (widget.item == null)
+            TextField(
+              controller: _qty,
+              decoration: InputDecoration(
+                labelText: AppText.t('الكمية', 'Quantity'),
+                isDense: true,
+              ),
+            ),
+          TextField(
+            controller: _min,
+            decoration: InputDecoration(
+              labelText: AppText.t('الحد الأدنى', 'Minimum'),
+              isDense: true,
+            ),
+          ),
+          TextField(
+            controller: _description,
+            maxLines: 2,
+            decoration: InputDecoration(
+              labelText: AppText.t('الوصف', 'Description'),
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -406,37 +409,10 @@ class _AdjustDialogState extends State<_AdjustDialog> {
   @override
   Widget build(BuildContext context) {
     final current = '${widget.item['current_qty'] ?? 0}';
-    return AlertDialog(
-      title: const Text('تسوية الكمية'),
-      content: SizedBox(
-        width: 400.w,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${widget.item['name']} — الحالية: $current ${widget.item['unit']}',
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _delta,
-              decoration: const InputDecoration(
-                labelText: 'الكمية الجديدة',
-                isDense: true,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            TextField(
-              controller: _reason,
-              decoration: const InputDecoration(
-                labelText: 'السبب',
-                isDense: true,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return AppWindow(
+      title: AppText.t('تسوية الكمية', 'Adjust quantity'),
+      icon: Icons.balance_outlined,
+      size: AppWindowSize.sm,
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(false),
@@ -453,6 +429,32 @@ class _AdjustDialogState extends State<_AdjustDialog> {
               : Text(AppStrings.save),
         ),
       ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${widget.item['name']} — الحالية: $current ${widget.item['unit']}',
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _delta,
+            decoration: InputDecoration(
+              labelText: AppText.t('الكمية الجديدة', 'New quantity'),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _reason,
+            decoration: InputDecoration(
+              labelText: AppText.t('السبب', 'Reason'),
+              isDense: true,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

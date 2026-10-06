@@ -6,6 +6,7 @@ import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../di/service_locator.dart';
 import '../../lab/domain/lab_result_repository.dart';
+import '../domain/parameter_type.dart';
 import '../domain/reference_repository.dart';
 import 'cubit/params_cubit.dart';
 import 'cubit/products_cubit.dart';
@@ -61,7 +62,7 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
         Icons.biotech_outlined,
         BlocProvider(
           create: (_) => ParamsCubit.chemical(repo: refRepo)..load(),
-          child: const ParamsTab(parameterType: 'chemical'),
+          child: ParamsTab(parameterType: ParameterType.chemical.value),
         ),
       ),
       _RefTab(
@@ -69,7 +70,7 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
         Icons.remove_red_eye_outlined,
         BlocProvider(
           create: (_) => ParamsCubit.physical(repo: refRepo)..load(),
-          child: const ParamsTab(parameterType: 'physical'),
+          child: ParamsTab(parameterType: ParameterType.physical.value),
         ),
       ),
       _RefTab(

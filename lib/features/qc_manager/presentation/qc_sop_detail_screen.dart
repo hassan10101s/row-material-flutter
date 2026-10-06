@@ -4,11 +4,13 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/animations/app_animations.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_enums.dart';
 import '../domain/qc_sop.dart';
 import 'cubit/qc_sop_detail_cubit.dart';
@@ -54,13 +56,13 @@ class QcSopDetailScreen extends StatelessWidget {
           (a.error != b.error && b.error != null),
       listener: (context, state) {
         final cubit = context.read<QcSopDetailCubit>();
-        final text = state.notice ?? state.error;
-        if (text == null) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(text)));
-        if (state.notice != null) cubit.clearNotice();
-        if (state.error != null) cubit.clearError();
+        if (state.error != null) {
+          AppFeedback.error(context, state.error!);
+          cubit.clearError();
+        } else if (state.notice != null) {
+          AppFeedback.success(context, state.notice!);
+          cubit.clearNotice();
+        }
       },
       builder: (context, state) {
         final sop = state.sop;
@@ -336,9 +338,21 @@ class _AckDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(AppText.t('تسجيل القراءة', 'Acknowledge read')),
-      content: Column(
+    return AppWindow(
+      title: AppText.t('تسجيل القراءة', 'Acknowledge read'),
+      icon: Icons.mark_email_read_outlined,
+      size: AppWindowSize.sm,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(AppText.t('إلغاء', 'Cancel')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(AppText.t('تأكيد', 'Confirm')),
+        ),
+      ],
+      child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           TextField(
@@ -353,16 +367,6 @@ class _AckDialog extends StatelessWidget {
           ),
         ],
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: Text(AppText.t('إلغاء', 'Cancel')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(AppText.t('تأكيد', 'Confirm')),
-        ),
-      ],
     );
   }
 }
@@ -434,31 +438,31 @@ class _RevisionsCard extends StatelessWidget {
                   ? null
                   : () async {
                       final reason = TextEditingController();
-                      final ok = await showDialog<bool>(
-                        context: context,
-                        builder: (dialog) => AlertDialog(
-                          title: Text(
-                            AppText.t('مراجعة جديدة', 'New revision'),
+                      final ok = await showAppWindow<bool>(
+                        context,
+                        title: AppText.t('مراجعة جديدة', 'New revision'),
+                        icon: Icons.note_add_outlined,
+                        size: AppWindowSize.sm,
+                        actions: [
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.of(context).pop(false),
+                            child: Text(AppText.t('إلغاء', 'Cancel')),
                           ),
-                          content: TextField(
-                            controller: reason,
-                            decoration: InputDecoration(
-                              labelText: AppText.t(
-                                'سبب التغيير',
-                                'Change summary',
-                              ),
+                          FilledButton(
+                            onPressed: () =>
+                                Navigator.of(context).pop(true),
+                            child: Text(AppText.t('حفظ', 'Save')),
+                          ),
+                        ],
+                        child: TextField(
+                          controller: reason,
+                          decoration: InputDecoration(
+                            labelText: AppText.t(
+                              'سبب التغيير',
+                              'Change summary',
                             ),
                           ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.of(dialog).pop(false),
-                              child: Text(AppText.t('إلغاء', 'Cancel')),
-                            ),
-                            FilledButton(
-                              onPressed: () => Navigator.of(dialog).pop(true),
-                              child: Text(AppText.t('حفظ', 'Save')),
-                            ),
-                          ],
                         ),
                       );
                       if (ok != true) return;

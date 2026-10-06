@@ -5,9 +5,11 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/ncr_filters.dart';
 import '../domain/ncr_report_row.dart';
 import 'cubit/qc_ncr_cubit.dart';
@@ -162,14 +164,15 @@ class QcNcrListScreen extends StatelessWidget {
   ];
 
   void _openFilters(BuildContext context, QcNcrState state, QcNcrCubit cubit) {
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      // The sheet is a new route, so the page's provider is not an ancestor of
-      // it. Re-provide the same instance rather than a copy: the sheet writes
-      // filters through it and the page must see the result.
-      builder: (sheetContext) => BlocProvider.value(
+    showAppOverlay<void>(
+      context,
+      title: AppText.t('تصفية النتائج', 'Filter results'),
+      icon: Icons.filter_alt_outlined,
+      size: AppWindowSize.sm,
+      // The overlay is a new route, so the page's provider is not an ancestor
+      // of it. Re-provide the same instance rather than a copy: the sheet
+      // writes filters through it and the page must see the result.
+      builder: (_, _) => BlocProvider.value(
         value: cubit,
         child: _FilterSheet(state: state),
       ),
@@ -305,25 +308,12 @@ class _FilterSheetState extends State<_FilterSheet> {
     final options = widget.state.options;
     final f = widget.state.filters;
 
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.85,
-      maxChildSize: 0.95,
-      builder: (context, scrollController) => ListView(
-        controller: scrollController,
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          0,
-          AppSpacing.lg,
-          AppSpacing.lg,
-        ),
-        children: [
-          Text(
-            AppText.t('تصفية النتائج', 'Filter results'),
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          _MultiSelect(
+    // Chrome (title, padding, scroll) comes from the overlay host.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _MultiSelect(
             title: AppText.t('الحالة', 'Status'),
             values: options.statuses,
             selected: f.statuses,
@@ -391,23 +381,23 @@ class _FilterSheetState extends State<_FilterSheet> {
             onApply: (v) => cubit.applyFilters(f.copyWith(poNo: v)),
           ),
           const SizedBox(height: AppSpacing.md),
-          DropdownButtonFormField<String>(
-            initialValue: _dateField,
-            decoration: InputDecoration(
-              labelText: AppText.t('طبّق النطاق على', 'Date range applies to'),
-            ),
+          // A stored filter from an older build can hold a value outside
+          // this list; [AppDropdown] renders it disabled instead of throwing.
+          AppDropdown<String>(
+            value: _dateField,
+            labelText: AppText.t('طبّق النطاق على', 'Date range applies to'),
             items: [
-              DropdownMenuItem(
+              AppDropdownItem(
                 value: NcrFilters.dateFieldCreated,
-                child: Text(AppText.t('تاريخ الفتح', 'Date raised')),
+                label: AppText.t('تاريخ الفتح', 'Date raised'),
               ),
-              DropdownMenuItem(
+              AppDropdownItem(
                 value: NcrFilters.dateFieldInspection,
-                child: Text(AppText.t('تاريخ التفتيش', 'Inspection date')),
+                label: AppText.t('تاريخ التفتيش', 'Inspection date'),
               ),
-              DropdownMenuItem(
+              AppDropdownItem(
                 value: NcrFilters.dateFieldClosed,
-                child: Text(AppText.t('تاريخ الإغلاق', 'Closure date')),
+                label: AppText.t('تاريخ الإغلاق', 'Closure date'),
               ),
             ],
             onChanged: (v) {
@@ -428,8 +418,8 @@ class _FilterSheetState extends State<_FilterSheet> {
             onChanged: (_) => cubit.toggleOnlyOverdue(),
           ),
           const SizedBox(height: AppSpacing.lg),
-          Row(
-            children: [
+          AppWindow.footer(
+            actions: [
               Expanded(
                 child: AppButton(
                   label: AppText.t('مسح الكل', 'Clear all'),
@@ -441,7 +431,6 @@ class _FilterSheetState extends State<_FilterSheet> {
                   },
                 ),
               ),
-              const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: AppButton(
                   label: AppText.t('عرض النتائج', 'Show results'),
@@ -453,8 +442,7 @@ class _FilterSheetState extends State<_FilterSheet> {
             ],
           ),
         ],
-      ),
-    );
+      );
   }
 }
 

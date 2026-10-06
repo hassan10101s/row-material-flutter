@@ -246,15 +246,25 @@ class LabRepo {
   // ── Products ──────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listProducts() async {
+    // Single round-trip: products + all ranges, grouped in memory.
+    // Previously N+1 (one getProductRanges per product).
     final rows = await fetchAll(
         null, 'SELECT * FROM lab_products WHERE active = 1 ORDER BY name ASC');
-    final products = <Map<String, dynamic>>[];
-    for (final row in rows) {
-      final product = Map<String, dynamic>.from(row);
-      product['ranges'] = await getProductRanges(int.parse('${product['id']}'));
-      products.add(product);
+    if (rows.isEmpty) return [];
+    final allRanges = await getProductRangesAll();
+    final byProduct = <int, List<Map<String, dynamic>>>{};
+    for (final r in allRanges) {
+      final pid = int.tryParse('${r['product_id']}') ?? 0;
+      byProduct.putIfAbsent(pid, () => []).add(r);
     }
-    return products;
+    return [
+      for (final row in rows)
+        {
+          ...Map<String, dynamic>.from(row),
+          'ranges': byProduct[int.tryParse('${row['id']}') ?? 0] ??
+              const <Map<String, dynamic>>[],
+        },
+    ];
   }
 
   Future<Map<String, dynamic>> getProduct(int productId,
@@ -355,7 +365,66 @@ class LabRepo {
           Map<String, dynamic>.from(a);
     }
     final now = nowIso();
-    var paramsAdded = 0, boundsAdded = 0, analysesAdded = 0, linked = 0;
+    // Pass 1: collect every distinct field across materials (pure memory).
+    final wanted = <String, Map<String, String>>{};
+    for (final m in materials) {
+      for (final e in jsonLoads('${m['physical_reference_json']}').entries) {
+        final name = '${e.key}'.trim();
+        if (name.isEmpty) continue;
+        wanted.putIfAbsent(name.toLowerCase(),
+            () => {'name': name, 'type': 'physical', 'value': '${e.value}'});
+      }
+      for (final e in jsonLoads('${m['chemical_reference_json']}').entries) {
+        final name = '${e.key}'.trim();
+        if (name.isEmpty) continue;
+        wanted.putIfAbsent(name.toLowerCase(),
+            () => {'name': name, 'type': 'chemical', 'value': '${e.value}'});
+      }
+    }
+    // Pass 2: batch-insert missing parameters, then single IN-reselect.
+    final missing =
+        wanted.entries.where((e) => !byName.containsKey(e.key)).toList();
+    var paramsAdded = 0;
+    if (missing.isNotEmpty) {
+      final batch = (db as dynamic).batch() as dynamic;
+      for (final e in missing) {
+        batch.rawInsert(
+            'INSERT OR IGNORE INTO parameters '
+            '(parameter_name, unit, parameter_type, imported_at) '
+            'VALUES (?, ?, ?, ?)',
+            [e.value['name'], referenceUnitText(e.value['value']), e.value['type'], now]);
+      }
+      await batch.commit(noResult: true);
+      final qmarks = List.filled(missing.length, '?').join(',');
+      final names = [for (final e in missing) e.value['name']];
+      final fresh = await db.rawQuery(
+          'SELECT id, parameter_name, parameter_type, unit FROM parameters '
+          'WHERE parameter_name IN ($qmarks)',
+          names);
+      for (final p in fresh) {
+        final k = '${p['parameter_name']}'.trim().toLowerCase();
+        if (!byName.containsKey(k)) paramsAdded++;
+        byName[k] = Map<String, dynamic>.from(p);
+      }
+    }
+    // Pass 3: batch bounds + analyses (no per-field SELECT anymore).
+    var boundsAdded = 0, analysesAdded = 0, linked = 0;
+    // Preload existing bounds once so the second sync is a true no-op
+    // (INSERT OR IGNORE would otherwise still count as an attempt).
+    final existingBounds = <String>{};
+    if (materials.isNotEmpty) {
+      final mIds = [for (final m in materials) int.parse('${m['id']}')];
+      final mq = List.filled(mIds.length, '?').join(',');
+      final boundRows = await db.rawQuery(
+          'SELECT material_id, parameter_id FROM material_parameter_bounds WHERE material_id IN ($mq)',
+          mIds);
+      for (final b in boundRows) {
+        existingBounds.add('${b['material_id']}:${b['parameter_id']}');
+      }
+    }
+    final writeBatch = (db as dynamic).batch() as dynamic;
+    var hasWrites = false;
+    final pendingAnalyses = <String>{};
     for (final m in materials) {
       final materialId = int.parse('${m['id']}');
       final fields = <(String, String, Object?)>[
@@ -370,41 +439,31 @@ class LabRepo {
         final value = field.$3;
         if (name.isEmpty) continue;
         final key = name.toLowerCase();
-        var parameter = byName[key];
-        if (parameter == null) {
-          final unit = referenceUnitText(value);
-          await db.rawInsert(
-              'INSERT OR IGNORE INTO parameters '
-              '(parameter_name, unit, parameter_type, imported_at) '
-              'VALUES (?, ?, ?, ?)',
-              [name, unit, type, now]);
-          final row = await db.rawQuery(
-              'SELECT id, parameter_name, parameter_type, unit FROM parameters '
-              'WHERE parameter_name = ? COLLATE NOCASE',
-              [name]);
-          if (row.isEmpty) continue;
-          parameter = Map<String, dynamic>.from(row.first);
-          byName[key] = parameter;
-          paramsAdded++;
-        }
-        final limits = parseReferenceLimits(value);
-        final unit = referenceUnitText(value);
-        final inserted = await db.rawInsert(
-            'INSERT OR IGNORE INTO material_parameter_bounds '
-            '(material_id, parameter_id, parameter_type, unit, min_value, max_value) '
-            'VALUES (?, ?, ?, ?, ?, ?)',
-            [
-              materialId,
-              int.parse('${parameter['id']}'),
-              type,
-              unit,
-              limits.min,
-              limits.max,
-            ]);
-        if (inserted > 0) boundsAdded++;
+        final parameter = byName[key];
+        if (parameter == null) continue;
         final pid = int.parse('${parameter['id']}');
-        if (!analysisByName.containsKey(key)) {
-          await db.rawInsert(
+        final boundKey = '$materialId:$pid';
+        final unit = referenceUnitText(value);
+        if (!existingBounds.contains(boundKey)) {
+          final limits = parseReferenceLimits(value);
+          writeBatch.rawInsert(
+              'INSERT OR IGNORE INTO material_parameter_bounds '
+              '(material_id, parameter_id, parameter_type, unit, min_value, max_value) '
+              'VALUES (?, ?, ?, ?, ?, ?)',
+              [
+                materialId,
+                pid,
+                type,
+                unit,
+                limits.min,
+                limits.max,
+              ]);
+          hasWrites = true;
+          existingBounds.add(boundKey);
+          boundsAdded++;
+        }
+        if (!analysisByName.containsKey(key) && !pendingAnalyses.contains(key)) {
+          writeBatch.rawInsert(
               'INSERT OR IGNORE INTO lab_analyses '
               '(name, unit, description, dynamic_fields_json, formula_json, parameter_id, created_at) '
               'VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -417,21 +476,25 @@ class LabRepo {
                 pid,
                 now,
               ]);
+          hasWrites = true;
+          pendingAnalyses.add(key);
           analysisByName[key] = <String, dynamic>{'id': 0, 'name': name};
           analysesAdded++;
         } else if (analysisByName[key]?['parameter_id'] == null) {
           final aid = int.parse('${analysisByName[key]?['id'] ?? 0}');
           if (aid > 0) {
-            await db.rawUpdate(
+            writeBatch.rawUpdate(
                 'UPDATE lab_analyses SET parameter_id = ? WHERE id = ? '
                 'AND parameter_id IS NULL',
                 [pid, aid]);
+            hasWrites = true;
             analysisByName[key]!['parameter_id'] = pid;
             linked++;
           }
         }
       }
     }
+    if (hasWrites) await writeBatch.commit(noResult: true);
     return {
       'materials': materials.length,
       'parameters': paramsAdded,
@@ -1195,7 +1258,8 @@ class LabRepo {
     if (!inventoryMap.containsKey(key)) {
       await addInventoryItem(
           name: name, category: inventoryCategoryForUnit(unit), unit: unit, qty: 0.0, minQty: 0.0);
-      final row = await fetchOne(null, 'SELECT id FROM lab_inventory WHERE name = ?', [name]);
+      final row = await fetchOne(
+          null, 'SELECT id FROM lab_inventory WHERE name = ? COLLATE NOCASE', [name.trim()]);
       if (row == null) {
         throw ValidationError(AppErrors.failedCreateInventory);
       }
@@ -1210,26 +1274,53 @@ class LabRepo {
     for (final row in invRows) {
       inventoryMap['${row['name']}'.trim().toLowerCase()] = int.parse('${row['id']}');
     }
+    // Preload all template analyses + their items in 2 queries
+    // (was: 1 fetchOne + 1 getAnalysisItems per template).
+    final templateNames = [for (final t in defaultAnalyses) '${t['name']}'];
+    final qmarks = List.filled(templateNames.length, '?').join(',');
+    final existingRows = templateNames.isEmpty
+        ? <Map<String, dynamic>>[]
+        : await fetchAll(null,
+            'SELECT id, name FROM lab_analyses WHERE name IN ($qmarks)', templateNames);
+    final existingByName = <String, int>{
+      for (final r in existingRows)
+        '${r['name']}'.trim().toLowerCase(): int.parse('${r['id']}'),
+    };
+    final existingIds = existingByName.values.toList();
+    final itemsByAnalysis = <int, Set<String>>{};
+    if (existingIds.isNotEmpty) {
+      final iq = List.filled(existingIds.length, '?').join(',');
+      final itemRows = await fetchAll(null, '''
+            SELECT li.analysis_id, inv.name AS inventory_name
+            FROM lab_analysis_items li
+            JOIN lab_inventory inv ON inv.id = li.inventory_id
+            WHERE li.analysis_id IN ($iq)''', existingIds);
+      for (final r in itemRows) {
+        itemsByAnalysis
+            .putIfAbsent(int.parse('${r['analysis_id']}'), () => <String>{})
+            .add('${r['inventory_name']}'.trim().toLowerCase());
+      }
+    }
+    final db = await _db;
+    final batch = db.batch();
+    var hasBatchWrites = false;
     for (final template in defaultAnalyses) {
       final name = '${template['name']}';
-      final analysis =
-          await fetchOne(null, 'SELECT id FROM lab_analyses WHERE name = ?', [name]);
-      if (analysis != null) {
-        final analysisId = int.parse('${analysis['id']}');
-        final linked = <String>{
-          for (final item in await getAnalysisItems(analysisId))
-            '${item['inventory_name']}'.trim().toLowerCase(),
-        };
+      final key = name.trim().toLowerCase();
+      final existingId = existingByName[key];
+      if (existingId != null) {
+        final linked = itemsByAnalysis[existingId] ?? const <String>{};
         for (final item in (template['items'] as List).cast<Map>()) {
           final itemName = '${item['name']}';
           final qty = (item['qty'] as num).toDouble();
           final unit = '${item['unit']}';
           if (linked.contains(itemName.trim().toLowerCase())) continue;
           final inventoryId = await resolveInventoryId(itemName, unit, inventoryMap);
-          await execute(null, '''
+          batch.rawInsert('''
                     INSERT INTO lab_analysis_items (analysis_id, inventory_id, qty_per_sample, unit)
                     VALUES (?, ?, ?, ?)
-                    ''', [analysisId, inventoryId, qty, unit]);
+                    ''', [existingId, inventoryId, qty, unit]);
+          hasBatchWrites = true;
         }
         continue;
       }
@@ -1255,6 +1346,7 @@ class LabRepo {
         unit: '${template['unit'] ?? '%'}',
       );
     }
+    if (hasBatchWrites) await batch.commit(noResult: true);
   }
 
   // ── Sample tests ──────────────────────────────────────────────
@@ -1398,16 +1490,12 @@ class LabRepo {
         _userId(user),
         null, null,
       ]);
-      final requested = <int, Map<String, Object?>>{};
+      final requested = <int, double>{};
+      final neededIds = <int>{};
       for (final item in analysis['items'] as List? ?? []) {
         final m = item as Map<String, dynamic>;
-        final inventory = await getInventoryItemTx(txn, int.parse('${m['inventory_id']}'));
-        final qty = convertQuantity(
-            safeFloat(m['qty_per_sample']) ?? 0.0, '${m['unit']}', '${inventory['unit']}');
-        final entry = requested.putIfAbsent(
-            int.parse('${m['inventory_id']}'),
-            () => {'inventory': inventory, 'qty': 0.0});
-        entry['qty'] = (entry['qty'] as double) + qty;
+        final id = int.tryParse('${m['inventory_id']}') ?? 0;
+        if (id > 0) neededIds.add(id);
       }
       for (final link in analysis['field_chemical_links'] as List? ?? []) {
         final lm = link as Map<String, dynamic>;
@@ -1418,11 +1506,33 @@ class LabRepo {
         if (field.isEmpty || inventoryId == 0 || qtyInput == null || qtyInput <= 0) {
           continue;
         }
-        final inventory = await getInventoryItemTx(txn, inventoryId);
+        neededIds.add(inventoryId);
+      }
+      // One batched read instead of K+L per-item getInventoryItemTx calls.
+      final invMap = await loadInventoryMap(txn, neededIds);
+      for (final item in analysis['items'] as List? ?? []) {
+        final m = item as Map<String, dynamic>;
+        final id = int.tryParse('${m['inventory_id']}') ?? 0;
+        final inventory = invMap[id];
+        if (inventory == null) continue;
+        final qty = convertQuantity(
+            safeFloat(m['qty_per_sample']) ?? 0.0, '${m['unit']}', '${inventory['unit']}');
+        requested[id] = (requested[id] ?? 0.0) + qty;
+      }
+      for (final link in analysis['field_chemical_links'] as List? ?? []) {
+        final lm = link as Map<String, dynamic>;
+        if ('${lm['kind'] ?? 'link'}' != 'link') continue;
+        final field = '${lm['dynamic_field'] ?? ''}'.trim();
+        final qtyInput = safeFloat(safeDynamics[field]);
+        final inventoryId = int.tryParse('${lm['inventory_id'] ?? 0}') ?? 0;
+        if (field.isEmpty || inventoryId == 0 || qtyInput == null || qtyInput <= 0) {
+          continue;
+        }
+        final inventory = invMap[inventoryId];
+        if (inventory == null) continue;
         final qty = convertQuantity(
             qtyInput, '${lm['unit'] ?? ''}', '${inventory['unit']}');
-        final entry = requested.putIfAbsent(inventoryId, () => {'inventory': inventory, 'qty': 0.0});
-        entry['qty'] = (entry['qty'] as double) + qty;
+        requested[inventoryId] = (requested[inventoryId] ?? 0.0) + qty;
       }
 
       final consumption = <Map<String, dynamic>>[];
@@ -1430,11 +1540,10 @@ class LabRepo {
       final timestamp = nowIso();
 
       final shortages = <String>[];
-      for (final item in requested.entries) {
-        final state = item.value;
-        final inventory = state['inventory'] as Map<String, dynamic>;
-        final requestedQty = state['qty'] as double;
+      for (final entry in requested.entries) {
+        final requestedQty = entry.value;
         if (requestedQty <= 0) continue;
+        final inventory = invMap[entry.key]!;
         final availableQty =
             (safeFloat(inventory['current_qty']) ?? 0.0).clamp(0.0, double.infinity).toDouble();
         if (availableQty + 1e-9 < requestedQty) {
@@ -1451,29 +1560,32 @@ class LabRepo {
             '${AppErrors.insufficientStock}\n${shortages.join('\n')}');
       }
 
-      for (final item in requested.entries) {
-        final state = item.value;
-        final inventory = state['inventory'] as Map<String, dynamic>;
-        final requestedQty = state['qty'] as double;
+      // Batched writes: collect UPDATE + INSERT pairs, commit via Batch
+      // (single round-trip) instead of 2*N sequential statements.
+      final batch = (txn as dynamic).batch() as dynamic;
+      final pendingWrites = <Map<String, dynamic>>[];
+      for (final entry in requested.entries) {
+        final requestedQty = entry.value;
         if (requestedQty <= 0) continue;
+        final inventory = invMap[entry.key]!;
         final availableQty =
             (safeFloat(inventory['current_qty']) ?? 0.0).clamp(0.0, double.infinity).toDouble();
         final appliedQty = availableQty < requestedQty ? availableQty : requestedQty;
         final shortfallQty = requestedQty - appliedQty > 0 ? requestedQty - appliedQty : 0.0;
         final newQty = availableQty - appliedQty;
-        await execute(txn,
+        batch.rawUpdate(
             'UPDATE lab_inventory SET current_qty = ?, updated_at = ? WHERE id = ?',
-            [newQty, timestamp, item.key]);
-        await execute(txn, '''
+            [newQty, timestamp, entry.key]);
+        batch.rawInsert('''
                     INSERT INTO lab_consumption_log (
                         sample_test_id, inventory_id, qty_used, requested_qty, applied_qty,
                         shortfall_qty, event_type, created_at
                     ) VALUES (?, ?, ?, ?, ?, ?, 'CONSUMPTION', ?)
                     ''', [
-          testId, item.key, appliedQty, requestedQty, appliedQty, shortfallQty, timestamp,
+          testId, entry.key, appliedQty, requestedQty, appliedQty, shortfallQty, timestamp,
         ]);
-        consumption.add({
-          'inventory_id': item.key,
+        pendingWrites.add({
+          'inventory_id': entry.key,
           'inventory_name': inventory['name'],
           'unit': inventory['unit'],
           'qty_used': appliedQty,
@@ -1481,14 +1593,29 @@ class LabRepo {
           'applied_qty': appliedQty,
           'shortfall_qty': shortfallQty,
           'new_qty': newQty,
+          'min_qty': inventory['min_qty'],
         });
-        if (newQty < (safeFloat(inventory['min_qty']) ?? 0.0) || shortfallQty > 0) {
+      }
+      await batch.commit(noResult: true);
+      for (final w in pendingWrites) {
+        consumption.add({
+          'inventory_id': w['inventory_id'],
+          'inventory_name': w['inventory_name'],
+          'unit': w['unit'],
+          'qty_used': w['qty_used'],
+          'requested_qty': w['requested_qty'],
+          'applied_qty': w['applied_qty'],
+          'shortfall_qty': w['shortfall_qty'],
+          'new_qty': w['new_qty'],
+        });
+        if ((w['new_qty'] as double) < (safeFloat(w['min_qty']) ?? 0.0) ||
+            (w['shortfall_qty'] as double) > 0) {
           lowStock.add({
-            'inventory_id': item.key,
-            'inventory_name': inventory['name'],
-            'current_qty': newQty,
-            'min_qty': inventory['min_qty'],
-            'shortfall_qty': shortfallQty,
+            'inventory_id': w['inventory_id'],
+            'inventory_name': w['inventory_name'],
+            'current_qty': w['new_qty'],
+            'min_qty': w['min_qty'],
+            'shortfall_qty': w['shortfall_qty'],
           });
         }
       }
@@ -1648,11 +1775,15 @@ class LabRepo {
     }
     query += ' ORDER BY t.tested_at DESC, t.id DESC';
     final rows = await fetchAll(null, query, params);
+    // Prime the 2-query range cache once, then enrich synchronously:
+    // previously N sequential `await enrichTest` (each hitting buildRangesCache
+    // on the first row and serializing the rest).
+    await buildRangesCache();
     final result = <Map<String, dynamic>>[];
     for (final row in rows) {
       final item = Map<String, dynamic>.from(row);
       item['dynamic_values'] = jsonLoads('${item['dynamic_values_json'] ?? ''}');
-      result.add(await enrichTest(item));
+      result.add(enrichTestSync(item));
     }
     return result;
   }
@@ -1692,6 +1823,43 @@ class LabRepo {
     if (raw.isNotEmpty) value = double.tryParse(raw);
     test['value'] = value;
     final rng = await testRangeForEnriched(test);
+    _applyRangeToTest(test, rng);
+    return test;
+  }
+
+  /// Synchronous variant used after [buildRangesCache] has been primed once,
+  /// so listing N tests costs 2 queries total instead of N sequential awaits.
+  Map<String, dynamic> enrichTestSync(Map<String, dynamic> test) {
+    final resultText = '${test['result_text'] ?? ''}'.trim();
+    final raw = resultText.replaceAll('%', '').trim();
+    double? value;
+    if (raw.isNotEmpty) value = double.tryParse(raw);
+    test['value'] = value;
+    _applyRangeToTest(test, rangeForEnrichedSync(test));
+    return test;
+  }
+
+  Map<String, Object?>? rangeForEnrichedSync(Map<String, dynamic> test) {
+    final sourceType = '${test['source_type'] ?? ''}';
+    final analysisId = int.tryParse('${test['analysis_id'] ?? 0}') ?? 0;
+    final sourceRefRaw = test['source_ref_id'];
+    final sourceRef = sourceRefRaw == null || '$sourceRefRaw' == ''
+        ? 0
+        : (int.tryParse('$sourceRefRaw') ?? 0);
+    if (sourceRef <= 0 || analysisId <= 0) return null;
+    Map<int, Map<String, Object?>>? byAnalysis;
+    if (sourceType == 'product') {
+      byAnalysis = _productRangeCache?[sourceRef];
+    } else if (sourceType == 'raw_material') {
+      byAnalysis = _materialRangeCache?[sourceRef];
+    }
+    if (byAnalysis == null) return null;
+    return byAnalysis[analysisId];
+  }
+
+  void _applyRangeToTest(
+      Map<String, dynamic> test, Map<String, Object?>? rng) {
+    final resultText = '${test['result_text'] ?? ''}'.trim();
     if (rng != null) {
       final minimum = _numOf(rng['min']);
       final maximum = _numOf(rng['max']);
@@ -1711,7 +1879,6 @@ class LabRepo {
       test['range_unit'] = '${test['analysis_unit'] ?? '%'}';
       test['range_state'] = 'none';
     }
-    return test;
   }
 
   Future<Map<String, Object?>?> testRangeForEnriched(
@@ -1832,11 +1999,12 @@ class LabRepo {
             ORDER BY t.tested_at ASC, t.id ASC
         ''';
     final rows = await fetchAll(null, query, params);
+    await buildRangesCache();
     final tests = <Map<String, dynamic>>[];
     for (final row in rows) {
       final item = Map<String, dynamic>.from(row);
       item['dynamic_values'] = jsonLoads('${item['dynamic_values_json'] ?? ''}');
-      tests.add(await enrichTest(item));
+      tests.add(enrichTestSync(item));
     }
     return {
       'title': periodLabel,
@@ -2165,14 +2333,28 @@ class LabRepo {
     Map<String, dynamic>? user,
     Map<int, Map<String, dynamic>>? inventoryMap,
   ) async {
-    final inventoryIds = <int>{...oldMap.keys, ...newMap.keys};
+    final deltas = <int, double>{};
+    for (final id in <int>{...oldMap.keys, ...newMap.keys}) {
+      final delta = (newMap[id] ?? 0.0) - (oldMap[id] ?? 0.0);
+      if (delta.abs() >= 1e-9) deltas[id] = delta;
+    }
+    if (deltas.isEmpty) return (<Map<String, dynamic>>[], <Map<String, dynamic>>[]);
+    // Single batched read for all touched inventory rows.
+    final loaded = await loadInventoryMap(txn, deltas.keys.toSet());
+    if (inventoryMap != null) {
+      for (final e in loaded.entries) {
+        inventoryMap.putIfAbsent(e.key, () => e.value);
+      }
+    }
     final consumption = <Map<String, dynamic>>[];
     final lowStock = <Map<String, dynamic>>[];
     final timestamp = nowIso();
-    for (final inventoryId in inventoryIds) {
-      final delta = (newMap[inventoryId] ?? 0.0) - (oldMap[inventoryId] ?? 0.0);
-      if (delta.abs() < 1e-9) continue;
-      final inventory = await getInventoryItemTx(txn, inventoryId);
+    final batch = (txn as dynamic).batch() as dynamic;
+    final pending = <Map<String, dynamic>>[];
+    for (final entry in deltas.entries) {
+      final inventoryId = entry.key;
+      final delta = entry.value;
+      final inventory = loaded[inventoryId]!;
       final currentQty =
         (safeFloat(inventory['current_qty']) ?? 0.0).clamp(0.0, double.infinity).toDouble();
       final requestedQty = delta.abs();
@@ -2182,10 +2364,10 @@ class LabRepo {
       final shortfallQty =
           isReversal ? 0.0 : (requestedQty - appliedQty > 0 ? requestedQty - appliedQty : 0.0);
       final newQty = isReversal ? currentQty + appliedQty : currentQty - appliedQty;
-      await execute(txn,
+      batch.rawUpdate(
           'UPDATE lab_inventory SET current_qty = ?, updated_at = ? WHERE id = ?',
           [newQty, timestamp, inventoryId]);
-      await execute(txn, '''
+      batch.rawInsert('''
                 INSERT INTO lab_consumption_log (
                     sample_test_id, inventory_id, qty_used, requested_qty, applied_qty,
                     shortfall_qty, event_type, created_at
@@ -2196,10 +2378,7 @@ class LabRepo {
         requestedQty, appliedQty, shortfallQty,
         isReversal ? 'REVERSAL' : 'CONSUMPTION', timestamp,
       ]);
-      if (inventoryMap != null) {
-        inventoryMap[inventoryId] = {...inventory, 'current_qty': newQty};
-      }
-      consumption.add({
+      pending.add({
         'inventory_id': inventoryId,
         'inventory_name': inventory['name'],
         'unit': inventory['unit'],
@@ -2208,13 +2387,37 @@ class LabRepo {
         'applied_qty': appliedQty,
         'shortfall_qty': shortfallQty,
         'new_qty': newQty,
+        'min_qty': inventory['min_qty'],
       });
-      if (newQty < (safeFloat(inventory['min_qty']) ?? 0.0) || shortfallQty > 0) {
+    }
+    await batch.commit(noResult: true);
+    for (final p in pending) {
+      if (inventoryMap != null) {
+        final cur = inventoryMap[p['inventory_id'] as int];
+        if (cur != null) {
+          inventoryMap[p['inventory_id'] as int] = {
+            ...cur,
+            'current_qty': p['new_qty'],
+          };
+        }
+      }
+      consumption.add({
+        'inventory_id': p['inventory_id'],
+        'inventory_name': p['inventory_name'],
+        'unit': p['unit'],
+        'qty_used': p['qty_used'],
+        'requested_qty': p['requested_qty'],
+        'applied_qty': p['applied_qty'],
+        'shortfall_qty': p['shortfall_qty'],
+        'new_qty': p['new_qty'],
+      });
+      if ((p['new_qty'] as double) < (safeFloat(p['min_qty']) ?? 0.0) ||
+          (p['shortfall_qty'] as double) > 0) {
         lowStock.add({
-          'inventory_id': inventoryId,
-          'inventory_name': inventory['name'],
-          'current_qty': newQty,
-          'min_qty': inventory['min_qty'],
+          'inventory_id': p['inventory_id'],
+          'inventory_name': p['inventory_name'],
+          'current_qty': p['new_qty'],
+          'min_qty': p['min_qty'],
         });
       }
     }

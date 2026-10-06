@@ -10,7 +10,9 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_dropdown.dart';
 import '../../lab/domain/lab_result_repository.dart';
+import '../domain/parameter_type.dart';
 import '../domain/reference_repository.dart';
 
 /// How the editor arranges its fields.
@@ -73,9 +75,8 @@ class _PhysicalParamRow {
     this.parameterId,
     String name = '',
     String requirement = '',
-  })
-    : nameCtrl = TextEditingController(text: name),
-      reqCtrl = TextEditingController(text: requirement);
+  }) : nameCtrl = TextEditingController(text: name),
+       reqCtrl = TextEditingController(text: requirement);
   void dispose() {
     nameCtrl.dispose();
     reqCtrl.dispose();
@@ -209,14 +210,18 @@ class MaterialEditorState extends State<MaterialEditor> {
         physicalRows = [
           for (final e in physMap.entries)
             _PhysicalParamRow(
-              parameterId: parameters
-                  .where(
-                    (p) =>
-                        '${p['parameter_type'] ?? ''}' == 'physical' &&
-                        '${p['parameter_name']}'.trim().toLowerCase() ==
-                            e.key.trim().toLowerCase(),
-                  )
-                  .firstOrNull?['id'] as int?,
+              parameterId:
+                  parameters
+                          .where(
+                            (p) =>
+                                ParameterType.physical.matches(
+                                  p['parameter_type'],
+                                ) &&
+                                '${p['parameter_name']}'.trim().toLowerCase() ==
+                                    e.key.trim().toLowerCase(),
+                          )
+                          .firstOrNull?['id']
+                      as int?,
               name: e.key,
               requirement: referenceValueText(e.value),
             ),
@@ -308,14 +313,19 @@ class MaterialEditorState extends State<MaterialEditor> {
         '${_physical[i].parameterId}',
   };
 
+  /// Both vocabularies inherit the same two kinds from [ParameterType]:
+  /// chemical rows can only bind chemical parameters and physical rows only
+  /// physical ones — never the full mixed list.
   List<Map<String, dynamic>> get _physicalParameters => [
     for (final parameter in _parameters)
-      if ('${parameter['parameter_type'] ?? ''}' == 'physical') parameter,
+      if (ParameterType.physical.matches(parameter['parameter_type']))
+        parameter,
   ];
 
   List<Map<String, dynamic>> get _chemicalParameters => [
     for (final parameter in _parameters)
-      if ('${parameter['parameter_type'] ?? ''}' == 'chemical') parameter,
+      if (ParameterType.chemical.matches(parameter['parameter_type']))
+        parameter,
   ];
 
   void _onPhysicalParameterChange(_PhysicalParamRow row, int? id) {
@@ -452,8 +462,9 @@ class MaterialEditorState extends State<MaterialEditor> {
           if (p.nameCtrl.text.trim().isNotEmpty) ...[
             {
               'parameter_name': p.nameCtrl.text.trim(),
-              'parameter_type': 'physical',
-              'unit': '${_physicalParameters.where((item) => '${item['id']}' == '${p.parameterId}').firstOrNull?['unit'] ?? ''}',
+              'parameter_type': ParameterType.physical.value,
+              'unit':
+                  '${_physicalParameters.where((item) => '${item['id']}' == '${p.parameterId}').firstOrNull?['unit'] ?? ''}',
               'min_value': _parseRangeText(p.reqCtrl.text.trim()).min,
               'max_value': _parseRangeText(p.reqCtrl.text.trim()).max,
             },
@@ -462,7 +473,7 @@ class MaterialEditorState extends State<MaterialEditor> {
           if (c.nameCtrl.text.trim().isNotEmpty)
             {
               'parameter_name': c.nameCtrl.text.trim(),
-              'parameter_type': 'chemical',
+              'parameter_type': ParameterType.chemical.value,
               'unit': c.unitCtrl.text.trim(),
               'min_value': c.minCtrl.text.trim(),
               'max_value': c.maxCtrl.text.trim(),
@@ -680,32 +691,21 @@ class MaterialEditorState extends State<MaterialEditor> {
     final used = _usedPhysicalParameterIds(index);
     final name = Expanded(
       flex: 2,
-      child: DropdownButtonFormField<int?>(
-        initialValue: row.parameterId,
-        isDense: true,
-        isExpanded: true,
-        decoration: const InputDecoration(
-          isDense: true,
-          border: OutlineInputBorder(),
-        ),
-        hint: Text(
-          AppText.t('اختر بارامتراً ظاهرياً…', 'Choose a physical parameter…'),
-          overflow: TextOverflow.ellipsis,
+      child: AppDropdown<int?>(
+        value: row.parameterId,
+        hintText: AppText.t(
+          'اختر بارامتراً ظاهرياً…',
+          'Choose a physical parameter…',
         ),
         items: [
           for (final parameter in _physicalParameters)
-            DropdownMenuItem<int?>(
+            AppDropdownItem<int?>(
               value: int.tryParse('${parameter['id']}'),
               enabled: !used.contains('${parameter['id']}'),
-              child: Text(
-                '${parameter['parameter_name']}',
-                overflow: TextOverflow.ellipsis,
-              ),
+              label: '${parameter['parameter_name']}',
             ),
         ],
-        onChanged: _saving
-            ? null
-            : (id) => _onPhysicalParameterChange(row, id),
+        onChanged: _saving ? null : (id) => _onPhysicalParameterChange(row, id),
       ),
     );
     final requirement = Expanded(
@@ -796,52 +796,20 @@ class MaterialEditorState extends State<MaterialEditor> {
     final row = _chemical[index];
     final used = _usedParameterIds(index);
     final enabled = row.parameterId != null && !_saving;
-    final dropdown = DropdownButtonFormField<int?>(
-      initialValue: row.parameterId,
-      isDense: true,
-      isExpanded: true,
-      decoration: const InputDecoration(
-        isDense: true,
-        border: OutlineInputBorder(),
-      ),
-      hint: Text(
-        AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
-        overflow: TextOverflow.ellipsis,
-        maxLines: 1,
-        softWrap: false,
-      ),
-      selectedItemBuilder: (_) => [
-        Text(
-          AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 1,
-          softWrap: false,
-        ),
-        for (final p in _chemicalParameters)
-          Text(
-            '${p['parameter_name']}',
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-            softWrap: false,
-          ),
-      ],
+    // A dangling `parameterId` (parameter deleted/retyped after the bounds
+    // were saved) used to crash the whole editor on open
+    // (`There should be exactly one item with [DropdownButton]'s value`).
+    // [AppDropdown] shows it as a disabled "deleted" row instead, and the
+    // save path below turns it into the friendly choose-a-parameter message.
+    final dropdown = AppDropdown<int?>(
+      value: row.parameterId,
+      hintText: AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
       items: [
-        DropdownMenuItem<int?>(
-          value: null,
-          enabled: false,
-          child: Text(
-            AppText.t('اختر بارامتراً…', 'Choose a parameter…'),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
         for (final p in _chemicalParameters)
-          DropdownMenuItem<int?>(
+          AppDropdownItem<int?>(
             value: int.tryParse('${p['id']}'),
             enabled: !used.contains('${p['id']}'),
-            child: Text(
-              '${p['parameter_name']}',
-              overflow: TextOverflow.ellipsis,
-            ),
+            label: '${p['parameter_name']}',
           ),
       ],
       onChanged: _saving

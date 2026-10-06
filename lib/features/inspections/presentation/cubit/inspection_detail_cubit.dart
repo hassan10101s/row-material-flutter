@@ -24,11 +24,17 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));
     try {
+      // Fetch the inspection row first (need entry_code), then load
+      // status history (already inside getById) + lab tests in parallel
+      // where possible. getById = row + history (1+1, expected on detail).
       final inspection = await repo.getById(inspectionId);
       final entryCode = '${inspection['entry_code'] ?? ''}'.trim();
-      final chemicalAnalyses = entryCode.isEmpty || labResults == null
-          ? <Map<String, dynamic>>[]
-          : await labResults!.listSampleTestsForEntryCode(entryCode);
+      // History already included; only the lab enrichment is extra.
+      List<Map<String, dynamic>> chemicalAnalyses = const [];
+      if (entryCode.isNotEmpty && labResults != null) {
+        chemicalAnalyses =
+            await labResults!.listSampleTestsForEntryCode(entryCode);
+      }
       safeEmit(state.copyWith(
         loading: false,
         inspection: inspection,

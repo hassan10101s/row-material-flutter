@@ -4,8 +4,9 @@ import '../../../reports/domain/report_repository.dart';
 import '../../domain/inspection_repository.dart';
 import 'inspections_state.dart';
 
-/// Inspections ledger: loads rows and maintains the client-side query/status
-/// filters and the follow-up report export flag.
+/// Inspections ledger: server-side query/status filters with LIMIT/OFFSET
+/// pagination. The DB does the filtering (indexed `idx_inspections_alive` +
+/// status/supplier), the cubit only holds the current page.
 class InspectionsCubit extends AppCubit<InspectionsState> {
   InspectionsCubit({required this.repo, required this.reports})
       : super(const InspectionsState());
@@ -13,13 +14,27 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
   final InspectionRepository repo;
   final ReportRepository reports;
 
-  Future<void> load() async {
-    safeEmit(state.copyWith(loading: true, error: null));
+  Future<void> load({int page = 0}) async {
+    safeEmit(state.copyWith(loading: true, error: null, page: page));
     try {
-      final rows = await repo.list(orderBy: 'inspection_date DESC, id DESC');
+      // Parallel: page rows + filtered total in one round.
+      final settled = await Future.wait([
+        repo.list(
+          query: state.query,
+          status: state.status,
+          limit: state.pageSize,
+          offset: page * state.pageSize,
+          orderBy: 'inspection_date DESC, id DESC',
+        ),
+        repo.count(query: state.query, status: state.status),
+      ]);
+      final rows = settled[0] as List<Map<String, dynamic>>;
+      final total = settled[1] as int;
       safeEmit(state.copyWith(
         rows: rows,
-        visible: _filtered(rows, state.query, state.status),
+        visible: rows,
+        total: total,
+        page: page,
         loading: false,
       ));
     } on AppError catch (e) {
@@ -29,18 +44,27 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
     }
   }
 
-  void setQuery(String query) {
-    safeEmit(state.copyWith(query: query));
-    safeEmit(state.copyWith(visible: _filtered(state.rows, query, state.status)));
+  Future<void> setPage(int page) async {
+    final maxPage = state.total <= 0
+        ? 0
+        : ((state.total - 1) ~/ state.pageSize).clamp(0, 1 << 31);
+    await load(page: page.clamp(0, maxPage));
   }
 
-  void setStatus(String status) {
+  Future<void> setQuery(String query) async {
+    safeEmit(state.copyWith(query: query));
+    await load(page: 0);
+  }
+
+  Future<void> setStatus(String status) async {
     safeEmit(state.copyWith(status: status));
-    safeEmit(state.copyWith(visible: _filtered(state.rows, state.query, status)));
+    await load(page: 0);
   }
 
   /// Returns the saved report path, or `null` when there is nothing to export.
   /// Export errors are surfaced by the caller (they are not ledger errors).
+  /// Note: exports the current server-filtered page (DB-side pagination holds
+  /// at most [InspectionsState.pageSize] rows in memory).
   Future<String?> exportFollowUp() async {
     final visible = state.visible;
     if (visible.isEmpty) return null;
@@ -54,26 +78,5 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
     } finally {
       safeEmit(state.copyWith(exporting: false));
     }
-  }
-
-  static List<Map<String, dynamic>> _filtered(
-    List<Map<String, dynamic>> rows,
-    String query,
-    String status,
-  ) {
-    final q = query.trim().toLowerCase();
-    final list = q.isEmpty
-        ? rows
-        : [
-            for (final r in rows)
-              if ('${r['entry_code']}'.toLowerCase().contains(q) ||
-                  '${r['material_name']}'.toLowerCase().contains(q) ||
-                  '${r['supplier']}'.toLowerCase().contains(q) ||
-                  '${r['truck_number']}'.toLowerCase().contains(q))
-                r,
-          ];
-    return status.isEmpty
-        ? list
-        : [for (final r in list) if ('${r['decision_status']}' == status) r];
   }
 }

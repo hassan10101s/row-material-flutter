@@ -11,6 +11,9 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_dialogs.dart';
+import '../../../design_system/widgets/app_dropdown.dart';
+import '../../../design_system/widgets/app_window.dart';
 import '../../../di/service_locator.dart';
 import '../core/formula_engine.dart'
     show inventoryUnits, safeFormulaFloat, unitDimOf, validateFormula;
@@ -41,23 +44,13 @@ class AnalysesTab extends StatelessWidget {
     Map<String, dynamic> analysis,
   ) async {
     final cubit = context.read<AnalysesCubit>();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(AppText.t('حذف التحليل', 'Delete analysis')),
-        content: Text('${AppText.t('حذف', 'Delete')} "${analysis['name']}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(AppStrings.cancel),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(AppStrings.delete),
-          ),
-        ],
-      ),
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('حذف التحليل', 'Delete analysis'),
+      message: '${AppText.t('حذف', 'Delete')} "${analysis['name']}"؟',
+      danger: true,
+      confirmLabel: AppStrings.delete,
+      cancelLabel: AppStrings.cancel,
     );
     if (confirmed != true) return;
     try {
@@ -119,7 +112,10 @@ class AnalysesTab extends StatelessWidget {
                               ),
                               DataColumn(
                                 label: Text(
-                                  AppText.t('بارامتر المرجع', 'Reference parameter'),
+                                  AppText.t(
+                                    'بارامتر المرجع',
+                                    'Reference parameter',
+                                  ),
                                 ),
                               ),
                               DataColumn(
@@ -278,9 +274,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         _consumedItems.add(m);
       }
     }
-    _parameterId = int.tryParse(
-      '${widget.analysis?['parameter_id'] ?? ''}',
-    );
+    _parameterId = int.tryParse('${widget.analysis?['parameter_id'] ?? ''}');
     _loadInventory();
     _parameterLoad = _loadReferenceParameters();
   }
@@ -290,15 +284,14 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       final parameters = await _reference.listParameters();
       if (!mounted) return;
       final linkedId = _parameterId;
-      final linked = parameters.where(
-        (row) => '${row['id']}' == '$linkedId',
-      );
+      final linked = parameters.where((row) => '${row['id']}' == '$linkedId');
       final matchingName = parameters.where(
         (row) =>
             '${row['parameter_name']}'.trim().toLowerCase() ==
             _name.text.trim().toLowerCase(),
       );
-      final parameter = linked.firstOrNull ??
+      final parameter =
+          linked.firstOrNull ??
           (linkedId == null ? matchingName.firstOrNull : null);
       setState(() {
         _parameters = parameters;
@@ -314,9 +307,9 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
   }
 
   void _selectReferenceParameter(int? id) {
-    final parameter = _parameters.where(
-      (row) => '${row['id']}' == '$id',
-    ).firstOrNull;
+    final parameter = _parameters
+        .where((row) => '${row['id']}' == '$id')
+        .firstOrNull;
     setState(() {
       _parameterId = id;
       _parameterError = null;
@@ -677,7 +670,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       return ActionChip(
         visualDensity: VisualDensity.compact,
         avatar: Icon(Icons.link, size: 14.r),
-        label: Text('ربط', style: TextStyle(fontSize: 12.spMax)),
+        label: Text(
+          AppText.t('ربط', 'Link'),
+          style: TextStyle(fontSize: 12.spMax),
+        ),
         onPressed: () =>
             setState(() => _linkPicker = _linkPicker == index ? -1 : index),
       );
@@ -688,7 +684,9 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
       visualDensity: VisualDensity.compact,
       avatar: Icon(Icons.link, size: 14.r),
       label: Text(
-        name.isEmpty ? 'مرتبط' : '$name ${unit.isNotEmpty ? '($unit)' : ''}',
+        name.isEmpty
+            ? AppText.t('مرتبط', 'Linked')
+            : '$name ${unit.isNotEmpty ? '($unit)' : ''}',
         overflow: TextOverflow.ellipsis,
         style: TextStyle(fontSize: 12.spMax),
       ),
@@ -724,21 +722,24 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'ربط بمادة المخزون (استهلاك تلقائي)',
+            AppText.t(
+              'ربط بمادة المخزون (استهلاك تلقائي)',
+              'Link to stock item (auto consume)',
+            ),
             style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
           ),
           const SizedBox(height: 6),
           DropdownButtonFormField<int?>(
             initialValue: selectedId,
             isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'المادة',
+            decoration: InputDecoration(
+              labelText: AppText.t('المادة', 'Material'),
               isDense: true,
             ),
             items: [
-              const DropdownMenuItem<int?>(
+              DropdownMenuItem<int?>(
                 value: null,
-                child: Text('— بدون ربط —'),
+                child: Text(AppText.t('— بدون ربط —', '— no link —')),
               ),
               for (final inv in _inventory)
                 DropdownMenuItem<int?>(
@@ -771,8 +772,8 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
             DropdownButtonFormField<String>(
               initialValue: '${_fieldLinks[index]['unit'] ?? 'mL'}',
               isExpanded: true,
-              decoration: const InputDecoration(
-                labelText: 'وحدة الاستهلاك',
+              decoration: InputDecoration(
+                labelText: AppText.t('وحدة الاستهلاك', 'Consume unit'),
                 isDense: true,
               ),
               items: [
@@ -822,7 +823,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'قيمة ثابتة تستخدم في المعادلة',
+            AppText.t(
+              'قيمة ثابتة تستخدم في المعادلة',
+              'Fixed value used in the formula',
+            ),
             style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
           ),
           const SizedBox(height: 6),
@@ -832,8 +836,8 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
             onChanged: (t) {
               _fieldLinks[index]['fixed_value'] = safeFormulaFloat(t);
             },
-            decoration: const InputDecoration(
-              labelText: 'قيمة ثابتة',
+            decoration: InputDecoration(
+              labelText: AppText.t('قيمة ثابتة', 'Fixed value'),
               isDense: true,
             ),
           ),
@@ -875,7 +879,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'قيم متعددة — يختار المستخدم قيمة لكل اختبار',
+            AppText.t(
+              'قيم متعددة — يختار المستخدم قيمة لكل اختبار',
+              'Multiple values — user picks one per test',
+            ),
             style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
           ),
           if (values.isNotEmpty) ...[
@@ -907,8 +914,8 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                     decimal: true,
                   ),
                   onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    labelText: 'قيمة...',
+                  decoration: InputDecoration(
+                    labelText: AppText.t('قيمة...', 'Value...'),
                     isDense: true,
                   ),
                 ),
@@ -916,7 +923,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               const SizedBox(width: 6),
               AppButton(
                 small: true,
-                label: 'إضافة',
+                label: AppText.t('إضافة', 'Add'),
                 icon: Icon(Icons.add, size: 14.r),
                 onPressed: () => _addListValue(index),
               ),
@@ -1011,8 +1018,8 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
                 decimal: true,
               ),
               style: TextStyle(fontSize: 12.5.spMax),
-              decoration: const InputDecoration(
-                labelText: 'الكمية',
+              decoration: InputDecoration(
+                labelText: AppText.t('الكمية', 'Qty'),
                 isDense: true,
               ),
             ),
@@ -1066,30 +1073,28 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
 
   Future<void> _pickInventoryItem() async {
     if (_inventory.isEmpty) return;
-    final selected = await showDialog<Map<String, dynamic>>(
-      context: context,
-      builder: (dialogContext) => SimpleDialog(
-        title: Text(AppText.t('اختر مادة مستهلكة', 'Pick consumed chemical')),
+    final selected = await showAppWindow<Map<String, dynamic>>(
+      context,
+      title: AppText.t('اختر مادة مستهلكة', 'Pick consumed chemical'),
+      icon: Icons.science_outlined,
+      size: AppWindowSize.sm,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           for (final inv in _inventory)
-            SimpleDialogOption(
-              onPressed: () => Navigator.of(dialogContext).pop(inv),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.science_outlined,
-                    size: 16.r,
-                    color: AppColors.accent,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '${inv['name']} (${inv['unit'] ?? ''})',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.science_outlined,
+                size: 16.r,
+                color: AppColors.accent,
               ),
+              title: Text(
+                '${inv['name']} (${inv['unit'] ?? ''})',
+                overflow: TextOverflow.ellipsis,
+              ),
+              onTap: () => Navigator.of(context).pop(inv),
             ),
         ],
       ),
@@ -1115,252 +1120,10 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text(widget.analysis == null ? 'إضافة تحليل' : 'تعديل تحليل'),
-      content: SizedBox(
-        width: 720.w,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<int>(
-                value: _parameters.any(
-                  (row) => '${row['id']}' == '$_parameterId',
-                )
-                    ? _parameterId
-                    : null,
-                isExpanded: true,
-                decoration: InputDecoration(
-                  labelText: AppText.t(
-                    'البارامتر المرجعي',
-                    'Reference parameter',
-                  ),
-                  isDense: true,
-                  errorText: _parameterError,
-                ),
-                items: [
-                  for (final parameter in _parameters)
-                    DropdownMenuItem<int>(
-                      value: int.tryParse('${parameter['id']}'),
-                      child: Text(
-                        '${parameter['parameter_name']}'
-                        ' (${parameter['unit'] ?? ''})',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-                onChanged: _selectReferenceParameter,
-              ),
-              TextField(
-                controller: _name,
-                enabled: false,
-                decoration: const InputDecoration(
-                  labelText: 'الاسم',
-                  isDense: true,
-                ),
-              ),
-              TextField(
-                controller: _unit,
-                enabled: false,
-                decoration: const InputDecoration(
-                  labelText: 'الوحدة الموروثة من المرجع',
-                  isDense: true,
-                ),
-              ),
-              TextField(
-                controller: _description,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'الوصف',
-                  isDense: true,
-                ),
-              ),
-              Text(
-                'الحقول الديناميكية (البارامترات)',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13.spMax,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'لكل حقل حدد كيف تُملأ قيمته: مرتبط بمادة من المخزون (تُستهلك تلقائياً)، أو قيمة ثابتة تدخل في المعادلة، أو قائمة قيم يختار منها المستخدم.',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 11.spMax,
-                ),
-              ),
-              const SizedBox(height: 8),
-              for (var i = 0; i < _fieldControllers.length; i++) ...[
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceSoft,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.borderMuted),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.tune,
-                            size: 16.r,
-                            color: AppColors.textMuted,
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: TextField(
-                              controller: _fieldControllers[i],
-                              onChanged: (_) => setState(() {}),
-                              decoration: InputDecoration(
-                                labelText: 'اسم الحقل ${i + 1}',
-                                isDense: true,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          _fieldSummaryChip(i),
-                          IconButton(
-                            tooltip: 'حذف الحقل',
-                            visualDensity: VisualDensity.compact,
-                            onPressed: _fieldControllers.length > 1
-                                ? () => _removeField(i)
-                                : null,
-                            icon: const Icon(Icons.close, size: 18),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: _kindChips(i),
-                      ),
-                      if (_kindOf(i) == 'link') ...[
-                        if (_linkPicker == i)
-                          _linkPanel(i)
-                        else
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: _linkSummary(i),
-                          ),
-                      ] else if (_kindOf(i) == 'value')
-                        _valuePanel(i)
-                      else if (_kindOf(i) == 'list')
-                        _listPanel(i),
-                    ],
-                  ),
-                ),
-                if (i < _fieldControllers.length - 1) const SizedBox(height: 8),
-              ],
-              const SizedBox(height: 6),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _newFieldController,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        labelText: 'أضف حقلاً...',
-                        isDense: true,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  AppButton(
-                    small: true,
-                    label: 'إضافة',
-                    icon: Icon(Icons.add, size: 16.r),
-                    onPressed: _addField,
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              TextField(
-                controller: _formula,
-                maxLines: 2,
-                textDirection: TextDirection.ltr,
-                style: const TextStyle(fontFamily: 'monospace'),
-                onChanged: (_) => setState(() {}),
-                decoration: InputDecoration(
-                  labelText: 'المعادلة',
-                  hintText: '(V1 - V2) * C * 1.4007 * F / m',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  if (_formulaTokens.isNotEmpty)
-                    PopupMenuButton<String>(
-                      tooltip: 'إدراج حقل / مادة / ثابت',
-                      onSelected: _insertFormulaToken,
-                      itemBuilder: (context) => [
-                        for (final t in _formulaTokens)
-                          PopupMenuItem<String>(
-                            value: t.value,
-                            child: Text(
-                              t.label,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                      ],
-                      child: const Chip(
-                        avatar: Icon(Icons.add, size: 18),
-                        label: Text('إدراج'),
-                      ),
-                    ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: [
-                        for (final op in _formulaOps)
-                          ActionChip(
-                            visualDensity: VisualDensity.compact,
-                            label: Text(
-                              op,
-                              style: const TextStyle(fontFamily: 'monospace'),
-                            ),
-                            onPressed: () => _insertFormulaToken(op),
-                          ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              if (!_formulaStatus.empty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: _formulaStatus.error != null
-                      ? Text(
-                          _formulaStatus.error!,
-                          style: TextStyle(
-                            color: AppColors.danger,
-                            fontSize: 12.spMax,
-                          ),
-                        )
-                      : Text(
-                          _formulaStatus.unresolved.isEmpty
-                              ? 'معادلة صالحة بدون متغيرات.'
-                              : 'المتغيرات المطلوبة: '
-                                    '${_formulaStatus.unresolved.join(', ')}',
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 12.spMax,
-                          ),
-                        ),
-                ),
-              _consumptionCard(),
-            ],
-          ),
-        ),
-      ),
+    return AppWindow(
+      title: widget.analysis == null ? 'إضافة تحليل' : 'تعديل تحليل',
+      icon: Icons.biotech_outlined,
+      maxWidth: 720,
       actions: [
         TextButton(
           onPressed: _saving ? null : () => Navigator.of(context).pop(false),
@@ -1377,6 +1140,235 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               : Text(AppStrings.save),
         ),
       ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AppDropdown<int>(
+            value: _parameterId,
+            labelText: AppText.t('البارامتر المرجعي', 'Reference parameter'),
+            errorText: _parameterError,
+            items: [
+              for (final parameter in _parameters)
+                if (int.tryParse('${parameter['id']}') != null)
+                  AppDropdownItem<int>(
+                    value: int.parse('${parameter['id']}'),
+                    label:
+                        '${parameter['parameter_name']}'
+                        ' (${parameter['unit'] ?? ''})',
+                  ),
+            ],
+            onChanged: _selectReferenceParameter,
+          ),
+          TextField(
+            controller: _name,
+            enabled: false,
+            decoration: InputDecoration(
+              labelText: AppText.t('الاسم', 'Name'),
+              isDense: true,
+            ),
+          ),
+          TextField(
+            controller: _unit,
+            enabled: false,
+            decoration: InputDecoration(
+              labelText: AppText.t(
+                'الوحدة الموروثة من المرجع',
+                'Unit inherited from reference',
+              ),
+              isDense: true,
+            ),
+          ),
+          TextField(
+            controller: _description,
+            maxLines: 2,
+            decoration: InputDecoration(
+              labelText: AppText.t('الوصف', 'Description'),
+              isDense: true,
+            ),
+          ),
+          Text(
+            AppText.t(
+              'الحقول الديناميكية (البارامترات)',
+              'Dynamic fields (parameters)',
+            ),
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13.spMax),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            AppText.t(
+              'لكل حقل حدد كيف تُملأ قيمته: مرتبط بمادة من المخزون (تُستهلك تلقائياً)، أو قيمة ثابتة تدخل في المعادلة، أو قائمة قيم يختار منها المستخدم.',
+              'For each field choose how its value is filled: linked to a stock item (auto consumed), a fixed value in the formula, or a list the user picks from.',
+            ),
+            style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
+          ),
+          const SizedBox(height: 8),
+          for (var i = 0; i < _fieldControllers.length; i++) ...[
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceSoft,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: AppColors.borderMuted),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Icon(Icons.tune, size: 16.r, color: AppColors.textMuted),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: TextField(
+                          controller: _fieldControllers[i],
+                          onChanged: (_) => setState(() {}),
+                          decoration: InputDecoration(
+                            labelText: AppText.t(
+                              'اسم الحقل ${i + 1}',
+                              'Field name ${i + 1}',
+                            ),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      _fieldSummaryChip(i),
+                      IconButton(
+                        tooltip: AppText.t('حذف الحقل', 'Delete field'),
+                        visualDensity: VisualDensity.compact,
+                        onPressed: _fieldControllers.length > 1
+                            ? () => _removeField(i)
+                            : null,
+                        icon: const Icon(Icons.close, size: 18),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: _kindChips(i),
+                  ),
+                  if (_kindOf(i) == 'link') ...[
+                    if (_linkPicker == i)
+                      _linkPanel(i)
+                    else
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: _linkSummary(i),
+                      ),
+                  ] else if (_kindOf(i) == 'value')
+                    _valuePanel(i)
+                  else if (_kindOf(i) == 'list')
+                    _listPanel(i),
+                ],
+              ),
+            ),
+            if (i < _fieldControllers.length - 1) const SizedBox(height: 8),
+          ],
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _newFieldController,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    labelText: AppText.t('أضف حقلاً...', 'Add a field...'),
+                    isDense: true,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              AppButton(
+                small: true,
+                label: AppText.t('إضافة', 'Add'),
+                icon: Icon(Icons.add, size: 16.r),
+                onPressed: _addField,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          TextField(
+            controller: _formula,
+            maxLines: 2,
+            textDirection: TextDirection.ltr,
+            style: const TextStyle(fontFamily: 'monospace'),
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: AppText.t('المعادلة', 'Formula'),
+              hintText: '(V1 - V2) * C * 1.4007 * F / m',
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              if (_formulaTokens.isNotEmpty)
+                PopupMenuButton<String>(
+                  tooltip: AppText.t(
+                    'إدراج حقل / مادة / ثابت',
+                    'Insert field / item / constant',
+                  ),
+                  onSelected: _insertFormulaToken,
+                  itemBuilder: (context) => [
+                    for (final t in _formulaTokens)
+                      PopupMenuItem<String>(
+                        value: t.value,
+                        child: Text(t.label, overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                  child: Chip(
+                    avatar: const Icon(Icons.add, size: 18),
+                    label: Text(AppText.t('إدراج', 'Insert')),
+                  ),
+                ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: [
+                    for (final op in _formulaOps)
+                      ActionChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(
+                          op,
+                          style: const TextStyle(fontFamily: 'monospace'),
+                        ),
+                        onPressed: () => _insertFormulaToken(op),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (!_formulaStatus.empty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: _formulaStatus.error != null
+                  ? Text(
+                      _formulaStatus.error!,
+                      style: TextStyle(
+                        color: AppColors.danger,
+                        fontSize: 12.spMax,
+                      ),
+                    )
+                  : Text(
+                      _formulaStatus.unresolved.isEmpty
+                          ? 'معادلة صالحة بدون متغيرات.'
+                          : 'المتغيرات المطلوبة: '
+                                '${_formulaStatus.unresolved.join(', ')}',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12.spMax,
+                      ),
+                    ),
+            ),
+          _consumptionCard(),
+        ],
+      ),
     );
   }
 }

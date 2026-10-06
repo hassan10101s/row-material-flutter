@@ -1,10 +1,9 @@
-import 'dart:convert';
-
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../auth/app_session.dart';
 import '../utils/app_dates.dart';
 import 'entity_registry.dart';
+import 'sync_codec.dart';
 import 'sync_queue.dart';
 
 /// Audit actions (plan §9.7).
@@ -73,6 +72,10 @@ class AuditLogger {
         ? deviceId
         : (session == null || session.deviceId.isEmpty ? 'unknown' : session.deviceId);
     final occurredAt = nowIso();
+    // Single sanitized encode reused for both columns: the old code encoded
+    // twice and threw on DateTime/Timestamp details, aborting the business txn.
+    final detailsJson =
+        details == null ? null : SyncCodec.encode(_redact(details));
     final id = await txn.insert('audit_logs', {
       'user_id': actor.isEmpty ? null : actor,
       'user_name': name.isEmpty ? null : name,
@@ -80,7 +83,7 @@ class AuditLogger {
       'action': action,
       'entity_type': entityType,
       'entity_id': entityId,
-      'details_json': details == null ? null : jsonEncode(_redact(details)),
+      'details_json': detailsJson,
       'device_id': device,
       'occurred_at': occurredAt,
       'version': 1,
@@ -98,7 +101,7 @@ class AuditLogger {
       'action': action,
       'entityType': entityType,
       'entityId': entityId,
-      'detailsJson': details == null ? null : jsonEncode(_redact(details)),
+      'detailsJson': detailsJson,
       'deviceId': device,
       'occurredAt': occurredAt,
       'version': 1,
@@ -137,10 +140,40 @@ class AuditLogger {
     'api_key',
   };
 
+  /// Deep redact + leave sanitization to [SyncCodec]: nested maps/lists are
+  /// walked so a `token` buried one level down never reaches the trail, and
+  /// DateTime/Timestamp values survive as ISO strings instead of crashing
+  /// `jsonEncode`.
   static Map<String, dynamic> _redact(Map<String, dynamic> details) {
     final out = <String, dynamic>{};
     for (final entry in details.entries) {
-      out[entry.key] = _sensitiveKeys.contains(entry.key) ? '***' : entry.value;
+      final key = entry.key;
+      if (_sensitiveKeys.contains(key)) {
+        out[key] = '***';
+        continue;
+      }
+      final value = entry.value;
+      if (value is Map<String, dynamic>) {
+        out[key] = _redact(value);
+      } else if (value is Map) {
+        out[key] = _redact({
+          for (final e in value.entries) '${e.key}': e.value,
+        });
+      } else if (value is List) {
+        out[key] = [
+          for (final item in value)
+            if (item is Map<String, dynamic>)
+              _redact(item)
+            else if (item is Map)
+              _redact({
+                for (final e in item.entries) '${e.key}': e.value,
+              })
+            else
+              item,
+        ];
+      } else {
+        out[key] = value;
+      }
     }
     return out;
   }

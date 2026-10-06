@@ -89,7 +89,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('الإعدادات', style: Theme.of(context).textTheme.headlineSmall),
+          Text(AppText.t('الإعدادات', 'Settings'),
+              style: Theme.of(context).textTheme.headlineSmall),
           const SizedBox(height: AppSpacing.md),
           _SettingsTabs(
             current: _tab,
@@ -354,30 +355,31 @@ class _AppearanceSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'المظهر واللغة',
+              AppText.t('المظهر واللغة', 'Appearance & language'),
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: AppSpacing.md),
-            Text('السمة', style: Theme.of(context).textTheme.bodyMedium),
+            Text(AppText.t('السمة', 'Theme'),
+                style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: AppSpacing.sm),
             // SegmentedButton shows all three states at once, unlike the
             // top-bar toggle which can only imply the current one.
             SegmentedButton<ThemeMode>(
-              segments: const [
+              segments: [
                 ButtonSegment(
                   value: ThemeMode.system,
-                  icon: Icon(Icons.brightness_auto, size: 18),
-                  label: Text('النظام'),
+                  icon: const Icon(Icons.brightness_auto, size: 18),
+                  label: Text(AppText.t('النظام', 'System')),
                 ),
                 ButtonSegment(
                   value: ThemeMode.light,
-                  icon: Icon(Icons.light_mode_outlined, size: 18),
-                  label: Text('فاتح'),
+                  icon: const Icon(Icons.light_mode_outlined, size: 18),
+                  label: Text(AppText.t('فاتح', 'Light')),
                 ),
                 ButtonSegment(
                   value: ThemeMode.dark,
-                  icon: Icon(Icons.dark_mode_outlined, size: 18),
-                  label: Text('داكن'),
+                  icon: const Icon(Icons.dark_mode_outlined, size: 18),
+                  label: Text(AppText.t('داكن', 'Dark')),
                 ),
               ],
               selected: {themeService.mode},
@@ -386,12 +388,16 @@ class _AppearanceSection extends StatelessWidget {
                   themeService.setMode(selection.first),
             ),
             const SizedBox(height: AppSpacing.lg),
-            Text('اللغة', style: Theme.of(context).textTheme.bodyMedium),
+            Text(AppText.t('اللغة', 'Language'),
+                style: Theme.of(context).textTheme.bodyMedium),
             const SizedBox(height: AppSpacing.sm),
             SegmentedButton<Locale>(
-              segments: const [
-                ButtonSegment(value: Locale('ar'), label: Text('العربية')),
-                ButtonSegment(value: Locale('en'), label: Text('English')),
+              segments: [
+                ButtonSegment(
+                    value: const Locale('ar'),
+                    label: Text(AppText.t('العربية', 'Arabic'))),
+                const ButtonSegment(
+                    value: Locale('en'), label: Text('English')),
               ],
               selected: {localeService.locale},
               showSelectedIcon: false,

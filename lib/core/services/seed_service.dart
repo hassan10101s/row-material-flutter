@@ -4,6 +4,7 @@ import 'package:excel/excel.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:sqflite/sqflite.dart';
 
+import '../../features/reference/domain/parameter_type.dart';
 import '../constants/app_errors.dart';
 import '../database/database_helper.dart';
 import '../utils/app_dates.dart';
@@ -108,6 +109,37 @@ class SeedService {
     return count;
   }
 
+  /// Element → type as curated in the `Type` column of units.xlsx (ground
+  /// truth derived from Reference.xlsx usage). Shared with [repairParameterTypes]
+  /// so seed and repair can never disagree.
+  Future<Map<String, ParameterType>> _seedParameterTypes() async {
+    final out = <String, ParameterType>{};
+    ByteData bytes;
+    try {
+      bytes = await rootBundle.load(_unitsAsset);
+    } catch (_) {
+      return out;
+    }
+    final sheet = await _readSheet(bytes, 'units.xlsx');
+    if (sheet.isEmpty) return out;
+    final headers = [for (final v in sheet.first) '${v ?? ''}'.trim()];
+    if (!headers.contains('Element Name')) return out;
+    final nameIdx = headers.indexOf('Element Name');
+    final typeIdx = headers.indexOf('Type');
+    for (var i = 1; i < sheet.length; i++) {
+      final row = sheet[i];
+      final name = '${_at(row, nameIdx) ?? ''}'.trim().toLowerCase();
+      if (name.isEmpty) continue;
+      final raw = typeIdx < 0 ? '' : '${_at(row, typeIdx) ?? ''}';
+      // Blank = data error, not a silent physical: matches the
+      // `upsertParameter` default and [ParameterType.ofDb].
+      out[name] = raw.trim().isEmpty
+          ? ParameterType.chemical
+          : ParameterType.parse(raw);
+    }
+    return out;
+  }
+
   Future<int> importUnits() async {
     final db = await dbHelper.database;
     ByteData bytes;
@@ -122,6 +154,7 @@ class SeedService {
     if (!headers.contains('Element Name') || !headers.contains('Unit')) return 0;
     final nameIdx = headers.indexOf('Element Name');
     final unitIdx = headers.indexOf('Unit');
+    final typeIdx = headers.indexOf('Type');
     final timestamp = nowIso();
     var count = 0;
     for (var i = 1; i < sheet.length; i++) {
@@ -129,16 +162,66 @@ class SeedService {
       final name = '${_at(row, nameIdx) ?? ''}'.trim();
       if (name.isEmpty) continue;
       final unit = '${_at(row, unitIdx) ?? ''}'.trim();
+      // Explicit type per row. The old statement omitted the column and the
+      // table default silently filed every element — chemical assays included —
+      // under physical, emptying the chemical tab.
+      final raw = typeIdx < 0 ? '' : '${_at(row, typeIdx) ?? ''}';
+      final type = raw.trim().isEmpty
+          ? ParameterType.chemical
+          : ParameterType.parse(raw);
       await db.execute(
-        'INSERT INTO parameters (parameter_name, unit, imported_at) '
-        'VALUES (?, ?, ?) '
+        'INSERT INTO parameters (parameter_name, unit, parameter_type, imported_at) '
+        'VALUES (?, ?, ?, ?) '
         'ON CONFLICT(parameter_name) DO UPDATE SET '
         'unit = excluded.unit, imported_at = excluded.imported_at',
-        [name, unit, timestamp],
+        [name, unit, type.value, timestamp],
       );
       count++;
     }
     return count;
+  }
+
+  /// Repairs rows mis-typed by the old typeless seed (everything defaulted to
+  /// physical) on every startup. Idempotent: only rows that still look
+  /// seed-defaulted move, and only uphill — a row explicitly typed chemical
+  /// by a user is never downgraded, and names absent from the asset are
+  /// untouched.
+  ///
+  /// A `physical` row carrying a unit is the fingerprint of the old seed:
+  /// physical aspects are unit-less by design, so such a row was never
+  /// hand-typed with intent.
+  Future<int> repairParameterTypes() async {
+    final assetTypes = await _seedParameterTypes();
+    if (assetTypes.isEmpty) return 0;
+    final db = await dbHelper.database;
+    final rows = await db.rawQuery(
+      'SELECT parameter_name, parameter_type, unit FROM parameters',
+    );
+    var fixed = 0;
+    for (final row in rows) {
+      final name = '${row['parameter_name'] ?? ''}';
+      final key = name.trim().toLowerCase();
+      final asset = assetTypes[key];
+      final current = '${row['parameter_type'] ?? ''}'.trim().toLowerCase();
+      final unit = '${row['unit'] ?? ''}'.trim();
+      if (current.isEmpty) {
+        // Dirty typeless row: normalize through the same reader the UI uses.
+        await db.rawUpdate(
+          'UPDATE parameters SET parameter_type = ? WHERE parameter_name = ?',
+          [ParameterType.ofDb(null).value, name],
+        );
+        fixed++;
+      } else if (current == ParameterType.physical.value &&
+          asset == ParameterType.chemical &&
+          unit.isNotEmpty) {
+        await db.rawUpdate(
+          'UPDATE parameters SET parameter_type = ? WHERE parameter_name = ?',
+          [ParameterType.chemical.value, name],
+        );
+        fixed++;
+      }
+    }
+    return fixed;
   }
 
   dynamic _at(List<dynamic> row, int? index) {
@@ -146,9 +229,14 @@ class SeedService {
     return row[index];
   }
 
-  /// One-time bootstrap used at startup.
+  /// One-time bootstrap used at startup, plus the every-startup type repair:
+  /// databases seeded before units.xlsx carried explicit types still file
+  /// every element under physical.
   Future<void> ensureInitialImport() async {
-    if (await isSeedDone()) return;
+    if (await isSeedDone()) {
+      await repairParameterTypes();
+      return;
+    }
     final db = await dbHelper.database;
     final count = Sqflite.firstIntValue(
         await db.rawQuery('SELECT COUNT(*) AS c FROM reference_materials'));
@@ -160,6 +248,7 @@ class SeedService {
           await db.rawQuery('SELECT COUNT(*) AS c FROM parameters'));
       if (paramCount == 0) await importUnits();
     }
+    await repairParameterTypes();
     await _markSeedDone();
   }
 }

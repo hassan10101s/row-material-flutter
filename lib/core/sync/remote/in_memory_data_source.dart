@@ -1,5 +1,4 @@
-import 'dart:convert';
-
+import '../sync_codec.dart';
 import 'remote_data_source.dart';
 
 /// In-memory [RemoteDataSource] used by the sync tests and by the offline
@@ -68,7 +67,7 @@ class InMemoryDataSource implements RemoteDataSource {
   }) async {
     if (offline) return PushResult.retryable('offline');
     if (!signedIn) return const PushResult.rejected('unauthenticated');
-    final bytes = jsonEncode(data).toLowerCase().codeUnits.length;
+    final bytes = SyncCodec.byteSize(data);
     if (bytes > maxPayloadBytes) return PushResult.oversized('too large: $bytes');
     final key = _key(organizationId, collection, documentId);
     final existing = documents[key];
@@ -81,7 +80,7 @@ class InMemoryDataSource implements RemoteDataSource {
         );
       }
     }
-    final payload = _withServerTimestamps(Map<String, dynamic>.from(data))
+    final payload = _withServerTimestamps(SyncCodec.sanitizeMap(data))
       ..['version'] = baseVersion + 1;
     if (existing == null) {
       documents[key] = payload;
@@ -94,7 +93,8 @@ class InMemoryDataSource implements RemoteDataSource {
       // real server preserves it.
       documents[key] = Map<String, dynamic>.from(existing)..addAll(payload);
     }
-    return PushResult.success(baseVersion + 1, payload: jsonEncode(payload));
+    return PushResult.success(
+        baseVersion + 1, payload: SyncCodec.encodeMap(payload));
   }
 
   @override
@@ -110,10 +110,10 @@ class InMemoryDataSource implements RemoteDataSource {
     if (documents.containsKey(key)) {
       return const PushResult.rejected('append-only document already exists');
     }
-    final payload = _withServerTimestamps(Map<String, dynamic>.from(data))
+    final payload = _withServerTimestamps(SyncCodec.sanitizeMap(data))
       ..['version'] = 1;
     documents[key] = payload;
-    return PushResult.success(1, payload: jsonEncode(payload));
+    return PushResult.success(1, payload: SyncCodec.encodeMap(payload));
   }
 
   @override

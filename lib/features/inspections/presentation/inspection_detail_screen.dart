@@ -14,6 +14,7 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_dialogs.dart';
 import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../di/service_locator.dart';
@@ -63,28 +64,16 @@ class InspectionDetailScreen extends StatelessWidget {
   }
 
   Future<void> _delete(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(AppText.t('حذف الفحص', 'Delete inspection')),
-        content: Text(
-          AppText.t(
-            'سيتم حذف الفحص نهائياً. هل أنت متأكد؟',
-            'This removes the record permanently.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(AppStrings.cancel),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(AppStrings.delete),
-          ),
-        ],
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('حذف الفحص', 'Delete inspection'),
+      message: AppText.t(
+        'سيتم حذف الفحص نهائياً. هل أنت متأكد؟',
+        'This removes the record permanently.',
       ),
+      danger: true,
+      confirmLabel: AppStrings.delete,
+      cancelLabel: AppStrings.cancel,
     );
     if (confirmed != true || !context.mounted) return;
     try {

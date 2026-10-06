@@ -11,7 +11,10 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_dialogs.dart';
+import '../../../design_system/widgets/app_dropdown.dart';
 import '../../../design_system/widgets/app_empty_state.dart';
+import '../../../design_system/widgets/app_window.dart';
 import 'cubit/products_cubit.dart';
 import 'cubit/products_state.dart';
 
@@ -20,42 +23,39 @@ import 'cubit/products_state.dart';
 class ProductsTab extends StatelessWidget {
   const ProductsTab({super.key});
 
-  Future<void> _openEditor(BuildContext context,
-      [Map<String, dynamic>? product]) async {
+  Future<void> _openEditor(
+    BuildContext context, [
+    Map<String, dynamic>? product,
+  ]) async {
     final state = context.read<ProductsCubit>().state;
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => _ProductDialog(product: product, analyses: state.analyses),
+      builder: (_) =>
+          _ProductDialog(product: product, analyses: state.analyses),
     );
     if (saved != true || !context.mounted) return;
     await context.read<ProductsCubit>().load();
   }
 
-  Future<void> _delete(BuildContext context, Map<String, dynamic> product) async {
+  Future<void> _delete(
+    BuildContext context,
+    Map<String, dynamic> product,
+  ) async {
     final cubit = context.read<ProductsCubit>();
     final name = '${product['name'] ?? ''}';
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(AppText.t('حذف المنتج', 'Delete product')),
-        content: Text('${AppText.t('حذف', 'Delete')} "$name"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text(AppStrings.cancel),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(AppStrings.delete),
-          ),
-        ],
-      ),
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('حذف المنتج', 'Delete product'),
+      message: '${AppText.t('حذف', 'Delete')} "$name"؟',
+      danger: true,
+      confirmLabel: AppStrings.delete,
+      cancelLabel: AppStrings.cancel,
     );
     if (confirmed != true || !context.mounted) return;
     try {
       await cubit.delete((product['id'] as num).toInt());
-      if (context.mounted) AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
+      if (context.mounted)
+        AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
     } on AppError catch (e) {
       if (context.mounted) AppFeedback.error(context, e.message);
     } catch (e) {
@@ -98,8 +98,10 @@ class ProductsTab extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(AppText.t('المنتجات', 'Products'),
-                  style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                AppText.t('المنتجات', 'Products'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
               const Spacer(),
               AppButton(
                 small: true,
@@ -112,12 +114,27 @@ class ProductsTab extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           if (state.loading && state.rows.isEmpty)
             const AppSkeletonList(rows: 6, lines: 3, height: 380)
-        else if (state.rows.isEmpty)
+          else if (state.rows.isEmpty && state.error != null)
+            AppEmptyState(
+              icon: Icons.cloud_off_outlined,
+              title: AppText.t(
+                'تعذر تحميل المنتجات',
+                'Could not load products',
+              ),
+              action: AppButton(
+                style: AppButtonStyle.secondary,
+                icon: Icon(Icons.refresh, size: 16.r),
+                label: AppText.t('إعادة المحاولة', 'Retry'),
+                onPressed: () => context.read<ProductsCubit>().load(),
+              ),
+            )
+          else if (state.rows.isEmpty)
             AppEmptyState(
               icon: Icons.inventory_2_outlined,
               title: AppText.t('لا توجد منتجات.', 'No products.'),
             )
-          else
+          else ...[
+            if (state.loading) const LinearProgressIndicator(),
             Flexible(
               flex: 5,
               child: AppCard(
@@ -130,37 +147,60 @@ class ProductsTab extends StatelessWidget {
                       scrollDirection: Axis.horizontal,
                       child: DataTable(
                         columns: [
-                          DataColumn(label: Text(AppText.t('المنتج', 'Product'))),
-                          DataColumn(label: Text(AppText.t('النوع', 'Category'))),
-                          DataColumn(label: Text(AppText.t('الوصف', 'Description'))),
-                          DataColumn(label: Text(AppText.t('الإجراءات', 'Actions'))),
+                          DataColumn(
+                            label: Text(AppText.t('المنتج', 'Product')),
+                          ),
+                          DataColumn(
+                            label: Text(AppText.t('النوع', 'Category')),
+                          ),
+                          DataColumn(
+                            label: Text(AppText.t('الوصف', 'Description')),
+                          ),
+                          DataColumn(
+                            label: Text(AppText.t('الإجراءات', 'Actions')),
+                          ),
                         ],
                         rows: [
                           for (final p in state.rows)
                             DataRow(
                               cells: [
-                                DataCell(Text('${p['name'] ?? ''}',
-                                    style: const TextStyle(fontWeight: FontWeight.w600))),
+                                DataCell(
+                                  Text(
+                                    '${p['name'] ?? ''}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
                                 DataCell(Text('${p['category'] ?? '-'}')),
                                 DataCell(Text('${p['description'] ?? '-'}')),
-                                DataCell(Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: AppStrings.edit,
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: () => _openEditor(context, p),
-                                      icon: Icon(Icons.edit_outlined, size: 18.r),
-                                    ),
-                                    IconButton(
-                                      tooltip: AppStrings.delete,
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: () => _delete(context, p),
-                                      icon: Icon(Icons.delete_outline,
-                                          size: 18.r, color: AppColors.danger),
-                                    ),
-                                  ],
-                                )),
+                                DataCell(
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        tooltip: AppStrings.edit,
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () =>
+                                            _openEditor(context, p),
+                                        icon: Icon(
+                                          Icons.edit_outlined,
+                                          size: 18.r,
+                                        ),
+                                      ),
+                                      IconButton(
+                                        tooltip: AppStrings.delete,
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () => _delete(context, p),
+                                        icon: Icon(
+                                          Icons.delete_outline,
+                                          size: 18.r,
+                                          color: AppColors.danger,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                               ],
                             ),
                         ],
@@ -170,40 +210,50 @@ class ProductsTab extends StatelessWidget {
                 ),
               ),
             ),
-          const SizedBox(height: AppSpacing.md),
-          if (state.rows.isNotEmpty)
-            Flexible(
-              flex: 3,
-              child: AppCard(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(AppText.t('النطاقات', 'Ranges'),
+            const SizedBox(height: AppSpacing.md),
+            if (state.rows.isNotEmpty)
+              Flexible(
+                flex: 3,
+                child: AppCard(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          AppText.t('النطاقات', 'Ranges'),
                           style: TextStyle(
-                              fontSize: 14.spMax, fontWeight: FontWeight.w700)),
-                      const SizedBox(height: AppSpacing.sm),
-                      for (final p in state.rows)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('${p['name'] ?? ''}',
-                                  style: TextStyle(
-                                      fontSize: 13.spMax,
-                                      fontWeight: FontWeight.w600,
-                                      color: AppColors.primary)),
-                              const SizedBox(height: 4),
-                              _rangesChips(p['ranges'] as List? ?? []),
-                            ],
+                            fontSize: 14.spMax,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
-                    ],
+                        const SizedBox(height: AppSpacing.sm),
+                        for (final p in state.rows)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              bottom: AppSpacing.sm,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${p['name'] ?? ''}',
+                                  style: TextStyle(
+                                    fontSize: 13.spMax,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                _rangesChips(p['ranges'] as List? ?? []),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-            ),
+          ],
         ],
       ),
     );
@@ -220,9 +270,9 @@ class _RangeRow {
     String min = '',
     String max = '',
     String unit = '%',
-  })  : minCtrl = TextEditingController(text: min),
-        maxCtrl = TextEditingController(text: max),
-        unitCtrl = TextEditingController(text: unit);
+  }) : minCtrl = TextEditingController(text: min),
+       maxCtrl = TextEditingController(text: max),
+       unitCtrl = TextEditingController(text: unit);
   void dispose() {
     minCtrl.dispose();
     maxCtrl.dispose();
@@ -240,12 +290,15 @@ class _ProductDialog extends StatefulWidget {
 }
 
 class _ProductDialogState extends State<_ProductDialog> {
-  late final TextEditingController _name =
-      TextEditingController(text: '${widget.product?['name'] ?? ''}');
-  late final TextEditingController _category =
-      TextEditingController(text: '${widget.product?['category'] ?? ''}');
-  late final TextEditingController _description =
-      TextEditingController(text: '${widget.product?['description'] ?? ''}');
+  late final TextEditingController _name = TextEditingController(
+    text: '${widget.product?['name'] ?? ''}',
+  );
+  late final TextEditingController _category = TextEditingController(
+    text: '${widget.product?['category'] ?? ''}',
+  );
+  late final TextEditingController _description = TextEditingController(
+    text: '${widget.product?['description'] ?? ''}',
+  );
   late final List<_RangeRow> _ranges;
   bool _saving = false;
   String? _nameError;
@@ -284,29 +337,33 @@ class _ProductDialogState extends State<_ProductDialog> {
   }
 
   Set<String> _usedAnalysisIds(int excludeIndex) => {
-        for (var i = 0; i < _ranges.length; i++)
-          if (i != excludeIndex && _ranges[i].analysisId != null)
-            '${_ranges[i].analysisId}',
-      };
+    for (var i = 0; i < _ranges.length; i++)
+      if (i != excludeIndex && _ranges[i].analysisId != null)
+        '${_ranges[i].analysisId}',
+  };
 
   void _onAnalysisChange(_RangeRow row) {
     final a = row.analysisId == null
         ? null
         : widget.analyses
-            .where((x) => '${x['id']}' == '${row.analysisId}')
-            .firstOrNull;
+              .where((x) => '${x['id']}' == '${row.analysisId}')
+              .firstOrNull;
     setState(() {
       if (a == null) return;
       row.unitCtrl.text = '${a['unit'] ?? ''}'.trim().isNotEmpty
           ? '${a['unit']}'
-          : (row.unitCtrl.text.trim().isNotEmpty ? row.unitCtrl.text.trim() : '%');
+          : (row.unitCtrl.text.trim().isNotEmpty
+                ? row.unitCtrl.text.trim()
+                : '%');
     });
   }
 
   Future<void> _save() async {
     final name = _name.text.trim();
     if (name.isEmpty) {
-      setState(() => _nameError = AppText.t('الاسم مطلوب', 'Name is required.'));
+      setState(
+        () => _nameError = AppText.t('الاسم مطلوب', 'Name is required.'),
+      );
       return;
     }
     setState(() => _saving = true);
@@ -317,7 +374,9 @@ class _ProductDialogState extends State<_ProductDialog> {
             'analysis_id': r.analysisId,
             'min_value': r.minCtrl.text.trim(),
             'max_value': r.maxCtrl.text.trim(),
-            'unit': r.unitCtrl.text.trim().isNotEmpty ? r.unitCtrl.text.trim() : '%',
+            'unit': r.unitCtrl.text.trim().isNotEmpty
+                ? r.unitCtrl.text.trim()
+                : '%',
           },
     ];
     try {
@@ -330,15 +389,12 @@ class _ProductDialogState extends State<_ProductDialog> {
           ranges: ranges,
         );
       } else {
-        await cubit.update(
-          (widget.product!['id'] as num).toInt(),
-          {
-            'name': name,
-            'category': _category.text.trim(),
-            'description': _description.text.trim(),
-            'ranges': ranges,
-          },
-        );
+        await cubit.update((widget.product!['id'] as num).toInt(), {
+          'name': name,
+          'category': _category.text.trim(),
+          'description': _description.text.trim(),
+          'ranges': ranges,
+        });
       }
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
@@ -352,136 +408,117 @@ class _ProductDialogState extends State<_ProductDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      insetPadding: const EdgeInsets.all(AppSpacing.lg),
-      backgroundColor: AppColors.surface,
-      child: SizedBox(
-        width: 760.w,
-        height: 620.h,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, 0),
-              child: Text(
-                widget.product == null
-                    ? AppText.t('منتج جديد', 'New Product')
-                    : AppText.t('تعديل المنتج', 'Edit Product'),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
+    return AppWindow(
+      title: widget.product == null
+          ? AppText.t('منتج جديد', 'New Product')
+          : AppText.t('تعديل المنتج', 'Edit Product'),
+      icon: Icons.inventory_2_outlined,
+      maxWidth: 760,
+      actions: [
+        AppButton(
+          style: AppButtonStyle.secondary,
+          label: AppStrings.cancel,
+          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+        ),
+        AppButton(
+          loading: _saving,
+          label: AppStrings.save,
+          onPressed: _saving ? null : _save,
+        ),
+      ],
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _name,
+            onChanged: (_) => setState(() => _nameError = null),
+            decoration: InputDecoration(
+              labelText: AppText.t('الاسم', 'Name'),
+              isDense: true,
+              errorText: _nameError,
+              border: const OutlineInputBorder(),
             ),
-            const SizedBox(height: AppSpacing.md),
-            Expanded(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TextField(
-                      controller: _name,
-                      onChanged: (_) => setState(() => _nameError = null),
-                      decoration: InputDecoration(
-                        labelText: AppText.t('الاسم', 'Name'),
-                        isDense: true,
-                        errorText: _nameError,
-                        border: const OutlineInputBorder(),
-                      ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            children: [
+              Expanded(
+                child: _labeled(
+                  AppText.t('النوع', 'Category'),
+                  TextField(
+                    controller: _category,
+                    enabled: !_saving,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
                     ),
-                    const SizedBox(height: AppSpacing.md),
-                    Row(
-                      children: [
-                        Expanded(
-                            child: _labeled(
-                          AppText.t('النوع', 'Category'),
-                          TextField(
-                            controller: _category,
-                            enabled: !_saving,
-                            decoration:
-                                const InputDecoration(isDense: true, border: OutlineInputBorder()),
-                          ),
-                        )),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                            child: _labeled(
-                          AppText.t('الوصف', 'Description'),
-                          TextField(
-                            controller: _description,
-                            enabled: !_saving,
-                            decoration:
-                                const InputDecoration(isDense: true, border: OutlineInputBorder()),
-                          ),
-                        )),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.lg),
-                    Text(AppText.t('نطاقات التحليل', 'Analysis Ranges'),
-                        style: TextStyle(
-                            fontSize: 16.spMax, fontWeight: FontWeight.w700)),
-                    const SizedBox(height: AppSpacing.sm),
-                    if (widget.analyses.isEmpty)
-                      Text(AppText.t('لا توجد تحاليل.', 'No analyses available.'),
-                          style:
-                              TextStyle(color: AppColors.textMuted, fontSize: 13.spMax))
-                    else
-                      AppCard(
-                        padding: const EdgeInsets.all(AppSpacing.md),
-                        child: Column(
-                          children: [
-                            for (var i = 0; i < _ranges.length; i++)
-                              _rangeRow(i),
-                            const SizedBox(height: AppSpacing.sm),
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: AppButton(
-                                small: true,
-                                style: AppButtonStyle.secondary,
-                                icon: Icon(Icons.add, size: 16.r),
-                                label: AppText.t('إضافة تحليل', 'Add Analysis'),
-                                onPressed: _saving ? null : _addRange,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    const SizedBox(height: AppSpacing.lg),
-                  ],
+                  ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  AppButton(
-                    style: AppButtonStyle.secondary,
-                    label: AppStrings.cancel,
-                    onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _labeled(
+                  AppText.t('الوصف', 'Description'),
+                  TextField(
+                    controller: _description,
+                    enabled: !_saving,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
                   ),
-                  const SizedBox(width: AppSpacing.md),
-                  AppButton(
-                    loading: _saving,
-                    label: AppStrings.save,
-                    onPressed: _saving ? null : _save,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            AppText.t('نطاقات التحليل', 'Analysis Ranges'),
+            style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (widget.analyses.isEmpty)
+            Text(
+              AppText.t('لا توجد تحاليل.', 'No analyses available.'),
+              style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+            )
+          else
+            AppCard(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Column(
+                children: [
+                  for (var i = 0; i < _ranges.length; i++) _rangeRow(i),
+                  const SizedBox(height: AppSpacing.sm),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: AppButton(
+                      small: true,
+                      style: AppButtonStyle.secondary,
+                      icon: Icon(Icons.add, size: 16.r),
+                      label: AppText.t('إضافة تحليل', 'Add Analysis'),
+                      onPressed: _saving ? null : _addRange,
+                    ),
                   ),
                 ],
               ),
             ),
-          ],
-        ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
       ),
     );
   }
 
   Widget _labeled(String label, Widget child) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label,
-              style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax)),
-          const SizedBox(height: AppSpacing.xs),
-          child,
-        ],
-      );
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      child,
+    ],
+  );
 
   Widget _rangeRow(int index) {
     final row = _ranges[index];
@@ -493,47 +530,18 @@ class _ProductDialogState extends State<_ProductDialog> {
         children: [
           Expanded(
             flex: 3,
-            child: DropdownButtonFormField<int?>(
-              initialValue: row.analysisId,
-              isDense: true,
-              isExpanded: true,
-              decoration:
-                  const InputDecoration(isDense: true, border: OutlineInputBorder()),
-              hint: Text(
-                AppText.t('اختر تحليلاً…', 'Choose an analysis…'),
-                overflow: TextOverflow.ellipsis,
-                maxLines: 1,
-                softWrap: false,
-              ),
-              selectedItemBuilder: (_) => [
-                Text(
-                  AppText.t('اختر تحليلاً…', 'Choose an analysis…'),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                  softWrap: false,
-                ),
-                for (final a in widget.analyses)
-                  Text(
-                    '${a['name']}',
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
-                    softWrap: false,
-                  ),
-              ],
+            // Same dangling-id crash class as the material editor: an
+            // analysis deleted after the range was saved. [AppDropdown]
+            // renders it as a disabled "deleted" row instead of throwing.
+            child: AppDropdown<int?>(
+              value: row.analysisId,
+              hintText: AppText.t('اختر تحليلاً…', 'Choose an analysis…'),
               items: [
-                DropdownMenuItem<int?>(
-                  value: null,
-                  enabled: false,
-                  child: Text(
-                    AppText.t('اختر تحليلاً…', 'Choose an analysis…'),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
                 for (final a in widget.analyses)
-                  DropdownMenuItem<int?>(
+                  AppDropdownItem<int?>(
                     value: int.tryParse('${a['id']}'),
                     enabled: !used.contains('${a['id']}'),
-                    child: Text('${a['name']}', overflow: TextOverflow.ellipsis),
+                    label: '${a['name']}',
                   ),
               ],
               onChanged: _saving
@@ -550,7 +558,9 @@ class _ProductDialogState extends State<_ProductDialog> {
             child: TextField(
               controller: row.minCtrl,
               enabled: enabled,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: InputDecoration(
                 isDense: true,
                 labelText: AppText.t('الحد الأدنى', 'Min'),
@@ -564,7 +574,9 @@ class _ProductDialogState extends State<_ProductDialog> {
             child: TextField(
               controller: row.maxCtrl,
               enabled: enabled,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
               decoration: InputDecoration(
                 isDense: true,
                 labelText: AppText.t('الحد الأقصى', 'Max'),
@@ -589,7 +601,11 @@ class _ProductDialogState extends State<_ProductDialog> {
             tooltip: AppStrings.delete,
             visualDensity: VisualDensity.compact,
             onPressed: _saving ? null : () => _removeRange(index),
-            icon: Icon(Icons.remove_circle_outline, size: 18.r, color: AppColors.danger),
+            icon: Icon(
+              Icons.remove_circle_outline,
+              size: 18.r,
+              color: AppColors.danger,
+            ),
           ),
         ],
       ),

@@ -11,6 +11,7 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../../domain/lab_local_repository.dart';
 import '../constants_editor.dart';
 import '../cubit/constants_cubit.dart';
@@ -35,26 +36,21 @@ class DesktopConstantsTab extends StatelessWidget {
     Map<String, dynamic>? constant,
   ]) async {
     final cubit = context.read<ConstantsCubit>();
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(constantsEditorTitle(constant == null)),
-        content: SizedBox(
-          width: 440.w,
-          child: SingleChildScrollView(
-            child: ConstantsEditor(
-              repo: repo,
-              constant: constant,
-              actions: (context, state) => Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  const ConstantsEditorCancel(),
-                  const SizedBox(width: AppSpacing.sm),
-                  ConstantsEditorSave(state: state),
-                ],
-              ),
-            ),
-          ),
+    final saved = await showAppWindow<bool>(
+      context,
+      title: constantsEditorTitle(constant == null),
+      icon: Icons.calculate_outlined,
+      size: AppWindowSize.sm,
+      child: ConstantsEditor(
+        repo: repo,
+        constant: constant,
+        actions: (context, state) => Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            const ConstantsEditorCancel(),
+            const SizedBox(width: AppSpacing.sm),
+            ConstantsEditorSave(state: state),
+          ],
         ),
       ),
     );

@@ -4,9 +4,12 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../design_system/animations/app_animations.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
+import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_date_field.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_enums.dart';
 import '../domain/qc_sop.dart';
 import 'cubit/qc_sop_detail_cubit.dart';
@@ -33,6 +36,24 @@ class QcSopFormScreen extends StatefulWidget {
     QcSopDetailCubit? detail,
   }) {
     final register = context.read<QcSopsCubit>();
+    final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+    if (wide) {
+      return showAppWindow(
+        context,
+        title: sop == null
+            ? AppText.t('إجراء قياسي جديد SOP', 'New SOP')
+            : AppText.t('تعديل الإجراء القياسي SOP', 'Edit SOP'),
+        icon: Icons.menu_book_outlined,
+        size: AppWindowSize.lg,
+        child: MultiBlocProvider(
+          providers: [
+            BlocProvider.value(value: register),
+            if (detail != null) BlocProvider.value(value: detail),
+          ],
+          child: QcSopFormScreen(sop: sop, detail: detail),
+        ),
+      );
+    }
     return Navigator.of(context).push(
       appMaterialPageRoute<void>(
         builder: (_) => MultiBlocProvider(
@@ -235,9 +256,7 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
   Widget _withErrors(Widget child) {
     void show(String? message, VoidCallback clear) {
       if (message == null) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      AppFeedback.error(context, message);
       clear();
     }
 

@@ -8,6 +8,7 @@ import '../../../core/database/database_helper.dart';
 import '../../../core/database/db_trace.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
+import '../../reference/domain/parameter_type.dart';
 import '../domain/backup_service.dart';
 
 /// Port of core/services/backup.py + controller.py backup/restore/migration
@@ -407,8 +408,10 @@ class BackupManager implements BackupService {
             }
           }
           if (newMaterials.isNotEmpty) {
+            // Batched insert + single IN-reselect (was 2*N sequential).
+            final batch = (txn as dynamic).batch() as dynamic;
             for (final m in newMaterials) {
-              await txn.insert(
+              batch.insert(
                 'reference_materials',
                 {
                   'material_name': m[0],
@@ -420,12 +423,15 @@ class BackupManager implements BackupService {
                 conflictAlgorithm: ConflictAlgorithm.ignore,
               );
             }
-            for (final m in newMaterials) {
-              final rows = await txn.rawQuery(
-                  'SELECT id FROM reference_materials WHERE material_name = ?', [m[0]]);
-              if (rows.isNotEmpty) {
-                materialNameToId['${m[0]}'] = int.parse('${rows.first['id']}');
-              }
+            await batch.commit(noResult: true);
+            final qmarks = List.filled(newMaterials.length, '?').join(',');
+            final names = [for (final m in newMaterials) m[0] as Object];
+            final idRows = await txn.rawQuery(
+                'SELECT id, material_name FROM reference_materials WHERE material_name IN ($qmarks)',
+                names);
+            for (final r in idRows) {
+              materialNameToId['${r['material_name']}'] =
+                  int.parse('${r['id']}');
             }
           }
 
@@ -576,7 +582,9 @@ class BackupManager implements BackupService {
             [
               '${row['parameter_name'] ?? ''}',
               '${row['unit'] ?? ''}',
-              '${row['parameter_type'] ?? 'physical'}',
+              // Never silently physical: typeless rows read as chemical,
+              // the same rule the UI and the seed repair use.
+              ParameterType.ofDb(row['parameter_type']).value,
               '${row['imported_at'] ?? timestamp}',
             ],
           );

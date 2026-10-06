@@ -3,6 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:get_it/get_it.dart';
 import 'package:mocktail/mocktail.dart';
+import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_audit.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_goal.dart';
@@ -53,6 +54,8 @@ void main() {
 
   tearDown(() async {
     await locator.reset();
+    // FormFactor memoises: a pinned factor must not leak into the next test.
+    FormFactor.debugSet(null);
   });
 
   Future<void> pumpHost(WidgetTester tester) async {
@@ -78,6 +81,9 @@ void main() {
   testWidgets('mobile opens details as a route and returns to the list', (
     tester,
   ) async {
+    // The form factor is a platform decision: pin it rather than deriving it
+    // from the window size (which is always a phone grid in widget tests).
+    FormFactor.debugSet(AppFormFactor.mobile);
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -99,6 +105,7 @@ void main() {
   testWidgets('desktop opens a dismissible floating detail dialog', (
     tester,
   ) async {
+    FormFactor.debugSet(AppFormFactor.desktop);
     tester.view.physicalSize = const Size(1280, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);

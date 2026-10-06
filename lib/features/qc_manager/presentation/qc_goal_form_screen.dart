@@ -7,9 +7,11 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/animations/app_animations.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../di/service_locator.dart';
+import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_enums.dart';
 import '../domain/qc_goal.dart';
 import 'cubit/qc_goals_cubit.dart';
@@ -28,6 +30,21 @@ class QcGoalFormScreen extends StatefulWidget {
 
   static Future<void> open(BuildContext context, {QcGoal? goal}) {
     final cubit = context.read<QcGoalsCubit>();
+    final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+    if (wide) {
+      return showAppWindow(
+        context,
+        title: goal == null
+            ? AppText.t('هدف جودة جديد', 'New quality goal')
+            : AppText.t('تعديل هدف الجودة', 'Edit quality goal'),
+        icon: Icons.flag_outlined,
+        size: AppWindowSize.lg,
+        child: BlocProvider.value(
+          value: cubit,
+          child: QcGoalFormScreen(goal: goal),
+        ),
+      );
+    }
     return Navigator.of(context).push(
       appMaterialPageRoute<void>(
         builder: (_) => BlocProvider.value(

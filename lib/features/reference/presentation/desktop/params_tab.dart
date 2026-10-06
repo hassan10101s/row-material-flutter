@@ -13,6 +13,7 @@ import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../cubit/params_cubit.dart';
 import '../cubit/params_state.dart';
 import '../params_editor.dart';
@@ -31,22 +32,17 @@ class DesktopParamsTab extends StatelessWidget {
     Map<String, dynamic>? param,
   ]) async {
     final cubit = context.read<ParamsCubit>();
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(paramEditorTitle(parameterType, param == null)),
-        content: SizedBox(
-          width: 420.w,
-          child: SingleChildScrollView(
-            child: ParamEditor(
-              parameterType: parameterType,
-              onSubmit: cubit.upsert,
-              param: param,
-              unitOptions: cubit.state.units,
-              actions: (_, state) => ParamEditorActions(state: state),
-            ),
-          ),
-        ),
+    final saved = await showAppWindow<bool>(
+      context,
+      title: paramEditorTitle(parameterType, param == null),
+      icon: _isChemical ? Icons.biotech_outlined : Icons.remove_red_eye_outlined,
+      size: AppWindowSize.sm,
+      child: ParamEditor(
+        parameterType: parameterType,
+        onSubmit: cubit.upsert,
+        param: param,
+        unitOptions: cubit.state.units,
+        actions: (_, state) => ParamEditorActions(state: state),
       ),
     );
     if (saved != true || !context.mounted) return;

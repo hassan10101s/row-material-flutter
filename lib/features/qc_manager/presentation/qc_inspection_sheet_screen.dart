@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/animations/app_animations.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
@@ -57,12 +58,11 @@ class QcInspectionSheetScreen extends StatelessWidget {
           (a.submitted != b.submitted && b.submitted),
       listener: (context, state) {
         final cubit = context.read<QcInspectionSheetCubit>();
-        final messenger = ScaffoldMessenger.of(context);
         if (state.error != null) {
-          messenger.showSnackBar(SnackBar(content: Text(state.error!)));
+          AppFeedback.error(context, state.error!);
           cubit.clearError();
         } else if (state.notice != null) {
-          messenger.showSnackBar(SnackBar(content: Text(state.notice!)));
+          AppFeedback.success(context, state.notice!);
           cubit.clearNotice();
         }
         if (state.submitted) context.pop();
@@ -847,7 +847,6 @@ class _EvidenceFieldsState extends State<_EvidenceFields> {
   /// inspector is told rather than left with a dead button.
   Future<void> _attachPhoto(BuildContext context) async {
     final cubit = context.read<QcInspectionSheetCubit>();
-    final messenger = ScaffoldMessenger.of(context);
     final item = widget.row.item;
     String? path;
     try {
@@ -856,14 +855,11 @@ class _EvidenceFieldsState extends State<_EvidenceFields> {
       path = null;
     }
     if (path == null || path.isEmpty) {
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            AppText.t(
-              'تعذّر إرفاق صورة — اكتب ملاحظة بدلاً منها',
-              'Could not attach a photo — write a note instead',
-            ),
-          ),
+      AppFeedback.error(
+        context,
+        AppText.t(
+          'تعذّر إرفاق صورة — اكتب ملاحظة بدلاً منها',
+          'Could not attach a photo — write a note instead',
         ),
       );
       return;

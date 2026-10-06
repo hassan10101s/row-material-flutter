@@ -3,13 +3,16 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_card.dart';
+import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_enums.dart';
 import '../domain/qc_inspection.dart';
 import 'cubit/qc_inspections_cubit.dart';
@@ -59,11 +62,9 @@ class QcInspectionsScreen extends StatelessWidget {
           final error = state.error;
           if (error == null) return;
           // Kept in the state so the empty-state branch can show it too; the
-          // snackbar is for a failure on top of an already-populated list.
+          // top banner is for a failure on top of an already-populated list.
           if (state.inspections.isNotEmpty) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text(error)));
+            AppFeedback.error(context, error);
             cubit.clearError();
           }
         },
@@ -156,10 +157,12 @@ class QcInspectionsScreen extends StatelessWidget {
 
   void _openFilters(BuildContext context) {
     final cubit = context.read<QcInspectionsCubit>();
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) => BlocProvider.value(
+    showAppOverlay<void>(
+      context,
+      title: AppText.t('فلاتر الفحوصات', 'Inspection filters'),
+      icon: Icons.filter_alt_outlined,
+      size: AppWindowSize.sm,
+      builder: (_, _) => BlocProvider.value(
         value: cubit,
         child: const _InspectionFilterSheet(),
       ),
@@ -408,24 +411,12 @@ class _InspectionFilterSheetState extends State<_InspectionFilterSheet> {
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<QcInspectionsCubit>();
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.md,
-        AppSpacing.md,
-        MediaQuery.of(context).viewInsets.bottom + AppSpacing.md,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              AppText.t('فلاتر الفحوصات', 'Inspection filters'),
-              style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
+    // Chrome (title, padding, scroll) comes from the overlay host.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
               AppText.t('الحالة', 'Status'),
               style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
             ),
@@ -451,18 +442,17 @@ class _InspectionFilterSheetState extends State<_InspectionFilterSheet> {
               style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
             ),
             const SizedBox(height: AppSpacing.xs),
-            DropdownButtonFormField<String>(
-              initialValue: _draft.refType,
-              isExpanded: true,
+            AppDropdown<String>(
+              value: _draft.refType,
               items: [
-                DropdownMenuItem(
+                AppDropdownItem(
                   value: '',
-                  child: Text(AppText.t('الكل', 'All')),
+                  label: AppText.t('الكل', 'All'),
                 ),
                 for (final type in QcRefType.all)
-                  DropdownMenuItem(
+                  AppDropdownItem(
                     value: type,
-                    child: Text(QcPill.refTypeLabel(type)),
+                    label: QcPill.refTypeLabel(type),
                   ),
               ],
               onChanged: (v) =>
@@ -479,8 +469,8 @@ class _InspectionFilterSheetState extends State<_InspectionFilterSheet> {
               controller: _dept,
             ),
             const SizedBox(height: AppSpacing.lg),
-            Row(
-              children: [
+            AppWindow.footer(
+              actions: [
                 Expanded(
                   child: OutlinedButton(
                     onPressed: () {
@@ -492,7 +482,6 @@ class _InspectionFilterSheetState extends State<_InspectionFilterSheet> {
                     child: Text(AppText.t('مسح', 'Clear')),
                   ),
                 ),
-                const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: FilledButton(
                     onPressed: () {
@@ -510,8 +499,6 @@ class _InspectionFilterSheetState extends State<_InspectionFilterSheet> {
               ],
             ),
           ],
-        ),
-      ),
-    );
+        );
   }
 }

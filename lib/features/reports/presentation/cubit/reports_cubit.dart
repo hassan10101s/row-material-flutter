@@ -21,9 +21,13 @@ class ReportsCubit extends AppCubit<ReportsState> {
     safeEmit(state.copyWith(busy: kind, error: null, lastExport: null, lastExportTitle: null));
     try {
       final doc = await job();
+      // The bytes alone are useless: without a file on disk the export sheet
+      // can only offer a bare filename that no app can open. Persist first
+      // (same pattern as the lab-reports cubit) and hand out the real path.
+      final file = await repo.saveReport(doc);
       safeEmit(state.copyWith(
         busy: '',
-        lastExport: doc.filename,
+        lastExport: file.path,
         lastExportTitle: doc.title,
       ));
     } on AppError catch (e) {

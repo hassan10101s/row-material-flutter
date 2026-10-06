@@ -235,23 +235,56 @@ void main() {
   });
 
   group('InspectionsCubit', () {
-    test('loads rows and filters by status client-side', () async {
+    test('loads a server-filtered page and pages through it', () async {
       final repo = _InspectionRepoMock();
       final reports = _ReportServiceMock();
-      when(() => repo.list(orderBy: 'inspection_date DESC, id DESC'))
-          .thenAnswer((_) async => [
+      when(() => repo.list(
+            query: any(named: 'query'),
+            status: any(named: 'status'),
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+            orderBy: any(named: 'orderBy'),
+          )).thenAnswer((_) async => [
                 {'id': 1, 'decision_status': 'APPROVED'},
                 {'id': 2, 'decision_status': 'REJECTED'},
               ]);
+      when(() => repo.count(
+            query: any(named: 'query'),
+            status: any(named: 'status'),
+          )).thenAnswer((_) async => 2);
       final cubit = InspectionsCubit(repo: repo, reports: reports);
       await cubit.load();
 
       expect(cubit.state.visible, hasLength(2));
-      cubit.setStatus('APPROVED');
+      expect(cubit.state.total, 2);
+      // Server-side filtering: a status change refetches from the DB.
+      when(() => repo.list(
+            query: any(named: 'query'),
+            status: 'APPROVED',
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+            orderBy: any(named: 'orderBy'),
+          )).thenAnswer((_) async => [
+                {'id': 1, 'decision_status': 'APPROVED'},
+              ]);
+      when(() => repo.count(
+            query: any(named: 'query'),
+            status: 'APPROVED',
+          )).thenAnswer((_) async => 1);
+      await cubit.setStatus('APPROVED');
       expect(cubit.state.visible, hasLength(1));
       expect(cubit.state.visible.single['id'], 1);
 
-      cubit.setQuery('zzz');
+      when(() => repo.list(
+            query: 'zzz',
+            status: any(named: 'status'),
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+            orderBy: any(named: 'orderBy'),
+          )).thenAnswer((_) async => const []);
+      when(() => repo.count(query: 'zzz', status: any(named: 'status')))
+          .thenAnswer((_) async => 0);
+      await cubit.setQuery('zzz');
       expect(cubit.state.visible, isEmpty);
       await cubit.close();
     });

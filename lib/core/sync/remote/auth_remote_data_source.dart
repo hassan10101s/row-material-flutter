@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:google_sign_in_dartio/google_sign_in_dartio.dart' show GoogleSignInDart;
 
+import '../sync_codec.dart';
 import 'firestore_data_source.dart';
 import 'remote_data_source.dart';
 
@@ -341,13 +342,30 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
           .orderBy('email')
           .get();
       return snapshot.docs
-          .map((doc) => RemoteDocument(
-                id: doc.id,
-                data: Map<String, dynamic>.from(doc.data()),
-                version: (doc.get('version') as num?)?.toInt() ?? 1,
-                updatedAt: _timestampOf(doc.get('updatedAt')),
-                exists: doc.exists,
-              ))
+          .map((doc) {
+            // Raw member docs carry Timestamp (activatedAt/invitedAt/...);
+            // sanitize so downstream mirrors/encoders never see Timestamp.
+            final raw = Map<String, dynamic>.from(doc.data());
+            Object? versionRaw;
+            try {
+              versionRaw = doc.get('version');
+            } catch (_) {
+              versionRaw = raw['version'];
+            }
+            Object? updatedRaw;
+            try {
+              updatedRaw = doc.get('updatedAt');
+            } catch (_) {
+              updatedRaw = raw['updatedAt'];
+            }
+            return RemoteDocument(
+              id: doc.id,
+              data: SyncCodec.sanitizeMap(raw),
+              version: (versionRaw as num?)?.toInt() ?? 1,
+              updatedAt: _timestampOf(updatedRaw),
+              exists: doc.exists,
+            );
+          })
           .toList();
     } on Object {
       // A permission error must not break the members screen; the local
@@ -524,7 +542,8 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       'action': action,
       'entityType': entityType,
       'entityId': entityId,
-      'detailsJson': details == null ? null : jsonEncode(details),
+      'detailsJson':
+          details == null ? null : SyncCodec.encode(details),
       'deviceId': _deviceId,
       'occurredAt': now,
       'version': 1,

@@ -3,12 +3,14 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_enums.dart';
 import '../domain/qc_template.dart';
 import 'cubit/qc_templates_cubit.dart';
@@ -52,9 +54,7 @@ class QcTemplatesScreen extends StatelessWidget {
       body: BlocConsumer<QcTemplatesCubit, QcTemplatesState>(
         listenWhen: (a, b) => a.error != b.error && b.error != null,
         listener: (context, state) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text(state.error!)));
+          AppFeedback.error(context, state.error!);
           cubit.clearError();
         },
         builder: (context, state) {
@@ -128,11 +128,15 @@ class QcTemplatesScreen extends StatelessWidget {
 
   void _openFilters(BuildContext context) {
     final cubit = context.read<QcTemplatesCubit>();
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) =>
-          BlocProvider.value(value: cubit, child: const _TemplateFilterSheet()),
+    showAppOverlay<void>(
+      context,
+      title: AppText.t('فلاتر القوائم', 'Checklist filters'),
+      icon: Icons.filter_alt_outlined,
+      size: AppWindowSize.sm,
+      builder: (_, _) => BlocProvider.value(
+        value: cubit,
+        child: const _TemplateFilterSheet(),
+      ),
     );
   }
 }
@@ -339,27 +343,12 @@ class _TemplateFilterSheetState extends State<_TemplateFilterSheet> {
       bloc: cubit,
       builder: (context, state) {
         final f = state.filters;
-        return Padding(
-          padding: EdgeInsets.only(
-            left: AppSpacing.lg,
-            right: AppSpacing.lg,
-            top: AppSpacing.lg,
-            bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppText.t('فلاتر القوائم', 'Checklist filters'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16.spMax,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextField(
+        // Chrome (title, padding, scroll) comes from the overlay host.
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
                   controller: _search,
                   decoration: InputDecoration(
                     labelText: AppText.t('بحث', 'Search'),
@@ -417,14 +406,12 @@ class _TemplateFilterSheetState extends State<_TemplateFilterSheet> {
                       ),
                   ],
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
+                AppWindow.footer(
+                  actions: [
                     TextButton(
                       onPressed: () => cubit.clearFilters(),
                       child: Text(AppText.t('مسح', 'Clear')),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
                     FilledButton(
                       onPressed: () => Navigator.of(context).pop(),
                       child: Text(AppText.t('تم', 'Done')),
@@ -432,9 +419,7 @@ class _TemplateFilterSheetState extends State<_TemplateFilterSheet> {
                   ],
                 ),
               ],
-            ),
-          ),
-        );
+            );
       },
     );
   }

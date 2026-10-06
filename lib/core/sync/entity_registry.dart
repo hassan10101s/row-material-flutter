@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'remote/remote_data_source.dart';
+import 'sync_codec.dart';
 
 /// The single contract between `push_worker`, `pull_worker` and the local
 /// tables (plan Â§9.2). Adding a table to the sync scope = adding one entry.
@@ -427,7 +428,7 @@ Map<String, dynamic> buildRemotePayload(
   payload['deletedAt'] = row['deleted_at'];
   if (entity.collection == SyncCollection.labConfig) {
     payload['configType'] = entity.localTable;
-    payload['payload'] = jsonEncode(_stripSyncColumns(row));
+    payload['payload'] = SyncCodec.encodeMap(_stripSyncColumns(row));
   }
   if (entity.type == 'sample') {
     payload['payloadBytes'] = _payloadBytes(payload);
@@ -440,8 +441,11 @@ class FieldTimestampSentinel {
   static const String value = '__SERVER_TIMESTAMP__';
 }
 
+/// Firestore size guard without the old double-allocating
+/// `jsonEncode(x).toLowerCase().codeUnits.length` (lowercased copy + code-unit
+/// list, and UTF-16 units instead of bytes). Single sanitized encode.
 int _payloadBytes(Map<String, dynamic> payload) =>
-    jsonEncode(payload).toLowerCase().codeUnits.length;
+    SyncCodec.byteSize(payload);
 
 Map<String, dynamic> _stripSyncColumns(Map<String, dynamic> row) {
   const syncColumns = {

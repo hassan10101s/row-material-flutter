@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../app/auth_gate.dart';
 import '../../../core/auth/permissions.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../di/service_locator.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
@@ -22,8 +23,10 @@ class WaitingActivationScreen extends StatelessWidget {
     final gate = getIt<AuthGate>();
     final session = gate.session;
     final status = session.isDisabled
-        ? 'حسابك معطّل من قبل مدير المؤسسة.'
-        : 'حسابك في انتظار التفعيل من مدير المؤسسة.';
+        ? AppText.t('حسابك معطّل من قبل مدير المؤسسة.',
+            'Your account was disabled by the organization admin.')
+        : AppText.t('حسابك في انتظار التفعيل من مدير المؤسسة.',
+            'Your account is waiting for activation by the organization admin.');
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Center(
@@ -41,7 +44,8 @@ class WaitingActivationScreen extends StatelessWidget {
                     Icon(Icons.hourglass_top, size: 44.r, color: AppColors.warning),
                     const SizedBox(height: AppSpacing.md),
                     Text(
-                      'الحساب بانتظار التفعيل',
+                      AppText.t(
+                          'الحساب بانتظار التفعيل', 'Account pending activation'),
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
@@ -60,17 +64,26 @@ class WaitingActivationScreen extends StatelessWidget {
                       ),
                       child: Column(
                         children: [
-                          _Row(label: 'البريد', value: session.email),
-                          _Row(label: 'المؤسسة', value: session.organizationId),
-                          _Row(label: 'الدور', value: AppRoles.label(session.role)),
-                          _Row(label: 'الحالة', value: session.status),
+                          _Row(
+                              label: AppText.t('البريد', 'Email'),
+                              value: session.email),
+                          _Row(
+                              label: AppText.t('المؤسسة', 'Organization'),
+                              value: session.organizationId),
+                          _Row(
+                              label: AppText.t('الدور', 'Role'),
+                              value: AppRoles.label(session.role)),
+                          _Row(
+                              label: AppText.t('الحالة', 'Status'),
+                              value: session.status),
                         ],
                       ),
                     ),
                     const SizedBox(height: AppSpacing.md),
                     Text(
-                      'يمكنك قراءة البيانات المحفوظة على هذا الجهاز. الكتابة '
-                      'تبدأ فور تفعيل الحساب من مدير المؤسسة.',
+                      AppText.t(
+                          'يمكنك قراءة البيانات المحفوظة على هذا الجهاز. الكتابة تبدأ فور تفعيل الحساب من مدير المؤسسة.',
+                          'You can read the data saved on this device. Writing starts once the organization admin activates the account.'),
                       textAlign: TextAlign.center,
                       style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
                     ),
@@ -90,7 +103,7 @@ class WaitingActivationScreen extends StatelessWidget {
                         gate.updated();
                         if (context.mounted) context.go('/login');
                       },
-                      child: const Text('تسجيل الخروج'),
+                      child: Text(AppText.t('تسجيل الخروج', 'Sign out')),
                     ),
                   ],
                 ),

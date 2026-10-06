@@ -281,6 +281,46 @@ void main() {
       expect('${conflicts.single['remote_payload']}', contains('5'));
     });
 
+    test('dismissAllConflicts ignores stale rows and clears the badge', () async {
+      for (final code in ['QC-D1', 'QC-D2']) {
+        final id = await insertSample(code);
+        await fixture.transaction((txn) => queue.enqueue(
+              txn,
+              entityType: 'sample',
+              entityId: code,
+              localRef: id,
+              operation: 'update',
+              payload: const {},
+            ));
+      }
+      for (final entry in await queue.claim(limit: 10)) {
+        await queue.markConflict(entry, direction: 'push_rejected');
+      }
+      expect(await queue.listConflicts(), hasLength(2));
+      expect((await queue.countBadge()).conflicts, 2);
+
+      expect(await queue.dismissAllConflicts(), 2);
+
+      expect(await queue.listConflicts(), isEmpty);
+      expect(await queue.countConflicts(), 0);
+      expect((await queue.countBadge()).conflicts, 0);
+      // Parked rows are dropped, history is kept as ignored.
+      expect(
+        await queue.listQueue(),
+        isEmpty,
+        reason: 'stale parked payloads must not linger',
+      );
+      final history = await fixture.db
+          .query('sync_conflicts', where: 'resolution = ?', whereArgs: ['ignored']);
+      expect(history, hasLength(2));
+      expect(history.every((r) => r['resolved_at'] != null), isTrue);
+    });
+
+    test('dismissAllConflicts is a no-op when nothing is unresolved', () async {
+      expect(await queue.dismissAllConflicts(), 0);
+      expect((await queue.countBadge()).conflicts, 0);
+    });
+
     test('resolveConflict applies the choice and closes the conflict', () async {
       final id = await insertSample('QC-10');
       await fixture.transaction((txn) => queue.enqueue(

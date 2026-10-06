@@ -381,7 +381,7 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         parameter_name TEXT NOT NULL UNIQUE,
         unit TEXT,
-        parameter_type TEXT DEFAULT 'physical',
+        parameter_type TEXT DEFAULT 'chemical',
         imported_at TEXT NOT NULL
       )
     ''');
@@ -641,6 +641,14 @@ class DatabaseHelper {
       CREATE INDEX IF NOT EXISTS idx_sync_queue_ready
         ON sync_queue(status, next_attempt_at, id)
     ''');
+    // Badge counters (`SyncQueue.countBadge`, `countBlocked`) filter on
+    // `status` alone. The leftmost column of `idx_sync_queue_ready` covers
+    // that, but an explicit narrow index guarantees an index-only COUNT
+    // without depending on the composite's shape surviving future edits.
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_sync_queue_status
+        ON sync_queue(status)
+    ''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS sync_metadata (
         key TEXT PRIMARY KEY,
@@ -659,6 +667,21 @@ class DatabaseHelper {
         resolution TEXT,
         resolved_at TEXT
       )
+    ''');
+    // The conflicts COUNT (`resolution IS NULL OR resolution NOT IN (...)`)
+    // had no index at all: every badge read full-scanned `sync_conflicts`,
+    // including its up-to-900 kB `local_payload`/`remote_payload` TEXT pages.
+    // That scan is what stalled bootstrap past the 2 s DbTrace budget while
+    // the dashboard's own queries queued behind it on the single FFI isolate.
+    // Declared after the table: `CREATE INDEX` on a missing table is a hard
+    // error, and recovery/QC-schema tests open files without sync tables.
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_sync_conflicts_resolution
+        ON sync_conflicts(resolution)
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_sync_conflicts_detected
+        ON sync_conflicts(detected_at DESC, id DESC)
     ''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS device_registry (
@@ -723,6 +746,9 @@ class DatabaseHelper {
       'CREATE INDEX IF NOT EXISTS idx_consumption_log_sample_test ON lab_consumption_log(sample_test_id)',
     );
     await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_consumption_log_inventory ON lab_consumption_log(inventory_id, reversal_of_log_id)',
+    );
+    await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_inspections_created_at_desc ON inspections(created_at DESC, id DESC)',
     );
     await db.execute(
@@ -730,6 +756,10 @@ class DatabaseHelper {
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_inspections_inspection_date ON inspections(inspection_date)',
+    );
+    // Covers the `deleted_at IS NULL` working-set filter used by every list.
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_inspections_alive ON inspections(deleted_at, inspection_date DESC, id DESC)',
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_inspections_material_code_date ON inspections(material_code, inspection_date)',
@@ -744,6 +774,9 @@ class DatabaseHelper {
       'CREATE INDEX IF NOT EXISTS idx_inspections_supplier ON inspections(supplier)',
     );
     await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_inspections_entry_code ON inspections(entry_code)',
+    );
+    await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_analysis ON lab_sample_tests(worksheet_row_id, analysis_id)',
     );
     await db.execute(
@@ -752,11 +785,58 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_row ON lab_sample_tests(worksheet_row_id)',
     );
+    // listSampleTests / findTestsForAnalysisAndSource filters.
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sample_tests_source ON lab_sample_tests(source_type, source_ref_id, tested_at DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_sample_tests_analysis ON lab_sample_tests(analysis_id)',
+    );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_status_history_inspection_version ON inspection_status_history(inspection_id, version DESC, id DESC)',
     );
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_stock_adjustments_adj_at ON lab_stock_adjustments(adjusted_at DESC, id DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_stock_adjustments_inventory ON lab_stock_adjustments(inventory_id)',
+    );
+    // Lookup / ordering helpers (all previously full-scans).
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_worksheet_status ON lab_worksheet(status, entry_code)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_analysis_items_analysis ON lab_analysis_items(analysis_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_field_links_analysis ON lab_field_chemical_links(analysis_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_product_analyses_product ON lab_product_analyses(product_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_material_analyses_material ON lab_material_analyses(material_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_bounds_param ON material_parameter_bounds(parameter_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_bounds_material ON material_parameter_bounds(material_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_inventory_name ON lab_inventory(name COLLATE NOCASE)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_products_name ON lab_products(name COLLATE NOCASE)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_analyses_name ON lab_analyses(name COLLATE NOCASE)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_reference_active ON reference_materials(active)',
     );
 
     // QC Manager indexes live in `_createQcIndexes`, alongside the tables they
@@ -970,6 +1050,11 @@ class DatabaseHelper {
   /// Idempotent legacy-guard migrations matching sqlite_db.py pragmas/rules.
   Future<void> _runLegacyGuarantees(Database db) async {
     await _rebuildFieldChemicalLinks(db);
+
+    // Perf indexes are IF NOT EXISTS: running here (every open) migrates
+    // existing installs that were created before the index existed.
+    // New databases already get them via _createSchema → _createIndexes.
+    await _createIndexes(db);
 
     // QC Manager (plan V6 §5.2): tables, then the indexes over them.
     //

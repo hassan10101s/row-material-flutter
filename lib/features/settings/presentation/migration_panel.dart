@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../app/auth_gate.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/services/seed_service.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
+import '../../../design_system/widgets/app_dialogs.dart';
 import '../../../di/service_locator.dart';
 import '../../backup/domain/backup_service.dart';
 
@@ -55,28 +57,15 @@ class _MigrationPanelState extends State<MigrationPanel> {
     required String message,
     required String confirmText,
     required bool danger,
-  }) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: Text(title),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(c).pop(false),
-            child: const Text('إلغاء'),
-          ),
-          FilledButton(
-            style: danger
-                ? FilledButton.styleFrom(backgroundColor: AppColors.danger)
-                : null,
-            onPressed: () => Navigator.of(c).pop(true),
-            child: Text(confirmText),
-          ),
-        ],
-      ),
+  }) {
+    return showAppConfirm(
+      context,
+      title: title,
+      message: message,
+      confirmLabel: confirmText,
+      cancelLabel: AppText.t('إلغاء', 'Cancel'),
+      danger: danger,
     );
-    return result ?? false;
   }
 
   Future<void> _run(String key, Future<String> Function() action) async {
@@ -230,12 +219,12 @@ class _MigrationPanelState extends State<MigrationPanel> {
             const SizedBox(width: AppSpacing.sm),
             OutlinedButton(
               onPressed: _busyKey != null ? null : () => _pick(pickKey),
-              child: const Text('اختيار'),
+              child: Text(AppText.t('اختيار', 'Choose')),
             ),
             const SizedBox(width: AppSpacing.sm),
             AppButton(
               small: true,
-              label: 'استيراد',
+              label: AppText.t('استيراد', 'Import'),
               icon: Icon(Icons.import_export, size: 16.r),
               loading: _busyKey == importKey,
               onPressed: _busyKey != null ? null : onImport,

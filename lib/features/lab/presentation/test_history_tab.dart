@@ -10,6 +10,7 @@ import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_skeleton.dart';
+import '../../../design_system/widgets/app_window.dart';
 import '../../../di/service_locator.dart';
 import '../core/test_history_logic.dart';
 import '../domain/lab_local_repository.dart';
@@ -75,76 +76,27 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
   }
 
   Future<void> _openNewTest() async {
-    await showDialog<void>(
-      context: context,
-      // Windows-like overlay: a large non-fullscreen surface floating over the
-      // app; tapping outside (or pressing the close button) returns to the main
-      // page. barrierDismissible is true by default.
-      builder: (dialogContext) => BlocProvider(
+    // Unified window chrome; tapping outside (or the close button) returns to
+    // the main page. barrierDismissible is true by default.
+    await showAppWindow<void>(
+      context,
+      title: AppText.t('اختبار جديد', 'New Test'),
+      icon: Icons.science_outlined,
+      maxWidth: 1040,
+      height: 780,
+      scrollBody: false,
+      child: BlocProvider(
         create: (_) => RunTestCubit(
           config: getIt<LabConfigurationRepository>(),
           results: getIt<LabResultRepository>(),
           local: getIt<LabLocalRepository>(),
         )..load(),
-        child: Dialog(
-          insetPadding: const EdgeInsets.symmetric(
-            horizontal: 48,
-            vertical: 32,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 1040, maxHeight: 780),
-            child: Column(
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.fromLTRB(20, 8, 8, 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceSoft,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(4),
-                    ),
-                    border: Border(
-                      bottom: BorderSide(color: AppColors.borderMuted),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.science_outlined,
-                        size: 20.r,
-                        color: AppColors.primary,
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        AppText.t('اختبار جديد', 'New Test'),
-                        style: TextStyle(
-                          fontSize: 16.spMax,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        tooltip: AppText.t('إغلاق', 'Close'),
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => Navigator.of(dialogContext).pop(),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    child: Align(
-                      alignment: Alignment.topCenter,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 920),
-                        child: RunTestTab(onTestRun: () {}),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
+        child: SingleChildScrollView(
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 920),
+              child: RunTestTab(onTestRun: () {}),
             ),
           ),
         ),
@@ -201,9 +153,14 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
     var dRange = _rangeState;
     var dLimit = _recordLimit;
 
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
+    await showAppWindow<void>(
+      context,
+      title: AppText.t('الفلاتر', 'Filters'),
+      icon: Icons.filter_alt_outlined,
+      maxWidth: 760,
+      height: 640,
+      scrollBody: false,
+      child: StatefulBuilder(
         builder: (dialogContext, setDraft) {
           Future<void> pickDate() async {
             final now = DateTime.now();
@@ -217,141 +174,91 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
             setDraft(() => dDate = thTodayISO(picked));
           }
 
-          return Dialog(
-            insetPadding: const EdgeInsets.symmetric(
-              horizontal: 48,
-              vertical: 32,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 760, maxHeight: 640),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(20, 8, 8, 6),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceSoft,
-                      borderRadius: const BorderRadius.vertical(
-                        top: Radius.circular(4),
-                      ),
-                      border: Border(
-                        bottom: BorderSide(color: AppColors.borderMuted),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.filter_alt_outlined,
-                          size: 20.r,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          AppText.t('الفلاتر', 'Filters'),
-                          style: TextStyle(
-                            fontSize: 16.spMax,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const Spacer(),
-                        IconButton(
-                          tooltip: AppText.t('إغلاق', 'Close'),
-                          visualDensity: VisualDensity.compact,
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                          icon: const Icon(Icons.close),
-                        ),
-                      ],
-                    ),
+          return Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  child: _filterGrid(
+                    state,
+                    chemOptions,
+                    mode: dMode,
+                    specificDate: dDate,
+                    analysisId: dAnalysis,
+                    sourceType: dSource,
+                    chemicalId: dChemical,
+                    rangeState: dRange,
+                    recordLimit: dLimit,
+                    onMode: (v) => setDraft(() {
+                      dMode = v;
+                      if (v != 'specific-date') {
+                        dDate = '';
+                      } else if (dDate.isEmpty) {
+                        dDate = thTodayISO();
+                      }
+                    }),
+                    onDate: pickDate,
+                    onAnalysis: (v) => setDraft(() => dAnalysis = v),
+                    onSource: (v) => setDraft(() => dSource = v),
+                    onChemical: (v) => setDraft(() => dChemical = v),
+                    onRange: (v) => setDraft(() => dRange = v),
+                    onLimit: (v) => setDraft(() => dLimit = v),
                   ),
-                  Flexible(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(AppSpacing.lg),
-                      child: _filterGrid(
-                        state,
-                        chemOptions,
-                        mode: dMode,
-                        specificDate: dDate,
-                        analysisId: dAnalysis,
-                        sourceType: dSource,
-                        chemicalId: dChemical,
-                        rangeState: dRange,
-                        recordLimit: dLimit,
-                        onMode: (v) => setDraft(() {
-                          dMode = v;
-                          if (v != 'specific-date') {
-                            dDate = '';
-                          } else if (dDate.isEmpty) {
-                            dDate = thTodayISO();
-                          }
-                        }),
-                        onDate: pickDate,
-                        onAnalysis: (v) => setDraft(() => dAnalysis = v),
-                        onSource: (v) => setDraft(() => dSource = v),
-                        onChemical: (v) => setDraft(() => dChemical = v),
-                        onRange: (v) => setDraft(() => dRange = v),
-                        onLimit: (v) => setDraft(() => dLimit = v),
-                      ),
-                    ),
-                  ),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceSoft,
-                      borderRadius: const BorderRadius.vertical(
-                        bottom: Radius.circular(4),
-                      ),
-                      border: Border(
-                        top: BorderSide(color: AppColors.borderMuted),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        AppButton(
-                          label: AppText.t('مسح الكل', 'Clear all'),
-                          style: AppButtonStyle.ghost,
-                          small: true,
-                          onPressed: () => setDraft(() {
-                            dMode = 'all';
-                            dDate = '';
-                            dAnalysis = '';
-                            dSource = '';
-                            dChemical = '';
-                            dRange = '';
-                          }),
-                        ),
-                        const Spacer(),
-                        AppButton(
-                          label: AppText.t('إلغاء', 'Cancel'),
-                          style: AppButtonStyle.secondary,
-                          small: true,
-                          onPressed: () => Navigator.of(dialogContext).pop(),
-                        ),
-                        const SizedBox(width: 8),
-                        AppButton(
-                          label: AppText.t('تطبيق', 'Apply'),
-                          style: AppButtonStyle.primary,
-                          small: true,
-                          onPressed: () {
-                            _applyFilters(
-                              filterMode: dMode,
-                              specificDate: dDate,
-                              analysisId: dAnalysis,
-                              sourceType: dSource,
-                              chemicalId: dChemical,
-                              rangeState: dRange,
-                              recordLimit: dLimit,
-                            );
-                            Navigator.of(dialogContext).pop();
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSoft,
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(4),
+                  ),
+                  border: Border(top: BorderSide(color: AppColors.borderMuted)),
+                ),
+                child: Row(
+                  children: [
+                    AppButton(
+                      label: AppText.t('مسح الكل', 'Clear all'),
+                      style: AppButtonStyle.ghost,
+                      small: true,
+                      onPressed: () => setDraft(() {
+                        dMode = 'all';
+                        dDate = '';
+                        dAnalysis = '';
+                        dSource = '';
+                        dChemical = '';
+                        dRange = '';
+                      }),
+                    ),
+                    const Spacer(),
+                    AppButton(
+                      label: AppText.t('إلغاء', 'Cancel'),
+                      style: AppButtonStyle.secondary,
+                      small: true,
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                    ),
+                    const SizedBox(width: 8),
+                    AppButton(
+                      label: AppText.t('تطبيق', 'Apply'),
+                      style: AppButtonStyle.primary,
+                      small: true,
+                      onPressed: () {
+                        _applyFilters(
+                          filterMode: dMode,
+                          specificDate: dDate,
+                          analysisId: dAnalysis,
+                          sourceType: dSource,
+                          chemicalId: dChemical,
+                          rangeState: dRange,
+                          recordLimit: dLimit,
+                        );
+                        Navigator.of(dialogContext).pop();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -615,15 +522,21 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                   child: DataTable(
                     columns: [
                       const DataColumn(label: Text('#')),
-                      _sortable('التوقيت', 'tested_at'),
-                      _sortable('التحليل', 'analysis_name'),
-                      _sortable('العينة', 'sample_name'),
-                      _sortable('المصدر', 'source_name'),
-                      _sortable('كود الدخول', 'entry_code'),
-                      _sortable('النتيجة', 'result_text'),
-                      const DataColumn(label: Text('النطاق')),
-                      _sortable('الحالة', 'range_state'),
-                      _sortable('بواسطة', 'tested_by_name'),
+                      _sortable(AppText.t('التوقيت', 'Time'), 'tested_at'),
+                      _sortable(
+                        AppText.t('التحليل', 'Analysis'),
+                        'analysis_name',
+                      ),
+                      _sortable(AppText.t('العينة', 'Sample'), 'sample_name'),
+                      _sortable(AppText.t('المصدر', 'Source'), 'source_name'),
+                      _sortable(
+                        AppText.t('كود الدخول', 'Entry code'),
+                        'entry_code',
+                      ),
+                      _sortable(AppText.t('النتيجة', 'Result'), 'result_text'),
+                      DataColumn(label: Text(AppText.t('النطاق', 'Range'))),
+                      _sortable(AppText.t('الحالة', 'Status'), 'range_state'),
+                      _sortable(AppText.t('بواسطة', 'By'), 'tested_by_name'),
                     ],
                     rows: [
                       if (paged.slice.isEmpty)
@@ -634,8 +547,14 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                                 i == 0
                                     ? Text(
                                         state.rows.isEmpty
-                                            ? 'لا توجد تحاليل بعد. شغّل تحليلاً من تبويب تشغيل تحليل.'
-                                            : 'لا توجد نتائج مطابقة للفلاتر الحالية.',
+                                            ? AppText.t(
+                                                'لا توجد تحاليل بعد. شغّل تحليلاً من تبويب تشغيل تحليل.',
+                                                'No analyses yet. Run one from the run-test tab.',
+                                              )
+                                            : AppText.t(
+                                                'لا توجد نتائج مطابقة للفلاتر الحالية.',
+                                                'No results match the current filters.',
+                                              ),
                                         style: TextStyle(
                                           color: AppColors.textMuted,
                                         ),
@@ -806,7 +725,10 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                 isDense: true,
               ),
               items: [
-                const DropdownMenuItem(value: '', child: Text('كل التحاليل')),
+                DropdownMenuItem(
+                  value: '',
+                  child: Text(AppText.t('كل التحاليل', 'All analyses')),
+                ),
                 for (final a in state.analyses)
                   DropdownMenuItem(
                     value: '${a['id']}',
@@ -828,13 +750,19 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
-              items: const [
-                DropdownMenuItem(value: '', child: Text('كل الأنواع')),
+              items: [
+                DropdownMenuItem(
+                  value: '',
+                  child: Text(AppText.t('كل الأنواع', 'All types')),
+                ),
                 DropdownMenuItem(
                   value: 'raw_material',
-                  child: Text('مادة خام'),
+                  child: Text(AppText.t('مادة خام', 'Raw material')),
                 ),
-                DropdownMenuItem(value: 'product', child: Text('منتج')),
+                DropdownMenuItem(
+                  value: 'product',
+                  child: Text(AppText.t('منتج', 'Product')),
+                ),
               ],
               onChanged: (v) => onSource(v ?? ''),
             ),
@@ -849,7 +777,10 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                 isDense: true,
               ),
               items: [
-                const DropdownMenuItem(value: '', child: Text('كل المواد')),
+                DropdownMenuItem(
+                  value: '',
+                  child: Text(AppText.t('كل المواد', 'All items')),
+                ),
                 for (final o in chemOptions)
                   DropdownMenuItem(value: o.value, child: Text(o.label)),
               ],
@@ -865,11 +796,23 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
                 border: OutlineInputBorder(),
                 isDense: true,
               ),
-              items: const [
-                DropdownMenuItem(value: '', child: Text('كل النتائج')),
-                DropdownMenuItem(value: 'out', child: Text('خارج النطاق')),
-                DropdownMenuItem(value: 'in', child: Text('ضمن النطاق')),
-                DropdownMenuItem(value: 'none', child: Text('بدون نطاق')),
+              items: [
+                DropdownMenuItem(
+                  value: '',
+                  child: Text(AppText.t('كل النتائج', 'All results')),
+                ),
+                DropdownMenuItem(
+                  value: 'out',
+                  child: Text(AppText.t('خارج النطاق', 'Out of range')),
+                ),
+                DropdownMenuItem(
+                  value: 'in',
+                  child: Text(AppText.t('ضمن النطاق', 'In range')),
+                ),
+                DropdownMenuItem(
+                  value: 'none',
+                  child: Text(AppText.t('بدون نطاق', 'No range')),
+                ),
               ],
               onChanged: (v) => onRange(v ?? ''),
             ),

@@ -4,7 +4,9 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/auth/session_source.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/responsive/form_factor.dart';
 import '../../../../design_system/animations/app_animations.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
@@ -12,6 +14,7 @@ import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_goal.dart';
 import '../domain/qc_enums.dart';
 import 'cubit/qc_goal_detail_cubit.dart';
@@ -29,7 +32,9 @@ class QcGoalDetailScreen extends StatelessWidget {
   final bool isModal;
 
   static Future<void> open(BuildContext context, int goalId) {
-    final isDesktop = MediaQuery.of(context).size.width >= 1024;
+    // Platform decision, never a width decision (architecture rule): a
+    // snapped desktop window keeps the desktop experience.
+    final isDesktop = FormFactor.current.isDesktop;
     Widget detail({required bool modal}) => BlocProvider(
       create: (_) => getIt<QcGoalDetailCubit>(param1: goalId)..load(),
       child: QcGoalDetailScreen(isModal: modal),
@@ -60,13 +65,13 @@ class QcGoalDetailScreen extends StatelessWidget {
           a.error != b.error && b.error != null,
       listener: (context, state) {
         final cubit = context.read<QcGoalDetailCubit>();
-        final text = state.notice ?? state.error;
-        if (text == null) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(text)));
-        if (state.notice != null) cubit.clearNotice();
-        if (state.error != null) cubit.clearError();
+        if (state.error != null) {
+          AppFeedback.error(context, state.error!);
+          cubit.clearError();
+        } else if (state.notice != null) {
+          AppFeedback.success(context, state.notice!);
+          cubit.clearNotice();
+        }
       },
       builder: (context, state) {
         final goal = state.goal;
@@ -517,14 +522,11 @@ class _OverviewTab extends StatelessWidget {
     final bundle = state.bundle;
     if (bundle == null) return;
     if (!bundle.allAssignmentsComplete || !bundle.allActionsDone) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppText.t(
-              'أكمل أو ألغِ جميع المسؤوليات والخطوات أولاً',
-              'Complete or cancel all assignments and steps first',
-            ),
-          ),
+      AppFeedback.error(
+        context,
+        AppText.t(
+          'أكمل أو ألغِ جميع المسؤوليات والخطوات أولاً',
+          'Complete or cancel all assignments and steps first',
         ),
       );
       return;
@@ -535,105 +537,103 @@ class _OverviewTab extends StatelessWidget {
     final name = TextEditingController();
     final evidenceController = TextEditingController();
     final evidenceList = <String>[];
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text(AppText.t('إكمال الهدف', 'Complete goal')),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppText.t(
-                    'التسجيل يتطلب اسم من أنهى الهدف.',
-                    'A finisher must be named before the goal can close.',
-                  ),
-                  style: const TextStyle(fontSize: 12),
+    final result = await showAppWindow<bool>(
+      context,
+      title: AppText.t('إكمال الهدف', 'Complete goal'),
+      icon: Icons.flag_outlined,
+      size: AppWindowSize.sm,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(AppText.t('إلغاء', 'Cancel')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(AppText.t('تأكيد', 'Confirm')),
+        ),
+      ],
+      child: StatefulBuilder(
+        builder: (context, setState) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              AppText.t(
+                'التسجيل يتطلب اسم من أنهى الهدف.',
+                'A finisher must be named before the goal can close.',
+              ),
+              style: const TextStyle(fontSize: 12),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            _FinisherAutocomplete(
+              nameController: name,
+              idController: who,
+              people: _knownPeople(goal, state.assignments),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            _AutocompleteTextField(
+              controller: notes,
+              label: AppText.t('ملاحظات', 'Notes'),
+              options: state.goal?.completionNotes.isNotEmpty == true
+                  ? [state.goal!.completionNotes]
+                  : const [],
+              maxLines: 2,
+            ),
+            if (goal.needsEvidence) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                AppText.t(
+                  'الأدلة مطلوبة لهذا الهدف الحرج',
+                  'Evidence required for critical goal',
                 ),
-                const SizedBox(height: AppSpacing.sm),
-                _FinisherAutocomplete(
-                  nameController: name,
-                  idController: who,
-                  people: _knownPeople(goal, state.assignments),
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
                 ),
-                const SizedBox(height: AppSpacing.xs),
-                _AutocompleteTextField(
-                  controller: notes,
-                  label: AppText.t('ملاحظات', 'Notes'),
-                  options: state.goal?.completionNotes.isNotEmpty == true
-                      ? [state.goal!.completionNotes]
-                      : const [],
-                  maxLines: 2,
-                ),
-                if (goal.needsEvidence) ...[
-                  const SizedBox(height: AppSpacing.sm),
-                  Text(
-                    AppText.t(
-                      'الأدلة مطلوبة لهذا الهدف الحرج',
-                      'Evidence required for critical goal',
-                    ),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Row(
+                children: [
+                  Expanded(
+                    child: _AutocompleteTextField(
+                      controller: evidenceController,
+                      label: AppText.t(
+                        'رابط/وصف الدليل',
+                        'Evidence URL/description',
+                      ),
+                      options: goal.completionEvidence,
                     ),
                   ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _AutocompleteTextField(
-                          controller: evidenceController,
-                          label: AppText.t(
-                            'رابط/وصف الدليل',
-                            'Evidence URL/description',
-                          ),
-                          options: goal.completionEvidence,
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () {
-                          final v = evidenceController.text.trim();
-                          if (v.isNotEmpty) {
-                            setState(() {
-                              evidenceList.add(v);
-                              evidenceController.clear();
-                            });
-                          }
-                        },
-                        icon: const Icon(Icons.add),
-                      ),
-                    ],
+                  IconButton(
+                    onPressed: () {
+                      final v = evidenceController.text.trim();
+                      if (v.isNotEmpty) {
+                        setState(() {
+                          evidenceList.add(v);
+                          evidenceController.clear();
+                        });
+                      }
+                    },
+                    icon: const Icon(Icons.add),
                   ),
-                  if (evidenceList.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.only(top: AppSpacing.xs),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: evidenceList
-                            .map(
-                              (e) => Text(
-                                '- $e',
-                                style: const TextStyle(fontSize: 11),
-                              ),
-                            )
-                            .toList(),
-                      ),
-                    ),
                 ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialog).pop(false),
-              child: Text(AppText.t('إلغاء', 'Cancel')),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(dialog).pop(true),
-              child: Text(AppText.t('تأكيد', 'Confirm')),
-            ),
+              ),
+              if (evidenceList.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.xs),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: evidenceList
+                        .map(
+                          (e) => Text(
+                            '- $e',
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        )
+                        .toList(),
+                  ),
+                ),
+            ],
           ],
         ),
       ),
@@ -645,14 +645,11 @@ class _OverviewTab extends StatelessWidget {
     if (result != true) return;
     if (!context.mounted) return;
     if (finisherId.isEmpty || finisherName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppText.t(
-              'لا يمكن الإكمال بدون مسؤول',
-              'Cannot complete without a finisher',
-            ),
-          ),
+      AppFeedback.error(
+        context,
+        AppText.t(
+          'لا يمكن الإكمال بدون مسؤول',
+          'Cannot complete without a finisher',
         ),
       );
       return;
@@ -748,28 +745,28 @@ class _AssignmentsTab extends StatelessWidget {
     final cubit = context.read<QcGoalDetailCubit>();
     final who = TextEditingController();
     final name = TextEditingController();
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text(AppText.t('إنجاز المسؤولية', 'Complete assignment')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _FinisherAutocomplete(
-              nameController: name,
-              idController: who,
-              people: _knownPeople(state.goal!, state.assignments),
-            ),
-          ],
+    final result = await showAppWindow<bool>(
+      context,
+      title: AppText.t('إنجاز المسؤولية', 'Complete assignment'),
+      icon: Icons.person_add_alt_outlined,
+      size: AppWindowSize.sm,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(AppText.t('إلغاء', 'Cancel')),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(false),
-            child: Text(AppText.t('إلغاء', 'Cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialog).pop(true),
-            child: Text(AppText.t('تأكيد', 'Confirm')),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(AppText.t('تأكيد', 'Confirm')),
+        ),
+      ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _FinisherAutocomplete(
+            nameController: name,
+            idController: who,
+            people: _knownPeople(state.goal!, state.assignments),
           ),
         ],
       ),
@@ -779,14 +776,11 @@ class _AssignmentsTab extends StatelessWidget {
     if (result != true) return;
     if (!context.mounted) return;
     if (w.isEmpty || n.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppText.t(
-              'اختر شخصاً من الاقتراحات',
-              'Select a person from the suggestions',
-            ),
-          ),
+      AppFeedback.error(
+        context,
+        AppText.t(
+          'اختر شخصاً من الاقتراحات',
+          'Select a person from the suggestions',
         ),
       );
       return;
@@ -876,28 +870,28 @@ class _ActionsTab extends StatelessWidget {
     final cubit = context.read<QcGoalDetailCubit>();
     final who = TextEditingController();
     final name = TextEditingController();
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text(AppText.t('إنجاز الخطوة', 'Complete step')),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _FinisherAutocomplete(
-              nameController: name,
-              idController: who,
-              people: _knownPeople(state.goal!, state.assignments),
-            ),
-          ],
+    final result = await showAppWindow<bool>(
+      context,
+      title: AppText.t('إنجاز الخطوة', 'Complete step'),
+      icon: Icons.check_circle_outline,
+      size: AppWindowSize.sm,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(AppText.t('إلغاء', 'Cancel')),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(false),
-            child: Text(AppText.t('إلغاء', 'Cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialog).pop(true),
-            child: Text(AppText.t('تأكيد', 'Confirm')),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(AppText.t('تأكيد', 'Confirm')),
+        ),
+      ],
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _FinisherAutocomplete(
+            nameController: name,
+            idController: who,
+            people: _knownPeople(state.goal!, state.assignments),
           ),
         ],
       ),
@@ -907,14 +901,11 @@ class _ActionsTab extends StatelessWidget {
     if (result != true) return;
     if (!context.mounted) return;
     if (w.isEmpty || n.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            AppText.t(
-              'اختر شخصاً من الاقتراحات',
-              'Select a person from the suggestions',
-            ),
-          ),
+      AppFeedback.error(
+        context,
+        AppText.t(
+          'اختر شخصاً من الاقتراحات',
+          'Select a person from the suggestions',
         ),
       );
       return;
@@ -942,208 +933,196 @@ class _KpisTab extends StatelessWidget {
     var measureDate = DateTime.now().toIso8601String().substring(0, 10);
     var selectedExistingName = '';
 
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text(AppText.t('إضافة/تسجيل مؤشر', 'Add or record KPI')),
-          content: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _AutocompleteTextField(
-                    controller: name,
-                    label: AppText.t('اسم المؤشر', 'KPI name'),
-                    options: state.kpis.map((kpi) => kpi.name).toSet().toList(),
-                    required: true,
-                    onSelected: (value) {
-                      final existing = state.kpis
-                          .where((kpi) => kpi.name == value)
-                          .firstOrNull;
-                      if (existing == null) return;
-                      selectedExistingName = existing.name;
-                      target.text = '${existing.target}';
-                      actual.text = existing.actual == null
-                          ? ''
-                          : '${existing.actual}';
-                      unit.text = existing.unit;
-                      measuredById.text = existing.measuredBy;
-                      measuredByName.text = existing.measuredByName;
-                      notes.text = existing.notes;
-                      setState(() {
-                        higherIsBetter = existing.higherIsBetter;
-                        if (existing.measureDate.isNotEmpty) {
-                          measureDate = existing.measureDate;
-                        }
-                      });
-                    },
-                    onChanged: (value) {
-                      if (selectedExistingName.isEmpty ||
-                          value == selectedExistingName) {
-                        return;
-                      }
-                      selectedExistingName = '';
-                      target.clear();
-                      actual.clear();
-                      unit.clear();
-                      measuredById.clear();
-                      measuredByName.clear();
-                      notes.clear();
-                      setState(() {
-                        higherIsBetter = true;
-                        measureDate = DateTime.now()
-                            .toIso8601String()
-                            .substring(0, 10);
-                      });
-                    },
-                  ),
-                  TextFormField(
-                    controller: target,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: InputDecoration(
-                      labelText: AppText.t('المستهدف', 'Target'),
-                    ),
-                    validator: (value) {
-                      final parsed = double.tryParse(value?.trim() ?? '');
-                      return parsed == null || !parsed.isFinite
-                          ? AppText.t(
-                              'أدخل قيمة رقمية صحيحة',
-                              'Enter a valid number',
-                            )
-                          : null;
-                    },
-                  ),
-                  TextFormField(
-                    controller: actual,
-                    keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true,
-                    ),
-                    decoration: InputDecoration(
-                      labelText: AppText.t(
-                        'القيمة الحالية (اختياري)',
-                        'Actual (optional)',
-                      ),
-                    ),
-                    validator: (value) {
-                      if (value == null || value.trim().isEmpty) return null;
-                      final parsed = double.tryParse(value.trim());
-                      return parsed == null || !parsed.isFinite
-                          ? AppText.t(
-                              'أدخل قيمة رقمية صحيحة',
-                              'Enter a valid number',
-                            )
-                          : null;
-                    },
-                  ),
-                  _AutocompleteTextField(
-                    controller: unit,
-                    label: AppText.t('الوحدة', 'Unit'),
-                    options: state.kpis
-                        .map((kpi) => kpi.unit)
-                        .where((value) => value.isNotEmpty)
-                        .toSet()
-                        .toList(),
-                  ),
-                  _FinisherAutocomplete(
-                    nameController: measuredByName,
-                    idController: measuredById,
-                    people: _knownPeople(state.goal!, state.assignments),
-                  ),
-                  _AutocompleteTextField(
-                    controller: notes,
-                    label: AppText.t('ملاحظات', 'Notes'),
-                    options: state.kpis
-                        .map((kpi) => kpi.notes)
-                        .where((value) => value.isNotEmpty)
-                        .toSet()
-                        .toList(),
-                    maxLines: 2,
-                  ),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(AppText.t('الأعلى أفضل', 'Higher is better')),
-                    value: higherIsBetter,
-                    onChanged: (value) =>
-                        setState(() => higherIsBetter = value),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () async {
-                        final picked = await showDatePicker(
-                          context: dialog,
-                          initialDate:
-                              DateTime.tryParse(measureDate) ?? DateTime.now(),
-                          firstDate: DateTime(2000),
-                          lastDate: DateTime(DateTime.now().year + 10),
-                        );
-                        if (picked != null) {
-                          setState(() {
-                            measureDate = picked.toIso8601String().substring(
-                              0,
-                              10,
-                            );
-                          });
-                        }
-                      },
-                      icon: const Icon(Icons.calendar_today_outlined),
-                      label: Text(
-                        '${AppText.t('تاريخ القياس', 'Measure date')}: $measureDate',
-                      ),
-                    ),
-                  ),
-                ],
+    final result = await showAppWindow<bool>(
+      context,
+      title: AppText.t('إضافة/تسجيل مؤشر', 'Add or record KPI'),
+      icon: Icons.track_changes_outlined,
+      size: AppWindowSize.md,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(AppText.t('إلغاء', 'Cancel')),
+        ),
+        FilledButton(
+          onPressed: () {
+            final isExistingName = state.kpis.any(
+              (kpi) => kpi.name == name.text.trim(),
+            );
+            if (formKey.currentState!.validate() &&
+                name.text.trim().isNotEmpty &&
+                (!isExistingName || selectedExistingName == name.text.trim()) &&
+                measuredById.text.trim().isNotEmpty) {
+              Navigator.of(context).pop(true);
+            } else if (isExistingName &&
+                selectedExistingName != name.text.trim()) {
+              AppFeedback.error(
+                context,
+                AppText.t(
+                  'اختر المؤشر الموجود من الاقتراحات لتحديثه بأمان',
+                  'Select the existing KPI suggestion to update it safely',
+                ),
+              );
+            } else if (measuredById.text.trim().isEmpty) {
+              AppFeedback.error(
+                context,
+                AppText.t(
+                  'اختر مسؤول القياس من الاقتراحات',
+                  'Select the measurement owner from suggestions',
+                ),
+              );
+            }
+          },
+          child: Text(AppText.t('حفظ', 'Save')),
+        ),
+      ],
+      child: StatefulBuilder(
+        builder: (context, setState) => Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _AutocompleteTextField(
+                controller: name,
+                label: AppText.t('اسم المؤشر', 'KPI name'),
+                options: state.kpis.map((kpi) => kpi.name).toSet().toList(),
+                required: true,
+                onSelected: (value) {
+                  final existing = state.kpis
+                      .where((kpi) => kpi.name == value)
+                      .firstOrNull;
+                  if (existing == null) return;
+                  selectedExistingName = existing.name;
+                  target.text = '${existing.target}';
+                  actual.text = existing.actual == null
+                      ? ''
+                      : '${existing.actual}';
+                  unit.text = existing.unit;
+                  measuredById.text = existing.measuredBy;
+                  measuredByName.text = existing.measuredByName;
+                  notes.text = existing.notes;
+                  setState(() {
+                    higherIsBetter = existing.higherIsBetter;
+                    if (existing.measureDate.isNotEmpty) {
+                      measureDate = existing.measureDate;
+                    }
+                  });
+                },
+                onChanged: (value) {
+                  if (selectedExistingName.isEmpty ||
+                      value == selectedExistingName) {
+                    return;
+                  }
+                  selectedExistingName = '';
+                  target.clear();
+                  actual.clear();
+                  unit.clear();
+                  measuredById.clear();
+                  measuredByName.clear();
+                  notes.clear();
+                  setState(() {
+                    higherIsBetter = true;
+                    measureDate = DateTime.now().toIso8601String().substring(
+                      0,
+                      10,
+                    );
+                  });
+                },
               ),
-            ),
+              TextFormField(
+                controller: target,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: AppText.t('المستهدف', 'Target'),
+                ),
+                validator: (value) {
+                  final parsed = double.tryParse(value?.trim() ?? '');
+                  return parsed == null || !parsed.isFinite
+                      ? AppText.t(
+                          'أدخل قيمة رقمية صحيحة',
+                          'Enter a valid number',
+                        )
+                      : null;
+                },
+              ),
+              TextFormField(
+                controller: actual,
+                keyboardType: const TextInputType.numberWithOptions(
+                  decimal: true,
+                ),
+                decoration: InputDecoration(
+                  labelText: AppText.t(
+                    'القيمة الحالية (اختياري)',
+                    'Actual (optional)',
+                  ),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) return null;
+                  final parsed = double.tryParse(value.trim());
+                  return parsed == null || !parsed.isFinite
+                      ? AppText.t(
+                          'أدخل قيمة رقمية صحيحة',
+                          'Enter a valid number',
+                        )
+                      : null;
+                },
+              ),
+              _AutocompleteTextField(
+                controller: unit,
+                label: AppText.t('الوحدة', 'Unit'),
+                options: state.kpis
+                    .map((kpi) => kpi.unit)
+                    .where((value) => value.isNotEmpty)
+                    .toSet()
+                    .toList(),
+              ),
+              _FinisherAutocomplete(
+                nameController: measuredByName,
+                idController: measuredById,
+                people: _knownPeople(state.goal!, state.assignments),
+              ),
+              _AutocompleteTextField(
+                controller: notes,
+                label: AppText.t('ملاحظات', 'Notes'),
+                options: state.kpis
+                    .map((kpi) => kpi.notes)
+                    .where((value) => value.isNotEmpty)
+                    .toSet()
+                    .toList(),
+                maxLines: 2,
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(AppText.t('الأعلى أفضل', 'Higher is better')),
+                value: higherIsBetter,
+                onChanged: (value) => setState(() => higherIsBetter = value),
+              ),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate:
+                          DateTime.tryParse(measureDate) ?? DateTime.now(),
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(DateTime.now().year + 10),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        measureDate = picked.toIso8601String().substring(0, 10);
+                      });
+                    }
+                  },
+                  icon: const Icon(Icons.calendar_today_outlined),
+                  label: Text(
+                    '${AppText.t('تاريخ القياس', 'Measure date')}: $measureDate',
+                  ),
+                ),
+              ),
+            ],
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialog).pop(false),
-              child: Text(AppText.t('إلغاء', 'Cancel')),
-            ),
-            FilledButton(
-              onPressed: () {
-                final isExistingName = state.kpis.any(
-                  (kpi) => kpi.name == name.text.trim(),
-                );
-                if (formKey.currentState!.validate() &&
-                    name.text.trim().isNotEmpty &&
-                    (!isExistingName ||
-                        selectedExistingName == name.text.trim()) &&
-                    measuredById.text.trim().isNotEmpty) {
-                  Navigator.of(dialog).pop(true);
-                } else if (isExistingName &&
-                    selectedExistingName != name.text.trim()) {
-                  ScaffoldMessenger.of(dialog).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        AppText.t(
-                          'اختر المؤشر الموجود من الاقتراحات لتحديثه بأمان',
-                          'Select the existing KPI suggestion to update it safely',
-                        ),
-                      ),
-                    ),
-                  );
-                } else if (measuredById.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(dialog).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        AppText.t(
-                          'اختر مسؤول القياس من الاقتراحات',
-                          'Select the measurement owner from suggestions',
-                        ),
-                      ),
-                    ),
-                  );
-                }
-              },
-              child: Text(AppText.t('حفظ', 'Save')),
-            ),
-          ],
         ),
       ),
     );

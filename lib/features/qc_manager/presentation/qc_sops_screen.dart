@@ -3,12 +3,14 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../domain/qc_enums.dart';
 import '../domain/qc_sop.dart';
 import 'cubit/qc_sops_cubit.dart';
@@ -51,9 +53,8 @@ class QcSopsScreen extends StatelessWidget {
       ),
       body: BlocConsumer<QcSopsCubit, QcSopsState>(
         listenWhen: (a, b) => a.error != b.error && b.error != null,
-        listener: (context, state) => ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(state.error!))),
+        listener: (context, state) =>
+            AppFeedback.error(context, state.error!),
         builder: (context, state) {
           if (state.loading && state.sops.isEmpty) {
             return const Center(child: CircularProgressIndicator());
@@ -103,11 +104,15 @@ class QcSopsScreen extends StatelessWidget {
 
   void _openFilters(BuildContext context) {
     final cubit = context.read<QcSopsCubit>();
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      builder: (_) =>
-          BlocProvider.value(value: cubit, child: const _SopFilterSheet()),
+    showAppOverlay<void>(
+      context,
+      title: AppText.t('فلاتر الإجراءات', 'Procedure filters'),
+      icon: Icons.filter_alt_outlined,
+      size: AppWindowSize.sm,
+      builder: (_, _) => BlocProvider.value(
+        value: cubit,
+        child: const _SopFilterSheet(),
+      ),
     );
   }
 }
@@ -312,27 +317,13 @@ class _SopFilterSheetState extends State<_SopFilterSheet> {
       bloc: cubit,
       builder: (context, state) {
         final f = state.filters;
-        return Padding(
-          padding: EdgeInsets.only(
-            left: AppSpacing.lg,
-            right: AppSpacing.lg,
-            top: AppSpacing.lg,
-            bottom: MediaQuery.of(context).viewInsets.bottom + AppSpacing.lg,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  AppText.t('فلاتر الإجراءات', 'Procedure filters'),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 16.spMax,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                TextField(
+        // Chrome (title, padding, scroll) comes from the overlay host, so
+        // desktop and phones share one look.
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
                   controller: _search,
                   decoration: InputDecoration(
                     labelText: AppText.t('بحث', 'Search'),
@@ -376,14 +367,12 @@ class _SopFilterSheetState extends State<_SopFilterSheet> {
                   onChanged: (v) =>
                       cubit.applyFilters(f.copyWith(includeArchived: v)),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
+                AppWindow.footer(
+                  actions: [
                     TextButton(
                       onPressed: () => cubit.clearFilters(),
                       child: Text(AppText.t('مسح', 'Clear')),
                     ),
-                    const SizedBox(width: AppSpacing.sm),
                     FilledButton(
                       onPressed: () => Navigator.of(context).pop(),
                       child: Text(AppText.t('تم', 'Done')),
@@ -391,9 +380,7 @@ class _SopFilterSheetState extends State<_SopFilterSheet> {
                   ],
                 ),
               ],
-            ),
-          ),
-        );
+            );
       },
     );
   }
