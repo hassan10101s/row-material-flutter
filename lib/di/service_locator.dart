@@ -56,6 +56,19 @@ import '../features/organizations/domain/organization_repository.dart';
 import '../features/reference/data/offline_first_reference_repository.dart';
 import '../features/reference/data/reference_repo.dart';
 import '../features/reference/domain/reference_repository.dart';
+import '../features/qc_manager/data/ncr_report_repo.dart';
+import '../features/qc_manager/data/offline_first_qc_repository.dart';
+import '../features/qc_manager/data/qc_audit_repo.dart';
+import '../features/qc_manager/data/ncr_export_service.dart';
+import '../features/qc_manager/domain/ncr_report_repository.dart';
+import '../features/qc_manager/domain/qc_repositories.dart';
+import '../features/qc_manager/presentation/cubit/qc_goal_detail_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_goals_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_inspection_sheet_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_inspections_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_sops_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_templates_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_ncr_cubit.dart';
 import '../features/reports/data/report_html_builder.dart';
 import '../features/reports/data/report_service.dart';
 import '../features/reports/domain/report_repository.dart';
@@ -80,7 +93,9 @@ Future<void> initServiceLocator() async {
 
   final secret = await _localSecret();
   final dbHelper = await _databaseHelper();
-  final hasher = PasswordHasher(pepper: String.fromCharCodes(await secret.load()));
+  final hasher = PasswordHasher(
+    pepper: String.fromCharCodes(await secret.load()),
+  );
 
   // ── Firebase + identity ────────────────────────────────────────────────
   final bootstrap = await FirebaseBootstrap.initialize();
@@ -149,7 +164,11 @@ Future<void> initServiceLocator() async {
     // §9.4 write guard, read live so sign-in/sign-out and connectivity changes
     // are picked up without re-registering. Every local write goes through it.
     ..registerLazySingleton<WriteGuard>(
-        () => SessionWriteGuard(source: sessionSource, isOnline: () => connectivity.isOnline))
+      () => SessionWriteGuard(
+        source: sessionSource,
+        isOnline: () => connectivity.isOnline,
+      ),
+    )
     ..registerLazySingleton<PasswordHasher>(() => hasher)
     // Platform ports (PLAN_V4 phase 2.5). Registered behind their abstraction so
     // presentation asks "can this platform do it" instead of branching on
@@ -171,94 +190,230 @@ Future<void> initServiceLocator() async {
       return const NoopBackupScheduler();
     })
     ..registerLazySingleton<SettingsRepo>(
-        () => SettingsRepo(dbHelper: dbHelper, secret: secret, paths: getIt<AppPaths>()))
+      () => SettingsRepo(
+        dbHelper: dbHelper,
+        secret: secret,
+        paths: getIt<AppPaths>(),
+      ),
+    )
     ..registerLazySingleton<SettingsRepository>(
-        () => getIt<SettingsRepo>() as SettingsRepository)
-    ..registerLazySingleton<ExportRootService>(() => ExportRootService(
-          repo: getIt<SettingsRepo>(),
-          paths: getIt<AppPaths>(),
-        ))
+      () => getIt<SettingsRepo>() as SettingsRepository,
+    )
+    ..registerLazySingleton<ExportRootService>(
+      () => ExportRootService(
+        repo: getIt<SettingsRepo>(),
+        paths: getIt<AppPaths>(),
+      ),
+    )
     ..registerLazySingleton<ThemeService>(
-        () => ThemeService(settings: getIt<SettingsRepo>()))
+      () => ThemeService(settings: getIt<SettingsRepo>()),
+    )
     ..registerLazySingleton<LocaleService>(
-        () => LocaleService(settings: getIt<SettingsRepo>()))
+      () => LocaleService(settings: getIt<SettingsRepo>()),
+    )
     // The offline-first facades are registered under the *old* concrete names,
     // so no cubit or widget changes (plan P5.4). Both are also exposed under
     // their domain contract, which is what new code should depend on.
     ..registerLazySingleton<ReferenceRepo>(
-        () => referenceFacade ??= OfflineFirstReferenceRepository(
-              dbHelper: dbHelper,
-              guard: getIt<WriteGuard>(),
-              queue: queue,
-              audit: audit,
-            ))
+      () => referenceFacade ??= OfflineFirstReferenceRepository(
+        dbHelper: dbHelper,
+        guard: getIt<WriteGuard>(),
+        queue: queue,
+        audit: audit,
+      ),
+    )
     ..registerLazySingleton<ReferenceRepository>(
-        () => getIt<ReferenceRepo>() as ReferenceRepository)
-    ..registerLazySingleton<LabRepo>(() => labFacade ??= OfflineFirstLabRepository(
-          dbHelper: dbHelper,
-          guard: getIt<WriteGuard>(),
-          queue: queue,
-          audit: audit,
-        ))
-    ..registerLazySingleton<LabResultRepository>(() => getIt<LabRepo>() as LabResultRepository)
+      () => getIt<ReferenceRepo>() as ReferenceRepository,
+    )
+    ..registerLazySingleton<LabRepo>(
+      () => labFacade ??= OfflineFirstLabRepository(
+        dbHelper: dbHelper,
+        guard: getIt<WriteGuard>(),
+        queue: queue,
+        audit: audit,
+      ),
+    )
+    ..registerLazySingleton<LabResultRepository>(
+      () => getIt<LabRepo>() as LabResultRepository,
+    )
     ..registerLazySingleton<LabConfigurationRepository>(
-        () => getIt<LabRepo>() as LabConfigurationRepository)
+      () => getIt<LabRepo>() as LabConfigurationRepository,
+    )
     ..registerLazySingleton<LabLocalRepository>(
-        () => getIt<LabRepo>() as LabLocalRepository)
-    ..registerLazySingleton<ReportHtmlBuilder>(() => ReportHtmlBuilder(
-          settingsRepo: getIt<SettingsRepo>(),
-          labRepo: getIt<LabRepo>(),
-          secret: secret,
-        ))
-    ..registerLazySingleton<InspectionRepo>(() => inspectionFacade ??=
-        OfflineFirstInspectionRepository(
-          dbHelper: dbHelper,
-          referenceRepo: getIt<ReferenceRepo>(),
-          htmlBuilder: getIt<ReportHtmlBuilder>(),
-          guard: getIt<WriteGuard>(),
-          queue: queue,
-          audit: audit,
-        ))
+      () => getIt<LabRepo>() as LabLocalRepository,
+    )
+    ..registerLazySingleton<ReportHtmlBuilder>(
+      () => ReportHtmlBuilder(
+        settingsRepo: getIt<SettingsRepo>(),
+        labRepo: getIt<LabRepo>(),
+        secret: secret,
+      ),
+    )
+    ..registerLazySingleton<InspectionRepo>(
+      () => inspectionFacade ??= OfflineFirstInspectionRepository(
+        dbHelper: dbHelper,
+        referenceRepo: getIt<ReferenceRepo>(),
+        htmlBuilder: getIt<ReportHtmlBuilder>(),
+        guard: getIt<WriteGuard>(),
+        queue: queue,
+        audit: audit,
+      ),
+    )
     ..registerLazySingleton<InspectionRepository>(
-        () => getIt<InspectionRepo>() as InspectionRepository)
+      () => getIt<InspectionRepo>() as InspectionRepository,
+    )
     ..registerLazySingleton<SampleRepository>(
-        () => getIt<InspectionRepo>() as SampleRepository)
+      () => getIt<InspectionRepo>() as SampleRepository,
+    )
     ..registerLazySingleton<QualityCheckRepository>(
-        () => getIt<InspectionRepo>() as QualityCheckRepository)
-    ..registerLazySingleton<DashboardRepo>(() => DashboardRepo(dbHelper: dbHelper))
+      () => getIt<InspectionRepo>() as QualityCheckRepository,
+    )
+    ..registerLazySingleton<DashboardRepo>(
+      () => DashboardRepo(dbHelper: dbHelper),
+    )
     ..registerLazySingleton<DashboardRepository>(
-        () => getIt<DashboardRepo>() as DashboardRepository)
+      () => getIt<DashboardRepo>() as DashboardRepository,
+    )
     ..registerLazySingleton<SeedService>(() => SeedService(dbHelper: dbHelper))
-    ..registerLazySingleton<BackupManager>(() => BackupManager(dbHelper: dbHelper))
+    ..registerLazySingleton<BackupManager>(
+      () => BackupManager(dbHelper: dbHelper),
+    )
     ..registerLazySingleton<BackupService>(
-        () => getIt<BackupManager>() as BackupService)
-    ..registerLazySingleton<ReportService>(() => ReportService(
-          settingsRepo: getIt<SettingsRepo>(),
-          inspectionRepo: getIt<InspectionRepo>(),
-          labRepo: getIt<LabRepo>(),
-          dbHelper: dbHelper,
-          secret: secret,
-          htmlBuilder: getIt<ReportHtmlBuilder>(),
-        ))
+      () => getIt<BackupManager>() as BackupService,
+    )
+    ..registerLazySingleton<ReportService>(
+      () => ReportService(
+        settingsRepo: getIt<SettingsRepo>(),
+        inspectionRepo: getIt<InspectionRepo>(),
+        labRepo: getIt<LabRepo>(),
+        dbHelper: dbHelper,
+        secret: secret,
+        htmlBuilder: getIt<ReportHtmlBuilder>(),
+      ),
+    )
     ..registerLazySingleton<ReportRepository>(
-        () => getIt<ReportService>() as ReportRepository)
+      () => getIt<ReportService>() as ReportRepository,
+    )
     // ── Organizations / members ───────────────────────────────────────────
     ..registerLazySingleton<OrganizationRepository>(() {
       final guard = getIt<WriteGuard>();
       return FirestoreOrganizationRepository(remote: authRemote, guard: guard);
     })
     ..registerLazySingleton<MemberRepository>(
-        () => getIt<OrganizationRepository>().members)
+      () => getIt<OrganizationRepository>().members,
+    )
     // ── Device registry + audit trail (plan §9.7 / §14-P9) ────────────────
-    ..registerLazySingleton<AuditTrail>(() => AuditTrail(
-          audit: audit,
-          metadata: metadata,
-          devices: devices,
-        ))
-    ..registerFactory<AuditController>(() => AuditController(getIt<AuditTrail>()))
+    ..registerLazySingleton<AuditTrail>(
+      () => AuditTrail(audit: audit, metadata: metadata, devices: devices),
+    )
+    ..registerFactory<AuditController>(
+      () => AuditController(getIt<AuditTrail>()),
+    )
+    // ── QC Manager (plan V6_ENHANCED P3) ───────────────────────────────────
+    // One [QcRepositories] holds all six contracts over the same guard and the
+    // same transaction boundary. Registering them individually would hand out
+    // six independently-built stacks and let a caller audit one entity while
+    // writing another.
+    ..registerLazySingleton<QcRepositories>(() {
+      return QcRepositories.offlineFirst(
+        dbHelper: dbHelper,
+        guard: getIt<WriteGuard>(),
+        // Read through SessionSource at write time, never captured at
+        // registration: a sign-out or a user switch must change who the next
+        // audit row names. `QcActor.fromSession` holds the mapping rules.
+        actorReader: () => QcActor.fromSession(sessionSource.session),
+      );
+    })
+    ..registerLazySingleton<QcSopRepository>(() => getIt<QcRepositories>().sops)
+    ..registerLazySingleton<QcTemplateRepository>(
+      () => getIt<QcRepositories>().templates,
+    )
+    ..registerLazySingleton<QcInspectionRepository>(
+      () => getIt<QcRepositories>().inspections,
+    )
+    ..registerLazySingleton<QcNcCapaRepository>(
+      () => getIt<QcRepositories>().ncCapa,
+    )
+    ..registerLazySingleton<QcGoalRepository>(
+      () => getIt<QcRepositories>().goals,
+    )
+    ..registerLazySingleton<QcAuditRepository>(
+      () => getIt<QcRepositories>().audit,
+    )
+    // ── QC NCR report (plan V6_ENHANCED P7) ───────────────────────────────
+    // A read-only projection, registered on its own rather than folded into
+    // [QcRepositories]: it deliberately bypasses the write guard and the audit
+    // chain because it never mutates anything, and routing it through the
+    // audited stack would log a hash-chained row per row *read*.
+    ..registerLazySingleton<QcNcReportRepo>(
+      () => QcNcReportRepo(dbHelper: dbHelper),
+    )
+    ..registerLazySingleton<QcNcReportRepository>(() => getIt<QcNcReportRepo>())
+    ..registerFactory<NcrExportService>(NcrExportService.new)
+    // One cubit per screen: it holds the active filter and the current page, so
+    // a singleton would leak one user's report scope into the next screen that
+    // happens to ask for the same type.
+    ..registerFactory<QcNcrCubit>(
+      () => QcNcrCubit(getIt<QcNcReportRepository>()),
+    )
+    // ── QC goals (plan V6_ENHANCED P6) ─────────────────────────────────────
+    // The list cubit owns the filter scope and the paged rows, the detail cubit
+    // owns one goal's people and its trail. Both are per-screen for the same
+    // reason [QcNcrCubit] is: neither may outlive the screen showing it.
+    ..registerFactory<QcGoalsCubit>(
+      () => QcGoalsCubit(repo: getIt<QcGoalRepository>()),
+    )
+    // [registerFactoryParam], not [registerFactory]: the detail route asks for
+    // this cubit with a `goalId`, and a plain factory cannot accept one.
+    ..registerFactoryParam<QcGoalDetailCubit, int, void>(
+      (goalId, _) => QcGoalDetailCubit(
+        repo: getIt<QcGoalRepository>(),
+        audit: getIt<QcAuditRepository>(),
+        goalId: goalId,
+      ),
+    )
+    // ── QC inspections (plan V6_ENHANCED P2) ─────────────────────────────────
+    // The register cubit carries the filter scope *and* the paged rows, and the
+    // "start an inspection" form reuses that same instance so a newly created
+    // sheet appears in the list behind it without a second refresh call.
+    //
+    // [registerFactoryParam] for the sheet cubit: the detail route asks for it
+    // with an `inspectionId`, and the sheet must not outlive its screen - it
+    // holds unsaved drafts for the items on it.
+    ..registerFactory<QcInspectionsCubit>(
+      () => QcInspectionsCubit(
+        repo: getIt<QcInspectionRepository>(),
+        templates: getIt<QcTemplateRepository>(),
+      ),
+    )
+    ..registerFactoryParam<QcInspectionSheetCubit, int, void>(
+      (inspectionId, _) => QcInspectionSheetCubit(
+        repo: getIt<QcInspectionRepository>(),
+        templates: getIt<QcTemplateRepository>(),
+        ncCapa: getIt<QcNcCapaRepository>(),
+        inspectionId: inspectionId,
+      ),
+    )
+    // ── QC SOPs (plan V6_ENHANCED P5) ──────────────────────────────────────
+    // The register cubit is per-screen for the same reason as the goal list: it
+    // carries the active filter scope. The SOP detail cubit is built by the
+    // detail screen from *this* instance rather than from DI, so advancing a
+    // procedure also refreshes the list still sitting behind it - two
+    // independently-built registers would each need its own refresh call, and
+    // the one nobody fires is the one the user sees as stale.
+    ..registerFactory<QcSopsCubit>(
+      () => QcSopsCubit(repo: getIt<QcSopRepository>()),
+    )
+    // Same reasoning for checklist templates: the library owns the active
+    // filter scope, and the tree editor is opened against that same instance so
+    // publishing a checklist also updates the list behind it.
+    ..registerFactory<QcTemplatesCubit>(
+      () => QcTemplatesCubit(repo: getIt<QcTemplateRepository>()),
+    )
     // ── Sync engine ───────────────────────────────────────────────────────
     ..registerLazySingleton<ConflictResolver>(
-        () => ConflictResolver(queue: queue, remote: remote))
+      () => ConflictResolver(queue: queue, remote: remote),
+    )
     ..registerLazySingleton<SyncEngine>(() {
       final pushWorker = PushWorker(
         queue: queue,
@@ -301,7 +456,9 @@ Future<void> initServiceLocator() async {
       );
     });
 
-  debugPrint('[bootstrap] service locator ready (firebase: ${bootstrap.status.name})');
+  debugPrint(
+    '[bootstrap] service locator ready (firebase: ${bootstrap.status.name})',
+  );
 }
 
 /// Wires the "organization bound" side effects (defaults → seeds → lab defaults

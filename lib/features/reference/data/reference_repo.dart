@@ -57,7 +57,7 @@ class ReferenceRepo implements ReferenceRepository {
     final chemicalMap = jsonLoads('${raw['chemical_reference_json']}');
     final enrichedPhysical = <String, dynamic>{};
     for (final e in physical.entries) {
-      enrichedPhysical[e.key] = referenceValueText(e.value);
+      enrichedPhysical[e.key] = withReferenceUnit(e.value, rows[e.key] ?? '');
     }
     final enrichedChemical = <String, dynamic>{};
     for (final e in chemicalMap.entries) {
@@ -108,7 +108,12 @@ class ReferenceRepo implements ReferenceRepository {
       'active': 1,
       'imported_at': nowIso(),
     });
-    await _batchUpsertParameters(chemicalReference, units, db);
+    await _upsertMaterialParameters(
+      physicalReference,
+      chemicalReference,
+      units,
+      db,
+    );
     return id;
   }
 
@@ -144,7 +149,7 @@ class ReferenceRepo implements ReferenceRepository {
       'chemical_reference_json': jsonDumps(chemicalRef),
       'active': 1,
     }, where: 'id = ?', whereArgs: [id]);
-    await _batchUpsertParameters(chemicalRef, units, db);
+    await _upsertMaterialParameters(physicalRef, chemicalRef, units, db);
   }
 
   @override
@@ -154,24 +159,50 @@ class ReferenceRepo implements ReferenceRepository {
         where: 'id = ?', whereArgs: [id]);
   }
 
-  Future<void> _batchUpsertParameters(
-      Map<String, dynamic> chemicalRef, Map<String, dynamic> units, DatabaseExecutor db) async {
-    final batch = db.batch();
-    for (final e in chemicalRef.entries) {
-      final unit = '${units[e.key] ?? ''}'.trim();
-      if (unit.isEmpty) continue;
-      batch.insert(
+  Future<void> _upsertMaterialParameters(
+    Map<String, dynamic> physical,
+    Map<String, dynamic> chemical,
+    Map<String, dynamic> units,
+    DatabaseExecutor db,
+  ) async {
+    final fields = <(String, String, Object?)>[
+      for (final entry in physical.entries) ('physical', entry.key, entry.value),
+      for (final entry in chemical.entries) ('chemical', entry.key, entry.value),
+    ];
+    for (final (type, rawName, value) in fields) {
+      final name = rawName.trim();
+      if (name.isEmpty) continue;
+      final requestedUnit = units.containsKey(name)
+          ? '${units[name] ?? ''}'.trim()
+          : referenceUnitText(value);
+      final existing = await db.query(
         'parameters',
-        {
-          'parameter_name': e.key,
-          'unit': unit,
-          'parameter_type': 'chemical',
-          'imported_at': nowIso(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace,
+        where: 'parameter_name = ? COLLATE NOCASE',
+        whereArgs: [name],
+        limit: 1,
       );
+      if (existing.isNotEmpty) {
+        if ('${existing.first['parameter_type'] ?? ''}' != type) {
+          throw ValidationError(AppErrors.parameterTypeInvalid);
+        }
+        final unit = requestedUnit.isNotEmpty || units.containsKey(name)
+            ? requestedUnit
+            : '${existing.first['unit'] ?? ''}';
+        await db.update(
+          'parameters',
+          {'unit': unit},
+          where: 'id = ?',
+          whereArgs: [existing.first['id']],
+        );
+      } else {
+        await db.insert('parameters', {
+          'parameter_name': name,
+          'unit': requestedUnit,
+          'parameter_type': type,
+          'imported_at': nowIso(),
+        });
+      }
     }
-    await batch.commit(noResult: true);
   }
 
   // ── Entry code ────────────────────────────────────────────────
@@ -217,16 +248,32 @@ class ReferenceRepo implements ReferenceRepository {
     if (parameterType != 'chemical' && parameterType != 'physical') {
       throw ValidationError(AppErrors.parameterTypeInvalid);
     }
-    await db.insert(
+    final existing = await db.query(
       'parameters',
-      {
-        'parameter_name': trimmed,
-        'unit': parameterType == 'physical' ? '' : unit.trim(),
-        'parameter_type': parameterType,
-        'imported_at': nowIso(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
+      where: 'parameter_name = ? COLLATE NOCASE',
+      whereArgs: [trimmed],
+      limit: 1,
     );
+    if (existing.isNotEmpty &&
+        '${existing.first['parameter_type'] ?? ''}' != parameterType) {
+      throw ValidationError(AppErrors.parameterTypeInvalid);
+    }
+    final values = {
+      'parameter_name': trimmed,
+      'unit': unit.trim(),
+      'parameter_type': parameterType,
+      'imported_at': nowIso(),
+    };
+    if (existing.isEmpty) {
+      await db.insert('parameters', values);
+    } else {
+      await db.update(
+        'parameters',
+        values,
+        where: 'id = ?',
+        whereArgs: [existing.first['id']],
+      );
+    }
   }
 
   @override

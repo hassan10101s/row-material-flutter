@@ -61,18 +61,23 @@ class AppSession {
 
   Set<Permission> get permissions => rolePermissions(role);
 
-  bool can(Permission permission) => isActiveMember && permissions.contains(permission);
+  bool can(Permission permission) =>
+      isActiveMember && permissions.contains(permission);
 
   /// Guard used before every write (plan §9.4). [online] comes from
   /// `ConnectivityService.isOnline`.
-  bool canDo(
-    Permission permission, {
-    bool online = true,
-  }) {
+  ///
+  /// The role is passed to [permissionRequiresFreshSession] so the organization
+  /// manager is exempt from the online/fresh-token requirement on the
+  /// privileged operations; see [freshSessionExemptRoles] for why that is safe.
+  /// The read-only-device and active-member checks above are not part of that
+  /// exemption and still refuse.
+  bool canDo(Permission permission, {bool online = true}) {
     if (readOnlyDevice) return false;
     if (!isActiveMember) return false;
     if (!permissions.contains(permission)) return false;
-    if (permissionRequiresFreshSession(permission) && (!online || !isTokenFresh)) {
+    if (permissionRequiresFreshSession(permission, role: role) &&
+        (!online || !isTokenFresh)) {
       return false;
     }
     return true;
@@ -102,38 +107,39 @@ class AppSession {
     DateTime? idTokenExpiresAt,
     bool? offline,
     bool clearToken = false,
-  }) =>
-      AppSession(
-        uid: uid ?? this.uid,
-        email: email ?? this.email,
-        displayName: displayName ?? this.displayName,
-        photoUrl: photoUrl ?? this.photoUrl,
-        organizationId: organizationId ?? this.organizationId,
-        memberId: memberId ?? this.memberId,
-        role: role ?? this.role,
-        status: status ?? this.status,
-        deviceId: deviceId ?? this.deviceId,
-        readOnlyDevice: readOnlyDevice ?? this.readOnlyDevice,
-        signedInAt: signedInAt ?? this.signedInAt,
-        idToken: clearToken ? null : (idToken ?? this.idToken),
-        idTokenExpiresAt: clearToken ? null : (idTokenExpiresAt ?? this.idTokenExpiresAt),
-        offline: offline ?? this.offline,
-      );
+  }) => AppSession(
+    uid: uid ?? this.uid,
+    email: email ?? this.email,
+    displayName: displayName ?? this.displayName,
+    photoUrl: photoUrl ?? this.photoUrl,
+    organizationId: organizationId ?? this.organizationId,
+    memberId: memberId ?? this.memberId,
+    role: role ?? this.role,
+    status: status ?? this.status,
+    deviceId: deviceId ?? this.deviceId,
+    readOnlyDevice: readOnlyDevice ?? this.readOnlyDevice,
+    signedInAt: signedInAt ?? this.signedInAt,
+    idToken: clearToken ? null : (idToken ?? this.idToken),
+    idTokenExpiresAt: clearToken
+        ? null
+        : (idTokenExpiresAt ?? this.idTokenExpiresAt),
+    offline: offline ?? this.offline,
+  );
 
   Map<String, dynamic> toJson() => {
-        'uid': uid,
-        'email': email,
-        'displayName': displayName,
-        'photoUrl': photoUrl,
-        'organizationId': organizationId,
-        'memberId': memberId,
-        'role': role,
-        'status': status,
-        'deviceId': deviceId,
-        'readOnlyDevice': readOnlyDevice,
-        'signedInAt': signedInAt?.toIso8601String(),
-        'idTokenExpiresAt': idTokenExpiresAt?.toIso8601String(),
-      };
+    'uid': uid,
+    'email': email,
+    'displayName': displayName,
+    'photoUrl': photoUrl,
+    'organizationId': organizationId,
+    'memberId': memberId,
+    'role': role,
+    'status': status,
+    'deviceId': deviceId,
+    'readOnlyDevice': readOnlyDevice,
+    'signedInAt': signedInAt?.toIso8601String(),
+    'idTokenExpiresAt': idTokenExpiresAt?.toIso8601String(),
+  };
 
   /// Rebuild a session from the on-disk cache.
   ///

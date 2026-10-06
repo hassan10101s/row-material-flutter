@@ -66,4 +66,12 @@ abstract interface class LabLocalRepository {
 
   /// The sample behind a scanned `entry_code`, or null when it is unknown.
   Future<Map<String, dynamic>?> resolveInspection(String entryCode);
+
+  /// Active raw materials that have inspection records, with their inspection
+  /// count for the run-test material picker.
+  Future<List<Map<String, dynamic>>> listInspectionMaterials();
+
+  /// Inspection records for one raw material, including supplier, vehicle and
+  /// the inspection's sample labels.
+  Future<List<Map<String, dynamic>>> listInspectionRecords(int materialId);
 }

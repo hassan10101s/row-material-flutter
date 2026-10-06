@@ -17,6 +17,7 @@ class PullReport {
     required this.skipped,
     required this.pushedBack,
     required this.hasMore,
+    this.failed = 0,
     this.error,
   });
 
@@ -24,9 +25,18 @@ class PullReport {
   final int skipped;
   final int pushedBack;
   final bool hasMore;
+
+  /// Documents the local schema refused. They are counted and reported, never
+  /// thrown: see [PullWorker._applyPage].
+  final int failed;
   final String? error;
 
-  static const PullReport empty = PullReport(applied: 0, skipped: 0, pushedBack: 0, hasMore: false);
+  static const PullReport empty = PullReport(
+    applied: 0,
+    skipped: 0,
+    pushedBack: 0,
+    hasMore: false,
+  );
 }
 
 /// Downloads remote changes page by page and applies them locally
@@ -44,8 +54,8 @@ class PullWorker {
     List<SyncEntity>? entities,
     this.quietPermissionErrors = false,
     this.marksPullTimestamp = true,
-  })  : source = source ?? SessionSource.empty(),
-        entities = entities ?? syncEntities;
+  }) : source = source ?? SessionSource.empty(),
+       entities = entities ?? syncEntities;
   final SyncQueue queue;
   final SyncMetadata metadata;
   final RemoteDataSource remote;
@@ -68,7 +78,6 @@ class PullWorker {
   /// dedicated audit pass must not move the "last synced" marker.
   final bool marksPullTimestamp;
 
-
   /// Read live: the session changes on sign-in, sign-out and org switch.
   AppSession get _session => source.session;
   final int pageSize;
@@ -84,6 +93,7 @@ class PullWorker {
     var applied = 0;
     var skipped = 0;
     var pushedBack = 0;
+    var failed = 0;
     var hasMore = false;
     String? error;
 
@@ -129,6 +139,8 @@ class PullWorker {
               skipped++;
             case _ApplyOutcome.pushedBack:
               pushedBack++;
+            case _ApplyOutcome.failed:
+              failed++;
           }
         }
         final last = result.documents.last;
@@ -148,6 +160,7 @@ class PullWorker {
       skipped: skipped,
       pushedBack: pushedBack,
       hasMore: hasMore,
+      failed: failed,
       error: error,
     );
   }
@@ -162,9 +175,26 @@ class PullWorker {
     List<RemoteDocument> documents,
     String organizationId,
   ) async {
+    // A document the local schema cannot hold is contained to itself.
+    //
+    // `txn` is one transaction for the whole page, so a `NOT NULL` / `CHECK` /
+    // `UNIQUE` violation used to roll back every document in the page and
+    // surface as a thrown exception from `runOnce` - the sync engine reported
+    // a hard error, the cursor never advanced, and the same bad document
+    // blocked the cycle forever, silently withholding every healthy change
+    // behind it. The page still commits; the offending row is counted as
+    // [PullReport.failed] and left for a later version of itself to fix.
     final outcomes = <_ApplyOutcome>[];
     for (final document in documents) {
-      outcomes.add(await _applyDocument(txn, entity, document, organizationId));
+      try {
+        outcomes.add(
+          await _applyDocument(txn, entity, document, organizationId),
+        );
+      } on Object catch (e) {
+        // ignore: avoid_print
+        print('[sync] pull skipped ${entity.type}/${document.id}: $e');
+        outcomes.add(_ApplyOutcome.failed);
+      }
     }
     return outcomes;
   }
@@ -176,25 +206,45 @@ class PullWorker {
     String organizationId,
   ) async {
     {
+      // Several entities may share one remote collection (every lab-settings
+      // table lives in `labConfig`), so the first question is whether this
+      // document is ours at all. Applying another table's document would
+      // overwrite an unrelated local row that happens to share the id.
+      final accepts = entity.accepts;
+      if (accepts != null && !accepts(document)) return _ApplyOutcome.skipped;
       // `localId` first, then the natural key: a document written on another
       // device carries an id that means nothing in this database.
-      final localRef =
-          await findLocalRef(txn, entity, document.id, document.data);
+      final localRef = await findLocalRef(
+        txn,
+        entity,
+        document.id,
+        document.data,
+      );
       final existing = localRef == null
           ? const <Map<String, Object?>>[]
-          : await txn.query(entity.localTable,
-              where: 'id = ?', whereArgs: [localRef], limit: 1);
+          : await txn.query(
+              entity.localTable,
+              where: 'id = ?',
+              whereArgs: [localRef],
+              limit: 1,
+            );
       final remoteVersion = document.version;
 
       if (existing.isEmpty) {
         final row = await _localRow(
           txn,
           entity,
-          remoteToLocalRow(entity, document.data, organizationId: organizationId),
+          remoteToLocalRow(
+            entity,
+            document.data,
+            organizationId: organizationId,
+          ),
         );
         row['remote_synced_at'] = nowIso();
         row['sync_state'] = 'synced';
-        row.removeWhere((key, value) => value == null && _nullableColumns.contains(key));
+        row.removeWhere(
+          (key, value) => value == null && _nullableColumns.contains(key),
+        );
         await txn.insert(
           entity.localTable,
           _withDefaults(entity, row, await _availableColumns(txn, entity)),
@@ -206,7 +256,8 @@ class PullWorker {
       final local = existing.first;
       final localVersion = (local['version'] as num?)?.toInt() ?? 0;
       final syncedVersion = (local['remote_version'] as num?)?.toInt() ?? 0;
-      final hasLocalEdits = (local['sync_state'] == 'queued') ||
+      final hasLocalEdits =
+          (local['sync_state'] == 'queued') ||
           (localVersion > syncedVersion && syncedVersion > 0);
 
       if (remoteVersion == syncedVersion) {
@@ -251,7 +302,8 @@ class PullWorker {
       row['sync_state'] = 'synced';
       await txn.update(
         entity.localTable,
-        _withDefaults(entity, row, await _availableColumns(txn, entity))..remove('id'),
+        _withDefaults(entity, row, await _availableColumns(txn, entity))
+          ..remove('id'),
         where: 'id = ?',
         whereArgs: [local['id']],
       );
@@ -275,7 +327,9 @@ class PullWorker {
     Map<String, dynamic> row,
   ) async {
     final columns = _columnCache.putIfAbsent(
-        entity.localTable, () => availableColumns(txn, entity.localTable));
+      entity.localTable,
+      () => availableColumns(txn, entity.localTable),
+    );
     final available = await columns;
     final resolved = <String, dynamic>{
       for (final entry in row.entries)
@@ -292,15 +346,21 @@ class PullWorker {
   Future<Set<String>> _availableColumns(
     DatabaseExecutor txn,
     SyncEntity entity,
-  ) =>
-      _columnCache.putIfAbsent(
-          entity.localTable, () => availableColumns(txn, entity.localTable));
+  ) => _columnCache.putIfAbsent(
+    entity.localTable,
+    () => availableColumns(txn, entity.localTable),
+  );
 
   /// Firebase uid → local `users.id`, cached for the length of the cycle.
   Future<int> _localUserId(DatabaseExecutor txn, String uid) async {
     if (uid.isEmpty) return 0;
     final byUid = _userIds.putIfAbsent(uid, () async {
-      final rows = await txn.query('users', where: 'uid = ?', whereArgs: [uid], limit: 1);
+      final rows = await txn.query(
+        'users',
+        where: 'uid = ?',
+        whereArgs: [uid],
+        limit: 1,
+      );
       return rows.isEmpty ? 0 : (rows.first['id'] as num).toInt();
     });
     return byUid;
@@ -333,10 +393,12 @@ class PullWorker {
     Set<String> available,
   ) {
     Map<String, dynamic> withTimestamps() => {
-          ...row,
-          if (available.contains('created_at')) 'created_at': row['created_at'] ?? nowIso(),
-          if (available.contains('updated_at')) 'updated_at': row['updated_at'] ?? nowIso(),
-        };
+      ...row,
+      if (available.contains('created_at'))
+        'created_at': row['created_at'] ?? nowIso(),
+      if (available.contains('updated_at'))
+        'updated_at': row['updated_at'] ?? nowIso(),
+    };
 
     switch (entity.localTable) {
       case 'inspections':
@@ -361,7 +423,7 @@ class PullWorker {
   }
 }
 
-enum _ApplyOutcome { applied, skipped, pushedBack }
+enum _ApplyOutcome { applied, skipped, pushedBack, failed }
 
 bool _isPermissionDenied(Object error) {
   final text = error.toString().toLowerCase();

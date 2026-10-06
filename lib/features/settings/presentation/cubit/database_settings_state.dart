@@ -33,17 +33,22 @@ class DatabaseSettingsState extends Equatable {
     bool? restored,
     int? restoreConflicts,
     int? restoreRequeued,
-  }) =>
-      DatabaseSettingsState(
-        busy: busy ?? this.busy,
-        error: error ?? this.error,
-        lastPath: lastPath ?? this.lastPath,
-        restored: restored ?? this.restored,
-        restoreConflicts: restoreConflicts ?? this.restoreConflicts,
-        restoreRequeued: restoreRequeued ?? this.restoreRequeued,
-      );
+  }) => DatabaseSettingsState(
+    busy: busy ?? this.busy,
+    error: error ?? this.error,
+    lastPath: lastPath ?? this.lastPath,
+    restored: restored ?? this.restored,
+    restoreConflicts: restoreConflicts ?? this.restoreConflicts,
+    restoreRequeued: restoreRequeued ?? this.restoreRequeued,
+  );
 
   @override
-  List<Object?> get props =>
-      [busy, error, lastPath, restored, restoreConflicts, restoreRequeued];
+  List<Object?> get props => [
+    busy,
+    error,
+    lastPath,
+    restored,
+    restoreConflicts,
+    restoreRequeued,
+  ];
 }

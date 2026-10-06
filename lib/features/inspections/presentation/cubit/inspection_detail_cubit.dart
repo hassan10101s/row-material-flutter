@@ -2,6 +2,7 @@ import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../../reports/domain/report_repository.dart';
+import '../../../lab/domain/lab_result_repository.dart';
 import '../../domain/inspection_repository.dart';
 import 'inspection_detail_state.dart';
 
@@ -12,20 +13,27 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
     required this.inspectionId,
     required this.repo,
     required this.reports,
+    this.labResults,
   }) : super(const InspectionDetailState());
 
   final int inspectionId;
   final InspectionRepository repo;
   final ReportRepository reports;
+  final LabResultRepository? labResults;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));
     try {
       final inspection = await repo.getById(inspectionId);
+      final entryCode = '${inspection['entry_code'] ?? ''}'.trim();
+      final chemicalAnalyses = entryCode.isEmpty || labResults == null
+          ? <Map<String, dynamic>>[]
+          : await labResults!.listSampleTestsForEntryCode(entryCode);
       safeEmit(state.copyWith(
         loading: false,
         inspection: inspection,
         history: List<Map<String, dynamic>>.from(inspection['status_history'] ?? []),
+        chemicalAnalyses: chemicalAnalyses,
       ));
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));

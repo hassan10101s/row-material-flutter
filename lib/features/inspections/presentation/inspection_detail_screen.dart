@@ -256,6 +256,8 @@ class InspectionDetailScreen extends StatelessWidget {
               samples: samples,
               numeric: true,
             ),
+            const SizedBox(height: AppSpacing.md),
+            _labChemicalAnalyses(state.chemicalAnalyses),
             if (state.history.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.md),
               HistoryCard(history: state.history),
@@ -295,6 +297,52 @@ class InspectionDetailScreen extends StatelessWidget {
           title: AppText.t('تفاصيل الفحص', 'Inspection details'),
         ),
         body: body,
+      ),
+    );
+  }
+
+  Widget _labChemicalAnalyses(List<Map<String, dynamic>> analyses) {
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            AppText.t(
+              'تحاليل المعمل المرتبطة بالمحضر',
+              'Lab chemical analyses linked to this record',
+            ),
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (analyses.isEmpty)
+            Text(
+              AppText.t(
+                'لا توجد تحاليل معمل مرتبطة بهذا المحضر.',
+                'No lab analyses are linked to this inspection record.',
+              ),
+              style: TextStyle(color: AppColors.textMuted),
+            )
+          else
+            for (var i = 0; i < analyses.length; i++) ...[
+              if (i > 0) const Divider(height: AppSpacing.md),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+                title: Text('${analyses[i]['analysis_name'] ?? ''}'),
+                subtitle: Text(
+                  '${AppText.t('العينة', 'Sample')}: '
+                  '${analyses[i]['sample_name'] ?? ''}'
+                  '${'${analyses[i]['tested_at'] ?? ''}'.trim().isEmpty ? '' : ' · ${analyses[i]['tested_at']}'}',
+                ),
+                trailing: Text(
+                  '${analyses[i]['result_text'] ?? ''}'
+                  '${'${analyses[i]['analysis_unit'] ?? ''}'.isEmpty ? '' : ' ${analyses[i]['analysis_unit']}'}',
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  textAlign: TextAlign.end,
+                ),
+              ),
+            ],
+        ],
       ),
     );
   }

@@ -2,6 +2,14 @@ import 'package:flutter/material.dart';
 
 /// In-app page route with a subtle fade + slide transition.
 class AppPageRoute<T> extends PageRouteBuilder<T> {
+  /// Notifier for app-wide appearance changes that need route content rebuilt.
+  ///
+  /// Flutter updates inherited Material properties, but app labels are
+  /// currently resolved by `AppText.t` during a screen's build. Re-running
+  /// this route's builder refreshes those labels without replacing its route
+  /// or losing the state owned by its screen.
+  static Listenable? appearanceChanges;
+
   AppPageRoute({
     super.settings,
     required WidgetBuilder builder,
@@ -9,7 +17,14 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
   }) : super(
           transitionDuration: duration,
           reverseTransitionDuration: Duration(milliseconds: duration.inMilliseconds ~/ 2),
-          pageBuilder: (context, animation, secondaryAnimation) => builder(context),
+          pageBuilder: (context, animation, secondaryAnimation) {
+            final changes = appearanceChanges;
+            if (changes == null) return builder(context);
+            return ListenableBuilder(
+              listenable: changes,
+              builder: (context, _) => builder(context),
+            );
+          },
           transitionsBuilder: (context, animation, secondaryAnimation, child) {
             final slide = SlideTransition(
               position: Tween<Offset>(
@@ -28,6 +43,25 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
 /// Convenience builder for [AppPageRoute] with a named route / screen.
 Route<T> appPageRoute<T>(Widget child, {RouteSettings? settings}) =>
     AppPageRoute<T>(settings: settings, builder: (_) => child);
+
+/// Material-style pushed route whose screen rebuilds when app appearance changes.
+///
+/// Rebuilding the route builder refreshes static app translations while
+/// retaining the state of the route's screen.
+MaterialPageRoute<T> appMaterialPageRoute<T>({
+  required WidgetBuilder builder,
+  RouteSettings? settings,
+}) => MaterialPageRoute<T>(
+  settings: settings,
+  builder: (context) {
+    final changes = AppPageRoute.appearanceChanges;
+    if (changes == null) return builder(context);
+    return ListenableBuilder(
+      listenable: changes,
+      builder: (context, _) => builder(context),
+    );
+  },
+);
 
 /// A [Page] backed by [AppPageRoute], suitable for go_router [GoRoute.pageBuilder].
 class AppPage<T> extends Page<T> {

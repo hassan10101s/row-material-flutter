@@ -5,7 +5,8 @@ import 'general_settings_state.dart';
 
 /// Loads/saves the department label shown on reports (General panel).
 class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
-  GeneralSettingsCubit({required this.repo}) : super(const GeneralSettingsState());
+  GeneralSettingsCubit({required this.repo})
+    : super(const GeneralSettingsState());
 
   final SettingsRepository repo;
 
@@ -16,20 +17,24 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
       final logoPath = await repo.getReportLogoPath();
       final logoDataUri = await repo.getReportLogoDataUri();
       final exportRootPath = await repo.getSettingValue('export_root_path');
-      safeEmit(state.copyWith(
-        loading: false,
-        departmentLabel: label?.trim().isNotEmpty == true
-            ? label!
-            : 'Quality Assurance Department',
-        logoPath: logoPath ?? '',
-        logoDataUri: logoDataUri ?? '',
-        exportRootPath: exportRootPath?.trim() ?? '',
-      ));
+      safeEmit(
+        state.copyWith(
+          loading: false,
+          departmentLabel: label?.trim().isNotEmpty == true
+              ? label!
+              : 'Quality Assurance Department',
+          logoPath: logoPath ?? '',
+          logoDataUri: logoDataUri ?? '',
+          exportRootPath: exportRootPath?.trim() ?? '',
+        ),
+      );
     } catch (e) {
-      safeEmit(state.copyWith(
-        loading: false,
-        departmentLabel: 'Quality Assurance Department',
-      ));
+      safeEmit(
+        state.copyWith(
+          loading: false,
+          departmentLabel: 'Quality Assurance Department',
+        ),
+      );
     }
   }
 
@@ -52,7 +57,8 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
     try {
       await repo.setReportLogo(path, dataUri);
       safeEmit(
-          state.copyWith(saving: false, logoPath: path, logoDataUri: dataUri));
+        state.copyWith(saving: false, logoPath: path, logoDataUri: dataUri),
+      );
     } on AppError {
       safeEmit(state.copyWith(saving: false));
       rethrow;

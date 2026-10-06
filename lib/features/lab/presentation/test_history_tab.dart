@@ -389,7 +389,7 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            AppText.t('سجل تحاليل المختبر', 'Test history'),
+            AppText.t('سجل تحاليل المعمل', 'Test history'),
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: AppSpacing.md),
@@ -423,7 +423,7 @@ class _TestHistoryTabState extends State<TestHistoryTab> {
               children: [
                 Expanded(
                   child: Text(
-                    AppText.t('سجل تحاليل المختبر', 'Test history'),
+                    AppText.t('سجل تحاليل المعمل', 'Test history'),
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),

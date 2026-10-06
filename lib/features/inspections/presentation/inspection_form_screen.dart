@@ -17,6 +17,7 @@ import '../../../design_system/widgets/app_autocomplete.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import '../../../design_system/widgets/app_dialogs.dart';
+import '../../../design_system/widgets/app_date_field.dart';
 import '../../../design_system/widgets/app_field.dart';
 import '../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../di/service_locator.dart';
@@ -735,7 +736,7 @@ class _FormBody extends StatelessWidget {
                 Row(
                   children: [
                     Expanded(
-                      child: AppField(
+                      child: AppDateField(
                         label: AppText.t('تاريخ الفحص', 'Date (YYYY-MM-DD)'),
                         controller: date,
                       ),
@@ -745,7 +746,7 @@ class _FormBody extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          AppField(
+                          AppDateField(
                             label: AppText.t(
                               'تاريخ الانتهاء',
                               'Expiry (YYYY-MM-DD)',

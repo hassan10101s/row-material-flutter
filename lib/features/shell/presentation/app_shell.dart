@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../app/auth_gate.dart';
@@ -8,45 +6,79 @@ import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/locale/locale_service.dart';
 import '../../../core/network/connectivity_service.dart';
+import '../../../core/platform/file_delivery.dart';
+import '../../../core/platform/folder_picker.dart';
 import '../../../core/sync/sync_metadata.dart';
 import '../../../core/sync/sync_queue.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../core/utils/app_exceptions.dart';
-import '../../../di/platform_ports.dart';
 import '../../../design_system/feedback/app_feedback.dart';
-import '../../../design_system/tokens/app_breakpoints.dart';
-import '../../../design_system/tokens/app_colors.dart';
-import '../../../design_system/tokens/app_spacing.dart';
-import '../../../di/service_locator.dart';
+import '../../../design_system/widgets/app_adaptive.dart';
 import '../../auth/domain/user.dart';
-import '../../sync/presentation/sync_badge.dart';
-import '../../sync/presentation/sync_status_controller.dart';
 import '../../settings/domain/export_root_service.dart';
+import '../../sync/presentation/sync_status_controller.dart';
+import 'desktop/app_shell.dart';
+import 'mobile/app_shell.dart';
+import 'shell_nav.dart';
 
-/// Application shell: RTL sidebar + topbar + content panel.
-/// Mirrors web/src/50_shell.js (AppShell).
+/// Application shell: sidebar or bottom bar, topbar, and the routed page.
+///
+/// This file holds **no UI**, only the dispatch and the two things both
+/// experiences need and neither should own: the destination list and the sync
+/// badge's controller. The desktop experience is the pre-split screen; the
+/// phone experience is the same destinations in a drawer plus a bottom bar.
+///
+/// ## Every dependency arrives as a parameter
+///
+/// The pre-split shell reached for `getIt` in nine places - the sync controller,
+/// the nav list, both sign-outs, the export folder, the chrome listenables and
+/// two reads of the current user. That made the whole shell untestable: there
+/// was no way to build it in a widget test, so there was no way to assert that
+/// the two chrome variants reach the same destinations. The router is now the
+/// only place that resolves anything, and it passes the graph down.
+///
+/// ## The sync controller lives here, not in a variant
+///
+/// It owns a 20s timer and a connectivity subscription. If each variant owned
+/// one there would be two timers when one is built and one when the other is,
+/// and the badge would depend on which chrome happened to be mounted. The host
+/// starts it once and both variants read it.
 class AppShell extends StatefulWidget {
+  const AppShell({
+    super.key,
+    required this.child,
+    required this.gate,
+    required this.locale,
+    required this.theme,
+    required this.syncQueue,
+    required this.syncMetadata,
+    required this.connectivity,
+    required this.exportRoot,
+    required this.fileDelivery,
+    required this.folderPicker,
+  });
+
   final Widget child;
-  const AppShell({super.key, required this.child});
+  final AuthGate gate;
+  final LocaleService locale;
+  final ThemeService theme;
+  final SyncQueue syncQueue;
+  final SyncMetadata syncMetadata;
+  final ConnectivityService connectivity;
+  final ExportRootService exportRoot;
+  final FileDelivery fileDelivery;
+  final FolderPicker folderPicker;
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
-class _NavEntry {
-  final String path;
-  final String label;
-  final IconData icon;
-  const _NavEntry(this.path, this.label, this.icon);
-}
-
 class _AppShellState extends State<AppShell> {
-  bool _navOpen = false;
-  final SyncStatusController _syncStatus = SyncStatusController(
-    queue: getIt<SyncQueue>(),
-    metadata: getIt<SyncMetadata>(),
-    isOnline: () => getIt<ConnectivityService>().isOnline,
-    connectivityChanges: getIt<ConnectivityService>().onStatusChange,
+  late final SyncStatusController _syncStatus = SyncStatusController(
+    queue: widget.syncQueue,
+    metadata: widget.syncMetadata,
+    isOnline: () => widget.connectivity.isOnline,
+    connectivityChanges: widget.connectivity.onStatusChange,
   )..start();
 
   @override
@@ -55,66 +87,45 @@ class _AppShellState extends State<AppShell> {
     super.dispose();
   }
 
-  List<_NavEntry> _navEntries(User user) {
-    // Sync and Members are no longer top-level destinations: both live in
-    // Settings now (`/settings?tab=sync`, `/settings?tab=members`).
-    final entries = <_NavEntry>[
-      _NavEntry('/dashboard', AppStrings.dashboard, Icons.dashboard_outlined),
-      _NavEntry('/inspections', AppStrings.inspections, Icons.history),
-      _NavEntry('/reports', AppStrings.reports, Icons.description_outlined),
-      _NavEntry('/lab', AppStrings.lab, Icons.biotech_outlined),
-    ];
-    if (user.canSeeSettings) {
-      entries.add(
-        _NavEntry('/reference', AppStrings.reference, Icons.book_outlined),
-      );
-      entries.add(
-        _NavEntry('/settings', AppStrings.settings, Icons.settings_outlined),
-      );
-    }
-    if (getIt<AuthGate>().session.permissions.contains(Permission.auditRead)) {
-      entries.add(
-        _NavEntry(
-          '/audit',
-          AppText.t('سجل التدقيق', 'Audit trail'),
-          Icons.history_toggle_off,
-        ),
-      );
-    }
-    return entries;
-  }
+  /// The destinations this member can reach, with the permission flags resolved
+  /// from the injected session rather than the locator.
+  List<ShellNavEntry> _entries(User user) => shellNavEntries(
+    canSeeSettings: user.canSeeSettings,
+    canAudit: widget.gate.session.permissions.contains(Permission.auditRead),
+    canReadQc: widget.gate.session.permissions.contains(Permission.qcRead),
+  );
 
   Future<void> _logout() async {
     try {
-      await getIt<AuthGate>().auth.signOut();
+      await widget.gate.auth.signOut();
     } on AppError {
       // best effort
     } on Object {
       // best effort: the local session is cleared even if the network fails
     }
-    getIt<AuthGate>().updated();
+    widget.gate.updated();
     if (mounted) context.go('/login');
   }
 
-  /// Signs out of this device only (plan §14-P9.1): the member stays active and
-  /// their other devices keep working.
+  /// Signs out of this device only: the member stays active and their other
+  /// devices keep working.
   Future<void> _logoutThisDevice() async {
     try {
-      await getIt<AuthGate>().auth.signOutThisDevice();
+      await widget.gate.auth.signOutThisDevice();
     } on AppError {
       // best effort
     } on Object {
       // best effort: the local session is cleared even if the network fails
     }
-    getIt<AuthGate>().updated();
+    widget.gate.updated();
     if (mounted) context.go('/login');
   }
 
   Future<void> _openPdfFolder() async {
-    final delivery = fileDelivery();
+    final delivery = widget.fileDelivery;
     if (!delivery.canReveal) return;
-    final picker = folderPicker();
-    final exportRoot = getIt<ExportRootService>();
+    final picker = widget.folderPicker;
+    final exportRoot = widget.exportRoot;
     try {
       var path = await exportRoot.configuredPath();
       if (path == null) {
@@ -148,499 +159,44 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  /// The listenables that only the chrome (topbar, sidebar) depends on.
-  ///
-  /// `main.dart` already rebuilds `MaterialApp.router` when the theme or the
-  /// locale changes, so the shell itself does not have to: listening here too
-  /// meant the whole subtree - including the routed page in [AppShell.child] -
-  /// was rebuilt twice per toggle.
-  static Listenable get _chromeListenables => Listenable.merge([
-        getIt<LocaleService>(),
-        getIt<ThemeService>(),
-      ]);
-
   @override
-  Widget build(BuildContext context) {
-    final user = getIt<AuthGate>().currentUser;
-    if (user == null) return const SizedBox.shrink();
-    return _build(context, user);
-  }
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([widget.locale, widget.theme]),
+    builder: (context, _) {
+      final user = widget.gate.currentUser;
+      if (user == null) return const SizedBox.shrink();
 
-  Widget _build(BuildContext context, User user) {
-    final entries = _navEntries(user);
-    final currentPath = GoRouterState.of(context).uri.path;
+      void navigate(String path) => context.go(path);
 
-    final drawer = ListenableBuilder(
-      listenable: _chromeListenables,
-      builder: (context, _) => _Sidebar(
-        user: user,
-        entries: entries,
-        currentPath: currentPath,
-        onSelect: (path) {
-          setState(() => _navOpen = false);
-          context.go(path);
-        },
-        onLogout: _logout,
-        onLogoutThisDevice: _logoutThisDevice,
-        onOpenPdfFolder: _openPdfFolder,
-        canOpenPdfFolder: fileDelivery().canReveal,
-      ),
-    );
-
-    final Widget body;
-    // Desktop / Large screen: sidebar on the right (first child in RTL Row).
-    if (MediaQuery.sizeOf(context).width >= AppBreakpoints.medium) {
-      body = Scaffold(
-        backgroundColor: AppColors.background,
-        body: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              width: 280.w,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                border: Border(left: BorderSide(color: AppColors.borderMuted)),
-              ),
-              child: drawer,
-            ),
-            Expanded(
-              child: Column(
-                children: [
-                  _TopBar(
-                    onMenu: () {},
-                    user: user,
-                    showMenuButton: false,
-                    syncStatus: _syncStatus,
-                    onOpenSync: () => context.go('/settings?tab=sync'),
-                  ),
-                  Expanded(child: widget.child),
-                ],
-              ),
-            ),
-          ],
+      return appAdaptiveVariant(
+        context,
+        desktop: (_) => DesktopAppShell(
+          user: user,
+          entries: _entries(user),
+          locale: widget.locale,
+          theme: widget.theme,
+          syncStatus: _syncStatus,
+          onNavigate: navigate,
+          onLogout: _logout,
+          onLogoutThisDevice: _logoutThisDevice,
+          onOpenPdfFolder: _openPdfFolder,
+          canOpenPdfFolder: widget.fileDelivery.canReveal,
+          child: widget.child,
+        ),
+        mobile: (_) => MobileAppShell(
+          user: user,
+          entries: _entries(user),
+          locale: widget.locale,
+          theme: widget.theme,
+          syncStatus: _syncStatus,
+          onNavigate: navigate,
+          onLogout: _logout,
+          onLogoutThisDevice: _logoutThisDevice,
+          onOpenPdfFolder: _openPdfFolder,
+          canOpenPdfFolder: widget.fileDelivery.canReveal,
+          child: widget.child,
         ),
       );
-    } else {
-      // Narrow screen: overlay drawer opened from topbar menu button.
-      body = Scaffold(
-        backgroundColor: AppColors.background,
-        body: Stack(
-          children: [
-            Column(
-              children: [
-                _TopBar(
-                  onMenu: () => setState(() => _navOpen = true),
-                  user: user,
-                  showMenuButton: true,
-                  syncStatus: _syncStatus,
-                  onOpenSync: () => context.go('/settings?tab=sync'),
-                ),
-                Expanded(child: widget.child),
-              ],
-            ),
-            if (_navOpen)
-              Positioned.fill(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: () => setState(() => _navOpen = false),
-                        child: ColoredBox(
-                          color: AppColors.surfaceDeep.withValues(alpha: 0.55),
-                        ),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 280.w,
-                      child: Material(child: drawer),
-                    ),
-                  ],
-                ),
-              ),
-          ],
-        ),
-      );
-    }
-
-    return CallbackShortcuts(bindings: _shortcuts(entries), child: body);
-  }
-
-  Map<ShortcutActivator, VoidCallback> _shortcuts(List<_NavEntry> entries) {
-    const digits = <LogicalKeyboardKey>[
-      LogicalKeyboardKey.digit0,
-      LogicalKeyboardKey.digit1,
-      LogicalKeyboardKey.digit2,
-      LogicalKeyboardKey.digit3,
-      LogicalKeyboardKey.digit4,
-      LogicalKeyboardKey.digit5,
-      LogicalKeyboardKey.digit6,
-      LogicalKeyboardKey.digit7,
-      LogicalKeyboardKey.digit8,
-      LogicalKeyboardKey.digit9,
-    ];
-    final bindings = <ShortcutActivator, VoidCallback>{};
-    for (var i = 0; i < entries.length && i + 1 < digits.length; i++) {
-      final path = entries[i].path;
-      bindings[SingleActivator(digits[i + 1], control: true)] = () {
-        if (mounted) context.go(path);
-      };
-    }
-    bindings[const SingleActivator(LogicalKeyboardKey.escape)] = () {
-      if (_navOpen) setState(() => _navOpen = false);
-    };
-    return bindings;
-  }
-}
-
-class _TopBar extends StatelessWidget {
-  final VoidCallback onMenu;
-  final User user;
-  final bool showMenuButton;
-  final SyncStatusController syncStatus;
-  final VoidCallback onOpenSync;
-  const _TopBar({
-    required this.onMenu,
-    required this.user,
-    required this.syncStatus,
-    required this.onOpenSync,
-    this.showMenuButton = true,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Only the bar listens. It is the one widget that renders the counters, the
-    // language label and the theme icon, and the 20s refresh it is driven by
-    // must not rebuild the routed page underneath it.
-    return ListenableBuilder(
-      listenable: Listenable.merge([
-        syncStatus,
-        getIt<LocaleService>(),
-        getIt<ThemeService>(),
-      ]),
-      builder: (context, _) => _bar(context),
-    );
-  }
-
-  Widget _bar(BuildContext context) {
-    return Material(
-      color: AppColors.surface,
-      elevation: 0.5,
-      child: Container(
-        height: 56.h,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
-          children: [
-            if (showMenuButton) ...[
-              IconButton(
-                tooltip: AppText.t('القائمة', 'Menu'),
-                onPressed: onMenu,
-                icon: const Icon(Icons.menu),
-              ),
-              const SizedBox(width: 8),
-            ],
-            const Spacer(),
-            _FloatingRound(
-              tooltip: AppStrings.toggleLanguage,
-              onPressed: () => getIt<LocaleService>().toggle(),
-              child: Text(
-                getIt<LocaleService>().isArabic ? 'EN' : 'ع',
-                style: TextStyle(
-                  fontSize: 14.spMax,
-                  fontWeight: FontWeight.w800,
-                  color: AppColors.primary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            _FloatingRound(
-              tooltip: AppStrings.toggleTheme,
-              onPressed: () => getIt<ThemeService>().toggle(),
-              child: Icon(
-                getIt<ThemeService>().mode == ThemeMode.dark
-                    ? Icons.light_mode_outlined
-                    : Icons.dark_mode_outlined,
-                size: 20.r,
-                color: AppColors.primary,
-              ),
-            ),
-            if (user.isReadOnly) ...[
-              const SizedBox(width: 12),
-              Container(
-                padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
-                decoration: BoxDecoration(
-                  color: AppColors.warning.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  AppRoles.label(user.role),
-                  style: TextStyle(
-                    fontSize: 12.spMax,
-                    color: AppColors.warning,
-                  ),
-                ),
-              ),
-            ],
-            const SizedBox(width: 10),
-            // §14-P8.1 the badge is the visible proof of the offline-first
-            // state: connection, work waiting, last exchange.
-            SyncBadge(status: syncStatus.status, onTap: onOpenSync),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Sidebar extends StatelessWidget {
-  final User user;
-  final List<_NavEntry> entries;
-  final String currentPath;
-  final ValueChanged<String> onSelect;
-  final VoidCallback onLogout;
-
-  /// "Sign out of this device only" (plan §14-P9.1).
-  final VoidCallback onLogoutThisDevice;
-  final VoidCallback onOpenPdfFolder;
-
-  /// Whether the exports folder can be shown in a file manager on this
-  /// platform. False on Android, where the folder is inside the sandbox.
-  final bool canOpenPdfFolder;
-
-  const _Sidebar({
-    required this.user,
-    required this.entries,
-    required this.currentPath,
-    required this.onSelect,
-    required this.onLogout,
-    required this.onLogoutThisDevice,
-    required this.onOpenPdfFolder,
-    required this.canOpenPdfFolder,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Brand card.
-                Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    children: [
-                      Icon(Icons.science, size: 44.r, color: AppColors.primary),
-                      const SizedBox(height: 8),
-                      Text(
-                        AppStrings.appTitle,
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                      Text(
-                        AppStrings.tagline,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 12.spMax,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.md),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: AppColors.surfaceSoft,
-                          borderRadius: BorderRadius.circular(12.r),
-                        ),
-                        padding: EdgeInsets.symmetric(
-                          horizontal: 12.w,
-                          vertical: 10.h,
-                        ),
-                        child: Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 18.r,
-                              backgroundColor: AppColors.primary,
-                              child: Text(
-                                user.fullName.isEmpty
-                                    ? '?'
-                                    : user.fullName
-                                          .substring(0, 1)
-                                          .toUpperCase(),
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16.spMax,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    user.fullName,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                      fontSize: 14.spMax,
-                                    ),
-                                  ),
-                                  Text(
-                                    '${user.username} — ${user.role}',
-                                    overflow: TextOverflow.ellipsis,
-                                    style: TextStyle(
-                                      color: AppColors.textMuted,
-                                      fontSize: 11.spMax,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: AppText.t(
-                                'تسجيل الخروج من هذا الجهاز فقط',
-                                'Sign out of this device only',
-                              ),
-                              onPressed: onLogoutThisDevice,
-                              icon: Icon(Icons.phone_iphone, size: 18.r),
-                            ),
-                            IconButton(
-                              tooltip: AppText.t('تسجيل الخروج', 'Logout'),
-                              onPressed: onLogout,
-                              icon: Icon(Icons.logout, size: 18.r),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                // Nav list.
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (final e in entries)
-                        _NavItem(
-                          label: e.label,
-                          icon: e.icon,
-                          active: e.path == currentPath,
-                          onTap: () => onSelect(e.path),
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        // On a phone the export folder is inside the app sandbox and no file
-        // manager can reach it, so the button would only ever fail. Reports are
-        // shared from the sheet that appears when one is created.
-        if (canOpenPdfFolder)
-          const Divider(height: 1),
-        if (canOpenPdfFolder)
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: OutlinedButton.icon(
-              onPressed: onOpenPdfFolder,
-              icon: Icon(Icons.folder_open, size: 18.r),
-              label: Text(AppStrings.openPdfFolder),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                backgroundColor: AppColors.surface,
-                side: BorderSide(color: AppColors.border),
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-/// Circular floating toggle button used in the topbar (language + theme).
-class _FloatingRound extends StatelessWidget {
-  final String tooltip;
-  final Widget child;
-  final VoidCallback onPressed;
-
-  const _FloatingRound({
-    required this.tooltip,
-    required this.child,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: AppColors.surfaceSoft,
-        shape: const CircleBorder(),
-        elevation: 2,
-        shadowColor: Colors.black26,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: onPressed,
-          child: Padding(padding: const EdgeInsets.all(9), child: child),
-        ),
-      ),
-    );
-  }
-}
-
-class _NavItem extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool active;
-  final VoidCallback onTap;
-
-  const _NavItem({
-    required this.label,
-    required this.icon,
-    required this.active,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-        decoration: BoxDecoration(
-          color: active
-              ? AppColors.primary.withValues(alpha: 0.12)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(10.r),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 18.r,
-              color: active ? AppColors.primary : AppColors.textMuted,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14.spMax,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                  color: active ? AppColors.primary : AppColors.textStrong,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+    },
+  );
 }

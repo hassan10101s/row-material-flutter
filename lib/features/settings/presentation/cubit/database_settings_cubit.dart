@@ -6,7 +6,8 @@ import 'database_settings_state.dart';
 
 /// Database backup/export/restore actions (Database panel).
 class DatabaseSettingsCubit extends AppCubit<DatabaseSettingsState> {
-  DatabaseSettingsCubit({required this.backup, this.engine}) : super(const DatabaseSettingsState());
+  DatabaseSettingsCubit({required this.backup, this.engine})
+    : super(const DatabaseSettingsState());
 
   final BackupService backup;
 
@@ -18,7 +19,9 @@ class DatabaseSettingsCubit extends AppCubit<DatabaseSettingsState> {
     safeEmit(state.copyWith(busy: true, error: null, lastPath: null));
     try {
       final result = await backup.exportDatabaseBackup();
-      safeEmit(state.copyWith(busy: false, lastPath: result['path'] as String? ?? ''));
+      safeEmit(
+        state.copyWith(busy: false, lastPath: result['path'] as String? ?? ''),
+      );
     } on AppError catch (e) {
       safeEmit(state.copyWith(busy: false, error: e.message));
     } catch (e) {
@@ -33,12 +36,14 @@ class DatabaseSettingsCubit extends AppCubit<DatabaseSettingsState> {
       final report = await engine?.reconcileAfterRestore();
       // The restored file is the truth from now on: tell the user what had to
       // be flagged instead of letting a change vanish quietly.
-      safeEmit(state.copyWith(
-        busy: false,
-        restored: true,
-        restoreConflicts: report?.orphanedEntries ?? 0,
-        restoreRequeued: report?.requeuedRows ?? 0,
-      ));
+      safeEmit(
+        state.copyWith(
+          busy: false,
+          restored: true,
+          restoreConflicts: report?.orphanedEntries ?? 0,
+          restoreRequeued: report?.requeuedRows ?? 0,
+        ),
+      );
     } on AppError catch (e) {
       safeEmit(state.copyWith(busy: false, error: e.message));
     } catch (e) {

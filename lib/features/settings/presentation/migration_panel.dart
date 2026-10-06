@@ -102,7 +102,8 @@ class _MigrationPanelState extends State<MigrationPanel> {
     }
     final ok = await _confirm(
       title: 'استيراد المستخدمين والفحوصات',
-      message: 'سيتم استيراد المستخدمين الجدد والفحوصات فقط من قاعدة البيانات المحددة. '
+      message:
+          'سيتم استيراد المستخدمين الجدد والفحوصات فقط من قاعدة البيانات المحددة. '
           'الخامات المطلوبة تُنشأ تلقائياً. لا تتأثر الإعدادات أو البيانات المرجعية الموجودة.\n'
           'Only new users and inspections will be imported. Required materials are auto-created.',
       confirmText: 'استيراد',
@@ -114,8 +115,9 @@ class _MigrationPanelState extends State<MigrationPanel> {
         sourceDbPath: path,
         developerName: _developerName,
       );
-      final inspections =
-          await _backup.importInspectionsFromSource(sourceDbPath: path);
+      final inspections = await _backup.importInspectionsFromSource(
+        sourceDbPath: path,
+      );
       return 'تم استيراد ${users['users_copied']} مستخدم و $inspections فحص. '
           'Imported ${users['users_copied']} users and $inspections inspections.';
     });
@@ -129,7 +131,8 @@ class _MigrationPanelState extends State<MigrationPanel> {
     }
     final ok = await _confirm(
       title: 'استيراد المستخدمين',
-      message: 'سيتم نسخ المستخدمين من الملف المحدد إلى القاعدة المحلية. '
+      message:
+          'سيتم نسخ المستخدمين من الملف المحدد إلى القاعدة المحلية. '
           'المستخدمون الموجودون مسبقاً لن يتأثروا.\n'
           'Existing users will not be affected.',
       confirmText: 'استيراد',
@@ -147,10 +150,14 @@ class _MigrationPanelState extends State<MigrationPanel> {
         parts.add('تم تخطي ${result['users_skipped']} مستخدم موجود سابقاً');
       }
       if ((result['legacy_count'] as num? ?? 0) > 0) {
-        parts.add('${result['legacy_count']} كلمة مرور قديمة (سيتم ترقيتها عند أول تسجيل دخول)');
+        parts.add(
+          '${result['legacy_count']} كلمة مرور قديمة (سيتم ترقيتها عند أول تسجيل دخول)',
+        );
       }
       if ((result['v2_count'] as num? ?? 0) > 0) {
-        parts.add('${result['v2_count']} كلمة مرور مشفرة من جهاز آخر (قد تحتاج إعادة تعيين)');
+        parts.add(
+          '${result['v2_count']} كلمة مرور مشفرة من جهاز آخر (قد تحتاج إعادة تعيين)',
+        );
       }
       return '${parts.join('. ')}.';
     });
@@ -164,7 +171,8 @@ class _MigrationPanelState extends State<MigrationPanel> {
     }
     final ok = await _confirm(
       title: 'استيراد الخامات والوحدات',
-      message: 'سيتم دمج الخامات والوحدات من قاعدة البيانات المحددة بشكل تراكمي (تحديث حسب الاسم). '
+      message:
+          'سيتم دمج الخامات والوحدات من قاعدة البيانات المحددة بشكل تراكمي (تحديث حسب الاسم). '
           'لن تتغير الإعدادات أو المسارات المحلية.\n'
           'Materials and units will be upserted by name. Settings stay unchanged.',
       confirmText: 'استيراد',
@@ -180,13 +188,18 @@ class _MigrationPanelState extends State<MigrationPanel> {
       final message = '${result['message'] ?? ''}';
       return message.isEmpty
           ? 'تم استيراد ${result['materials']} خامة و ${result['parameters']} وحدة. '
-              'Imported ${result['materials']} materials and ${result['parameters']} units.'
+                'Imported ${result['materials']} materials and ${result['parameters']} units.'
           : message;
     });
   }
 
-  Widget _row(String label, String? path, String pickKey, String importKey,
-      VoidCallback onImport) {
+  Widget _row(
+    String label,
+    String? path,
+    String pickKey,
+    String importKey,
+    VoidCallback onImport,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -196,14 +209,20 @@ class _MigrationPanelState extends State<MigrationPanel> {
           children: [
             Expanded(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   border: Border.all(color: AppColors.borderMuted),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   path?.isNotEmpty == true ? path! : '—',
-                  style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 13.spMax,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -250,13 +269,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
           _importCombined,
         ),
         const SizedBox(height: AppSpacing.lg),
-        _row(
-          'مستخدمين فقط',
-          _usersPath,
-          'users',
-          'users',
-          _importUsers,
-        ),
+        _row('مستخدمين فقط', _usersPath, 'users', 'users', _importUsers),
         const SizedBox(height: AppSpacing.lg),
         _row(
           'خامات ووحدات',

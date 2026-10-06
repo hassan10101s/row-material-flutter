@@ -16,6 +16,7 @@ import '../core/formula_engine.dart'
     show inventoryUnits, safeFormulaFloat, unitDimOf, validateFormula;
 import '../domain/lab_local_repository.dart';
 import '../domain/lab_result_repository.dart';
+import '../../reference/domain/reference_repository.dart';
 import 'cubit/analyses_cubit.dart';
 import 'cubit/analyses_state.dart';
 
@@ -117,6 +118,11 @@ class AnalysesTab extends StatelessWidget {
                                 label: Text(AppText.t('الوحدة', 'Unit')),
                               ),
                               DataColumn(
+                                label: Text(
+                                  AppText.t('بارامتر المرجع', 'Reference parameter'),
+                                ),
+                              ),
+                              DataColumn(
                                 label: Text(AppText.t('المعادلة', 'Formula')),
                               ),
                               DataColumn(
@@ -133,6 +139,11 @@ class AnalysesTab extends StatelessWidget {
                                   cells: [
                                     DataCell(Text('${r['name']}')),
                                     DataCell(Text('${r['unit'] ?? '%'}')),
+                                    DataCell(
+                                      Text(
+                                        '${r['reference_parameter_name'] ?? '—'}',
+                                      ),
+                                    ),
                                     DataCell(
                                       Text(
                                         '${(r['formula'] is Map ? (r['formula'] as Map)['expression'] : '') ?? ''}',
@@ -209,6 +220,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
   // so this dialog legitimately needs both contracts.
   final _repo = getIt<LabConfigurationRepository>();
   final _stock = getIt<LabLocalRepository>();
+  final _reference = getIt<ReferenceRepository>();
   late final TextEditingController _name = TextEditingController(
     text: '${widget.analysis?['name'] ?? ''}',
   );
@@ -227,8 +239,12 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
   final List<Map<String, dynamic>> _fieldLinks = [];
   final List<Map<String, dynamic>> _consumedItems = [];
   List<Map<String, dynamic>> _inventory = [];
+  List<Map<String, dynamic>> _parameters = [];
+  int? _parameterId;
+  Future<void>? _parameterLoad;
   int _linkPicker = -1;
   bool _saving = false;
+  String? _parameterError;
 
   @override
   void initState() {
@@ -262,7 +278,53 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         _consumedItems.add(m);
       }
     }
+    _parameterId = int.tryParse(
+      '${widget.analysis?['parameter_id'] ?? ''}',
+    );
     _loadInventory();
+    _parameterLoad = _loadReferenceParameters();
+  }
+
+  Future<void> _loadReferenceParameters() async {
+    try {
+      final parameters = await _reference.listParameters();
+      if (!mounted) return;
+      final linkedId = _parameterId;
+      final linked = parameters.where(
+        (row) => '${row['id']}' == '$linkedId',
+      );
+      final matchingName = parameters.where(
+        (row) =>
+            '${row['parameter_name']}'.trim().toLowerCase() ==
+            _name.text.trim().toLowerCase(),
+      );
+      final parameter = linked.firstOrNull ??
+          (linkedId == null ? matchingName.firstOrNull : null);
+      setState(() {
+        _parameters = parameters;
+        if (parameter != null) {
+          _parameterId = int.tryParse('${parameter['id']}');
+          _name.text = '${parameter['parameter_name'] ?? ''}';
+          _unit.text = '${parameter['unit'] ?? ''}';
+        }
+      });
+    } catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    }
+  }
+
+  void _selectReferenceParameter(int? id) {
+    final parameter = _parameters.where(
+      (row) => '${row['id']}' == '$id',
+    ).firstOrNull;
+    setState(() {
+      _parameterId = id;
+      _parameterError = null;
+      if (parameter != null) {
+        _name.text = '${parameter['parameter_name'] ?? ''}';
+        _unit.text = '${parameter['unit'] ?? ''}';
+      }
+    });
   }
 
   Map<String, dynamic> _decodeFieldConfig(Map<String, dynamic>? row) {
@@ -393,6 +455,18 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
   }
 
   Future<void> _save() async {
+    await _parameterLoad;
+    if (!mounted) return;
+    if (_parameterId == null ||
+        !_parameters.any((row) => '${row['id']}' == '$_parameterId')) {
+      setState(
+        () => _parameterError = AppText.t(
+          'اختر بارامتراً أساسياً من المرجع',
+          'Choose a base parameter from Reference.',
+        ),
+      );
+      return;
+    }
     setState(() => _saving = true);
     final links = <Map<String, dynamic>>[];
     for (var i = 0; i < _fieldControllers.length; i++) {
@@ -451,6 +525,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         await _repo.createAnalysis(
           name: _name.text,
           unit: _unit.text,
+          parameterId: _parameterId,
           description: _description.text,
           dynamicFields: _fieldList,
           formula: _formula.text.trim(),
@@ -461,6 +536,7 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
         await _repo.updateAnalysis(
           analysisId: (widget.analysis!['id'] as num).toInt(),
           unit: _unit.text,
+          parameterId: _parameterId,
           description: _description.text,
           dynamicFields: _fieldList,
           formula: _formula.text.trim(),
@@ -1047,9 +1123,37 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              DropdownButtonFormField<int>(
+                value: _parameters.any(
+                  (row) => '${row['id']}' == '$_parameterId',
+                )
+                    ? _parameterId
+                    : null,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: AppText.t(
+                    'البارامتر المرجعي',
+                    'Reference parameter',
+                  ),
+                  isDense: true,
+                  errorText: _parameterError,
+                ),
+                items: [
+                  for (final parameter in _parameters)
+                    DropdownMenuItem<int>(
+                      value: int.tryParse('${parameter['id']}'),
+                      child: Text(
+                        '${parameter['parameter_name']}'
+                        ' (${parameter['unit'] ?? ''})',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: _selectReferenceParameter,
+              ),
               TextField(
                 controller: _name,
-                enabled: widget.analysis == null,
+                enabled: false,
                 decoration: const InputDecoration(
                   labelText: 'الاسم',
                   isDense: true,
@@ -1057,8 +1161,9 @@ class _AnalysisDialogState extends State<_AnalysisDialog> {
               ),
               TextField(
                 controller: _unit,
+                enabled: false,
                 decoration: const InputDecoration(
-                  labelText: 'الوحدة',
+                  labelText: 'الوحدة الموروثة من المرجع',
                   isDense: true,
                 ),
               ),

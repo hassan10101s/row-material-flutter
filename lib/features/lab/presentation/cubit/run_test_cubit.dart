@@ -4,8 +4,8 @@ import '../../domain/lab_local_repository.dart';
 import '../../domain/lab_result_repository.dart';
 import 'run_test_state.dart';
 
-/// Drives the "Run a test" form: loads analyses/products, holds the current
-/// selection, looks up raw-material entry codes and executes sample tests.
+/// Drives the "Run a test" form: loads analyses/products/raw materials,
+/// resolves inspection records and executes sample tests.
 /// Text-field values live in the tab (pure UI); this cubit owns data and
 /// business state. Errors from [run] rethrow so the caller can show a dialog
 /// with the result or a feedback snackbar.
@@ -28,8 +28,14 @@ class RunTestCubit extends AppCubit<RunTestState> {
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));
     try {
-      final analyses = await config.listAnalyses();
-      final products = await config.listProducts();
+      final loaded = await Future.wait<Object>([
+        config.listAnalyses(),
+        config.listProducts(),
+        local.listInspectionMaterials(),
+      ]);
+      final analyses = loaded[0] as List<Map<String, dynamic>>;
+      final products = loaded[1] as List<Map<String, dynamic>>;
+      final rawMaterials = loaded[2] as List<Map<String, dynamic>>;
       int? analysisId = state.analysisId;
       if (analysisId == null && analyses.isNotEmpty) {
         analysisId = (analyses.first['id'] as num).toInt();
@@ -39,6 +45,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
           loading: false,
           analyses: analyses,
           products: products,
+          rawMaterials: rawMaterials,
           analysisId: analysisId,
         ),
       );
@@ -64,17 +71,56 @@ class RunTestCubit extends AppCubit<RunTestState> {
     safeEmit(state.copyWith(productId: id));
   }
 
-  /// Resolves a raw-material entry code and, when found, records the
-  /// material name as the test source. Returns true when resolved.
-  Future<bool> lookupEntry(String code) async {
-    final trimmed = code.trim();
-    if (trimmed.isEmpty) return false;
-    final inspection = await local.resolveInspection(trimmed);
-    if (inspection == null) return false;
+  Future<void> selectRawMaterial(int materialId) async {
     safeEmit(
-      state.copyWith(sourceName: '${inspection['material_name'] ?? ''}'),
+      state.copyWith(
+        rawMaterialId: materialId,
+        sourceName: _rawMaterialName(materialId),
+        inspections: const [],
+        selectedInspection: const {},
+        selectedSampleName: '',
+        loadingInspections: true,
+        error: null,
+      ),
     );
-    return true;
+    try {
+      final inspections = await local.listInspectionRecords(materialId);
+      if (state.rawMaterialId != materialId) return;
+      safeEmit(
+        state.copyWith(
+          inspections: inspections,
+          loadingInspections: false,
+        ),
+      );
+    } on AppError catch (e) {
+      safeEmit(
+        state.copyWith(loadingInspections: false, error: e.message),
+      );
+    } catch (e) {
+      safeEmit(
+        state.copyWith(loadingInspections: false, error: '$e'),
+      );
+    }
+  }
+
+  void selectInspection(int inspectionId) {
+    final inspection = state.inspections
+        .where((row) => '${row['id']}' == '$inspectionId')
+        .firstOrNull;
+    if (inspection == null) return;
+    final sampleNames = _sampleNamesOf(inspection);
+    safeEmit(
+      state.copyWith(
+        selectedInspection: inspection,
+        selectedSampleName: sampleNames.isEmpty ? '' : sampleNames.first,
+      ),
+    );
+  }
+
+  void selectInspectionSample(String sampleName) {
+    if (_sampleNamesOf(state.selectedInspection).contains(sampleName)) {
+      safeEmit(state.copyWith(selectedSampleName: sampleName));
+    }
   }
 
   /// Runs the sample test. On success returns the result payload (test,
@@ -84,7 +130,6 @@ class RunTestCubit extends AppCubit<RunTestState> {
     required String sampleName,
     required String resultText,
     required Map<String, dynamic> dynamicValues,
-    required String entryCode,
     bool manualResult = false,
     Map<String, dynamic>? user,
   }) async {
@@ -92,17 +137,23 @@ class RunTestCubit extends AppCubit<RunTestState> {
     try {
       final sourceName = state.sourceType == 'product'
           ? _productName(state.productId)
-          : state.sourceName;
+          : '${state.selectedInspection['material_name'] ?? state.sourceName}';
       return await results.runSampleTest(
         analysisId: state.analysisId!,
         sourceType: state.sourceType,
-        sourceRefId: state.sourceType == 'product' ? state.productId : null,
+        sourceRefId: state.sourceType == 'product'
+            ? state.productId
+            : state.rawMaterialId,
         sourceName: sourceName,
-        sampleName: sampleName.trim(),
+        sampleName: state.sourceType == 'raw_material'
+            ? state.selectedSampleName
+            : sampleName.trim(),
         resultText: resultText.trim(),
         dynamicValues: dynamicValues,
         user: user,
-        entryCode: state.sourceType == 'raw_material' ? entryCode.trim() : '',
+        entryCode: state.sourceType == 'raw_material'
+            ? '${state.selectedInspection['entry_code'] ?? ''}'
+            : '',
         manualResult: manualResult,
       );
     } finally {
@@ -117,4 +168,16 @@ class RunTestCubit extends AppCubit<RunTestState> {
     }
     return '';
   }
+
+  String _rawMaterialName(int materialId) {
+    final material = state.rawMaterials
+        .where((row) => '${row['id']}' == '$materialId')
+        .firstOrNull;
+    return '${material?['material_name'] ?? ''}';
+  }
+
+  List<String> _sampleNamesOf(Map<String, dynamic> inspection) => [
+    for (final value in (inspection['sample_names'] as List? ?? const []))
+      if ('$value'.trim().isNotEmpty) '$value'.trim(),
+  ];
 }

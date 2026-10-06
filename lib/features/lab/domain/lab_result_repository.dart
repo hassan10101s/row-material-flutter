@@ -30,6 +30,10 @@ abstract interface class LabResultRepository {
     int? sourceRefId,
   });
 
+  Future<List<Map<String, dynamic>>> listSampleTestsForEntryCode(
+    String entryCode,
+  );
+
   /// Files a batch of worksheet rows.
   Future<Map<String, dynamic>> saveWorksheet(
     List<Map<String, dynamic>> rows,
@@ -92,6 +96,7 @@ abstract interface class LabConfigurationRepository {
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String unit = '%',
+    int? parameterId,
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
   });
@@ -102,6 +107,7 @@ abstract interface class LabConfigurationRepository {
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String? unit,
+    int? parameterId,
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
   });

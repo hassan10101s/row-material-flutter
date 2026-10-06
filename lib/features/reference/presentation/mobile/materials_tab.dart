@@ -4,6 +4,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_exceptions.dart';
+import '../../../../design_system/animations/app_animations.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
@@ -49,7 +50,7 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
 
   Future<void> _openEditor([int? materialId]) async {
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
+      appMaterialPageRoute<bool>(
         builder: (_) => MobileMaterialEditor(
           refRepo: widget.refRepo,
           labConfig: widget.labConfig,

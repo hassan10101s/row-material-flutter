@@ -1,3 +1,4 @@
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -85,6 +86,28 @@ class DashboardScreen extends StatelessWidget {
                 // Monthly Trend & Comparison Section
                 _MonthlyTrendSection(summary: state.summary!),
                 const SizedBox(height: AppSpacing.lg),
+                // Cross-module analyst KPIs (display-only, all business logic)
+                BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
+                  builder: (context, kpi) => Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _VolumeQualitySection(kpi: kpi),
+                      const SizedBox(height: AppSpacing.lg),
+                      _LabQcSection(kpi: kpi),
+                      const SizedBox(height: AppSpacing.lg),
+                      _NcrSection(kpi: kpi),
+                      const SizedBox(height: AppSpacing.lg),
+                      _SopGoalsSection(kpi: kpi),
+                      const SizedBox(height: AppSpacing.lg),
+                      _InventorySection(kpi: kpi),
+                      const SizedBox(height: AppSpacing.lg),
+                      _TrendChartSection(kpi: kpi),
+                      const SizedBox(height: AppSpacing.lg),
+                      _AgingDefectsSection(kpi: kpi),
+                      const SizedBox(height: AppSpacing.lg),
+                    ],
+                  ),
+                ),
                 // Recommendations & Insights Section
                 _InsightsAndRecommendationsSection(summary: state.summary!),
                 const SizedBox(height: AppSpacing.lg),
@@ -933,6 +956,450 @@ class _TopItemProgress extends StatelessWidget {
             backgroundColor: AppColors.borderMuted,
           ),
         ),
+      ],
+    );
+  }
+}
+
+// ── Senior-analyst cross-module sections (display-only) ──────────────
+// Every section reads DashboardKpisState.bundle; zeros render as "0", null
+// rates render as "—" (never NaN). No onTap navigation per requirements.
+
+class _SectionTitle extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String? subtitle;
+  const _SectionTitle(
+      {required this.icon, required this.color, required this.title, this.subtitle});
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20.r),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(title,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold)),
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(subtitle!,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax)),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _VolumeQualitySection extends StatelessWidget {
+  final DashboardKpisState kpi;
+  const _VolumeQualitySection({required this.kpi});
+  @override
+  Widget build(BuildContext context) {
+    final v = kpi.bundle.volume;
+    final q = kpi.bundle.quality;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          icon: Icons.query_stats,
+          color: AppColors.primary,
+          title: AppText.t('حجم الفحص وجودة القرارات', 'Volume & Decision Quality'),
+          subtitle: AppText.t('الفترة المحددة', 'Selected period'),
+        ),
+        LayoutBuilder(builder: (context, c) {
+          final cols = c.maxWidth >= AppBreakpoints.medium ? 4 : 2;
+          final tile = (c.maxWidth - AppSpacing.md * (cols - 1)) / cols;
+          final cards = <Widget>[
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('قيد الانتظار', 'Pending'), value: '${v.pending}', color: AppColors.warning, icon: Icons.hourglass_empty)),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('متابعات مفتوحة', 'Open follow-ups'), value: '${v.openFollowUps}', color: AppColors.info, icon: Icons.follow_the_signs_outlined, hint: AppText.t('قبول مشروط بملاحظة', 'Conditional with note'))),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('معدل القبول', 'Acceptance rate'), value: '${q.acceptanceRate}%', color: AppColors.success, icon: Icons.verified_outlined, hint: AppText.t('نهائي + مشروط', 'Approved + conditional'))),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('قبول صارم', 'Strict approval'), value: '${q.strictRate}%', color: AppColors.primary, icon: Icons.check_circle_outline)),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('نسبة كمية مرفوضة', 'Rejected qty %'), value: '${q.rejectedQtyRatio}%', color: AppColors.danger, icon: Icons.scale_outlined, hint: '${q.rejectedQty.toStringAsFixed(1)} / ${q.totalQty.toStringAsFixed(1)}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('مشروط / جزئي / كلي', 'Cond / Part / Full'), value: '${q.conditional} / ${q.partial} / ${q.rejected}', color: AppColors.accent, icon: Icons.pie_chart_outline, hint: '${AppText.t('مشروط', 'Cond')}: ${q.conditionalShare}%')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('مقابل متوسط 7 أيام', 'vs 7-day avg'), value: '${v.today} / ${v.weekAvg}', color: AppColors.primary, icon: Icons.today_outlined, hint: '${v.vsWeekAvg >= 0 ? '+' : ''}${v.vsWeekAvg.toStringAsFixed(1)}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('انتهاء / منتهي', 'Expiring / expired'), value: '${q.expiryRisk} / ${q.expired}', color: AppColors.danger, icon: Icons.event_busy_outlined, hint: AppText.t('30 يوم / منتهي', '30d / expired'))),
+          ];
+          return Wrap(spacing: AppSpacing.md, runSpacing: AppSpacing.md, children: cards);
+        }),
+        const SizedBox(height: AppSpacing.sm),
+        // Decision donut: approved / conditional / partial / full.
+        if (q.total > 0)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                height: 200,
+                child: PieChart(
+                  PieChartData(
+                    centerSpaceRadius: 42,
+                    sectionsSpace: 2,
+                    sections: [
+                      PieChartSectionData(value: q.approved.toDouble(), color: AppColors.success, title: '${q.approved}', titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                      PieChartSectionData(value: q.conditional.toDouble(), color: AppColors.info, title: '${q.conditional}', titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                      PieChartSectionData(value: q.partial.toDouble(), color: AppColors.warning, title: '${q.partial}', titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                      PieChartSectionData(value: q.rejected.toDouble(), color: AppColors.danger, title: '${q.rejected}', titleStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _LabQcSection extends StatelessWidget {
+  final DashboardKpisState kpi;
+  const _LabQcSection({required this.kpi});
+  @override
+  Widget build(BuildContext context) {
+    final lab = kpi.bundle.lab;
+    final qc = kpi.bundle.qc;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          icon: Icons.biotech_outlined,
+          color: AppColors.success,
+          title: AppText.t('المعمل وفحوصات الجودة', 'Lab & QC Checks'),
+          subtitle: AppText.t('الفترة المحددة', 'Selected period'),
+        ),
+        LayoutBuilder(builder: (context, c) {
+          final cols = c.maxWidth >= AppBreakpoints.medium ? 4 : 2;
+          final tile = (c.maxWidth - AppSpacing.md * (cols - 1)) / cols;
+          return Wrap(spacing: AppSpacing.md, runSpacing: AppSpacing.md, children: [
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('اختبارات المعمل', 'Lab tests'), value: '${lab.totalTests}', color: AppColors.success, icon: Icons.science_outlined, hint: '${AppText.t('مقيّم', 'Evaluated')}: ${lab.evaluated}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('ناجح / راسب QC', 'QC pass / fail'), value: '${qc.pass} / ${qc.fail}', color: AppColors.primary, icon: Icons.fact_check_outlined, hint: '${AppText.t('مشروط', 'Cond')}: ${qc.conditional}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('متوسط الدرجة', 'Avg score'), value: '${qc.avgScore}%', color: AppColors.accent, icon: Icons.score_outlined, hint: '${AppText.t('إجمالي', 'Total')}: ${qc.total}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('معدل NC', 'NC rate'), value: '${qc.ncRate}%', color: AppColors.danger, icon: Icons.warning_amber_outlined, hint: 'C:${qc.critical} M:${qc.major} m:${qc.minor}')),
+          ]);
+        }),
+      ],
+    );
+  }
+}
+
+class _NcrSection extends StatelessWidget {
+  final DashboardKpisState kpi;
+  const _NcrSection({required this.kpi});
+  String _pct(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}%';
+  String _days(double? v) => v == null ? '—' : '${v.toStringAsFixed(1)}d';
+  @override
+  Widget build(BuildContext context) {
+    final n = kpi.bundle.ncr;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          icon: Icons.report_problem_outlined,
+          color: AppColors.danger,
+          title: AppText.t('عدم المطابقة CAPA', 'NCR & CAPA'),
+          subtitle: AppText.t('كل الفترات', 'All time'),
+        ),
+        LayoutBuilder(builder: (context, c) {
+          final cols = c.maxWidth >= AppBreakpoints.medium ? 4 : 2;
+          final tile = (c.maxWidth - AppSpacing.md * (cols - 1)) / cols;
+          return Wrap(spacing: AppSpacing.md, runSpacing: AppSpacing.md, children: [
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('مفتوح', 'Open'), value: '${n.open}', color: AppColors.warning, icon: Icons.folder_open_outlined, hint: '${AppText.t('إجمالي', 'Total')}: ${n.total}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('متأخر', 'Overdue'), value: '${n.overdue}', color: AppColors.danger, icon: Icons.schedule_outlined, hint: '${n.overduePct.toStringAsFixed(1)}%')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('حرج', 'Critical'), value: '${n.critical}', color: AppColors.danger, icon: Icons.priority_high, hint: 'M:${n.major} m:${n.minor}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('إغلاق في الموعد', 'On-time closure'), value: _pct(n.onTimePct), color: AppColors.success, icon: Icons.event_available_outlined, hint: '${n.closedOnTime}/${n.closed}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: 'MTTC', value: _days(n.mttcDays), color: AppColors.primary, icon: Icons.timelapse_outlined)),
+            SizedBox(width: tile, child: AppSummaryCard(label: 'MTTV', value: _days(n.mttvDays), color: AppColors.accent, icon: Icons.verified_outlined)),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('تغطية CAPA', 'CAPA coverage'), value: '${n.capaCoveragePct.toStringAsFixed(1)}%', color: AppColors.info, icon: Icons.link_outlined, hint: '${n.capaLinked}/${n.total}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('CAPA متأخر', 'CAPA overdue'), value: '${n.capaOverdue}', color: AppColors.danger, icon: Icons.alarm_outlined)),
+          ]);
+        }),
+      ],
+    );
+  }
+}
+
+class _SopGoalsSection extends StatelessWidget {
+  final DashboardKpisState kpi;
+  const _SopGoalsSection({required this.kpi});
+  @override
+  Widget build(BuildContext context) {
+    final s = kpi.bundle.sopGoals;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          icon: Icons.menu_book_outlined,
+          color: AppColors.accent,
+          title: AppText.t('SOP والأهداف', 'SOPs & Goals'),
+          subtitle: AppText.t('كل الفترات', 'All time'),
+        ),
+        LayoutBuilder(builder: (context, c) {
+          final cols = c.maxWidth >= AppBreakpoints.medium ? 4 : 2;
+          final tile = (c.maxWidth - AppSpacing.md * (cols - 1)) / cols;
+          return Wrap(spacing: AppSpacing.md, runSpacing: AppSpacing.md, children: [
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('SOP منشور', 'SOP published'), value: '${s.sopPublished}', color: AppColors.primary, icon: Icons.description_outlined, hint: '${AppText.t('إجمالي', 'Total')}: ${s.sopTotal}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('منتهي / قريب', 'Expired / soon'), value: '${s.sopExpired} / ${s.sopExpiring}', color: AppColors.danger, icon: Icons.event_busy_outlined, hint: '${AppText.t('بانتظار', 'Pending')}: ${s.sopPending}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('أهداف نشطة', 'Active goals'), value: '${s.goalActive}', color: AppColors.accent, icon: Icons.flag_outlined, hint: '${AppText.t('إجمالي', 'Total')}: ${s.goalTotal}')),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('متأخر / مكتمل', 'Overdue / done'), value: '${s.goalOverdue} / ${s.goalCompleted}', color: AppColors.warning, icon: Icons.task_alt_outlined, hint: '${AppText.t('تقدم', 'Progress')}: ${s.goalAvgProgress}% · ${AppText.t('إجراءات', 'Actions')}: ${s.goalOverdueActions}')),
+          ]);
+        }),
+      ],
+    );
+  }
+}
+
+class _InventorySection extends StatelessWidget {
+  final DashboardKpisState kpi;
+  const _InventorySection({required this.kpi});
+  @override
+  Widget build(BuildContext context) {
+    final inv = kpi.bundle.inventory;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          icon: Icons.inventory_2_outlined,
+          color: AppColors.info,
+          title: AppText.t('المخزون', 'Inventory'),
+          subtitle: AppText.t('لقطة حالية', 'Snapshot'),
+        ),
+        LayoutBuilder(builder: (context, c) {
+          final cols = c.maxWidth >= AppBreakpoints.medium ? 4 : 2;
+          final tile = (c.maxWidth - AppSpacing.md * (cols - 1)) / cols;
+          return Wrap(spacing: AppSpacing.md, runSpacing: AppSpacing.md, children: [
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('أصناف', 'SKUs'), value: '${inv.skus}', color: AppColors.info, icon: Icons.inventory_outlined)),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('منخفض', 'Low'), value: '${inv.low}', color: AppColors.warning, icon: Icons.trending_down)),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('فارغ', 'Empty'), value: '${inv.empty}', color: AppColors.danger, icon: Icons.remove_shopping_cart_outlined)),
+            SizedBox(width: tile, child: AppSummaryCard(label: AppText.t('سليم', 'OK'), value: '${inv.ok}', color: AppColors.success, icon: Icons.check_circle_outline)),
+          ]);
+        }),
+        if (inv.lowItems.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final it in inv.lowItems)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Row(
+                        children: [
+                          Expanded(child: Text('${it['name']}', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 13.spMax, fontWeight: FontWeight.w600))),
+                          Text('${it['current_qty']}/${it['min_qty']} ${it['unit'] ?? ''}', style: TextStyle(color: AppColors.danger, fontSize: 12.spMax, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _TrendChartSection extends StatelessWidget {
+  final DashboardKpisState kpi;
+  const _TrendChartSection({required this.kpi});
+  @override
+  Widget build(BuildContext context) {
+    final trend = kpi.bundle.trend;
+    final hasData = trend.any((t) => t.total > 0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          icon: Icons.show_chart,
+          color: AppColors.accent,
+          title: AppText.t('اتجاه 6 أشهر: الحجم والقبول', '6-month trend: volume & approval'),
+        ),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: !hasData
+                ? Center(child: Text(context.l10n.monthly_trend_empty, style: TextStyle(color: AppColors.textMuted)))
+                : SizedBox(
+                    height: 220,
+                    child: BarChart(
+                      BarChartData(
+                        barGroups: [
+                          for (var i = 0; i < trend.length; i++)
+                            BarChartGroupData(x: i, barRods: [
+                              BarChartRodData(toY: trend[i].total.toDouble(), color: AppColors.primary, width: 18, borderRadius: BorderRadius.circular(4)),
+                            ]),
+                        ],
+                        titlesData: FlTitlesData(
+                          leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 36)),
+                          bottomTitles: AxisTitles(
+                              sideTitles: SideTitles(
+                                  showTitles: true,
+                                  getTitlesWidget: (v, _) {
+                                    final i = v.toInt();
+                                    if (i < 0 || i >= trend.length) return const SizedBox.shrink();
+                                    return Padding(
+                                      padding: const EdgeInsets.only(top: 6),
+                                      child: Text(trend[i].label.split(' ').first, style: const TextStyle(fontSize: 10)),
+                                    );
+                                  })),
+                          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                        ),
+                        gridData: const FlGridData(show: true),
+                        borderData: FlBorderData(show: false),
+                      ),
+                    ),
+                  ),
+          ),
+        ),
+        if (hasData)
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                height: 180,
+                child: LineChart(
+                  LineChartData(
+                    minY: 0,
+                    maxY: 100,
+                    lineBarsData: [
+                      LineChartBarData(
+                        spots: [for (var i = 0; i < trend.length; i++) FlSpot(i.toDouble(), trend[i].approvalRate)],
+                        isCurved: true,
+                        color: AppColors.success,
+                        barWidth: 3,
+                        dotData: const FlDotData(show: true),
+                      ),
+                    ],
+                    titlesData: FlTitlesData(
+                      leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: true, reservedSize: 40)),
+                      bottomTitles: AxisTitles(
+                          sideTitles: SideTitles(
+                              showTitles: true,
+                              getTitlesWidget: (v, _) {
+                                final i = v.toInt();
+                                if (i < 0 || i >= trend.length) return const SizedBox.shrink();
+                                return Padding(
+                                  padding: const EdgeInsets.only(top: 6),
+                                  child: Text(trend[i].label.split(' ').first, style: const TextStyle(fontSize: 10)),
+                                );
+                              })),
+                      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    ),
+                    gridData: const FlGridData(show: true),
+                    borderData: FlBorderData(show: false),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _AgingDefectsSection extends StatelessWidget {
+  final DashboardKpisState kpi;
+  const _AgingDefectsSection({required this.kpi});
+  static const _labels = ['0-7', '8-14', '15-30', '31-60', '>60'];
+  @override
+  Widget build(BuildContext context) {
+    final n = kpi.bundle.ncr;
+    final maxAging = n.aging.fold<int>(0, (a, b) => a > b ? a : b);
+    final maxDefect = n.topDefects.fold<int>(0, (a, d) => (d['count'] as int? ?? 0) > a ? (d['count'] as int? ?? 0) : a);
+    if (n.total == 0) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+          icon: Icons.hourglass_bottom_outlined,
+          color: AppColors.warning,
+          title: AppText.t('أعمار NCR المفتوحة والعيوب', 'Open NCR aging & defects'),
+        ),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                for (var i = 0; i < _labels.length; i++)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        SizedBox(width: 52, child: Text(_labels[i], style: TextStyle(fontSize: 12.spMax, fontWeight: FontWeight.w600))),
+                        Expanded(
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: maxAging == 0 ? 0 : n.aging[i] / maxAging,
+                              minHeight: 8,
+                              color: AppColors.warning,
+                              backgroundColor: AppColors.borderMuted,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        SizedBox(width: 32, child: Text('${n.aging[i]}', textAlign: TextAlign.end, style: TextStyle(fontSize: 12.spMax, fontWeight: FontWeight.bold))),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        if (n.topDefects.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(AppText.t('أعلى العيوب', 'Top defects'), style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: AppSpacing.sm),
+                  for (final d in n.topDefects)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(child: Text('${d['label']}', overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12.5.spMax))),
+                              Text('${d['count']}', style: TextStyle(fontSize: 12.spMax, fontWeight: FontWeight.bold, color: AppColors.danger)),
+                            ],
+                          ),
+                          const SizedBox(height: 3),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(4),
+                            child: LinearProgressIndicator(
+                              value: maxDefect == 0 ? 0 : ((d['count'] as int? ?? 0) / maxDefect),
+                              minHeight: 6,
+                              color: AppColors.danger,
+                              backgroundColor: AppColors.borderMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

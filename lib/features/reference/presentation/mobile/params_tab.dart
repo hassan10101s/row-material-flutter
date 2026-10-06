@@ -6,6 +6,7 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
+import '../../../../design_system/animations/app_animations.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_delete_confirm.dart';
@@ -17,10 +18,8 @@ import '../params_editor.dart';
 
 /// Mobile parameter management.
 ///
-/// The table becomes a card per parameter - with a physical parameter showing
-/// only its name, so the unit row cannot appear where it has no meaning - and
-/// the 420dp editor dialog becomes a full-screen route, because a unit field
-/// plus an on-screen keyboard does not fit inside a dialog on a 400dp grid.
+/// The table becomes a card per parameter, and the 420dp editor dialog becomes
+/// a full-screen route to fit the form on a 400dp grid.
 class MobileParamsTab extends StatelessWidget {
   const MobileParamsTab({super.key, required this.parameterType});
 
@@ -34,7 +33,7 @@ class MobileParamsTab extends StatelessWidget {
   ]) async {
     final cubit = context.read<ParamsCubit>();
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
+      appMaterialPageRoute<bool>(
         builder: (_) => _ParamEditorRoute(
           parameterType: parameterType,
           param: param,
@@ -117,7 +116,7 @@ class MobileParamsTab extends StatelessWidget {
                   final p = state.rows[index];
                   return _ParamCard(
                     name: '${p['parameter_name'] ?? ''}',
-                    unit: _isChemical ? '${p['unit'] ?? '%'}' : null,
+                    unit: '${p['unit'] ?? ''}',
                     onEdit: () => _openEditor(context, p),
                     onDelete: () => _delete(context, p),
                   );
@@ -130,9 +129,7 @@ class MobileParamsTab extends StatelessWidget {
   }
 }
 
-/// One parameter as a card. The unit line is omitted entirely for a physical
-/// parameter rather than shown blank, so the list does not hint that a unit is
-/// editable where it is not.
+/// One parameter and its canonical unit as a card.
 class _ParamCard extends StatelessWidget {
   const _ParamCard({
     required this.name,

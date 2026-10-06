@@ -438,7 +438,7 @@ class ReportService implements ReportRepository {
       }
     }
     return ReportDoc(
-      filename: 'تقرير_المختبر_${type}_$period.pdf',
+      filename: 'تقرير_المعمل_${type}_$period.pdf',
       bytes: bytes,
       title: '${data['title']}',
     );

@@ -17,9 +17,7 @@ String paramEditorTitle(String parameterType, bool isNew) {
 /// The parameter editor, shared by both experiences.
 ///
 /// Same contract as `ConstantsEditor`: the fields and the save path are written
-/// once, and each variant supplies only the chrome through [actions]. A
-/// physical parameter is unit-less by design, so the unit field - and its
-/// suggestions popup - disappear entirely rather than being disabled.
+/// once, and each variant supplies only the chrome through [actions].
 class ParamEditor extends StatefulWidget {
   const ParamEditor({
     super.key,
@@ -51,8 +49,6 @@ class ParamEditor extends StatefulWidget {
   /// Builds the per-experience action row, handed this widget's [State].
   final Widget Function(BuildContext context, ParamEditorState state)? actions;
 
-  bool get _isChemical => parameterType == 'chemical';
-
   @override
   State<ParamEditor> createState() => ParamEditorState();
 }
@@ -62,7 +58,7 @@ class ParamEditorState extends State<ParamEditor> {
     text: '${widget.param?['parameter_name'] ?? ''}',
   );
   late final TextEditingController _unit = TextEditingController(
-    text: '${widget.param?['unit'] ?? '%'}',
+    text: '${widget.param?['unit'] ?? ''}',
   );
   bool _saving = false;
   String? _nameError;
@@ -76,14 +72,18 @@ class ParamEditorState extends State<ParamEditor> {
     super.dispose();
   }
 
-  /// De-duplicated unit symbols, so "mg" repeated across twenty materials
-  /// offers one suggestion rather than twenty.
-  List<String> get _unitSuggestions {
+  List<String> get _unitOptions {
     final seen = <String>{};
     final out = <String>[];
     for (final u in widget.unitOptions ?? []) {
       final s = '${u['symbol'] ?? ''}'.trim();
       if (s.isNotEmpty && seen.add(s.toLowerCase())) out.add(s);
+    }
+    final current = _unit.text.trim();
+    if (widget.param != null &&
+        current.isNotEmpty &&
+        seen.add(current.toLowerCase())) {
+      out.add(current);
     }
     return out;
   }
@@ -99,7 +99,7 @@ class ParamEditorState extends State<ParamEditor> {
     if (_saving) return;
     setState(() => _saving = true);
     try {
-      await widget.onSubmit(name, widget._isChemical ? _unit.text.trim() : '');
+      await widget.onSubmit(name, _unit.text.trim());
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
       setState(() => _saving = false);
@@ -125,32 +125,27 @@ class ParamEditorState extends State<ParamEditor> {
             errorText: _nameError,
           ),
         ),
-        if (widget._isChemical) ...[
-          const SizedBox(height: AppSpacing.md),
-          TextField(
-            controller: _unit,
-            decoration: InputDecoration(
-              labelText: AppText.t('الوحدة', 'Unit'),
-              isDense: true,
-              hintText: '%',
-              border: const OutlineInputBorder(),
-              suffixIcon: _unitSuggestions.isEmpty
-                  ? null
-                  : PopupMenuButton<String>(
-                      tooltip: AppText.t(
-                        'اقتراحات الوحدات',
-                        'Unit suggestions',
-                      ),
-                      onSelected: (v) => setState(() => _unit.text = v),
-                      itemBuilder: (_) => [
-                        for (final u in _unitSuggestions)
-                          PopupMenuItem(value: u, child: Text(u)),
-                      ],
-                      icon: Icon(Icons.arrow_drop_down, size: 18.r),
-                    ),
-            ),
+        const SizedBox(height: AppSpacing.md),
+        DropdownButtonFormField<String>(
+          initialValue: _unitOptions.contains(_unit.text.trim())
+              ? _unit.text.trim()
+              : '',
+          isExpanded: true,
+          decoration: InputDecoration(
+            labelText: AppText.t('الوحدة المرجعية', 'Reference unit'),
+            isDense: true,
+            border: const OutlineInputBorder(),
           ),
-        ],
+          items: [
+            DropdownMenuItem(
+              value: '',
+              child: Text(AppText.t('بلا وحدة', 'No unit')),
+            ),
+            for (final unit in _unitOptions)
+              DropdownMenuItem(value: unit, child: Text(unit)),
+          ],
+          onChanged: (value) => setState(() => _unit.text = value ?? ''),
+        ),
         if (actions != null) ...[
           const SizedBox(height: AppSpacing.md),
           actions,

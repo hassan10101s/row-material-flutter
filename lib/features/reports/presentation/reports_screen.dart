@@ -8,6 +8,7 @@ import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/feedback/app_feedback_export.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../design_system/widgets/app_date_field.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
 import 'cubit/reports_cubit.dart';
@@ -110,17 +111,14 @@ class _ReportsScreenState extends State<ReportsScreen> {
               icon: Icons.today,
               title: AppText.t('تقرير اليومي', 'Daily report'),
               children: [
-                TextField(
+                AppDateField(
                   controller: _date,
+                  label: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'),
                   onChanged: (_) {
                     if (_dateError == null) return;
                     setState(() => _dateError = null);
                   },
-                  decoration: InputDecoration(
-                    labelText: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'),
-                    isDense: true,
-                    errorText: _dateError,
-                  ),
+                  errorText: _dateError,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppButton(

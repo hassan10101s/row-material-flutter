@@ -7,10 +7,16 @@ import 'package:go_router/go_router.dart';
 import '../app/auth_gate.dart';
 import '../core/auth/app_session.dart';
 import '../core/auth/permissions.dart';
+import '../core/locale/locale_service.dart';
+import '../core/network/connectivity_service.dart';
+import '../core/sync/sync_metadata.dart';
+import '../core/sync/sync_queue.dart';
+import '../core/theme/theme_service.dart';
 import '../design_system/animations/app_animations.dart';
+import '../di/platform_ports.dart';
+import '../di/service_locator.dart';
 import '../features/audit/presentation/audit_controller.dart';
 import '../features/audit/presentation/audit_screen.dart';
-import '../di/service_locator.dart';
 import '../features/auth/domain/auth_repository.dart';
 import '../features/auth/presentation/cubit/create_organization_cubit.dart';
 import '../features/auth/presentation/cubit/login_cubit.dart';
@@ -25,17 +31,34 @@ import '../features/dashboard/presentation/dashboard_screen.dart';
 import '../features/inspections/domain/inspection_repository.dart';
 import '../features/inspections/presentation/cubit/inspection_form_cubit.dart';
 import '../features/inspections/presentation/cubit/inspections_cubit.dart';
+import '../features/inspections/presentation/inspection_center_screen.dart';
 import '../features/inspections/presentation/inspection_form_screen.dart';
-import '../features/inspections/presentation/inspections_screen.dart';
 import '../features/lab/presentation/cubit/lab_cubit.dart';
 import '../features/lab/presentation/lab_screen.dart';
 import '../features/organizations/domain/organization_repository.dart';
+import '../features/qc_manager/presentation/cubit/qc_goal_detail_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_goals_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_inspection_sheet_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_inspections_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_ncr_cubit.dart';
+import '../features/qc_manager/presentation/qc_goal_detail_screen.dart';
+import '../features/qc_manager/presentation/cubit/qc_sops_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_templates_cubit.dart';
+import '../features/qc_manager/presentation/qc_goals_screen.dart';
+import '../features/qc_manager/presentation/qc_inspection_sheet_screen.dart';
+import '../features/qc_manager/presentation/qc_inspections_screen.dart';
+import '../features/qc_manager/presentation/qc_ncr_dashboard_screen.dart';
+import '../features/qc_manager/presentation/qc_ncr_detail_screen.dart';
+import '../features/qc_manager/presentation/qc_ncr_list_screen.dart';
+import '../features/qc_manager/presentation/qc_management_screen.dart';
+import '../features/qc_manager/presentation/qc_sops_screen.dart';
+import '../features/qc_manager/presentation/qc_templates_screen.dart';
 import '../features/members/presentation/members_screen.dart';
 import '../features/reference/domain/reference_repository.dart';
 import '../features/reference/presentation/reference_screen.dart';
 import '../features/reports/domain/report_repository.dart';
 import '../features/reports/presentation/cubit/reports_cubit.dart';
-import '../features/reports/presentation/reports_screen.dart';
+import '../features/settings/domain/export_root_service.dart';
 import '../features/settings/presentation/settings_screen.dart';
 import '../features/shell/presentation/app_shell.dart';
 import '../features/sync/presentation/sync_screen.dart';
@@ -55,6 +78,38 @@ abstract final class AppRoutes {
   static const String members = '/members';
   static const String sync = '/sync';
   static const String audit = '/audit';
+
+  /// QC Manager (plan V6_ENHANCED §22.7, §12.2).
+  static const String qcNcr = '/qc-ncr';
+  static const String qcManagement = '/quality-management';
+
+  /// The table behind the dashboard. Not named by the plan, which gives one path
+  /// for the whole report; the dashboard and the table are separate screens
+  /// sharing one filter scope, so they need separate routes to push between.
+  static const String qcNcrList = '/qc-ncr/list';
+  static const String qcNcrDetail = '/qc-ncr/detail';
+
+  /// The inspection register, and one executed sheet in full.
+  ///
+  /// The sheet resolves its own cubit rather than borrowing the register's:
+  /// answering an item rewrites the score, so the register's filtered page and
+  /// the sheet's tree are two different queries over two different tables.
+  static const String qcInspections = '/qc-inspections';
+  static const String qcInspectionDetail = '/qc-inspections/detail';
+
+  /// Quality goals: the register, and one goal in full.
+  static const String qcGoals = '/qc-goals';
+  static const String qcGoalDetail = '/qc-goals/detail';
+
+  /// The SOP register. One route, not two: a procedure's detail needs the
+  /// register's cubit to stay in sync behind it, so it is pushed onto the same
+  /// navigator stack rather than resolved as an independent route.
+  static const String qcSops = '/qc-sops';
+
+  /// The checklist template library. Same single-route shape as the SOP
+  /// register: publishing a checklist must land in the list behind it, and a
+  /// separate detail route would resolve its own cubit and go stale.
+  static const String qcTemplates = '/qc-templates';
 }
 
 /// Rewritten guard (plan §8.1). It is a pure function of [AuthState]:
@@ -109,7 +164,21 @@ class AppRouter {
         ),
       ),
       ShellRoute(
-        builder: (context, state, child) => AppShell(child: child),
+        builder: (context, state, child) => AppShell(
+          // The shell is the one widget that needs the whole graph, so the
+          // router - the app's composition root - is where it is resolved.
+          // Everything below the shell receives its dependencies as parameters.
+          gate: _gate,
+          locale: getIt<LocaleService>(),
+          theme: getIt<ThemeService>(),
+          syncQueue: getIt<SyncQueue>(),
+          syncMetadata: getIt<SyncMetadata>(),
+          connectivity: getIt<ConnectivityService>(),
+          exportRoot: getIt<ExportRootService>(),
+          fileDelivery: fileDelivery(),
+          folderPicker: folderPicker(),
+          child: child,
+        ),
         routes: [
           GoRoute(
             path: AppRoutes.dashboard,
@@ -146,24 +215,43 @@ class AppRouter {
           ),
           GoRoute(
             path: AppRoutes.inspections,
-            pageBuilder: (c, s) => AppPage<InspectionsScreen>(
+            pageBuilder: (c, s) => AppPage<InspectionCenterScreen>(
               name: s.uri.path,
-              builder: (c) => BlocProvider(
-                create: (c) => InspectionsCubit(
-                  repo: getIt<InspectionRepository>(),
-                  reports: getIt<ReportRepository>(),
-                )..load(),
-                child: const InspectionsScreen(),
+              builder: (c) => MultiBlocProvider(
+                providers: [
+                  BlocProvider(
+                    create: (c) => InspectionsCubit(
+                      repo: getIt<InspectionRepository>(),
+                      reports: getIt<ReportRepository>(),
+                    )..load(),
+                  ),
+                  BlocProvider(
+                    create: (c) =>
+                        ReportsCubit(repo: getIt<ReportRepository>()),
+                  ),
+                ],
+                child: const InspectionCenterScreen(),
               ),
             ),
           ),
           GoRoute(
             path: AppRoutes.reports,
-            pageBuilder: (c, s) => AppPage<ReportsScreen>(
+            pageBuilder: (c, s) => AppPage<InspectionCenterScreen>(
               name: s.uri.path,
-              builder: (c) => BlocProvider(
-                create: (c) => ReportsCubit(repo: getIt<ReportRepository>()),
-                child: const ReportsScreen(),
+              builder: (c) => MultiBlocProvider(
+                providers: [
+                  BlocProvider(
+                    create: (c) => InspectionsCubit(
+                      repo: getIt<InspectionRepository>(),
+                      reports: getIt<ReportRepository>(),
+                    )..load(),
+                  ),
+                  BlocProvider(
+                    create: (c) =>
+                        ReportsCubit(repo: getIt<ReportRepository>()),
+                  ),
+                ],
+                child: const InspectionCenterScreen(initialReportsTab: true),
               ),
             ),
           ),
@@ -213,6 +301,147 @@ class AppRouter {
               // Members, so the shell badge deep-links into the section instead.
               builder: (c) => SettingsScreen(
                 initialTab: SettingsTab.fromKey(s.uri.queryParameters['tab']),
+              ),
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.qcManagement,
+            pageBuilder: (c, s) => AppPage<QcManagementScreen>(
+              name: s.uri.path,
+              builder: (c) => const QcManagementScreen(),
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.qcNcr,
+            pageBuilder: (c, s) => AppPage<QcNcrDashboardScreen>(
+              name: s.uri.path,
+              // `create` so the router's scope closes the cubit on pop; the
+              // cubit holds the active filter and page, and a leaked one would
+              // hand the next visitor a report already filtered for someone else.
+              builder: (context) => BlocProvider(
+                create: (_) => getIt<QcNcrCubit>()
+                  ..loadOptions()
+                  ..load(),
+                child: QcNcrDashboardScreen(
+                  onOpenList: () => context.push(AppRoutes.qcNcrList),
+                ),
+              ),
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.qcNcrList,
+            pageBuilder: (c, s) => AppPage<QcNcrListScreen>(
+              name: s.uri.path,
+              builder: (context) => BlocProvider(
+                create: (_) => getIt<QcNcrCubit>()
+                  ..loadOptions()
+                  ..load(),
+                child: QcNcrListScreen(
+                  onOpenFinding: (id) =>
+                      context.push('${AppRoutes.qcNcrDetail}?findingId=$id'),
+                ),
+              ),
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.qcNcrDetail,
+            pageBuilder: (c, s) => AppPage<QcNcrDetailScreen>(
+              name: s.uri.path,
+              builder: (context) {
+                final id = int.tryParse(
+                  s.uri.queryParameters['findingId'] ?? '',
+                );
+                return BlocProvider(
+                  create: (_) => getIt<QcNcrCubit>(),
+                  child: QcNcrDetailScreen(findingId: id),
+                );
+              },
+            ),
+          ),
+          // ── QC inspections (plan V6_ENHANCED P2) ─────────────────────────
+          GoRoute(
+            path: AppRoutes.qcInspections,
+            pageBuilder: (c, s) => AppPage<QcInspectionsScreen>(
+              name: s.uri.path,
+              // The filter scope and the paged rows live in the cubit, and the
+              // start form reuses it, so it is created per visit and closed by
+              // the router's scope on pop.
+              builder: (context) => BlocProvider(
+                create: (_) => getIt<QcInspectionsCubit>()..load(),
+                child: const QcInspectionsScreen(),
+              ),
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.qcInspectionDetail,
+            pageBuilder: (c, s) => AppPage<QcInspectionSheetScreen>(
+              name: s.uri.path,
+              builder: (context) {
+                final id = int.tryParse(
+                  s.uri.queryParameters['inspectionId'] ?? '',
+                );
+                if (id == null) {
+                  return const SizedBox.shrink();
+                }
+                return BlocProvider(
+                  create: (_) =>
+                      getIt<QcInspectionSheetCubit>(param1: id)..load(),
+                  child: const QcInspectionSheetScreen(),
+                );
+              },
+            ),
+          ),
+          // ── QC goals (plan V6_ENHANCED P6) ────────────────────────────────
+          GoRoute(
+            path: AppRoutes.qcGoals,
+            pageBuilder: (c, s) => AppPage<QcGoalsScreen>(
+              name: s.uri.path,
+              // The filter scope and the paged rows live in the cubit, so it is
+              // created per visit and closed by the router's scope on pop.
+              builder: (context) => BlocProvider(
+                create: (_) => getIt<QcGoalsCubit>()..load(),
+                child: const QcGoalsScreen(),
+              ),
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.qcGoalDetail,
+            pageBuilder: (c, s) => AppPage<QcGoalDetailScreen>(
+              name: s.uri.path,
+              builder: (context) {
+                final id = int.tryParse(s.uri.queryParameters['goalId'] ?? '');
+                if (id == null) {
+                  return const SizedBox.shrink();
+                }
+                return BlocProvider(
+                  create: (_) => getIt<QcGoalDetailCubit>(param1: id),
+                  child: const QcGoalDetailScreen(),
+                );
+              },
+            ),
+          ),
+          // ── QC SOPs (plan V6_ENHANCED P5) ────────────────────────────────
+          GoRoute(
+            path: AppRoutes.qcSops,
+            pageBuilder: (c, s) => AppPage<QcSopsScreen>(
+              name: s.uri.path,
+              // The register cubit carries the filter scope and is also what the
+              // detail screen pushes a lifecycle change through, so it is created
+              // per visit and closed with the route.
+              builder: (context) => BlocProvider(
+                create: (_) => getIt<QcSopsCubit>()..load(),
+                child: const QcSopsScreen(),
+              ),
+            ),
+          ),
+          // ── QC checklist templates (plan V6_ENHANCED P5) ───────────────────
+          GoRoute(
+            path: AppRoutes.qcTemplates,
+            pageBuilder: (c, s) => AppPage<QcTemplatesScreen>(
+              name: s.uri.path,
+              builder: (context) => BlocProvider(
+                create: (_) => getIt<QcTemplatesCubit>()..load(),
+                child: const QcTemplatesScreen(),
               ),
             ),
           ),
@@ -279,6 +508,24 @@ class AppRouter {
       case AppRoutes.inspectionNew:
         // A write form is never opened by a read-only device.
         if (!session.canWrite) return AppRoutes.dashboard;
+      case AppRoutes.qcNcr:
+      case AppRoutes.qcManagement:
+      case AppRoutes.qcNcrList:
+      case AppRoutes.qcNcrDetail:
+      case AppRoutes.qcInspections:
+      case AppRoutes.qcInspectionDetail:
+      case AppRoutes.qcGoals:
+      case AppRoutes.qcGoalDetail:
+      case AppRoutes.qcSops:
+      case AppRoutes.qcTemplates:
+        // The NCR report, the goal register, the SOP register and the checklist
+        // template library are all QC
+        // destinations gated on `qcRead`: the pages themselves are readable, and
+        // the write paths (create, edit, complete, publish) are refused by the
+        // repository facade when the session lacks `qcWrite`/`qcApprove`.
+        if (!session.permissions.contains(Permission.qcRead)) {
+          return AppRoutes.dashboard;
+        }
     }
     return null;
   }

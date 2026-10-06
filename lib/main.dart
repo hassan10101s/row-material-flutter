@@ -14,6 +14,7 @@ import 'core/responsive/layout_spec.dart';
 import 'core/responsive/responsive_scope.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/theme_service.dart';
+import 'design_system/animations/app_animations.dart';
 import 'design_system/tokens/app_colors.dart';
 import 'design_system/tokens/app_text_theme.dart';
 import 'di/service_locator.dart';
@@ -31,6 +32,10 @@ Future<void> main() async {
   final localeService = getIt<LocaleService>();
   await localeService.init();
   AppText.arabic = localeService.isArabic;
+  AppPageRoute.appearanceChanges = Listenable.merge([
+    themeService,
+    localeService,
+  ]);
 
   final router = AppRouter(authGate: getIt<AuthGate>()).router;
   runApp(MaterialLabApp(router: router));

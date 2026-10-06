@@ -104,7 +104,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _body() => switch (_tab) {
     SettingsTab.general => BlocProvider(
-      create: (c) => GeneralSettingsCubit(repo: getIt<SettingsRepository>())..load(),
+      create: (c) =>
+          GeneralSettingsCubit(repo: getIt<SettingsRepository>())..load(),
       child: const _GeneralPanel(),
     ),
     SettingsTab.database => BlocProvider(
@@ -238,7 +239,10 @@ class _GeneralPanelState extends State<_GeneralPanel> {
     final current = context.read<GeneralSettingsCubit>().state.exportRootPath;
     final picked = await picker.pick(
       startDirectory: current.isEmpty ? null : current,
-      dialogTitle: AppText.t('اختر مجلد حفظ التقارير', 'Choose reports save folder'),
+      dialogTitle: AppText.t(
+        'اختر مجلد حفظ التقارير',
+        'Choose reports save folder',
+      ),
     );
     if (picked == null || !mounted) return;
     try {
@@ -265,7 +269,9 @@ class _GeneralPanelState extends State<_GeneralPanel> {
       } catch (_) {
         if (mounted) {
           AppFeedback.error(
-              context, AppText.t('تعذر فتح المجلد', 'Could not open the folder'));
+            context,
+            AppText.t('تعذر فتح المجلد', 'Could not open the folder'),
+          );
         }
         return;
       }
@@ -384,14 +390,8 @@ class _AppearanceSection extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             SegmentedButton<Locale>(
               segments: const [
-                ButtonSegment(
-                  value: Locale('ar'),
-                  label: Text('العربية'),
-                ),
-                ButtonSegment(
-                  value: Locale('en'),
-                  label: Text('English'),
-                ),
+                ButtonSegment(value: Locale('ar'), label: Text('العربية')),
+                ButtonSegment(value: Locale('en'), label: Text('English')),
               ],
               selected: {localeService.locale},
               showSelectedIcon: false,
@@ -531,10 +531,7 @@ class _ExportPathSection extends StatelessWidget {
                   'غير محدد — سيتم الحفظ في مجلد التطبيق الافتراضي',
                   'Not set — reports are saved to the app default folder',
                 ),
-          style: TextStyle(
-            fontSize: 13.spMax,
-            color: AppColors.textMuted,
-          ),
+          style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
         ),
         // Explain the fixed location instead of leaving an unexplained missing
         // button: on mobile the location is a deliberate choice, not a setting
@@ -547,16 +544,18 @@ class _ExportPathSection extends StatelessWidget {
                 'يُحفظ في مساحة التطبيق على هذا الجهاز، ويمكن مشاركته عند إنشاء التقرير',
                 'On this device reports are saved inside the app and can be shared when created',
               ),
-              style: TextStyle(
-                fontSize: 12.spMax,
-                color: AppColors.textMuted,
-              ),
+              style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
             ),
           ),
         if (canPick || canOpen)
           Padding(
             padding: const EdgeInsets.only(top: AppSpacing.sm),
-            child: Row(
+            // A `Wrap` rather than a `Row`: two labelled Arabic buttons do not
+            // fit side by side on a 400dp phone, and a Row would clip the second
+            // one instead of dropping it to the next line.
+            child: Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
               children: [
                 if (canPick)
                   AppButton(
@@ -564,7 +563,6 @@ class _ExportPathSection extends StatelessWidget {
                     icon: Icon(Icons.folder_open_outlined, size: 16.r),
                     onPressed: onPick,
                   ),
-                if (canPick && canOpen) const SizedBox(width: AppSpacing.sm),
                 if (canOpen)
                   AppButton(
                     label: 'فتح',
@@ -767,14 +765,30 @@ class _MembersReadOnlyNote extends StatelessWidget {
   }
 }
 
+/// A section body: a card whose height is bounded by the tab area.
+///
+/// The sections are longer than the window they live in - General alone carries
+/// a field, a theme picker, a logo picker and a folder picker - so the column
+/// has to scroll rather than overflow. `Expanded` gives the panel a bounded
+/// height, which is what lets the scroll view decide between "fits" and
+/// "scrolls".
 class _Panel extends StatelessWidget {
   final List<Widget> children;
   const _Panel({required this.children});
   @override
   Widget build(BuildContext context) {
+    // The keyboard closes over the bottom of the panel: the department field
+    // sits above the save button, so without the inset the button ends up
+    // underneath the keyboard with no way to scroll it clear.
+    final keyboard = MediaQuery.of(context).viewInsets.bottom;
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
+      child: SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+          20,
+          20,
+          20,
+          20 + (keyboard > 0 ? keyboard + AppSpacing.md : 0),
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: children,

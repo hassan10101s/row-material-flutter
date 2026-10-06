@@ -7,6 +7,7 @@ import 'package:equatable/equatable.dart';
 class InspectionDetailState extends Equatable {
   final Map<String, dynamic>? inspection;
   final List<Map<String, dynamic>> history;
+  final List<Map<String, dynamic>> chemicalAnalyses;
   final bool loading;
   final String? error;
   final String busy;
@@ -14,6 +15,7 @@ class InspectionDetailState extends Equatable {
   const InspectionDetailState({
     this.inspection,
     this.history = const [],
+    this.chemicalAnalyses = const [],
     this.loading = true,
     this.error,
     this.busy = '',
@@ -22,6 +24,7 @@ class InspectionDetailState extends Equatable {
   InspectionDetailState copyWith({
     Map<String, dynamic>? inspection,
     List<Map<String, dynamic>>? history,
+    List<Map<String, dynamic>>? chemicalAnalyses,
     bool? loading,
     String? error,
     String? busy,
@@ -29,11 +32,19 @@ class InspectionDetailState extends Equatable {
       InspectionDetailState(
         inspection: inspection ?? this.inspection,
         history: history ?? this.history,
+        chemicalAnalyses: chemicalAnalyses ?? this.chemicalAnalyses,
         loading: loading ?? this.loading,
         error: error ?? this.error,
         busy: busy ?? this.busy,
       );
 
   @override
-  List<Object?> get props => [inspection, history, loading, error, busy];
+  List<Object?> get props => [
+    inspection,
+    history,
+    chemicalAnalyses,
+    loading,
+    error,
+    busy,
+  ];
 }

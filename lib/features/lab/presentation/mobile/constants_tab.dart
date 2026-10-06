@@ -6,6 +6,7 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
+import '../../../../design_system/animations/app_animations.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_delete_confirm.dart';
@@ -44,7 +45,7 @@ class MobileConstantsTab extends StatelessWidget {
   ]) async {
     final cubit = context.read<ConstantsCubit>();
     final saved = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
+      appMaterialPageRoute<bool>(
         // The cubit is captured here, not read inside the route: a pushed route
         // is built under the *root* navigator, so a `context.read` there would
         // look for the provider above the navigator and find nothing.

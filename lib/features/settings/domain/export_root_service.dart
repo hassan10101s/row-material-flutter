@@ -18,7 +18,8 @@ class ExportRootService {
 
   /// The configured export folder, or null when not set.
   Future<String?> configuredPath() async {
-    final value = (await repo.getSettingValue('export_root_path'))?.trim() ?? '';
+    final value =
+        (await repo.getSettingValue('export_root_path'))?.trim() ?? '';
     return value.isEmpty ? null : value;
   }
 
@@ -37,7 +38,9 @@ class ExportRootService {
       return dir;
     }
     if (paths == null) {
-      throw StateError('No AppPaths available to resolve the default export root');
+      throw StateError(
+        'No AppPaths available to resolve the default export root',
+      );
     }
     return paths!.exportsRoot();
   }

@@ -20,7 +20,7 @@ class ParamsCubit extends AppCubit<ParamsState> {
     : this(repo: repo, parameterType: 'chemical', loadUnits: true);
 
   ParamsCubit.physical({required ReferenceRepository repo})
-    : this(repo: repo, parameterType: 'physical', loadUnits: false);
+    : this(repo: repo, parameterType: 'physical', loadUnits: true);
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));

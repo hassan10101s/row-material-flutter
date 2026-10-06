@@ -211,23 +211,12 @@ class _MembersScreenState extends State<MembersScreen> {
                   labelText: 'الدور',
                   isDense: true,
                 ),
-                items: const [
-                  DropdownMenuItem(
-                    value: AppRoles.admin,
-                    child: Text('مدير المؤسسة'),
-                  ),
-                  DropdownMenuItem(
-                    value: AppRoles.qualityManager,
-                    child: Text('مدير الجودة'),
-                  ),
-                  DropdownMenuItem(
-                    value: AppRoles.lab,
-                    child: Text('فني مختبر'),
-                  ),
-                  DropdownMenuItem(
-                    value: AppRoles.viewer,
-                    child: Text('اطّلاع فقط'),
-                  ),
+                items: [
+                  for (final role in AppRoles.all)
+                    DropdownMenuItem(
+                      value: role,
+                      child: Text(AppRoles.label(role)),
+                    ),
                 ],
                 onChanged: (v) => setState(() => _role = v ?? AppRoles.lab),
               ),
@@ -354,20 +343,9 @@ class _MemberTile extends StatelessWidget {
             PopupMenuButton<String>(
               tooltip: 'تغيير الدور',
               onSelected: onRole,
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: AppRoles.admin,
-                  child: Text('مدير المؤسسة'),
-                ),
-                PopupMenuItem(
-                  value: AppRoles.qualityManager,
-                  child: Text('مدير الجودة'),
-                ),
-                PopupMenuItem(value: AppRoles.lab, child: Text('فني مختبر')),
-                PopupMenuItem(
-                  value: AppRoles.viewer,
-                  child: Text('اطّلاع فقط'),
-                ),
+              itemBuilder: (_) => [
+                for (final role in AppRoles.all)
+                  PopupMenuItem(value: role, child: Text(AppRoles.label(role))),
               ],
               icon: const Icon(Icons.manage_accounts_outlined, size: 20),
             ),

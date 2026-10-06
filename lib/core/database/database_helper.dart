@@ -237,7 +237,8 @@ class DatabaseHelper {
   }
 
   /// Notified after [close] - the cached connection is gone.
-  void onDatabaseClosed(void Function() listener) => _closeListeners.add(listener);
+  void onDatabaseClosed(void Function() listener) =>
+      _closeListeners.add(listener);
 
   final List<void Function()> _closeListeners = [];
 
@@ -384,7 +385,9 @@ class DatabaseHelper {
         imported_at TEXT NOT NULL
       )
     ''');
-    await db.execute('CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+    );
     await db.execute('''
       CREATE TABLE IF NOT EXISTS lab_products (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -578,6 +581,8 @@ class DatabaseHelper {
       )
     ''');
 
+    // QC Manager tables and their indexes are guaranteed by
+    // `_runLegacyGuarantees`, which runs on every open - see the note there.
     await _createIndexes(db);
     await _createSyncTables(db);
     await _runLegacyGuarantees(db);
@@ -685,9 +690,11 @@ class DatabaseHelper {
       )
     ''');
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id, id)');
+      'CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity_type, entity_id, id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(occurred_at DESC, id DESC)');
+      'CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(occurred_at DESC, id DESC)',
+    );
   }
 
   /// Tables mirrored to Firestore and the columns that make that possible
@@ -713,54 +720,404 @@ class DatabaseHelper {
 
   Future<void> _createIndexes(Database db) async {
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_consumption_log_sample_test ON lab_consumption_log(sample_test_id)');
+      'CREATE INDEX IF NOT EXISTS idx_consumption_log_sample_test ON lab_consumption_log(sample_test_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_inspections_created_at_desc ON inspections(created_at DESC, id DESC)');
+      'CREATE INDEX IF NOT EXISTS idx_inspections_created_at_desc ON inspections(created_at DESC, id DESC)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_inspections_date_created_desc ON inspections(inspection_date, created_at DESC, id DESC)');
+      'CREATE INDEX IF NOT EXISTS idx_inspections_date_created_desc ON inspections(inspection_date, created_at DESC, id DESC)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_inspections_inspection_date ON inspections(inspection_date)');
+      'CREATE INDEX IF NOT EXISTS idx_inspections_inspection_date ON inspections(inspection_date)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_inspections_material_code_date ON inspections(material_code, inspection_date)');
+      'CREATE INDEX IF NOT EXISTS idx_inspections_material_code_date ON inspections(material_code, inspection_date)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_inspections_material_id ON inspections(material_id)');
+      'CREATE INDEX IF NOT EXISTS idx_inspections_material_id ON inspections(material_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_inspections_status ON inspections(decision_status)');
+      'CREATE INDEX IF NOT EXISTS idx_inspections_status ON inspections(decision_status)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_inspections_supplier ON inspections(supplier)');
+      'CREATE INDEX IF NOT EXISTS idx_inspections_supplier ON inspections(supplier)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_analysis ON lab_sample_tests(worksheet_row_id, analysis_id)');
+      'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_analysis ON lab_sample_tests(worksheet_row_id, analysis_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_entry_code ON lab_sample_tests(entry_code)');
+      'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_entry_code ON lab_sample_tests(entry_code)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_row ON lab_sample_tests(worksheet_row_id)');
+      'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_row ON lab_sample_tests(worksheet_row_id)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_status_history_inspection_version ON inspection_status_history(inspection_id, version DESC, id DESC)');
+      'CREATE INDEX IF NOT EXISTS idx_status_history_inspection_version ON inspection_status_history(inspection_id, version DESC, id DESC)',
+    );
     await db.execute(
-        'CREATE INDEX IF NOT EXISTS idx_stock_adjustments_adj_at ON lab_stock_adjustments(adjusted_at DESC, id DESC)');
+      'CREATE INDEX IF NOT EXISTS idx_stock_adjustments_adj_at ON lab_stock_adjustments(adjusted_at DESC, id DESC)',
+    );
+
+    // QC Manager indexes live in `_createQcIndexes`, alongside the tables they
+    // cover, so that a single call guarantees both. They are created after the
+    // tables by `_runLegacyGuarantees` rather than from here.
+  }
+
+  /// Indexes for the QC Manager tables.
+  ///
+  /// Split from [_createIndexes] on purpose. SQLite resolves an index's columns
+  /// when the index is created, so a QC index can only be created once its table
+  /// exists - and because the schema version is pinned at 1, the QC tables have
+  /// to be guaranteed on *every* open, not just `onCreate`. Keeping the tables
+  /// and their indexes in one method makes it impossible to create one without
+  /// the other, which is how `idx_qc_insps_date` came to reference an `id`
+  /// column that `qc_inspections` does not have.
+  ///
+  /// Every statement is `IF NOT EXISTS`, so re-running this on each open costs
+  /// a schema lookup and nothing else.
+  Future<void> _createQcIndexes(Database db) async {
+    // SOP
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sops_code ON qc_sops(code)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sops_status ON qc_sops(status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sops_dept ON qc_sops(dept)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sops_active ON qc_sops(is_active)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sops_deleted ON qc_sops(deleted_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sop_revs_sop_rev ON qc_sop_revisions(sop_id, rev_no DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sop_reads_sop_rev ON qc_sop_reads(sop_id, rev_no)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sop_reads_user ON qc_sop_reads(user_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sop_audits_sop ON qc_sop_audits(sop_id, id)',
+    );
+    // Templates
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_templates_pub ON qc_templates(is_published, is_archived, deleted_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_templates_dept ON qc_templates(dept)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_sections_tpl ON qc_sections(template_id, order_index)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_items_tpl ON qc_items(template_id, order_index)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_items_sec ON qc_items(section_id, order_index)',
+    );
+    // Inspections - the reference index is what makes the NCR report's
+    // lot/batch drilldown cheap, so it is deliberately (lot_no, batch_no).
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_insps_tpl ON qc_inspections(template_id, status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_insps_status ON qc_inspections(status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_insps_date ON qc_inspections(inspection_date DESC, inspection_id DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_insps_ref ON qc_inspections(ref_type, ref_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_insps_inspector ON qc_inspections(inspector_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_insps_lot ON qc_inspections(lot_no, batch_no)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_insps_deleted ON qc_inspections(deleted_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_resps_insp ON qc_responses(inspection_id)',
+    );
+    await db.execute(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_qc_resps_insp_item ON qc_responses(inspection_id, item_id)',
+    );
+    // NC / CAPA - (status, severity) and (assigned_to, status) are the two
+    // columns the NCR dashboard groups and filters on.
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_findings_insp ON qc_findings_nc(inspection_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_findings_status_sev ON qc_findings_nc(status, severity)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_findings_due ON qc_findings_nc(due_date)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_findings_assigned ON qc_findings_nc(assigned_to, status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_findings_deleted ON qc_findings_nc(deleted_at)',
+    );
+    // The NCR report's default view filters on `created_at` and orders by
+    // `finding_id`, so the range scan the dashboard does on every load is
+    // covered here rather than by the `(status, severity)` index.
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_findings_created ON qc_findings_nc(created_at DESC, finding_id DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_capa_finding ON qc_capa(finding_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_capa_status ON qc_capa(status, due_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_capa_assigned ON qc_capa(assigned_to, status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_capa_due ON qc_capa(due_at)',
+    );
+    // Audit - the chain is walked in id order, hence the trailing `id`.
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_audits_entity ON qc_audits(entity_type, entity_id, id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_audits_at ON qc_audits(at DESC, id DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_audits_actor ON qc_audits(by_user_id, at DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_defcodes_active ON qc_defect_codes(is_active, category)',
+    );
+    // Goals
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goals_status ON qc_goals(status, due_date)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goals_dept ON qc_goals(dept)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goals_owner ON qc_goals(owner_id, status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goals_due ON qc_goals(due_date)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goals_deleted ON qc_goals(deleted_at)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goal_assign_goal ON qc_goal_assignments(goal_id, status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goal_assign_user ON qc_goal_assignments(assignee_id, status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goal_actions_goal ON qc_goal_actions(goal_id, status)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goal_kpis_goal ON qc_goal_kpis(goal_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goal_links_goal ON qc_goal_links(goal_id)',
+    );
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_goal_links_ref ON qc_goal_links(link_type, ref_id)',
+    );
+  }
+
+  /// Makes the QC audit tables append-only at the storage layer.
+  ///
+  /// The repository already refuses to update or delete these rows, and the
+  /// domain contract does not even declare a mutator - but a repository is Dart
+  /// code, and Dart code has bugs, back doors and one-shot maintenance scripts.
+  /// A `BEFORE UPDATE`/`BEFORE DELETE` trigger moves the guarantee down into
+  /// SQLite itself, so the only way to rewrite history is to drop the trigger,
+  /// which is a visible, deliberate act rather than a stray `db.update`.
+  ///
+  /// `RAISE(ABORT, ...)` rolls the statement back and surfaces the message;
+  /// `RAISE(IGNORE)` would silently succeed and be far more dangerous.
+  ///
+  /// None of the QC tables that reference these use `ON DELETE CASCADE` (deletes
+  /// are soft, via `deleted_at`), so blocking the delete cannot break a cascade.
+  Future<void> _createQcAuditGuards(Database db) async {
+    for (final table in const ['qc_audits', 'qc_sop_audits']) {
+      await db.execute('''
+        CREATE TRIGGER IF NOT EXISTS ${table}_block_update
+        BEFORE UPDATE ON $table
+        BEGIN
+          SELECT RAISE(ABORT, '$table is append-only: rows cannot be modified');
+        END
+      ''');
+      await db.execute('''
+        CREATE TRIGGER IF NOT EXISTS ${table}_block_delete
+        BEFORE DELETE ON $table
+        BEGIN
+          SELECT RAISE(ABORT, '$table is append-only: rows cannot be deleted');
+        END
+      ''');
+    }
   }
 
   /// Idempotent legacy-guard migrations matching sqlite_db.py pragmas/rules.
   Future<void> _runLegacyGuarantees(Database db) async {
     await _rebuildFieldChemicalLinks(db);
+
+    // QC Manager (plan V6 §5.2): tables, then the indexes over them.
+    //
+    // This runs on *every* open, and that is the point. The schema version is
+    // pinned at 1, so `onUpgrade` never fires and a `CREATE TABLE` added here
+    // alone would only ever reach a brand-new database - every user who already
+    // installed the app would keep a file with no `qc_goals`, and the first QC
+    // query would fail with "no such table". Putting the tables under the
+    // existing every-open guarantee is what makes the addition safe to ship
+    // without a version bump.
+    await _createQcTables(db);
+    await _createQcIndexes(db);
+    await _createQcAuditGuards(db);
+
+    // `qc_sop_revisions` was created without these two. `_createQcTables` uses
+    // `CREATE TABLE IF NOT EXISTS`, so it cannot add a column to a database that
+    // already has the table, and an existing install would keep the old shape.
+    // `publishSopRevision` writes `superseded_at` and the revision model carries
+    // `edited_by_name`, so without this the first publish on an upgraded install
+    // dies with "no such column".
+    await _ensureColumn(
+      db,
+      'qc_sop_revisions',
+      'superseded_at',
+      'superseded_at TEXT',
+    );
+    await _ensureColumn(
+      db,
+      'qc_sop_revisions',
+      'edited_by_name',
+      "edited_by_name TEXT NOT NULL DEFAULT ''",
+    );
+
+    // The same story for three more columns P3 writes but P1 never declared:
+    // `published_at` when an SOP is published, `deleted_at` on the two checklist
+    // child tables so a template edit can retire its old sections and items
+    // instead of destroying rows that a past inspection still points at, and
+    // `qc_goals.version` so a goal edit can be made the same way an SOP edit
+    // is: optimistic-concurrency checked instead of last-writer-wins.
+    await _ensureColumn(db, 'qc_sops', 'published_at', 'published_at TEXT');
+    await _ensureColumn(db, 'qc_sections', 'deleted_at', 'deleted_at TEXT');
+    await _ensureColumn(db, 'qc_items', 'deleted_at', 'deleted_at TEXT');
+    await _ensureColumn(
+      db,
+      'qc_goals',
+      'version',
+      'version INTEGER NOT NULL DEFAULT 1',
+    );
+    await _ensureColumn(
+      db,
+      'qc_goal_kpis',
+      'higher_is_better',
+      'higher_is_better INTEGER NOT NULL DEFAULT 1',
+    );
+
     await _ensureColumn(db, 'inspections', 'expiry_date', 'expiry_date TEXT');
-    await _ensureColumn(db, 'inspections', 'specialist_name', "specialist_name TEXT NOT NULL DEFAULT ''");
-    await _ensureColumn(db, 'inspections', 'decision_version', 'decision_version INTEGER NOT NULL DEFAULT 1');
-    await _ensureColumn(db, 'lab_analyses', 'formula_json', "formula_json TEXT NOT NULL DEFAULT '{}'");
+    await _ensureColumn(
+      db,
+      'inspections',
+      'specialist_name',
+      "specialist_name TEXT NOT NULL DEFAULT ''",
+    );
+    await _ensureColumn(
+      db,
+      'inspections',
+      'decision_version',
+      'decision_version INTEGER NOT NULL DEFAULT 1',
+    );
+    await _ensureColumn(
+      db,
+      'lab_analyses',
+      'formula_json',
+      "formula_json TEXT NOT NULL DEFAULT '{}'",
+    );
     await _ensureColumn(db, 'lab_constants', 'unit_dim', 'unit_dim TEXT');
-    await _ensureColumn(db, 'lab_sample_tests', 'entry_code', 'entry_code TEXT');
-    await _ensureColumn(db, 'lab_sample_tests', 'worksheet_row_id', 'worksheet_row_id INTEGER');
+    await _ensureColumn(
+      db,
+      'lab_sample_tests',
+      'entry_code',
+      'entry_code TEXT',
+    );
+    await _ensureColumn(
+      db,
+      'lab_sample_tests',
+      'worksheet_row_id',
+      'worksheet_row_id INTEGER',
+    );
     await _ensureColumn(db, 'lab_worksheet', 'entry_code', 'entry_code TEXT');
-    await _ensureColumn(db, 'lab_worksheet', 'status', "status TEXT NOT NULL DEFAULT 'ACTIVE'");
-    await _ensureColumn(db, 'lab_consumption_log', 'requested_qty', 'requested_qty REAL');
-    await _ensureColumn(db, 'lab_consumption_log', 'applied_qty', 'applied_qty REAL');
-    await _ensureColumn(db, 'lab_consumption_log', 'shortfall_qty', 'shortfall_qty REAL NOT NULL DEFAULT 0');
-    await _ensureColumn(db, 'lab_consumption_log', 'event_type', "event_type TEXT NOT NULL DEFAULT 'CONSUMPTION'");
-    await _ensureColumn(db, 'lab_consumption_log', 'reversal_of_log_id', 'reversal_of_log_id INTEGER');
-    await _ensureColumn(db, 'reference_materials', 'active', 'active INTEGER NOT NULL DEFAULT 1');
-    await _ensureColumn(db, 'lab_products', 'active', 'active INTEGER NOT NULL DEFAULT 1');
-    await _ensureColumn(db, 'lab_analyses', 'active', 'active INTEGER NOT NULL DEFAULT 1');
-    await _ensureColumn(db, 'lab_analyses', 'parameter_id', 'parameter_id INTEGER REFERENCES parameters(id)');
+    await _ensureColumn(
+      db,
+      'lab_worksheet',
+      'status',
+      "status TEXT NOT NULL DEFAULT 'ACTIVE'",
+    );
+    await _ensureColumn(
+      db,
+      'lab_consumption_log',
+      'requested_qty',
+      'requested_qty REAL',
+    );
+    await _ensureColumn(
+      db,
+      'lab_consumption_log',
+      'applied_qty',
+      'applied_qty REAL',
+    );
+    await _ensureColumn(
+      db,
+      'lab_consumption_log',
+      'shortfall_qty',
+      'shortfall_qty REAL NOT NULL DEFAULT 0',
+    );
+    await _ensureColumn(
+      db,
+      'lab_consumption_log',
+      'event_type',
+      "event_type TEXT NOT NULL DEFAULT 'CONSUMPTION'",
+    );
+    await _ensureColumn(
+      db,
+      'lab_consumption_log',
+      'reversal_of_log_id',
+      'reversal_of_log_id INTEGER',
+    );
+    await _ensureColumn(
+      db,
+      'reference_materials',
+      'active',
+      'active INTEGER NOT NULL DEFAULT 1',
+    );
+    await _ensureColumn(
+      db,
+      'lab_products',
+      'active',
+      'active INTEGER NOT NULL DEFAULT 1',
+    );
+    await _ensureColumn(
+      db,
+      'lab_analyses',
+      'active',
+      'active INTEGER NOT NULL DEFAULT 1',
+    );
+    await _ensureColumn(
+      db,
+      'lab_analyses',
+      'parameter_id',
+      'parameter_id INTEGER REFERENCES parameters(id)',
+    );
     await db.execute('''
       CREATE TABLE IF NOT EXISTS material_parameter_bounds (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -775,10 +1132,30 @@ class DatabaseHelper {
         UNIQUE(material_id, parameter_id)
       )
     ''');
-    await _ensureColumn(db, 'lab_inventory', 'category', "category TEXT CHECK(category IN ('liquid', 'powder'))");
-    await _ensureColumn(db, 'lab_field_chemical_links', 'kind', "kind TEXT NOT NULL DEFAULT 'link'");
-    await _ensureColumn(db, 'lab_field_chemical_links', 'fixed_value', 'fixed_value REAL');
-    await _ensureColumn(db, 'lab_field_chemical_links', 'list_values', 'list_values TEXT');
+    await _ensureColumn(
+      db,
+      'lab_inventory',
+      'category',
+      "category TEXT CHECK(category IN ('liquid', 'powder'))",
+    );
+    await _ensureColumn(
+      db,
+      'lab_field_chemical_links',
+      'kind',
+      "kind TEXT NOT NULL DEFAULT 'link'",
+    );
+    await _ensureColumn(
+      db,
+      'lab_field_chemical_links',
+      'fixed_value',
+      'fixed_value REAL',
+    );
+    await _ensureColumn(
+      db,
+      'lab_field_chemical_links',
+      'list_values',
+      'list_values TEXT',
+    );
 
     // V2: identity + sync bookkeeping.
     await _migrateUsersTable(db);
@@ -789,11 +1166,30 @@ class DatabaseHelper {
       // `inspection_status_history` already declared it; `decision_version`
       // on `inspections` is the *business* approval counter and stays
       // separate, so a normal edit does not look like a version bump.
-      await _ensureColumn(db, table, 'version', 'version INTEGER NOT NULL DEFAULT 1');
-      await _ensureColumn(db, table, 'remote_version', 'remote_version INTEGER NOT NULL DEFAULT 0');
-      await _ensureColumn(db, table, 'remote_synced_at', 'remote_synced_at TEXT');
       await _ensureColumn(
-          db, table, 'sync_state', "sync_state TEXT NOT NULL DEFAULT 'local'");
+        db,
+        table,
+        'version',
+        'version INTEGER NOT NULL DEFAULT 1',
+      );
+      await _ensureColumn(
+        db,
+        table,
+        'remote_version',
+        'remote_version INTEGER NOT NULL DEFAULT 0',
+      );
+      await _ensureColumn(
+        db,
+        table,
+        'remote_synced_at',
+        'remote_synced_at TEXT',
+      );
+      await _ensureColumn(
+        db,
+        table,
+        'sync_state',
+        "sync_state TEXT NOT NULL DEFAULT 'local'",
+      );
       await _ensureColumn(db, table, 'deleted_at', 'deleted_at TEXT');
     }
     await _ensureUnknownUserRow(db);
@@ -847,29 +1243,36 @@ class DatabaseHelper {
   /// and a database already stuck in that half-state is detected and finished
   /// rather than abandoned.
   Future<void> _rebuildFieldChemicalLinks(Database db) async {
-    final cols = await db.rawQuery('PRAGMA table_info(lab_field_chemical_links)');
+    final cols = await db.rawQuery(
+      'PRAGMA table_info(lab_field_chemical_links)',
+    );
     if (cols.isNotEmpty && cols.any((c) => c['name'] == 'kind')) return;
 
     // Nothing to carry over on a database that was never created.
     if (cols.isEmpty) {
       final orphan = await db.rawQuery(
-          'PRAGMA table_info(lab_field_chemical_links_old)');
+        'PRAGMA table_info(lab_field_chemical_links_old)',
+      );
       if (orphan.isEmpty) return;
     }
 
     await db.transaction((txn) async {
       if (await _tableExists(txn, 'lab_field_chemical_links')) {
-        await txn.execute('ALTER TABLE lab_field_chemical_links '
-            'RENAME TO lab_field_chemical_links_old');
+        await txn.execute(
+          'ALTER TABLE lab_field_chemical_links '
+          'RENAME TO lab_field_chemical_links_old',
+        );
       }
       await txn.execute(_fclTableV2);
 
       final legacy = await txn.rawQuery(
-          'PRAGMA table_info(lab_field_chemical_links_old)');
+        'PRAGMA table_info(lab_field_chemical_links_old)',
+      );
       if (legacy.isNotEmpty) {
         final present = legacy.map((c) => '${c['name']}').toSet();
-        final carried =
-            _fclCarriedColumns.where(present.contains).toList(growable: false);
+        final carried = _fclCarriedColumns
+            .where(present.contains)
+            .toList(growable: false);
         if (carried.isNotEmpty) {
           final columns = carried.join(', ');
           await txn.execute(
@@ -969,7 +1372,8 @@ class DatabaseHelper {
         await txn.execute('DROP TABLE users_legacy_v1');
       });
       final check = await db.rawQuery('PRAGMA integrity_check');
-      final ok = check.isNotEmpty && '${check.first.values.first}'.trim() == 'ok';
+      final ok =
+          check.isNotEmpty && '${check.first.values.first}'.trim() == 'ok';
       if (!ok) {
         throw StateError('integrity_check failed after users migration');
       }
@@ -979,7 +1383,12 @@ class DatabaseHelper {
     }
   }
 
-  Future<void> _ensureColumn(Database db, String table, String column, String spec) async {
+  Future<void> _ensureColumn(
+    Database db,
+    String table,
+    String column,
+    String spec,
+  ) async {
     final cols = await db.rawQuery('PRAGMA table_info($table)');
     if (cols.isEmpty) {
       // A table that is not there cannot gain a column, and `ALTER TABLE` on a
@@ -995,5 +1404,522 @@ class DatabaseHelper {
     if (!has) {
       await db.execute('ALTER TABLE $table ADD COLUMN $spec');
     }
+  }
+
+  /// QC Manager schema (plan V6 §5.2 + V6_ENHANCED §12.1).
+  ///
+  /// Split out of [_createSchema] purely for readability - same idempotent
+  /// `IF NOT EXISTS` contract, same call site, and `_runLegacyGuarantees` still
+  /// runs after it on every open.
+  ///
+  /// Three conventions differ from the rest of this file, and deliberately:
+  ///
+  /// * **Person columns are `TEXT` holding a Firebase uid**, not
+  ///   `INTEGER REFERENCES users(id)`. `inspections.created_by` needs the
+  ///   `INTEGER` form because the reserved `users.id = 0` row exists to absorb a
+  ///   foreign key arriving on a pull; nothing here is pulled from another
+  ///   device, and a uid is the only identifier a QC row written offline can be
+  ///   sure of.
+  /// * **Soft delete is `deleted_at TEXT`**, matching `InspectionRepo.aliveFilter`
+  ///   (`deleted_at IS NULL`) rather than the older `is_deleted` columns.
+  /// * **`qc_audits` / `qc_sop_audits` are append-only.** Nothing in this file can
+  ///   enforce that - it is a repository contract (V6_ENHANCED §21) - but they
+  ///   carry `immutable` plus the `prev_hash`/`hash` chain so that a tamper is
+  ///   detectable after the fact.
+  Future<void> _createQcTables(Database db) async {
+    // ── SOP Management ─────────────────────────────────────────────
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_sops (
+        sop_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        category TEXT,
+        dept TEXT,
+        site TEXT,
+        status TEXT NOT NULL CHECK(status IN ('Draft','Pending','Approved','Published','Obsolete','Archived')) DEFAULT 'Draft',
+        content_type TEXT CHECK(content_type IN ('text','file')) DEFAULT 'text',
+        content_text TEXT,
+        file_url TEXT,
+        file_name TEXT,
+        mime_type TEXT,
+        rev_no INTEGER NOT NULL DEFAULT 0,
+        effective_date TEXT,
+        published_at TEXT,
+        expiry_date TEXT,
+        is_active INTEGER NOT NULL DEFAULT 0,
+        deleted_at TEXT,
+        owner_id TEXT,
+        approver_id TEXT,
+        approved_at TEXT,
+        reviewed_at TEXT,
+        rejection_reason TEXT,
+        tags TEXT,
+        criticality TEXT CHECK(criticality IN ('Low','Medium','High','Critical')) DEFAULT 'Medium',
+        view_roles TEXT,
+        edit_roles TEXT,
+        approve_roles TEXT,
+        publish_roles TEXT,
+        requires_read_ack INTEGER NOT NULL DEFAULT 1,
+        read_ack_mandatory INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        version_hash TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_sop_revisions (
+        rev_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sop_id INTEGER NOT NULL,
+        rev_no INTEGER NOT NULL,
+        content_text TEXT,
+        file_url TEXT,
+        file_name TEXT,
+        mime_type TEXT,
+        change_reason TEXT NOT NULL,
+        edited_by TEXT,
+        edited_at TEXT NOT NULL,
+        diff_summary TEXT,
+        prev_rev_id_ref TEXT,
+        content_hash TEXT,
+        is_published_rev INTEGER NOT NULL DEFAULT 0,
+        edited_by_name TEXT NOT NULL DEFAULT '',
+        superseded_at TEXT,
+        FOREIGN KEY(sop_id) REFERENCES qc_sops(sop_id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_sop_reads (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sop_id INTEGER NOT NULL,
+        rev_no INTEGER NOT NULL,
+        user_id TEXT NOT NULL,
+        user_name TEXT,
+        read_at TEXT NOT NULL,
+        signature_base64 TEXT,
+        device_id TEXT,
+        ip_address TEXT,
+        geo TEXT,
+        ack_method TEXT CHECK(ack_method IN ('manual','signature','biometric')) DEFAULT 'manual',
+        FOREIGN KEY(sop_id) REFERENCES qc_sops(sop_id) ON DELETE CASCADE,
+        UNIQUE(sop_id, rev_no, user_id)
+      )
+    ''');
+    // Append-only, hash-chained (V6_ENHANCED §21).
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_sop_audits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sop_id INTEGER,
+        rev_no INTEGER,
+        action TEXT NOT NULL,
+        entity TEXT CHECK(entity IN ('SOP','SOP_REV','SOP_READ','APPROVAL')) DEFAULT 'SOP',
+        by_user_id TEXT,
+        by_user_name TEXT,
+        at TEXT NOT NULL,
+        meta_json TEXT,
+        prev_hash TEXT,
+        hash TEXT,
+        immutable INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+
+    // ── Checklist Templates ────────────────────────────────────────
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_templates (
+        template_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        code TEXT UNIQUE,
+        type TEXT CHECK(type IN ('Incoming','InProcess','Final','Packing','Process','RawMaterial','FinishedGoods','Calibration','Other')) DEFAULT 'Other',
+        dept TEXT,
+        site TEXT,
+        category TEXT,
+        description TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        is_published INTEGER NOT NULL DEFAULT 0,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        deleted_at TEXT,
+        requires_approval_on_submit INTEGER NOT NULL DEFAULT 0,
+        allow_na INTEGER NOT NULL DEFAULT 1,
+        enforce_evidence_on_fail INTEGER NOT NULL DEFAULT 1,
+        block_submit_if_critical_fail INTEGER NOT NULL DEFAULT 1,
+        owner_id TEXT,
+        published_by TEXT,
+        published_at TEXT,
+        effective_date TEXT,
+        expiry_date TEXT,
+        tags TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        revision_note TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_sections (
+        section_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        order_index INTEGER NOT NULL DEFAULT 0,
+        is_collapsible INTEGER NOT NULL DEFAULT 1,
+        required_all INTEGER NOT NULL DEFAULT 0,
+        conditional_rule_json TEXT,
+        deleted_at TEXT,
+        FOREIGN KEY(template_id) REFERENCES qc_templates(template_id) ON DELETE CASCADE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_items (
+        item_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        section_id INTEGER NOT NULL,
+        template_id INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        item_type TEXT CHECK(item_type IN ('bool','passfail','na','text','number','date','dropdown','multiselect','photo','signature')) DEFAULT 'passfail',
+        order_index INTEGER NOT NULL DEFAULT 0,
+        required INTEGER NOT NULL DEFAULT 1,
+        allow_na INTEGER NOT NULL DEFAULT 1,
+        is_critical INTEGER NOT NULL DEFAULT 0,
+        require_evidence_if_fail INTEGER NOT NULL DEFAULT 1,
+        require_evidence_if_value INTEGER NOT NULL DEFAULT 0,
+        default_value TEXT,
+        options_json TEXT,
+        unit TEXT,
+        min_value REAL,
+        max_value REAL,
+        tolerance REAL,
+        tolerance_type TEXT CHECK(tolerance_type IN ('abs','pct')) DEFAULT 'abs',
+        validation_rule_json TEXT,
+        conditional_show_json TEXT,
+        fail_trigger_json TEXT,
+        help_text TEXT,
+        defect_code TEXT,
+        deleted_at TEXT,
+        FOREIGN KEY(section_id) REFERENCES qc_sections(section_id) ON DELETE CASCADE,
+        FOREIGN KEY(template_id) REFERENCES qc_templates(template_id) ON DELETE CASCADE
+      )
+    ''');
+
+    // ── Inspection Execution ───────────────────────────────────────
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_inspections (
+        inspection_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        template_id INTEGER NOT NULL,
+        template_version INTEGER NOT NULL DEFAULT 1,
+        ref_type TEXT CHECK(ref_type IN ('Job','Batch','Lot','PO','GRN','Material','WIP','FG','Order','Other')) DEFAULT 'Other',
+        ref_id TEXT,
+        lot_no TEXT,
+        batch_no TEXT,
+        po_no TEXT,
+        grn_no TEXT,
+        qty_inspected REAL,
+        qty_unit TEXT,
+        dept TEXT,
+        site TEXT,
+        location TEXT,
+        line TEXT,
+        work_center TEXT,
+        status TEXT CHECK(status IN ('InProgress','Submitted','Reviewed','Approved','Rejected','Closed')) DEFAULT 'InProgress',
+        result_overall TEXT CHECK(result_overall IN ('Pass','Conditional','Fail','Pending')) DEFAULT 'Pending',
+        score_pct REAL,
+        has_nc INTEGER NOT NULL DEFAULT 0,
+        nc_count INTEGER NOT NULL DEFAULT 0,
+        critical_nc_count INTEGER NOT NULL DEFAULT 0,
+        major_nc_count INTEGER NOT NULL DEFAULT 0,
+        minor_nc_count INTEGER NOT NULL DEFAULT 0,
+        inspector_id TEXT,
+        inspector_name TEXT,
+        reviewer_id TEXT,
+        reviewer_name TEXT,
+        approved_by TEXT,
+        approved_by_name TEXT,
+        submitted_at TEXT,
+        reviewed_at TEXT,
+        approved_at TEXT,
+        rejected_at TEXT,
+        closed_at TEXT,
+        inspection_date TEXT NOT NULL,
+        start_at TEXT,
+        end_at TEXT,
+        shift TEXT,
+        remarks TEXT,
+        review_comments TEXT,
+        rejection_reason TEXT,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        version INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_responses (
+        resp_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inspection_id INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        section_id INTEGER,
+        result TEXT CHECK(result IN ('Pass','Fail','NA')) NOT NULL,
+        value TEXT,
+        value_type TEXT,
+        notes TEXT,
+        photos_json TEXT,
+        signature_base64 TEXT,
+        measured_at TEXT,
+        measured_value REAL,
+        defect_code TEXT,
+        is_critical_failure INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(inspection_id) REFERENCES qc_inspections(inspection_id) ON DELETE CASCADE,
+        FOREIGN KEY(item_id) REFERENCES qc_items(item_id)
+      )
+    ''');
+
+    // ── Non-Conformance & CAPA ─────────────────────────────────────
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_findings_nc (
+        finding_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inspection_id INTEGER NOT NULL,
+        item_id INTEGER,
+        resp_id INTEGER,
+        code TEXT,
+        severity TEXT CHECK(severity IN ('Minor','Major','Critical')) NOT NULL,
+        category TEXT,
+        description TEXT NOT NULL,
+        status TEXT CHECK(status IN ('Open','Assigned','InProgress','Verified','Closed','Rejected')) DEFAULT 'Open',
+        type TEXT CHECK(type IN ('NonConformance','Observation','Deviation')) DEFAULT 'NonConformance',
+        due_date TEXT,
+        assigned_to TEXT,
+        assigned_to_name TEXT,
+        assigned_at TEXT,
+        root_cause TEXT,
+        action_plan TEXT,
+        proposed_action TEXT,
+        qty_affected REAL,
+        qty_unit TEXT,
+        disposition TEXT CHECK(disposition IN ('Rework','Scrap','UseAsIs','Return','Concession','Pending')) DEFAULT 'Pending',
+        verified_by TEXT,
+        verified_by_name TEXT,
+        verified_at TEXT,
+        closed_at TEXT,
+        closed_by TEXT,
+        rejected_at TEXT,
+        rejection_reason TEXT,
+        evidence_json TEXT,
+        capa_id INTEGER,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        FOREIGN KEY(inspection_id) REFERENCES qc_inspections(inspection_id) ON DELETE CASCADE,
+        FOREIGN KEY(resp_id) REFERENCES qc_responses(resp_id)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_capa (
+        capa_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        finding_id INTEGER NOT NULL,
+        capa_no TEXT UNIQUE,
+        type TEXT CHECK(type IN ('Corrective','Preventive','CorrectivePreventive')) DEFAULT 'Corrective',
+        title TEXT,
+        description TEXT,
+        root_cause TEXT,
+        root_cause_method TEXT CHECK(root_cause_method IN ('5Why','Fishbone','Ishikawa','Other')) DEFAULT 'Other',
+        action_plan TEXT NOT NULL,
+        action_steps_json TEXT,
+        assigned_to TEXT,
+        assigned_to_name TEXT,
+        dept TEXT,
+        status TEXT CHECK(status IN ('Open','InProgress','ActionComplete','VerificationPending','VerifiedEffective','VerifiedIneffective','Closed','Rejected')) DEFAULT 'Open',
+        priority TEXT CHECK(priority IN ('Low','Medium','High','Critical')) DEFAULT 'Medium',
+        due_at TEXT,
+        target_completion_at TEXT,
+        action_completed_at TEXT,
+        action_completed_by TEXT,
+        action_completion_notes TEXT,
+        verified_by TEXT,
+        verified_by_name TEXT,
+        verified_at TEXT,
+        verification_notes TEXT,
+        is_effective INTEGER NOT NULL DEFAULT 0,
+        effectiveness_checked_at TEXT,
+        effectiveness_notes TEXT,
+        closure_notes TEXT,
+        closed_at TEXT,
+        closed_by TEXT,
+        rejected_at TEXT,
+        rejection_reason TEXT,
+        evidence_json TEXT,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        FOREIGN KEY(finding_id) REFERENCES qc_findings_nc(finding_id) ON DELETE CASCADE
+      )
+    ''');
+
+    // ── Global Audit (append-only) ─────────────────────────────────
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_audits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL CHECK(entity_type IN ('SOP','SOP_REV','SOP_READ','TEMPLATE','SECTION','ITEM','INSPECTION','RESPONSE','FINDING','CAPA','GOAL','GOAL_ASSIGNMENT','GOAL_ACTION','NCR','APPROVAL')),
+        entity_id TEXT,
+        action TEXT NOT NULL,
+        by_user_id TEXT,
+        by_user_name TEXT,
+        at TEXT NOT NULL,
+        before_json TEXT,
+        after_json TEXT,
+        meta_json TEXT,
+        prev_hash TEXT,
+        hash TEXT,
+        immutable INTEGER NOT NULL DEFAULT 1,
+        ip_address TEXT,
+        device_id TEXT
+      )
+    ''');
+
+    // ── Master Data ────────────────────────────────────────────────
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_defect_codes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL,
+        description TEXT,
+        category TEXT,
+        severity TEXT CHECK(severity IN ('Minor','Major','Critical')) DEFAULT 'Minor',
+        default_type TEXT CHECK(default_type IN ('NonConformance','Observation','Deviation')) DEFAULT 'NonConformance',
+        suggested_capa TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        dept TEXT
+      )
+    ''');
+
+    // ── Goal Tracking (V6_ENHANCED §12.1) ──────────────────────────
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_goals (
+        goal_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        code TEXT NOT NULL UNIQUE,
+        title TEXT NOT NULL,
+        description TEXT,
+        goal_type TEXT CHECK(goal_type IN ('SOP','Training','NC','CAPA','Audit','KPI','Compliance','Other')) DEFAULT 'Other',
+        dept TEXT,
+        site TEXT,
+        priority TEXT CHECK(priority IN ('Low','Medium','High','Critical')) DEFAULT 'Medium',
+        status TEXT NOT NULL CHECK(status IN ('Draft','Active','OnHold','Completed','Cancelled','Archived')) DEFAULT 'Draft',
+        target_value REAL,
+        target_unit TEXT,
+        baseline_value REAL,
+        current_value REAL,
+        start_date TEXT NOT NULL,
+        due_date TEXT,
+        completed_at TEXT,
+        completed_by TEXT,
+        completed_by_name TEXT,
+        completion_notes TEXT,
+        completion_evidence_json TEXT,
+        owner_id TEXT,
+        owner_name TEXT,
+        approver_id TEXT,
+        approver_name TEXT,
+        approved_at TEXT,
+        tags TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        version INTEGER NOT NULL DEFAULT 1
+      )
+    ''');
+    // One row per person per goal: who is accountable, and once finished, who
+    // finished it (`completed_by` / `completed_by_name` / `completed_at`).
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_goal_assignments (
+        assign_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        goal_id INTEGER NOT NULL,
+        assignee_id TEXT NOT NULL,
+        assignee_name TEXT,
+        role TEXT CHECK(role IN ('Owner','Lead','Member','Reviewer')) DEFAULT 'Member',
+        assigned_at TEXT NOT NULL,
+        assigned_by TEXT,
+        assigned_by_name TEXT,
+        due_date TEXT,
+        status TEXT CHECK(status IN ('Pending','InProgress','Completed','Rejected','Cancelled')) DEFAULT 'Pending',
+        completed_at TEXT,
+        completed_by TEXT,
+        completed_by_name TEXT,
+        completion_notes TEXT,
+        completion_evidence_json TEXT,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(goal_id) REFERENCES qc_goals(goal_id) ON DELETE CASCADE,
+        UNIQUE(goal_id, assignee_id)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_goal_actions (
+        action_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        goal_id INTEGER NOT NULL,
+        assign_id INTEGER,
+        action_text TEXT NOT NULL,
+        status TEXT CHECK(status IN ('Todo','InProgress','Done','Blocked','Cancelled')) DEFAULT 'Todo',
+        priority TEXT CHECK(priority IN ('Low','Medium','High')) DEFAULT 'Medium',
+        due_date TEXT,
+        done_at TEXT,
+        done_by TEXT,
+        done_by_name TEXT,
+        blocked_reason TEXT,
+        evidence_json TEXT,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        FOREIGN KEY(goal_id) REFERENCES qc_goals(goal_id) ON DELETE CASCADE,
+        FOREIGN KEY(assign_id) REFERENCES qc_goal_assignments(assign_id) ON DELETE SET NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_goal_kpis (
+        kpi_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        goal_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        target REAL NOT NULL,
+        actual REAL,
+        unit TEXT,
+        measure_date TEXT,
+        measured_by TEXT,
+        measured_by_name TEXT,
+        notes TEXT,
+        higher_is_better INTEGER NOT NULL DEFAULT 1,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY(goal_id) REFERENCES qc_goals(goal_id) ON DELETE CASCADE
+      )
+    ''');
+    // Goal → SOP / inspection / finding / CAPA / template, so a goal can be
+    // closed out against the records that evidence it.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_goal_links (
+        link_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        goal_id INTEGER NOT NULL,
+        link_type TEXT NOT NULL CHECK(link_type IN ('SOP','INSPECTION','FINDING','CAPA','TEMPLATE','AUDIT','OTHER')),
+        ref_id TEXT NOT NULL,
+        ref_table TEXT,
+        notes TEXT,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        created_by TEXT,
+        FOREIGN KEY(goal_id) REFERENCES qc_goals(goal_id) ON DELETE CASCADE
+      )
+    ''');
   }
 }

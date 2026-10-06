@@ -67,6 +67,11 @@ class AppErrors {
       AppText.t('يوجد منتج بنفس الاسم بالفعل.', 'A product with this name already exists.');
   static String get productNotFound =>
       AppText.t('المنتج غير موجود.', 'Product was not found.');
+  static String get productRangeInvalid =>
+      AppText.t('أدخل حدودًا رقمية صالحة للتحليل.', 'Enter valid numeric analysis limits.');
+  static String get productRangeOrderInvalid => AppText.t(
+      'يجب ألا يتجاوز الحد الأدنى الحد الأقصى.',
+      'The minimum limit must not exceed the maximum limit.');
 
   // ── Analyses (lab) ───────────────────────────────────────────────────────
 

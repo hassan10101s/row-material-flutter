@@ -52,6 +52,50 @@ class LabRepo {
         [code]);
   }
 
+  @override
+  Future<List<Map<String, dynamic>>> listInspectionMaterials() async {
+    return fetchAll(
+      null,
+      '''
+      SELECT m.id, m.material_name, m.material_code,
+             COUNT(i.id) AS inspection_count
+      FROM reference_materials m
+      JOIN inspections i ON i.material_id = m.id AND i.deleted_at IS NULL
+      WHERE m.active = 1
+      GROUP BY m.id, m.material_name, m.material_code
+      ORDER BY m.material_name COLLATE NOCASE ASC
+      ''',
+    );
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listInspectionRecords(
+    int materialId,
+  ) async {
+    final rows = await fetchAll(
+      null,
+      '''
+      SELECT id, entry_code, material_id, material_name, material_code,
+             inspection_date, supplier, truck_number, quantity,
+             decision_status, sample_names_json
+      FROM inspections
+      WHERE material_id = ? AND deleted_at IS NULL
+      ORDER BY inspection_date DESC, id DESC
+      ''',
+      [materialId],
+    );
+    return [
+      for (final row in rows)
+        {
+          ...row,
+          'sample_names': jsonLoadsList(
+            '${row['sample_names_json'] ?? ''}',
+            const ['Result'],
+          ),
+        },
+    ];
+  }
+
   // ── Inventory ─────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listInventory({String? category}) async {
@@ -227,10 +271,13 @@ class LabRepo {
       [DatabaseExecutor? executor]) async {
     return fetchAll(executor, '''
             SELECT 
-                lpa.id, lpa.product_id, lpa.analysis_id, lpa.min_value, lpa.max_value, lpa.unit,
-                a.name AS analysis_name
+                lpa.id, lpa.product_id, lpa.analysis_id, lpa.min_value, lpa.max_value,
+                CASE WHEN a.parameter_id IS NOT NULL THEN COALESCE(p.unit, '')
+                     ELSE COALESCE(NULLIF(a.unit, ''), lpa.unit) END AS unit,
+                a.name AS analysis_name, a.parameter_id
             FROM lab_product_analyses lpa
             JOIN lab_analyses a ON a.id = lpa.analysis_id
+            LEFT JOIN parameters p ON p.id = a.parameter_id
             WHERE lpa.product_id = ?
             ORDER BY a.name ASC
             ''', [productId]);
@@ -239,10 +286,13 @@ class LabRepo {
   Future<List<Map<String, dynamic>>> getProductRangesAll() async {
     return fetchAll(null, '''
             SELECT 
-                lpa.id, lpa.product_id, lpa.analysis_id, lpa.min_value, lpa.max_value, lpa.unit,
-                a.name AS analysis_name
+                lpa.id, lpa.product_id, lpa.analysis_id, lpa.min_value, lpa.max_value,
+                CASE WHEN a.parameter_id IS NOT NULL THEN COALESCE(p.unit, '')
+                     ELSE COALESCE(NULLIF(a.unit, ''), lpa.unit) END AS unit,
+                a.name AS analysis_name, a.parameter_id
             FROM lab_product_analyses lpa
             JOIN lab_analyses a ON a.id = lpa.analysis_id
+            LEFT JOIN parameters p ON p.id = a.parameter_id
             ORDER BY lpa.product_id ASC, a.name ASC
             ''');
   }
@@ -493,7 +543,9 @@ class LabRepo {
       DatabaseExecutor? executor, {int? materialId}) async {
     return fetchAll(executor, '''
         SELECT m.id AS material_id, m.material_name,
-               b.parameter_type, b.unit, b.min_value, b.max_value, b.precision,
+               b.parameter_type,
+               CASE WHEN p.id IS NOT NULL THEN COALESCE(p.unit, '') ELSE b.unit END AS unit,
+               b.min_value, b.max_value, b.precision,
                p.id AS parameter_id, p.parameter_name, p.unit AS canonical_unit,
                a.id AS analysis_id, a.name AS analysis_name
         FROM reference_materials m
@@ -696,10 +748,22 @@ class LabRepo {
 
   Future<List<Map<String, dynamic>>> listAnalyses() async {
     final rows = await fetchAll(
-        null, 'SELECT * FROM lab_analyses WHERE active = 1 ORDER BY name ASC');
+        null, '''
+        SELECT a.*, p.parameter_name AS reference_parameter_name,
+               p.parameter_type AS reference_parameter_type,
+               p.unit AS canonical_unit
+        FROM lab_analyses a
+        LEFT JOIN parameters p ON p.id = a.parameter_id
+        WHERE a.active = 1
+        ORDER BY a.name ASC
+        ''');
     final analyses = <Map<String, dynamic>>[];
     for (final row in rows) {
-      analyses.add(await _decorateAnalysis(row));
+      final analysis = await _decorateAnalysis(row);
+      if (analysis['parameter_id'] != null) {
+        analysis['unit'] = '${analysis['canonical_unit'] ?? ''}';
+      }
+      analyses.add(analysis);
     }
     return analyses;
   }
@@ -707,15 +771,35 @@ class LabRepo {
   Future<Map<String, dynamic>> getAnalysis(int analysisId,
       [DatabaseExecutor? executor]) async {
     final row =
-        await fetchOne(executor, 'SELECT * FROM lab_analyses WHERE id = ?', [analysisId]);
+        await fetchOne(executor, '''
+        SELECT a.*, p.parameter_name AS reference_parameter_name,
+               p.parameter_type AS reference_parameter_type,
+               p.unit AS canonical_unit
+        FROM lab_analyses a
+        LEFT JOIN parameters p ON p.id = a.parameter_id
+        WHERE a.id = ?
+        ''', [analysisId]);
     if (row == null) throw NotFoundError(AppErrors.analysisNotFound);
-    return _decorateAnalysis(row, executor);
+    final analysis = await _decorateAnalysis(row, executor);
+    final canonicalUnit = '${analysis['canonical_unit'] ?? ''}'.trim();
+    if (analysis['parameter_id'] != null) {
+      analysis['unit'] = '${analysis['canonical_unit'] ?? ''}';
+    } else if (canonicalUnit.isNotEmpty) {
+      analysis['unit'] = canonicalUnit;
+    }
+    return analysis;
   }
 
   Future<Map<String, dynamic>> _decorateAnalysis(Map<String, dynamic> row,
       [DatabaseExecutor? executor]) async {
     final analysis = Map<String, dynamic>.from(row);
     final id = int.parse('${analysis['id']}');
+    final canonicalUnit = '${analysis['canonical_unit'] ?? ''}'.trim();
+    if (analysis['parameter_id'] != null) {
+      analysis['unit'] = '${analysis['canonical_unit'] ?? ''}';
+    } else if (canonicalUnit.isNotEmpty) {
+      analysis['unit'] = canonicalUnit;
+    }
     analysis['items'] = await getAnalysisItems(id, executor);
     analysis['dynamic_fields'] = jsonLoadsList(
         '${analysis.remove('dynamic_fields_json') ?? ''}', const ['Sample Name']);
@@ -807,16 +891,40 @@ class LabRepo {
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String unit = '%',
+    int? parameterId,
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
     DatabaseExecutor? executor,
   }) async {
     final cleanName = name.trim();
-    if (cleanName.isEmpty) throw ValidationError(AppErrors.analysisNameRequired);
-    final dup = await fetchOne(executor, 'SELECT id FROM lab_analyses WHERE name = ?', [cleanName]);
+    final parameter = parameterId == null
+        ? null
+        : await fetchOne(
+            executor,
+            'SELECT id, parameter_name, unit FROM parameters WHERE id = ?',
+            [parameterId],
+          );
+    if (parameterId != null && parameter == null) {
+      throw ValidationError(AppErrors.parameterNameRequired);
+    }
+    final canonicalName = '${parameter?['parameter_name'] ?? ''}'.trim();
+    final finalName = canonicalName.isNotEmpty ? canonicalName : cleanName;
+    if (finalName.isEmpty) {
+      throw ValidationError(AppErrors.analysisNameRequired);
+    }
+    final dup = await fetchOne(
+      executor,
+      'SELECT id FROM lab_analyses WHERE name = ?',
+      [finalName],
+    );
     if (dup != null) throw ValidationError(AppErrors.analysisExists);
-    final cleanUnit = unit.trim();
-    final finalUnit = cleanUnit.isEmpty ? '%' : cleanUnit;
+    final inheritedUnit = '${parameter?['unit'] ?? ''}'.trim();
+    final cleanUnit = inheritedUnit.isNotEmpty ? inheritedUnit : unit.trim();
+    final finalUnit = parameterId != null
+        ? inheritedUnit
+        : cleanUnit.isEmpty
+        ? '%'
+        : cleanUnit;
     final fields = [
       for (final f in dynamicFields ?? [])
         if (f.trim().isNotEmpty) f.trim()
@@ -830,14 +938,16 @@ class LabRepo {
       );
     }
     final analysisId = await executeReturnId(executor, '''
-            INSERT INTO lab_analyses (name, unit, description, dynamic_fields_json, formula_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO lab_analyses
+                (name, unit, description, dynamic_fields_json, formula_json, parameter_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', [
-      cleanName,
+      finalName,
       finalUnit,
       description.trim(),
       jsonDumps(fields),
       jsonDumps(formulaData),
+      parameterId,
       nowIso(),
     ]);
     for (final item in items ?? []) {
@@ -864,16 +974,45 @@ class LabRepo {
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String? unit,
+    int? parameterId,
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
     DatabaseExecutor? executor,
   }) async {
     await getAnalysis(analysisId, executor);
+    if (parameterId != null) {
+      final parameter = await fetchOne(
+        executor,
+        'SELECT parameter_name, unit FROM parameters WHERE id = ?',
+        [parameterId],
+      );
+      if (parameter == null) {
+        throw ValidationError(AppErrors.parameterNameRequired);
+      }
+      final canonicalName = '${parameter['parameter_name'] ?? ''}'.trim();
+      final canonicalUnit = '${parameter['unit'] ?? ''}'.trim();
+      final duplicate = await fetchOne(
+        executor,
+        'SELECT id FROM lab_analyses WHERE name = ? AND id != ?',
+        [canonicalName, analysisId],
+      );
+      if (duplicate != null) throw ValidationError(AppErrors.analysisExists);
+      await execute(
+        executor,
+        'UPDATE lab_analyses SET parameter_id = ?, name = ?, unit = ? WHERE id = ?',
+        [
+          parameterId,
+          canonicalName,
+          canonicalUnit,
+          analysisId,
+        ],
+      );
+    }
     if (description != null) {
       await execute(executor, 'UPDATE lab_analyses SET description = ? WHERE id = ?',
           [description.trim(), analysisId]);
     }
-    if (unit != null) {
+    if (unit != null && parameterId == null) {
       final clean = unit.trim();
       await execute(executor, 'UPDATE lab_analyses SET unit = ? WHERE id = ?',
           [clean.isEmpty ? '%' : clean, analysisId]);
@@ -892,7 +1031,13 @@ class LabRepo {
         validateFormula('${formulaData['expression']}');
         resolveConstants(
           _mapOf(formulaData['constants']),
-          targetUnit: unit is String ? unit : '',
+          targetUnit: parameterId != null
+              ? '${(await fetchOne(
+                    executor,
+                    'SELECT unit FROM parameters WHERE id = ?',
+                    [parameterId],
+                  ))?['unit'] ?? ''}'
+              : unit ?? '',
         );
       }
       await execute(executor, 'UPDATE lab_analyses SET formula_json = ? WHERE id = ?',
@@ -1510,6 +1655,29 @@ class LabRepo {
       result.add(await enrichTest(item));
     }
     return result;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listSampleTestsForEntryCode(
+    String entryCode,
+  ) async {
+    final code = entryCode.trim();
+    if (code.isEmpty) return [];
+    return fetchAll(
+      null,
+      '''
+      SELECT t.*, a.name AS analysis_name,
+             CASE WHEN a.parameter_id IS NOT NULL THEN COALESCE(p.unit, '')
+                  ELSE a.unit END AS analysis_unit
+      FROM lab_sample_tests t
+      JOIN lab_analyses a ON a.id = t.analysis_id
+      LEFT JOIN parameters p ON p.id = a.parameter_id
+      WHERE t.source_type = 'raw_material' AND t.entry_code = ?
+        AND (p.parameter_type = 'chemical' OR a.parameter_id IS NULL)
+      ORDER BY t.tested_at DESC, t.id DESC
+      ''',
+      [code],
+    );
   }
 
   // ── Test range / out-of-range enrichment ──────────────────────

@@ -10,6 +10,10 @@
 ///
 /// Every method aggregates read-only; the dashboard never writes, so there is no
 /// queue/audit/permission machinery to model here (unlike the lab contracts).
+library;
+
+import 'dashboard_kpis.dart';
+
 abstract interface class DashboardRepository {
   /// Inspection analytics for the current filter: decision counts and rates,
   /// per-material and per-supplier breakdowns, monthly buckets, and the latest
@@ -26,6 +30,16 @@ abstract interface class DashboardRepository {
 
   /// Dropdown options for the material/supplier/status filter bars.
   Future<DashboardFilterOptions> filterOptions();
+
+  /// Full cross-module KPI bundle (inspections + lab + QC + NCR/CAPA +
+  /// SOP/goals + inventory + 6-month trend). Read-only; every section is
+  /// best-effort — a missing table yields zeros, never a throw.
+  Future<DashboardBundle> dashboardBundle({
+    String period,
+    String? materialId,
+    String? supplier,
+    String? status,
+  });
 }
 
 /// Dropdown options for dashboard filters.

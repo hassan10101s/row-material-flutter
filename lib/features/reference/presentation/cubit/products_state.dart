@@ -18,11 +18,12 @@ class ProductsState extends Equatable {
   ProductsState copyWith({
     bool? loading,
     String? error,
+    bool clearError = false,
     List<Map<String, dynamic>>? rows,
     List<Map<String, dynamic>>? analyses,
   }) => ProductsState(
     loading: loading ?? this.loading,
-    error: error ?? this.error,
+    error: clearError ? null : error ?? this.error,
     rows: rows ?? this.rows,
     analyses: analyses ?? this.analyses,
   );

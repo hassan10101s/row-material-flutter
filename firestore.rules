@@ -52,14 +52,14 @@ service cloud.firestore {
         'users.read','users.create','users.update','users.disable',
         'samples.read','samples.create','samples.update',
         'lab_results.read','lab_results.create','lab_results.update',
-        'qc.read','qc.approve','qc.reject',
+        'qc.read','qc.write','qc.approve','qc.reject',
         'reports.read','reports.create','reports.export',
         'devices.read','devices.register','devices.update','audit.read'
       ] : role == 'quality_manager' ? [
         'org.read','users.read',
         'samples.read','samples.create','samples.update',
         'lab_results.read','lab_results.create','lab_results.update',
-        'qc.read','qc.approve','qc.reject',
+        'qc.read','qc.write','qc.approve','qc.reject',
         'reports.read','reports.create','reports.export','audit.read'
       ] : role == 'lab' ? [
         'org.read',

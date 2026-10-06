@@ -12,7 +12,7 @@ class ProductsCubit extends AppCubit<ProductsState> {
   final LabConfigurationRepository repo;
 
   Future<void> load() async {
-    safeEmit(state.copyWith(loading: true, error: null));
+    safeEmit(state.copyWith(loading: true, clearError: true));
     try {
       final rows = await repo.listProducts();
       final analyses = await repo.listAnalyses();
@@ -30,7 +30,7 @@ class ProductsCubit extends AppCubit<ProductsState> {
     String description = '',
     List<Map<String, dynamic>>? ranges,
   }) async {
-    safeEmit(state.copyWith(loading: true, error: null));
+    safeEmit(state.copyWith(loading: true, clearError: true));
     try {
       final product = await repo.createProduct(
         name: name,
@@ -40,10 +40,8 @@ class ProductsCubit extends AppCubit<ProductsState> {
       );
       await load();
       return product;
-    } on AppError {
-      rethrow;
-    } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+    } on Object {
+      safeEmit(state.copyWith(loading: false));
       rethrow;
     }
   }
@@ -52,28 +50,24 @@ class ProductsCubit extends AppCubit<ProductsState> {
     int productId,
     Map<String, dynamic> fields,
   ) async {
-    safeEmit(state.copyWith(loading: true, error: null));
+    safeEmit(state.copyWith(loading: true, clearError: true));
     try {
       final product = await repo.updateProduct(productId, fields);
       await load();
       return product;
-    } on AppError {
-      rethrow;
-    } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+    } on Object {
+      safeEmit(state.copyWith(loading: false));
       rethrow;
     }
   }
 
   Future<void> delete(int productId) async {
-    safeEmit(state.copyWith(loading: true, error: null));
+    safeEmit(state.copyWith(loading: true, clearError: true));
     try {
       await repo.deleteProduct(productId);
       await load();
-    } on AppError {
-      rethrow;
-    } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+    } on Object {
+      safeEmit(state.copyWith(loading: false));
       rethrow;
     }
   }

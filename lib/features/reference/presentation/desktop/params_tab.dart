@@ -42,7 +42,7 @@ class DesktopParamsTab extends StatelessWidget {
               parameterType: parameterType,
               onSubmit: cubit.upsert,
               param: param,
-              unitOptions: _isChemical ? cubit.state.units : null,
+              unitOptions: cubit.state.units,
               actions: (_, state) => ParamEditorActions(state: state),
             ),
           ),
@@ -134,10 +134,9 @@ class DesktopParamsTab extends StatelessWidget {
                           DataColumn(
                             label: Text(AppText.t('البارامتر', 'Parameter')),
                           ),
-                          if (_isChemical)
-                            DataColumn(
-                              label: Text(AppText.t('الوحدة', 'Unit')),
-                            ),
+                          DataColumn(
+                            label: Text(AppText.t('الوحدة', 'Unit')),
+                          ),
                           DataColumn(label: Text('')),
                         ],
                         rows: [
@@ -145,8 +144,7 @@ class DesktopParamsTab extends StatelessWidget {
                             DataRow(
                               cells: [
                                 DataCell(Text('${p['parameter_name'] ?? ''}')),
-                                if (_isChemical)
-                                  DataCell(Text('${p['unit'] ?? '%'}')),
+                                DataCell(Text('${p['unit'] ?? ''}')),
                                 DataCell(
                                   Row(
                                     mainAxisSize: MainAxisSize.min,

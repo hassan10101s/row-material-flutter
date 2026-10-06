@@ -29,23 +29,22 @@ class GeneralSettingsState extends Equatable {
     String? logoPath,
     String? logoDataUri,
     String? exportRootPath,
-  }) =>
-      GeneralSettingsState(
-        loading: loading ?? this.loading,
-        saving: saving ?? this.saving,
-        departmentLabel: departmentLabel ?? this.departmentLabel,
-        logoPath: logoPath ?? this.logoPath,
-        logoDataUri: logoDataUri ?? this.logoDataUri,
-        exportRootPath: exportRootPath ?? this.exportRootPath,
-      );
+  }) => GeneralSettingsState(
+    loading: loading ?? this.loading,
+    saving: saving ?? this.saving,
+    departmentLabel: departmentLabel ?? this.departmentLabel,
+    logoPath: logoPath ?? this.logoPath,
+    logoDataUri: logoDataUri ?? this.logoDataUri,
+    exportRootPath: exportRootPath ?? this.exportRootPath,
+  );
 
   @override
   List<Object?> get props => [
-        loading,
-        saving,
-        departmentLabel,
-        logoPath,
-        logoDataUri,
-        exportRootPath,
-      ];
+    loading,
+    saving,
+    departmentLabel,
+    logoPath,
+    logoDataUri,
+    exportRootPath,
+  ];
 }

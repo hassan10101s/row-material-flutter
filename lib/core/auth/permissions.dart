@@ -17,6 +17,7 @@ enum Permission {
   labResultsCreate('lab_results.create', true),
   labResultsUpdate('lab_results.update', true),
   qcRead('qc.read', false),
+  qcWrite('qc.write', true),
   qcApprove('qc.approve', true),
   qcReject('qc.reject', true),
   reportsRead('reports.read', false),
@@ -61,9 +62,35 @@ const Set<Permission> privilegedPermissions = {
   Permission.qcReject,
 };
 
+/// Roles that may run a privileged operation with no connectivity and no fresh
+/// token.
+///
+/// The organization manager is the account of last resort: it is the only role
+/// that can rename the organization, invite members and sign off on a QC
+/// decision, and it is the role an owner falls back to when the network is down
+/// or the token has expired. Requiring connectivity for exactly that role made
+/// the account unusable in the situation it exists for.
+///
+/// The exemption is deliberately narrow. It lifts **only** the online/fresh-token
+/// requirement, and only for `admin`, which already holds every permission in
+/// [Permission]. It does not lift the other two gates in `AppSession.canDo`:
+/// a read-only device and a non-active member still refuse everything, and an
+/// unknown role still gets an empty permission set. The write is queued
+/// locally like any other and reaches Firestore when the device reconnects,
+/// where the rules apply independently.
+const Set<String> freshSessionExemptRoles = {AppRoles.admin};
+
 /// True when [permission] may only run online with a non-expired token.
-bool permissionRequiresFreshSession(Permission permission) =>
-    privilegedPermissions.contains(permission);
+///
+/// [role] is the holder's role. A role in [freshSessionExemptRoles] returns
+/// false for every permission, because it is not subject to the requirement at
+/// all. Omitting [role] answers the role-independent question - "is this
+/// permission privileged?" - which is what the error-reporting call sites want
+/// when they are classifying a refusal they did not cause.
+bool permissionRequiresFreshSession(Permission permission, {String? role}) {
+  if (role != null && freshSessionExemptRoles.contains(role)) return false;
+  return privilegedPermissions.contains(permission);
+}
 
 /// The four organization roles (V1).
 abstract final class AppRoles {
@@ -80,12 +107,12 @@ abstract final class AppRoles {
   static bool isReadOnlyRole(String? role) => role == viewer;
 
   static String label(String role) => switch (role) {
-        admin => 'مدير المؤسسة',
-        qualityManager => 'مدير الجودة',
-        lab => 'فني مختبر',
-        viewer => 'اطّلاع فقط',
-        _ => role,
-      };
+    admin => 'مدير المؤسسة',
+    qualityManager => 'مدير الجودة',
+    lab => 'اخصائي جودة',
+    viewer => 'اطّلاع فقط',
+    _ => role,
+  };
 }
 
 /// Member states.
@@ -113,6 +140,7 @@ const Map<String, Set<Permission>> _rolePermissions = {
     Permission.labResultsCreate,
     Permission.labResultsUpdate,
     Permission.qcRead,
+    Permission.qcWrite,
     Permission.qcApprove,
     Permission.qcReject,
     Permission.reportsRead,
@@ -133,6 +161,7 @@ const Map<String, Set<Permission>> _rolePermissions = {
     Permission.labResultsCreate,
     Permission.labResultsUpdate,
     Permission.qcRead,
+    Permission.qcWrite,
     Permission.qcApprove,
     Permission.qcReject,
     Permission.reportsRead,
@@ -182,18 +211,18 @@ bool roleIsReadOnly(String? role) =>
 /// `Developer`, `Viewer`) onto the V2 roles. Unknown values degrade to
 /// [AppRoles.viewer] so a corrupt row can never grant write access.
 String normalizeRole(String? role) => switch (role) {
-      'Developer' || 'Admin' => AppRoles.admin,
-      'Lab User' || 'Lab' => AppRoles.lab,
-      'Quality Manager' || 'QualityManager' => AppRoles.qualityManager,
-      'Viewer' || 'viewer' => AppRoles.viewer,
-      final String value when AppRoles.isValid(value) => value,
-      _ => AppRoles.viewer,
-    };
+  'Developer' || 'Admin' => AppRoles.admin,
+  'Lab User' || 'Lab' => AppRoles.lab,
+  'Quality Manager' || 'QualityManager' => AppRoles.qualityManager,
+  'Viewer' || 'viewer' => AppRoles.viewer,
+  final String value when AppRoles.isValid(value) => value,
+  _ => AppRoles.viewer,
+};
 
 /// Same idea for `status`; anything unknown is treated as `invited` (never
 /// active), which keeps a damaged row from unlocking the UI.
 String normalizeMemberStatus(String? status) => switch (status) {
-      MemberStatus.active => MemberStatus.active,
-      MemberStatus.disabled => MemberStatus.disabled,
-      _ => MemberStatus.invited,
-    };
+  MemberStatus.active => MemberStatus.active,
+  MemberStatus.disabled => MemberStatus.disabled,
+  _ => MemberStatus.invited,
+};

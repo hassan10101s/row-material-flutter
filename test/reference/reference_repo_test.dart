@@ -68,8 +68,10 @@ Future<void> _run() async {
   expect(raw!['material_name'], 'Sugar  EN | AR');
   expect(raw['active'], 1);
   expect(raw['physical_reference_json'], '{"Granulation":"fine"}');
-  expect(raw['chemical_reference_json'],
-      '{"Moisture":{"min":"0","max":"0.5"},"Ash":{"min":"0","max":"2"}}');
+  expect(
+    raw['chemical_reference_json'],
+    '{"Moisture":{"min":"0","max":"0.5"},"Ash":{"min":"0","max":"2"}}',
+  );
 
   // parameters seeded only for params that carry a unit
   final params = await _repo.listParameters();
@@ -80,7 +82,10 @@ Future<void> _run() async {
   // getMaterial enriches unit text onto chemical reference
   final enriched = await _repo.getMaterial(id);
   expect(enriched['chemical_reference']['Moisture']['unit'], '%');
-  expect(enriched['chemical_reference']['Moisture']['value'], contains('"max":'));
+  expect(
+    enriched['chemical_reference']['Moisture']['value'],
+    contains('"max":'),
+  );
   expect(enriched['physical_reference']['Granulation'], 'fine');
 
   // entry code generated from material code + date
@@ -130,7 +135,9 @@ Future<void> _run() async {
   final params2 = await _repo.listParameters(parameterType: 'chemical');
   expect(params2.any((p) => p['parameter_name'] == 'Purity'), isTrue);
   expect(
-      params2.firstWhere((p) => p['parameter_name'] == 'Purity')['unit'], '%');
+    params2.firstWhere((p) => p['parameter_name'] == 'Purity')['unit'],
+    '%',
+  );
 
   // Bounds are persisted per parameter and resolved through the reference.
   final analyses = await _lab.getMaterialAnalyses(id);
@@ -141,38 +148,109 @@ Future<void> _run() async {
   expect(purity['max'], 100);
   expect(purity['unit'], '%');
   expect(
-      chemFields.map((f) => f['parameter_name']).toSet(),
-      containsAll({'Moisture', 'Ash', 'Purity'}));
+    chemFields.map((f) => f['parameter_name']).toSet(),
+    containsAll({'Moisture', 'Ash', 'Purity'}),
+  );
+
+  await _repo.upsertParameter(
+    'Bulk Density',
+    'g/cm3',
+    parameterType: 'physical',
+  );
+  final bulkDensity = (await _repo.listParameters(
+    parameterType: 'physical',
+  )).firstWhere((p) => p['parameter_name'] == 'Bulk Density');
+  final physicalMaterialId = await _repo.createMaterial(
+    materialName: 'Physical reference material',
+    materialCode: 'M-PHYSICAL-01',
+    physicalReference: {
+      'Bulk Density': {'value': '0.5-0.8', 'unit': 'g/cm3'},
+    },
+  );
+  await _lab.saveMaterialBounds(physicalMaterialId, [
+    {
+      'parameter_name': 'Bulk Density',
+      'parameter_type': 'physical',
+      'unit': 'g/cm3',
+      'min_value': '0.5',
+      'max_value': '0.8',
+    },
+  ]);
+  final physicalReference = await _repo.getMaterial(physicalMaterialId);
+  expect(
+    physicalReference['physical_reference']['Bulk Density']['unit'],
+    'g/cm3',
+  );
+  final physicalAnalyses = await _lab.getMaterialAnalyses(physicalMaterialId);
+  final physicalFields = ((physicalAnalyses['physical']?['fields']) as List)
+      .cast<Map<String, dynamic>>();
+  expect(physicalFields.single['unit'], 'g/cm3');
+
+  final linkedAnalysis = (await _lab.listAnalyses()).firstWhere(
+    (analysis) => analysis['parameter_id'] == bulkDensity['id'],
+  );
+  final product = await _lab.createProduct(
+    name: 'Bulk Density Product',
+    ranges: [
+      {
+        'analysis_id': linkedAnalysis['id'],
+        'min_value': 0.5,
+        'max_value': 0.8,
+        'unit': 'legacy-unit',
+      },
+    ],
+  );
+  final productId = int.parse('${product['id']}');
+  expect(
+    (await _lab.getProductRanges(productId)).single['unit'],
+    'g/cm3',
+    reason: 'product ranges inherit the linked analysis unit',
+  );
+
+  await _repo.upsertParameter(
+    'Bulk Density',
+    'kg/m3',
+    parameterType: 'physical',
+  );
+  final canonicalAnalysis = await _lab.getAnalysis(
+    int.parse('${linkedAnalysis['id']}'),
+  );
+  expect(canonicalAnalysis['parameter_id'], bulkDensity['id']);
+  expect(canonicalAnalysis['unit'], 'kg/m3');
+  final canonicalPhysical = await _lab.getMaterialAnalyses(physicalMaterialId);
+  expect(
+    ((canonicalPhysical['physical']?['fields']) as List).single['unit'],
+    'kg/m3',
+  );
+  expect((await _lab.getProductRanges(productId)).single['unit'], 'kg/m3');
 
   // ── Duplicate name rejected on update ─────────────────────────────
-  await _repo.createMaterial(
-    materialName: 'Other',
-    materialCode: 'M-OTHER-01',
-  );
+  await _repo.createMaterial(materialName: 'Other', materialCode: 'M-OTHER-01');
   await expectLater(
-    _repo.updateMaterial(
-      id,
-      materialName: 'Other',
-      materialCode: 'M-SUGAR-01',
-    ),
+    _repo.updateMaterial(id, materialName: 'Other', materialCode: 'M-SUGAR-01'),
     throwsA(isA<ValidationError>()),
   );
 
   // ── Soft delete semantics ─────────────────────────────────────────
-  expect(await _repo.listMaterials(), hasLength(2));
+  expect(await _repo.listMaterials(), hasLength(3));
   await _repo.deleteMaterial(id);
-  expect(await _repo.listMaterials(), hasLength(1));
+  expect(await _repo.listMaterials(), hasLength(2));
   final all = await _repo.listAllMaterials();
-  expect(all.length, 2);
-  expect(all.firstWhere((m) => m['id'] == id)['active'], 0,
-      reason: 'listAllMaterials includes deleted rows');
+  expect(all.length, 3);
+  expect(
+    all.firstWhere((m) => m['id'] == id)['active'],
+    0,
+    reason: 'listAllMaterials includes deleted rows',
+  );
 
   // ── Parameter/unit CRUD parity ────────────────────────────────────
-  await _repo.upsertParameter('Color', 'abs',
-      parameterType: 'physical');
+  await _repo.upsertParameter('Color', 'abs', parameterType: 'physical');
   final physical = await _repo.listParameters(parameterType: 'physical');
-  expect(physical.firstWhere((p) => p['parameter_name'] == 'Color')['unit'], '',
-      reason: 'physical params are unit-less');
+  expect(
+    physical.firstWhere((p) => p['parameter_name'] == 'Color')['unit'],
+    'abs',
+    reason: 'physical parameters inherit their reference unit',
+  );
 
   await _repo.upsertUnit('%', name: 'Percent', dimension: 'ratio');
   final units = await _repo.listUnits();
@@ -182,7 +260,9 @@ Future<void> _run() async {
 
   await _repo.deleteParameter('Purity');
   expect(
-      (await _repo.listParameters(parameterType: 'chemical'))
-          .any((p) => p['parameter_name'] == 'Purity'),
-      isFalse);
+    (await _repo.listParameters(
+      parameterType: 'chemical',
+    )).any((p) => p['parameter_name'] == 'Purity'),
+    isFalse,
+  );
 }

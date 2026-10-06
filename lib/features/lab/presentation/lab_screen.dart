@@ -125,7 +125,7 @@ class LabScreen extends StatelessWidget {
         ),
       ),
       _LabTab(
-        AppText.t('تقارير المختبر', 'Reports'),
+        AppText.t('تقارير المعمل', 'Reports'),
         Icons.description_outlined,
         (context) => BlocProvider(
           create: (_) => LabReportsCubit(reports: getIt<ReportRepository>()),

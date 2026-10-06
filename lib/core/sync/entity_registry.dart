@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -17,6 +17,7 @@ class SyncEntity {
     this.permission,
     this.payloadBuilder,
     this.usesLocalIdAsRef = true,
+    this.accepts,
   });
 
   /// Stable identifier used in `sync_queue.entity_type`.
@@ -42,7 +43,11 @@ class SyncEntity {
   final String? permission;
 
   /// Optional payload shaping (defaults to snakeâ†’camel row copy).
-  final Map<String, dynamic> Function(Map<String, dynamic> row, SyncPayloadContext ctx)? payloadBuilder;
+  final Map<String, dynamic> Function(
+    Map<String, dynamic> row,
+    SyncPayloadContext ctx,
+  )?
+  payloadBuilder;
 
   /// Whether the envelope's `localId` may be used to find the local row of a
   /// remote document.
@@ -54,6 +59,21 @@ class SyncEntity {
   /// of a document written elsewhere is the primary key of an unrelated local
   /// row, and matching on it would silently overwrite that row.
   final bool usesLocalIdAsRef;
+
+  /// Whether a *pulled* document belongs to this entity.
+  ///
+  /// Null (the default) accepts every document of [collection], which is
+  /// correct for the entities that own a collection outright. It is required
+  /// whenever several entities share one collection: the seven lab-settings
+  /// tables all live in `labConfig`, so a collection query hands every
+  /// lab-config document to every one of those entities. Without a
+  /// discriminator each entity writes the whole collection into its own table —
+  /// `localId` collides across tables, so unrelated rows overwrite each other,
+  /// and a document whose payload does not fit the target table aborts on a
+  /// `NOT NULL` violation. The document id already names its table
+  /// (`lc_<table>_<id>`, see [labConfigDocId]), which is the reliable signal
+  /// because it cannot be absent from the document.
+  final bool Function(RemoteDocument document)? accepts;
 
   static SyncEntity? byType(String type) {
     for (final e in syncEntities) {
@@ -98,6 +118,12 @@ String labTestDocId(Map<String, dynamic> row) => 'lt_${row['id']}';
 
 String Function(Map<String, dynamic> row) labConfigDocId(String table) =>
     (row) => 'lc_${table}_${row['id']}';
+
+/// Companion of [labConfigDocId] for the pull: accepts only the documents this
+/// table wrote, so the entities sharing the `labConfig` collection stop
+/// applying each other's rows.
+bool Function(RemoteDocument document) labConfigSelector(String table) =>
+    (document) => document.id.startsWith('lc_${table}_');
 
 String userDocId(Map<String, dynamic> row) {
   final memberId = '${row['member_id'] ?? ''}';
@@ -185,56 +211,126 @@ final List<SyncEntity> syncEntities = [
     collection: SyncCollection.labConfig,
     localTable: 'lab_analyses',
     docId: labConfigDocId('lab_analyses'),
+    accepts: labConfigSelector('lab_analyses'),
     permission: 'lab_results.update',
-    mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
   ),
   SyncEntity(
     type: 'labAnalysisItem',
     collection: SyncCollection.labConfig,
     localTable: 'lab_analysis_items',
     docId: labConfigDocId('lab_analysis_items'),
+    accepts: labConfigSelector('lab_analysis_items'),
     permission: 'lab_results.update',
-    mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
   ),
   SyncEntity(
     type: 'labFieldLink',
     collection: SyncCollection.labConfig,
     localTable: 'lab_field_chemical_links',
     docId: labConfigDocId('lab_field_chemical_links'),
+    accepts: labConfigSelector('lab_field_chemical_links'),
     permission: 'lab_results.update',
-    mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
   ),
   SyncEntity(
     type: 'labConstant',
     collection: SyncCollection.labConfig,
     localTable: 'lab_constants',
     docId: labConfigDocId('lab_constants'),
+    accepts: labConfigSelector('lab_constants'),
     permission: 'lab_results.update',
-    mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
   ),
   SyncEntity(
     type: 'labProduct',
     collection: SyncCollection.labConfig,
     localTable: 'lab_products',
     docId: labConfigDocId('lab_products'),
+    accepts: labConfigSelector('lab_products'),
     permission: 'lab_results.update',
-    mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
   ),
   SyncEntity(
     type: 'labProductAnalysis',
     collection: SyncCollection.labConfig,
     localTable: 'lab_product_analyses',
     docId: labConfigDocId('lab_product_analyses'),
+    accepts: labConfigSelector('lab_product_analyses'),
     permission: 'lab_results.update',
-    mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
   ),
   SyncEntity(
     type: 'labUnit',
     collection: SyncCollection.labConfig,
     localTable: 'lab_units',
     docId: labConfigDocId('lab_units'),
+    accepts: labConfigSelector('lab_units'),
     permission: 'lab_results.update',
-    mutableFields: {'payload', 'configType', 'localId', 'version', 'updatedAt', 'updatedBy', 'deviceId', 'deletedAt'},
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
   ),
   SyncEntity(
     type: 'member',
@@ -242,7 +338,15 @@ final List<SyncEntity> syncEntities = [
     localTable: 'users',
     docId: userDocId,
     permission: 'users.update',
-    mutableFields: {'role', 'status', 'displayName', 'activatedAt', 'version', 'updatedAt', 'updatedBy'},
+    mutableFields: {
+      'role',
+      'status',
+      'displayName',
+      'activatedAt',
+      'version',
+      'updatedAt',
+      'updatedBy',
+    },
   ),
 ];
 
@@ -414,14 +518,24 @@ Future<int?> findLocalRef(
 ) async {
   final localId = data['localId'];
   if (entity.usesLocalIdAsRef && localId is num) {
-    final rows = await db.query(entity.localTable,
-        columns: ['id'], where: 'id = ?', whereArgs: [localId.toInt()], limit: 1);
+    final rows = await db.query(
+      entity.localTable,
+      columns: ['id'],
+      where: 'id = ?',
+      whereArgs: [localId.toInt()],
+      limit: 1,
+    );
     if (rows.isNotEmpty) return (rows.first['id'] as num).toInt();
   }
   final natural = _naturalKey(entity, entityId, data);
   if (natural == null) return null;
-  final rows = await db.query(entity.localTable,
-      columns: ['id'], where: natural.$1, whereArgs: natural.$2, limit: 1);
+  final rows = await db.query(
+    entity.localTable,
+    columns: ['id'],
+    where: natural.$1,
+    whereArgs: natural.$2,
+    limit: 1,
+  );
   return rows.isEmpty ? null : (rows.first['id'] as num).toInt();
 }
 
@@ -439,12 +553,18 @@ Future<int?> findLocalRef(
       final inspectionId = data['inspectionId'] ?? data['inspection_id'];
       if (inspectionId is! num) return null;
       final version = (data['version'] as num?)?.toInt() ?? 0;
-      return ('inspection_id = ? AND version = ?', [inspectionId.toInt(), version]);
+      return (
+        'inspection_id = ? AND version = ?',
+        [inspectionId.toInt(), version],
+      );
     case 'lab_sample_tests':
       final worksheetRowId = data['worksheetRowId'] ?? data['worksheet_row_id'];
       final entryCode = data['entryCode'] ?? data['entry_code'];
       if (worksheetRowId == null || entryCode == null) return null;
-      return ('worksheet_row_id = ? AND entry_code = ?', [worksheetRowId, entryCode]);
+      return (
+        'worksheet_row_id = ? AND entry_code = ?',
+        [worksheetRowId, entryCode],
+      );
     case 'users':
       return ('member_id = ? OR email = ?', [entityId, data['email']]);
     case 'audit_logs':
@@ -499,16 +619,35 @@ Map<String, dynamic> remoteToLocalRow(
     }
     row[camelToSnake(key)] = entry.value;
   }
-  if (entity.collection == SyncCollection.labConfig && document['payload'] is String) {
-    try {
-      final decoded = jsonDecode('${document['payload']}');
-      if (decoded is Map) {
-        for (final entry in decoded.entries) {
-          row['${entry.key}'] = entry.value;
-        }
+  if (entity.collection == SyncCollection.labConfig) {
+    // The nested `payload` is the business content of a lab-config document,
+    // and it reaches the remote in one of two shapes: a `Map`, when it was
+    // parked straight from the local row by `OfflineFirstLabRepository`
+    // (`..['payload'] = Map.from(fresh)`), or a JSON `String` when it was
+    // produced by a `payloadBuilder`. Unwrapping only the `String` shape meant
+    // a `Map` payload was dropped whole by the `payload` skip above, and the
+    // row was rebuilt from the envelope alone: on `lab_analysis_items` that is
+    // `(id, unit, version, remote_version, remote_synced_at, sync_state)`,
+    // because `unit` is the only payload column whose name is identical in
+    // both cases. Every other column was missing, so the insert violated
+    // `NOT NULL constraint failed: lab_analysis_items.analysis_id`.
+    //
+    // Keys are normalised so either casing lands on the real column name;
+    // `camelToSnake` leaves an already-snake_case key untouched, so a payload
+    // parked from the local row round-trips byte for byte.
+    Object? nested = document['payload'];
+    if (nested is String) {
+      try {
+        nested = jsonDecode(nested);
+      } on Object {
+        // Malformed payload: keep the envelope only.
+        nested = null;
       }
-    } on Object {
-      // Malformed payload: keep the envelope only.
+    }
+    if (nested is Map) {
+      for (final entry in nested.entries) {
+        row[camelToSnake('${entry.key}')] = entry.value;
+      }
     }
   }
   row['version'] = document['version'];

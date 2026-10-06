@@ -91,7 +91,7 @@ void main() {
       final ctx = buildLabReportContext(
         <Map<String, dynamic>>[],
         settings: settings,
-        title: 'Lab Tests | فحوصات المختبر',
+        title: 'Lab Tests | فحوصات المعمل',
         periodLabel: '2026-09-22',
       );
       final out = tinyJinjaRender(_tpl('lab_report_template.html'), ctx);

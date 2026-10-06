@@ -314,7 +314,10 @@ void main() {
       await tester.tap(find.text('New Parameter'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextField).at(0), 'Carbon');
-      await tester.enterText(find.byType(TextField).at(1), '%');
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('%').last);
+      await tester.pumpAndSettle();
       await tester.pump();
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
@@ -386,11 +389,9 @@ void main() {
       }
     });
 
-    testWidgets('a physical parameter has no unit field on either experience', (
+    testWidgets('a physical parameter uses the shared reference unit field', (
       tester,
     ) async {
-      // Physical rows are unit-less by design, so the field must be absent
-      // rather than disabled - and absent on both.
       final physical = ParamsCubit.physical(repo: reference);
       addTearDown(physical.close);
       await physical.load();
@@ -406,11 +407,12 @@ void main() {
         await tester.tap(find.text('New Parameter'));
         await tester.pumpAndSettle();
 
-        final unitFields = tester
-            .widgetList<TextField>(find.byType(TextField))
-            .where((f) => f.decoration?.labelText == 'Unit')
-            .length;
-        expect(unitFields, 0, reason: '$factor');
+        expect(find.text('Reference unit'), findsOneWidget, reason: '$factor');
+        expect(
+          find.byType(DropdownButtonFormField<String>),
+          findsOneWidget,
+          reason: '$factor',
+        );
 
         await tester.tap(find.text('Cancel'));
         await tester.pumpAndSettle();

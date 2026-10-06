@@ -8,6 +8,7 @@ import '../../../design_system/feedback/app_feedback_export.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_button.dart';
 import '../../../design_system/widgets/app_card.dart';
+import '../../../design_system/widgets/app_date_field.dart';
 import 'cubit/lab_reports_cubit.dart';
 import 'cubit/lab_reports_state.dart';
 
@@ -52,7 +53,7 @@ class _LabReportsTabState extends State<LabReportsTab> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              AppText.t('تقارير المختبر', 'Lab reports'),
+              AppText.t('تقارير المعمل', 'Lab reports'),
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: AppSpacing.md),
@@ -68,12 +69,9 @@ class _LabReportsTabState extends State<LabReportsTab> {
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(height: AppSpacing.sm),
-                    TextField(
+                    AppDateField(
                       controller: _date,
-                      decoration: InputDecoration(
-                        labelText: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'),
-                        isDense: true,
-                      ),
+                      label: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'),
                     ),
                     const SizedBox(height: AppSpacing.md),
                     AppButton(

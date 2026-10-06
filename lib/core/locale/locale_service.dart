@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../constants/app_strings.dart';
 import '../../features/settings/data/settings_repo.dart';
 
 /// Persisted UI locale stored in the settings table (`locale` = 'ar'|'en').
@@ -22,12 +23,14 @@ class LocaleService extends ChangeNotifier {
   Future<void> init() async {
     final value = await settings.getSettingValue(_key);
     _locale = value == _enCode ? const Locale(_enCode) : const Locale(_defaultCode);
+    AppText.useLanguage(_locale.languageCode);
     notifyListeners();
   }
 
   Future<void> setLocale(Locale locale) async {
     if (locale.languageCode == _locale.languageCode) return;
     _locale = locale;
+    AppText.useLanguage(locale.languageCode);
     notifyListeners();
     await settings.updateSettings({_key: locale.languageCode});
   }

@@ -4,9 +4,10 @@ import '../../../../core/utils/app_exceptions.dart';
 import 'dashboard_kpis_cubit.dart';
 import 'dashboard_state.dart';
 
-/// Loads the dashboard summary, today-KPIs and filter options. The raw KPI map
-/// is forwarded to [kpis] so the typed KPI cards can be rebuilt from Equatable
-/// state.
+/// Loads the dashboard summary, today-KPIs, filter options and the
+/// cross-module KPI bundle. The raw KPI map is forwarded to [kpis] so the
+/// typed KPI cards can be rebuilt from Equatable state; the bundle follows
+/// in the same load so hero cards and analyst sections never disagree.
 class DashboardCubit extends AppCubit<DashboardState> {
   DashboardCubit({
     required this.repo,
@@ -30,6 +31,19 @@ class DashboardCubit extends AppCubit<DashboardState> {
         repo.filterOptions(),
       ]);
       kpis.hydrate(results[1] as Map<String, dynamic>);
+      // Bundle is best-effort and fetched separately so an old mock (or a
+      // device missing QC tables) can never fail the core dashboard load.
+      try {
+        final bundle = await repo.dashboardBundle(
+          period: state.period,
+          materialId: state.selectedMaterial,
+          supplier: state.selectedSupplier,
+          status: state.selectedStatus,
+        );
+        kpis.hydrateBundle(bundle);
+      } catch (_) {
+        // Legacy cards already hydrated above; analyst sections stay zeroed.
+      }
       safeEmit(state.copyWith(
         loading: false,
         summary: results[0] as Map<String, dynamic>,

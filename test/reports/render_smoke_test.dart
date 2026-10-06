@@ -315,7 +315,7 @@ void serviceGroup() {
     test('lab report (daily)', timeout: Timeout(const Duration(minutes: 3)), () async {
       final doc = await _service.labReport(type: 'daily', dateStr: '2026-09-05');
       expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, startsWith('تقرير_المختبر_daily_'));
+      expect(doc.filename, startsWith('تقرير_المعمل_daily_'));
       expect(doc.title, 'التقرير اليومي - 2026-09-05');
     });
 

@@ -27,7 +27,6 @@ class RunTestTab extends StatefulWidget {
 }
 
 class _RunTestTabState extends State<RunTestTab> {
-  final _entryCode = TextEditingController();
   final _sampleName = TextEditingController(text: 'Sample 1');
   final _resultText = TextEditingController();
   bool _formulaAuto = true;
@@ -44,7 +43,6 @@ class _RunTestTabState extends State<RunTestTab> {
 
   @override
   void dispose() {
-    _entryCode.dispose();
     _sampleName.dispose();
     _resultText.dispose();
     for (final c in _dynamicControllers.values) {
@@ -52,19 +50,6 @@ class _RunTestTabState extends State<RunTestTab> {
     }
     _dynamicControllers.clear();
     super.dispose();
-  }
-
-  Future<void> _lookupEntry() async {
-    final found = await context.read<RunTestCubit>().lookupEntry(
-      _entryCode.text,
-    );
-    if (!mounted) return;
-    if (!found) {
-      AppFeedback.error(
-        context,
-        AppText.t('كود الدخول غير موجود', 'Entry code not found.'),
-      );
-    }
   }
 
   Future<void> _run() async {
@@ -76,10 +61,23 @@ class _RunTestTabState extends State<RunTestTab> {
       );
       return;
     }
-    if (_sampleName.text.trim().isEmpty) {
+    if (state.sourceType == 'product' && _sampleName.text.trim().isEmpty) {
       AppFeedback.error(
         context,
         AppText.t('اسم العينة مطلوب', 'Sample name is required.'),
+      );
+      return;
+    }
+    if (state.sourceType == 'raw_material' &&
+        (state.rawMaterialId == null ||
+            state.selectedInspection['id'] == null ||
+            state.selectedSampleName.isEmpty)) {
+      AppFeedback.error(
+        context,
+        AppText.t(
+          'اختر الخام ومحضر الفحص والعينة أولاً',
+          'Select a raw material, inspection record and sample first.',
+        ),
       );
       return;
     }
@@ -108,7 +106,6 @@ class _RunTestTabState extends State<RunTestTab> {
         sampleName: _sampleName.text.trim(),
         resultText: resultText,
         dynamicValues: dynamicValues,
-        entryCode: _entryCode.text.trim(),
         manualResult: formulaEnabled && !autoOk,
         user: _currentUserMap,
       );
@@ -488,6 +485,58 @@ class _RunTestTabState extends State<RunTestTab> {
     );
   }
 
+  Widget _inspectionTraceCard(Map<String, dynamic> inspection) {
+    Widget detail(IconData icon, String label, Object? value) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 15.r, color: AppColors.primary),
+        const SizedBox(width: 5),
+        Text(
+          '$label: ${'${value ?? ''}'.trim().isEmpty ? '—' : value}',
+          style: TextStyle(fontSize: 12.spMax),
+        ),
+      ],
+    );
+
+    return SizedBox(
+      width: double.infinity,
+      child: AppCard(
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        child: Wrap(
+          spacing: AppSpacing.lg,
+          runSpacing: AppSpacing.xs,
+          children: [
+            detail(
+              Icons.qr_code_2,
+              AppText.t('رقم المحضر', 'Record'),
+              inspection['entry_code'],
+            ),
+            detail(
+              Icons.local_shipping_outlined,
+              AppText.t('المورد', 'Supplier'),
+              inspection['supplier'],
+            ),
+            detail(
+              Icons.directions_car_outlined,
+              AppText.t('السيارة', 'Vehicle'),
+              inspection['truck_number'],
+            ),
+            detail(
+              Icons.calendar_today_outlined,
+              AppText.t('التاريخ', 'Date'),
+              inspection['inspection_date'],
+            ),
+            detail(
+              Icons.fact_check_outlined,
+              AppText.t('القرار', 'Decision'),
+              inspection['decision_status'],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<RunTestCubit>().state;
@@ -594,27 +643,169 @@ class _RunTestTabState extends State<RunTestTab> {
                       ),
                       if (state.sourceType == 'raw_material') ...[
                         SizedBox(
-                          width: 280.w,
-                          child: TextField(
-                            controller: _entryCode,
+                          width: 300.w,
+                          child: DropdownButtonFormField<int>(
+                            initialValue:
+                                state.rawMaterials.any(
+                                  (row) =>
+                                      '${row['id']}' ==
+                                      '${state.rawMaterialId}',
+                                )
+                                ? state.rawMaterialId
+                                : null,
+                            isExpanded: true,
                             decoration: InputDecoration(
-                              labelText: AppText.t('رقم القيد', 'Entry code'),
+                              labelText: AppText.t('الخامة', 'Raw material'),
                               isDense: true,
                             ),
+                            items: [
+                              for (final material in state.rawMaterials)
+                                DropdownMenuItem<int>(
+                                  value: int.tryParse('${material['id']}'),
+                                  child: Text(
+                                    '${material['material_name']}'
+                                    ' (${material['material_code']})',
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                            ],
+                            onChanged: (id) {
+                              if (id != null) cubit.selectRawMaterial(id);
+                            },
                           ),
                         ),
-                        OutlinedButton(
-                          onPressed: _lookupEntry,
-                          child: Text(AppText.t('بحث', 'Lookup')),
+                        SizedBox(
+                          width: 350.w,
+                          child: DropdownButtonFormField<int>(
+                            initialValue:
+                                state.inspections.any(
+                                  (row) =>
+                                      '${row['id']}' ==
+                                      '${state.selectedInspection['id'] ?? ''}',
+                                )
+                                ? int.tryParse(
+                                    '${state.selectedInspection['id']}',
+                                  )
+                                : null,
+                            isExpanded: true,
+                            decoration: InputDecoration(
+                              labelText: AppText.t(
+                                'رقم محضر الفحص',
+                                'Inspection record',
+                              ),
+                              isDense: true,
+                              helperText: state.loadingInspections
+                                  ? AppText.t(
+                                      'جارٍ تحميل المحاضر…',
+                                      'Loading inspection records…',
+                                    )
+                                  : null,
+                            ),
+                            items: [
+                              for (final record in state.inspections)
+                                DropdownMenuItem<int>(
+                                  value: int.tryParse('${record['id']}'),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        '${record['entry_code']} · '
+                                        '${record['inspection_date']}',
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        '${AppText.t('المورد', 'Supplier')}: '
+                                        '${record['supplier'] ?? '—'} · '
+                                        '${AppText.t('السيارة', 'Vehicle')}: '
+                                        '${record['truck_number'] ?? '—'}',
+                                        style: TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 11.spMax,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                            onChanged: (id) {
+                              if (id != null) cubit.selectInspection(id);
+                            },
+                          ),
                         ),
-                        if (state.sourceName.isNotEmpty)
+                        if (state.rawMaterialId != null &&
+                            !state.loadingInspections &&
+                            state.inspections.isEmpty)
                           Text(
-                            '${AppText.t('المادة', 'Material')}: ${state.sourceName}',
+                            AppText.t(
+                              'لا توجد محاضر فحص لهذه الخامة.',
+                              'No inspection records exist for this raw material.',
+                            ),
                             style: TextStyle(
-                              color: AppColors.success,
+                              color: AppColors.textMuted,
                               fontSize: 12.spMax,
                             ),
                           ),
+                        if (state.selectedInspection.isNotEmpty) ...[
+                          _inspectionTraceCard(state.selectedInspection),
+                          if (state.selectedSampleName.isEmpty)
+                            Text(
+                              AppText.t(
+                                'لا يحتوي المحضر على عينات مسجلة؛ أضف عينة إلى المحضر قبل تسجيل التحليل.',
+                                'This record has no registered samples. Add a sample to the inspection before recording an analysis.',
+                              ),
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 12.spMax,
+                              ),
+                            )
+                          else
+                            SizedBox(
+                              width: 220.w,
+                              child: DropdownButtonFormField<String>(
+                                initialValue:
+                                    (state.selectedInspection['sample_names']
+                                                as List?)
+                                            ?.map((name) => '$name'.trim())
+                                            .where((name) => name.isNotEmpty)
+                                            .contains(
+                                              state.selectedSampleName,
+                                            ) ==
+                                        true
+                                    ? state.selectedSampleName
+                                    : null,
+                                isExpanded: true,
+                                decoration: InputDecoration(
+                                  labelText: AppText.t(
+                                    'العينة في المحضر',
+                                    'Inspection sample',
+                                  ),
+                                  isDense: true,
+                                ),
+                                items: [
+                                  for (final name
+                                      in (state.selectedInspection['sample_names']
+                                              as List? ??
+                                          const []))
+                                    if ('$name'.trim().isNotEmpty)
+                                      DropdownMenuItem<String>(
+                                        value: '$name'.trim(),
+                                        child: Text(
+                                          '$name',
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                ],
+                                onChanged: (name) {
+                                  if (name != null) {
+                                    cubit.selectInspectionSample(name);
+                                  }
+                                },
+                              ),
+                            ),
+                        ],
                       ] else ...[
                         SizedBox(
                           width: 280.w,
@@ -641,16 +832,17 @@ class _RunTestTabState extends State<RunTestTab> {
                           ),
                         ),
                       ],
-                      SizedBox(
-                        width: 220.w,
-                        child: TextField(
-                          controller: _sampleName,
-                          decoration: InputDecoration(
-                            labelText: AppText.t('اسم العينة', 'Sample name'),
-                            isDense: true,
+                      if (state.sourceType == 'product')
+                        SizedBox(
+                          width: 220.w,
+                          child: TextField(
+                            controller: _sampleName,
+                            decoration: InputDecoration(
+                              labelText: AppText.t('اسم العينة', 'Sample name'),
+                              isDense: true,
+                            ),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ],

@@ -20,6 +20,7 @@ import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../di/service_locator.dart';
 import '../../reference/domain/reference_repository.dart';
 import '../../reports/domain/report_repository.dart';
+import '../../lab/domain/lab_result_repository.dart';
 import '../domain/inspection_repository.dart';
 import 'cubit/inspection_detail_cubit.dart';
 import 'cubit/inspection_form_cubit.dart';
@@ -79,6 +80,7 @@ class InspectionsScreen extends StatelessWidget {
             inspectionId: id,
             repo: getIt<InspectionRepository>(),
             reports: getIt<ReportRepository>(),
+            labResults: getIt<LabResultRepository>(),
           )..load(),
           child: InspectionDetailScreen(inspectionId: id),
         ),

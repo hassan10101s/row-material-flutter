@@ -18,7 +18,6 @@ class SettingsRepo implements SettingsRepository {
 
   SettingsRepo({required this.dbHelper, required this.secret, this.paths});
 
-
   Future<Map<String, dynamic>> getSettings() async {
     final db = await dbHelper.database;
     final rows = await db.query('settings');
@@ -34,8 +33,10 @@ class SettingsRepo implements SettingsRepository {
     final db = await dbHelper.database;
     final batch = db.batch();
     for (final entry in updates.entries) {
-      batch.insert('settings', {'key': entry.key, 'value': entry.value},
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert('settings', {
+        'key': entry.key,
+        'value': entry.value,
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
   }
@@ -117,7 +118,8 @@ class SettingsRepo implements SettingsRepository {
   Future<String?> getReportLogoPath() => getSettingValue('report_logo_path');
 
   @override
-  Future<String?> getReportLogoDataUri() => getSettingValue('report_logo_data_uri');
+  Future<String?> getReportLogoDataUri() =>
+      getSettingValue('report_logo_data_uri');
 
   @override
   Future<void> setReportLogo(String path, String dataUri) async {

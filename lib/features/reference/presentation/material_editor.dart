@@ -66,9 +66,14 @@ class MaterialEditor extends StatefulWidget {
 }
 
 class _PhysicalParamRow {
+  int? parameterId;
   final TextEditingController nameCtrl;
   final TextEditingController reqCtrl;
-  _PhysicalParamRow({String name = '', String requirement = ''})
+  _PhysicalParamRow({
+    this.parameterId,
+    String name = '',
+    String requirement = '',
+  })
     : nameCtrl = TextEditingController(text: name),
       reqCtrl = TextEditingController(text: requirement);
   void dispose() {
@@ -111,7 +116,6 @@ class MaterialEditorState extends State<MaterialEditor> {
   final _physical = <_PhysicalParamRow>[];
   final _chemical = <_ChemicalParamRow>[];
   List<Map<String, dynamic>> _parameters = [];
-  List<Map<String, dynamic>> _units = [];
 
   bool _loading = true;
   bool _saving = false;
@@ -191,7 +195,6 @@ class MaterialEditorState extends State<MaterialEditor> {
     setState(() => _loading = true);
     try {
       final parameters = await _refRepo.listParameters();
-      final units = await _refRepo.listUnits();
       var physicalRows = <_PhysicalParamRow>[];
       var chemicalRows = <_ChemicalParamRow>[];
       var initialName = '';
@@ -206,6 +209,14 @@ class MaterialEditorState extends State<MaterialEditor> {
         physicalRows = [
           for (final e in physMap.entries)
             _PhysicalParamRow(
+              parameterId: parameters
+                  .where(
+                    (p) =>
+                        '${p['parameter_type'] ?? ''}' == 'physical' &&
+                        '${p['parameter_name']}'.trim().toLowerCase() ==
+                            e.key.trim().toLowerCase(),
+                  )
+                  .firstOrNull?['id'] as int?,
               name: e.key,
               requirement: referenceValueText(e.value),
             ),
@@ -221,9 +232,7 @@ class MaterialEditorState extends State<MaterialEditor> {
           final fm = Map<String, dynamic>.from(f as Map);
           final name = '${fm['parameter_name'] ?? ''}'.trim();
           if (name.isEmpty) continue;
-          final unit = '${fm['unit'] ?? ''}'.trim().isNotEmpty
-              ? '${fm['unit']}'
-              : '%';
+          final unit = '${fm['unit'] ?? ''}';
           chemicalByName[name.toLowerCase()] = _ChemicalParamRow(
             parameterId: fm['parameter_id'] as int?,
             name: name,
@@ -246,7 +255,7 @@ class MaterialEditorState extends State<MaterialEditor> {
             name: nameStr,
             min: parsed.min,
             max: parsed.max,
-            unit: refUnit.isNotEmpty ? refUnit : '%',
+            unit: refUnit,
           );
         });
         chemicalRows = chemicalByName.values.toList();
@@ -256,7 +265,6 @@ class MaterialEditorState extends State<MaterialEditor> {
       if (!mounted) return;
       setState(() {
         _parameters = parameters;
-        _units = units;
         _physical.addAll(physicalRows);
         _chemical.addAll(chemicalRows);
         _nameEn.text = parts.en;
@@ -270,20 +278,6 @@ class MaterialEditorState extends State<MaterialEditor> {
       AppFeedback.errorFrom(context, e);
       Navigator.of(context).pop(false);
     }
-  }
-
-  List<String> get _uniqueUnitSuggestions {
-    final seen = <String>{};
-    final out = <String>[];
-    for (final u in _units) {
-      final s = '${u['symbol'] ?? ''}'.trim();
-      if (s.isNotEmpty && seen.add(s.toLowerCase())) out.add(s);
-    }
-    for (final p in _parameters) {
-      final u = '${p['unit'] ?? ''}'.trim();
-      if (u.isNotEmpty && seen.add(u.toLowerCase())) out.add(u);
-    }
-    return out;
   }
 
   void _addPhysicalRow() => setState(() => _physical.add(_PhysicalParamRow()));
@@ -308,10 +302,40 @@ class MaterialEditorState extends State<MaterialEditor> {
         '${_chemical[i].parameterId}',
   };
 
+  Set<String> _usedPhysicalParameterIds(int excludeIndex) => {
+    for (var i = 0; i < _physical.length; i++)
+      if (i != excludeIndex && _physical[i].parameterId != null)
+        '${_physical[i].parameterId}',
+  };
+
+  List<Map<String, dynamic>> get _physicalParameters => [
+    for (final parameter in _parameters)
+      if ('${parameter['parameter_type'] ?? ''}' == 'physical') parameter,
+  ];
+
+  List<Map<String, dynamic>> get _chemicalParameters => [
+    for (final parameter in _parameters)
+      if ('${parameter['parameter_type'] ?? ''}' == 'chemical') parameter,
+  ];
+
+  void _onPhysicalParameterChange(_PhysicalParamRow row, int? id) {
+    final parameter = _physicalParameters
+        .where((item) => '${item['id']}' == '$id')
+        .firstOrNull;
+    setState(() {
+      row.parameterId = id;
+      if (parameter != null) {
+        row.nameCtrl.text = '${parameter['parameter_name'] ?? ''}';
+      } else {
+        row.nameCtrl.clear();
+      }
+    });
+  }
+
   void _onParameterChange(_ChemicalParamRow row) {
     final p = row.parameterId == null
         ? null
-        : _parameters
+        : _chemicalParameters
               .where((x) => '${x['id']}' == '${row.parameterId}')
               .firstOrNull;
     setState(() {
@@ -320,11 +344,7 @@ class MaterialEditorState extends State<MaterialEditor> {
         return;
       }
       row.nameCtrl.text = '${p['parameter_name'] ?? ''}';
-      row.unitCtrl.text = '${p['unit'] ?? ''}'.trim().isNotEmpty
-          ? '${p['unit']}'
-          : (row.unitCtrl.text.trim().isNotEmpty
-                ? row.unitCtrl.text.trim()
-                : '%');
+      row.unitCtrl.text = '${p['unit'] ?? ''}';
     });
   }
 
@@ -371,11 +391,39 @@ class MaterialEditorState extends State<MaterialEditor> {
 
       for (final p in _physical) {
         final name = p.nameCtrl.text.trim();
-        if (name.isNotEmpty) physicalReference[name] = p.reqCtrl.text.trim();
+        if (name.isNotEmpty) {
+          final parameter = _physicalParameters
+              .where((item) => '${item['id']}' == '${p.parameterId}')
+              .firstOrNull;
+          if (parameter == null) {
+            throw ValidationError(
+              AppText.t(
+                'اختر بارامتراً ظاهرياً من المرجع لكل حقل',
+                'Choose a reference physical parameter for every field.',
+              ),
+            );
+          }
+          physicalReference[name] = {
+            'value': p.reqCtrl.text.trim(),
+            'unit': '${parameter['unit'] ?? ''}',
+          };
+        }
       }
       for (final c in _chemical) {
         final name = c.nameCtrl.text.trim();
         if (name.isEmpty) continue;
+        final parameter = _chemicalParameters
+            .where((item) => '${item['id']}' == '${c.parameterId}')
+            .firstOrNull;
+        if (parameter == null) {
+          throw ValidationError(
+            AppText.t(
+              'اختر بارامتراً كيميائياً من المرجع لكل حقل',
+              'Choose a reference chemical parameter for every field.',
+            ),
+          );
+        }
+        c.unitCtrl.text = '${parameter['unit'] ?? ''}';
         final min = c.minCtrl.text.trim();
         final max = c.maxCtrl.text.trim();
         String range = '';
@@ -389,8 +437,8 @@ class MaterialEditorState extends State<MaterialEditor> {
           range = 'max $max';
         }
         chemicalReference[name] = range;
-        final unit = c.unitCtrl.text.trim();
-        if (unit.isNotEmpty) units[name] = unit;
+        final unit = '${parameter['unit'] ?? ''}'.trim();
+        units[name] = unit;
       }
 
       final combinedName = [
@@ -405,7 +453,7 @@ class MaterialEditorState extends State<MaterialEditor> {
             {
               'parameter_name': p.nameCtrl.text.trim(),
               'parameter_type': 'physical',
-              'unit': '',
+              'unit': '${_physicalParameters.where((item) => '${item['id']}' == '${p.parameterId}').firstOrNull?['unit'] ?? ''}',
               'min_value': _parseRangeText(p.reqCtrl.text.trim()).min,
               'max_value': _parseRangeText(p.reqCtrl.text.trim()).max,
             },
@@ -629,16 +677,35 @@ class MaterialEditorState extends State<MaterialEditor> {
 
   Widget _physicalRow(int index) {
     final row = _physical[index];
+    final used = _usedPhysicalParameterIds(index);
     final name = Expanded(
       flex: 2,
-      child: TextField(
-        controller: row.nameCtrl,
-        enabled: !_saving,
-        decoration: InputDecoration(
+      child: DropdownButtonFormField<int?>(
+        initialValue: row.parameterId,
+        isDense: true,
+        isExpanded: true,
+        decoration: const InputDecoration(
           isDense: true,
-          hintText: AppText.t('مثال: اللون', 'e.g. Color'),
-          border: const OutlineInputBorder(),
+          border: OutlineInputBorder(),
         ),
+        hint: Text(
+          AppText.t('اختر بارامتراً ظاهرياً…', 'Choose a physical parameter…'),
+          overflow: TextOverflow.ellipsis,
+        ),
+        items: [
+          for (final parameter in _physicalParameters)
+            DropdownMenuItem<int?>(
+              value: int.tryParse('${parameter['id']}'),
+              enabled: !used.contains('${parameter['id']}'),
+              child: Text(
+                '${parameter['parameter_name']}',
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+        ],
+        onChanged: _saving
+            ? null
+            : (id) => _onPhysicalParameterChange(row, id),
       ),
     );
     final requirement = Expanded(
@@ -750,7 +817,7 @@ class MaterialEditorState extends State<MaterialEditor> {
           maxLines: 1,
           softWrap: false,
         ),
-        for (final p in _parameters)
+        for (final p in _chemicalParameters)
           Text(
             '${p['parameter_name']}',
             overflow: TextOverflow.ellipsis,
@@ -767,7 +834,7 @@ class MaterialEditorState extends State<MaterialEditor> {
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        for (final p in _parameters)
+        for (final p in _chemicalParameters)
           DropdownMenuItem<int?>(
             value: int.tryParse('${p['id']}'),
             enabled: !used.contains('${p['id']}'),
@@ -806,21 +873,11 @@ class MaterialEditorState extends State<MaterialEditor> {
     );
     final unit = TextField(
       controller: row.unitCtrl,
-      enabled: enabled,
+      enabled: false,
       decoration: InputDecoration(
         isDense: true,
-        labelText: AppText.t('الوحدة', 'Unit'),
+        labelText: AppText.t('الوحدة الموروثة', 'Inherited unit'),
         border: const OutlineInputBorder(),
-        suffixIcon: PopupMenuButton<String>(
-          enabled: enabled,
-          tooltip: AppText.t('اقتراحات الوحدات', 'Unit suggestions'),
-          onSelected: (v) => setState(() => row.unitCtrl.text = v),
-          itemBuilder: (_) => [
-            for (final u in _uniqueUnitSuggestions)
-              PopupMenuItem(value: u, child: Text(u)),
-          ],
-          icon: Icon(Icons.arrow_drop_down, size: 18.r),
-        ),
       ),
     );
     final remove = IconButton(

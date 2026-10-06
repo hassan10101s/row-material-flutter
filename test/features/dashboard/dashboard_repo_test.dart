@@ -650,17 +650,10 @@ void main() {
       expect(empty['rejectedWidth'], '0');
     });
 
-    test('BUG PINNED: every monthly bucket reports 0.0 rates and empty bars',
-        () async {
-      // `summary()` increments only `buck['total']` (dashboard_repo.dart:145).
-      // The status counters at lines 148-158 bump `mat` and `sup` but never
-      // `buck`, so `approved`/`conditional`/`rejected` are stuck at 0 for every
-      // month. The trend chart therefore renders "no approvals at all" for a
-      // month that was 100% approved, while `totals.approvalRate` in the very
-      // same response is correct.
-      //
-      // Pinned as observed behaviour so that whoever fixes line 145 has to
-      // update this test deliberately rather than shipping the broken chart.
+    test('monthly buckets split approvals/conditionals/rejections', () async {
+      // FIXED (was BUG PINNED): `summary()` now increments the per-status
+      // bucket counters alongside `total`, so the trend chart agrees with the
+      // headline numbers. PARTIAL counts as rejected in the monthly buckets.
       final m = await addMaterial('Salt');
       await addInspection(
           entryCode: 'T-1',
@@ -684,15 +677,14 @@ void main() {
       final s = await repo.summary(period: 'all');
       final bucket = (s['monthlyTrend'] as List).last;
       expect(bucket['total'], 3, reason: 'the row count itself is correct');
-      expect(bucket['approved'], 0);
-      expect(bucket['conditional'], 0);
-      expect(bucket['rejected'], 0);
-      expect(bucket['approvalRate'], '0.0');
-      expect(bucket['rejectionRate'], '0.0');
-      expect(bucket['approvedWidth'], '0.00',
-          reason: 'total is 3, so the width is 0/3 formatted, not the "0" literal');
-      expect(bucket['conditionalWidth'], '0.00');
-      expect(bucket['rejectedWidth'], '0.00');
+      expect(bucket['approved'], 1);
+      expect(bucket['conditional'], 1);
+      expect(bucket['rejected'], 1);
+      expect(bucket['approvalRate'], '33.3');
+      expect(bucket['rejectionRate'], '66.7');
+      expect(bucket['approvedWidth'], '33.33');
+      expect(bucket['conditionalWidth'], '33.33');
+      expect(bucket['rejectedWidth'], '33.33');
 
       // The headline numbers, computed by the same loop, are right — proving the
       // defect is isolated to the monthly buckets.
@@ -777,11 +769,9 @@ void main() {
       expect(comparison['label'], 'لا يوجد اتجاه بعد');
     });
 
-    test('BUG PINNED: a single month reports 0.0 instead of that month\'s rate',
-        () async {
-      // `_comparison` reads `approvalRate` out of the trend bucket, which is
-      // always '0.0' (see the bucket bug above), so the "this month" figure is
-      // hard-coded to zero no matter how good the month was.
+    test('a single month reports that month\'s rate', () async {
+      // FIXED (was BUG PINNED): `_comparison` reads the now-live bucket
+      // `approvalRate`, so the "this month" figure matches the data.
       final m = await addMaterial('Salt');
       for (var i = 0; i < 2; i++) {
         await addInspection(
@@ -797,14 +787,12 @@ void main() {
           reason: 'the headline rate is correct');
       final comparison = s['comparison'] as Map;
       expect(comparison['label'], 'نسبة القبول هذا الشهر');
-      expect(comparison['approvalDelta'], '0.0');
+      expect(comparison['approvalDelta'], '100.0');
     });
 
-    test('BUG PINNED: two months of data always claim a +0.0% improvement',
-        () async {
-      // Because both sides of the delta are the dead '0.0', `delta >= 0` is
-      // always true: the dashboard tells the user quality *improved* by zero
-      // percent even when it collapsed from 100% to 0%.
+    test('two months of data report the real approval delta', () async {
+      // FIXED (was BUG PINNED): both sides of the delta are live, so a
+      // collapse from 100% to 0% reports a decline of 100 points.
       final m = await addMaterial('Salt');
       for (var i = 0; i < 2; i++) {
         await addInspection(
@@ -825,16 +813,14 @@ void main() {
 
       final comparison =
           (await repo.summary(period: 'all'))['comparison'] as Map;
-      expect(comparison['approvalDeltaSign'], '+');
-      expect(comparison['approvalDelta'], '0.0');
-      expect(comparison['label'], 'تحسن عن الشهر السابق (+0.0%)');
+      expect(comparison['approvalDeltaSign'], '');
+      expect(comparison['approvalDelta'], '100.0');
+      expect(comparison['label'], 'انخفاض عن الشهر السابق (-100.0%)');
     });
 
-    test('BUG PINNED: the month-over-month insight card can never fire',
-        () async {
-      // `_insightCards` computes its trend from the same dead
-      // `approvalRate`, so `trend` is always 0 and neither the improvement nor
-      // the decline card is ever emitted — whatever the data says.
+    test('the month-over-month insight card fires on real movement', () async {
+      // FIXED (was BUG PINNED): `_insightCards` computes its trend from the
+      // live bucket `approvalRate`, so a 0% -> 100% jump emits improvement.
       final m = await addMaterial('Salt');
       for (var i = 0; i < 2; i++) {
         await addInspection(
@@ -854,8 +840,7 @@ void main() {
       }
 
       final cards = (await repo.summary(period: 'all'))['insightCards'] as List;
-      expect(cards.map((c) => '${c['title']}'),
-          isNot(contains('اتجاه تحسن')));
+      expect(cards.map((c) => '${c['title']}'), contains('اتجاه تحسن'));
       expect(cards.map((c) => '${c['title']}'),
           isNot(contains('اتجاه انخفاض')));
     });
@@ -1189,6 +1174,152 @@ void main() {
       final salt =
           options.materials.firstWhere((m) => m['name'] == 'Salt (M-SALT-01)');
       expect(salt['id'], '$id');
+    });
+  });
+
+  group('dashboardBundle() — cross-module analyst KPIs', () {
+    test('empty database yields a zeroed bundle, never a throw', () async {
+      final b = await repo.dashboardBundle(period: 'all');
+      expect(b.volume.total, 0);
+      expect(b.quality.total, 0);
+      expect(b.quality.acceptanceRate, 0.0);
+      expect(b.lab.totalTests, 0);
+      expect(b.qc.total, 0);
+      expect(b.ncr.total, 0);
+      expect(b.ncr.onTimePct, isNull);
+      expect(b.sopGoals.sopTotal, 0);
+      expect(b.inventory.skus, 0);
+      expect(b.trend, hasLength(6));
+    });
+
+    test('inspection sections honour filters; acceptance folds conditional',
+        () async {
+      await seedCementSugar();
+      final b = await repo.dashboardBundle(period: 'all');
+      // 5 rows: 2 approved + 1 conditional + 1 partial + 1 full.
+      expect(b.quality.total, 5);
+      expect(b.quality.approved, 2);
+      expect(b.quality.conditional, 1);
+      expect(b.quality.acceptanceRate, 60.0);
+      expect(b.quality.strictRate, 40.0);
+      expect(b.quality.rejectionRate, 40.0);
+      expect(b.volume.total, 5);
+      // Quantities: addInspection writes quantity '10' each; partial has no
+      // rejected_quantity, so rejected-qty ratio is 10 (one FULL) / 50.
+      expect(b.quality.totalQty, 50.0);
+      expect(b.quality.rejectedQtyRatio, 20.0);
+    });
+
+    test('inventory section counts low/empty stock', () async {
+      await db.insert('lab_inventory', <String, dynamic>{
+        'name': 'Acid',
+        'category': 'liquid',
+        'unit': 'L',
+        'current_qty': 2,
+        'min_qty': 5,
+        'created_at': nowIso(),
+        'updated_at': nowIso(),
+      });
+      await db.insert('lab_inventory', <String, dynamic>{
+        'name': 'Salt-lab',
+        'category': 'powder',
+        'unit': 'kg',
+        'current_qty': 0,
+        'min_qty': 1,
+        'created_at': nowIso(),
+        'updated_at': nowIso(),
+      });
+      await db.insert('lab_inventory', <String, dynamic>{
+        'name': 'Water',
+        'category': 'liquid',
+        'unit': 'L',
+        'current_qty': 50,
+        'min_qty': 5,
+        'created_at': nowIso(),
+        'updated_at': nowIso(),
+      });
+      final b = await repo.dashboardBundle(period: 'all');
+      expect(b.inventory.skus, 3);
+      expect(b.inventory.low, 1);
+      expect(b.inventory.empty, 1);
+      expect(b.inventory.ok, 1);
+      expect(b.inventory.lowItems.map((e) => '${e['name']}'),
+          contains('Acid'));
+      expect(b.lab.lowStockCount, 2,
+          reason: 'lab counts every row with qty < min (low + empty)');
+    });
+
+    test('NCR section aggregates open/overdue/severity', () async {
+      final insp = await db.insert('qc_inspections', <String, dynamic>{
+        'template_id': 1,
+        'inspection_date': dayOffset(10),
+        'created_at': nowIso(),
+        'updated_at': nowIso(),
+      });
+      final overdueDay = dayOffset(40);
+      final futureDay = dayOffset(-40);
+      await db.insert('qc_findings_nc', <String, dynamic>{
+        'inspection_id': insp,
+        'severity': 'Critical',
+        'description': 'crit open overdue',
+        'status': 'Open',
+        'due_date': overdueDay,
+        'created_at': '${dayOffset(40)} 08:00:00',
+        'updated_at': nowIso(),
+      });
+      await db.insert('qc_findings_nc', <String, dynamic>{
+        'inspection_id': insp,
+        'severity': 'Major',
+        'description': 'major open',
+        'status': 'InProgress',
+        'due_date': futureDay,
+        'created_at': nowIso(),
+        'updated_at': nowIso(),
+      });
+      final b = await repo.dashboardBundle(period: 'all');
+      expect(b.ncr.total, 2);
+      expect(b.ncr.open, 2);
+      expect(b.ncr.overdue, 1);
+      expect(b.ncr.overduePct, 50.0);
+      expect(b.ncr.critical, 1);
+      expect(b.ncr.major, 1);
+      expect(b.ncr.onTimePct, isNull,
+          reason: 'nothing closed, so the rate is unknown, not 0%');
+      expect(b.ncr.aging.fold<int>(0, (a, v) => a + v), 2);
+    });
+
+    test('SOP section counts published/expired/expiring/pending', () async {
+      final today = todayIso();
+      await db.insert('qc_sops', <String, dynamic>{
+        'code': 'SOP-OLD',
+        'title': 'Old',
+        'status': 'Published',
+        'expiry_date': dayOffset(10),
+        'created_at': nowIso(),
+        'updated_at': nowIso(),
+      });
+      await db.insert('qc_sops', <String, dynamic>{
+        'code': 'SOP-SOON',
+        'title': 'Soon',
+        'status': 'Published',
+        'expiry_date': dayOffset(-10),
+        'created_at': nowIso(),
+        'updated_at': nowIso(),
+      });
+      await db.insert('qc_sops', <String, dynamic>{
+        'code': 'SOP-PEND',
+        'title': 'Pending',
+        'status': 'Pending',
+        'created_at': nowIso(),
+        'updated_at': nowIso(),
+      });
+      final b = await repo.dashboardBundle(period: 'all');
+      expect(b.sopGoals.sopTotal, 3);
+      expect(b.sopGoals.sopPublished, 2);
+      expect(b.sopGoals.sopExpired, 1);
+      expect(b.sopGoals.sopExpiring, 1);
+      expect(b.sopGoals.sopPending, 1);
+      expect(today, isNotEmpty, reason: 'todayIso helper is linked');
     });
   });
 }

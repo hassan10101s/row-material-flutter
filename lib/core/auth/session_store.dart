@@ -7,14 +7,15 @@ import 'app_session.dart';
 /// read-only local work, and every remote write still requires a live token.
 class SessionStore {
   SessionStore({FlutterSecureStorage? storage})
-      : _storage = storage ??
-            const FlutterSecureStorage(
-              // `resetOnError` is what makes a **restored** device recoverable:
-              // after a restore the Android KeyStore key that encrypted the
-              // token is gone, and without this a `KeyStoreException` is thrown
-              // out of `read` at boot instead of degrading to "signed out".
-              aOptions: AndroidOptions(resetOnError: true),
-            );
+    : _storage =
+          storage ??
+          const FlutterSecureStorage(
+            // `resetOnError` is what makes a **restored** device recoverable:
+            // after a restore the Android KeyStore key that encrypted the
+            // token is gone, and without this a `KeyStoreException` is thrown
+            // out of `read` at boot instead of degrading to "signed out".
+            aOptions: AndroidOptions(resetOnError: true),
+          );
 
   static const String key = 'ml_session_v2';
 

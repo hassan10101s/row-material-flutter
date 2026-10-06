@@ -32,7 +32,8 @@ void main() {
       expect(
         ruleMatrix[role],
         rolePermissions(role).map((p) => p.id).toSet(),
-        reason: 'role `$role` differs between permissions.dart and firestore.rules',
+        reason:
+            'role `$role` differs between permissions.dart and firestore.rules',
       );
     }
   });
@@ -42,11 +43,14 @@ void main() {
   });
 
   test('the catch-all deny stays at the end of the rules', () {
-    final lastMatch = RegExp(r'match /\{document=\*\*\} \{ allow read, write: if false; \}')
-        .allMatches(rules)
-        .toList();
-    expect(lastMatch.length, greaterThanOrEqualTo(2),
-        reason: 'both the organization catch-all and the global one are required');
+    final lastMatch = RegExp(
+      r'match /\{document=\*\*\} \{ allow read, write: if false; \}',
+    ).allMatches(rules).toList();
+    expect(
+      lastMatch.length,
+      greaterThanOrEqualTo(2),
+      reason: 'both the organization catch-all and the global one are required',
+    );
     final tail = rules.substring(lastMatch.last.end);
     expect(
       tail.replaceAll('}', '').trim(),
