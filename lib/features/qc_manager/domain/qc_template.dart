@@ -43,6 +43,10 @@ class QcTemplate extends Equatable {
   /// Why this version differs from the last - mandatory on a published change.
   final String revisionNote;
 
+  /// Simplified periodic tasks (plan §3): 'once' | 'daily' | 'weekly' | 'monthly'.
+  /// 'once' = quality checklist on a shipment; others = recurring task list.
+  final String recurrence;
+
   const QcTemplate({
     this.templateId,
     required this.name,
@@ -71,6 +75,7 @@ class QcTemplate extends Equatable {
     this.createdBy = '',
     this.updatedBy = '',
     this.revisionNote = '',
+    this.recurrence = QcRecurrence.once,
   });
 
   bool get isDeleted => deletedAt.isNotEmpty;
@@ -82,6 +87,10 @@ class QcTemplate extends Equatable {
   bool get isExpired => qcIsPastDue(expiryDate);
 
   bool get isEffectiveNow => qcIsEffectiveFrom(effectiveDate);
+
+  /// Periodic task list vs one-off quality checklist.
+  bool get isPeriodic => QcRecurrence.isPeriodic(recurrence);
+  bool get isOneShot => !isPeriodic;
 
   List<String> get tagList => _splitTags(tags);
 
@@ -114,6 +123,7 @@ class QcTemplate extends Equatable {
     createdBy,
     updatedBy,
     revisionNote,
+    recurrence,
   ];
 
   factory QcTemplate.fromMap(Map<String, dynamic> m) => QcTemplate(
@@ -147,6 +157,7 @@ class QcTemplate extends Equatable {
     createdBy: '${m['created_by'] ?? ''}',
     updatedBy: '${m['updated_by'] ?? ''}',
     revisionNote: '${m['revision_note'] ?? ''}',
+    recurrence: QcRecurrence.normalize('${m['recurrence'] ?? 'once'}'),
   );
 
   Map<String, dynamic> toMap({bool withId = true}) => {
@@ -177,6 +188,7 @@ class QcTemplate extends Equatable {
     'created_by': createdBy,
     'updated_by': updatedBy,
     'revision_note': revisionNote,
+    'recurrence': recurrence,
   };
 
   /// The copy that becomes a new draft version, carrying the structure across
@@ -206,6 +218,40 @@ class QcTemplate extends Equatable {
     createdBy: createdBy,
     updatedBy: updatedBy,
     revisionNote: note ?? revisionNote,
+    recurrence: recurrence,
+  );
+}
+
+extension QcTemplateRecurrenceX on QcTemplate {
+  QcTemplate copyWithRecurrence({String? recurrence}) => QcTemplate(
+    templateId: templateId,
+    name: name,
+    code: code,
+    type: type,
+    dept: dept,
+    site: site,
+    category: category,
+    description: description,
+    version: version,
+    isPublished: isPublished,
+    isArchived: isArchived,
+    deletedAt: deletedAt,
+    requiresApprovalOnSubmit: requiresApprovalOnSubmit,
+    allowNa: allowNa,
+    enforceEvidenceOnFail: enforceEvidenceOnFail,
+    blockSubmitIfCriticalFail: blockSubmitIfCriticalFail,
+    ownerId: ownerId,
+    publishedBy: publishedBy,
+    publishedAt: publishedAt,
+    effectiveDate: effectiveDate,
+    expiryDate: expiryDate,
+    tags: tags,
+    createdAt: createdAt,
+    updatedAt: updatedAt,
+    createdBy: createdBy,
+    updatedBy: updatedBy,
+    revisionNote: revisionNote,
+    recurrence: recurrence ?? this.recurrence,
   );
 }
 

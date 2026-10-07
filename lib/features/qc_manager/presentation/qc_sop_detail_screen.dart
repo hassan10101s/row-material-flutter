@@ -120,32 +120,45 @@ class _Body extends StatelessWidget {
         const SizedBox(height: AppSpacing.md),
         _LifecycleRow(state: state, sop: sop),
         const SizedBox(height: AppSpacing.md),
+        // Simplified (plan §5): title + category + body first. Code and
+        // expiry stay visible when set (legacy rows); roles/dept/site and
+        // version internals stay in DB, hidden from the plant floor.
         AppCard(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _Field(
-                AppText.t('الرمز', 'Code'),
-                '${sop.code}  •  rev ${sop.revNo}',
+              Text(
+                sop.title,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16.spMax,
+                ),
               ),
-              _Field(AppText.t('القسم', 'Department'), sop.dept),
-              _Field(AppText.t('التصنيف', 'Category'), sop.category),
-              _Field(AppText.t('الموقع', 'Site'), sop.site),
-              _Field(
-                AppText.t('ساري من', 'Effective'),
-                sop.effectiveDate.isEmpty
-                    ? '-'
-                    : sop.effectiveDate.substring(0, 10),
+              const SizedBox(height: 4),
+              Text(
+                '${AppText.t('الفئة', 'Category')}: ${sop.category.isEmpty ? '-' : sop.category}',
+                style: TextStyle(
+                  fontSize: 12.spMax,
+                  color: AppColors.textMuted,
+                ),
               ),
-              _Field(
-                AppText.t('ينتهي في', 'Expires'),
-                sop.expiryDate.isEmpty ? '-' : sop.expiryDate.substring(0, 10),
-                danger: sop.isExpired,
-              ),
-              if (sop.publishedAt.isNotEmpty)
-                _Field(
-                  AppText.t('نُشر في', 'Published'),
-                  sop.publishedAt.substring(0, 10),
+              if (sop.code.isNotEmpty)
+                Text(
+                  '${sop.code}  •  rev ${sop.revNo}',
+                  style: TextStyle(
+                    fontSize: 12.spMax,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+              if (sop.expiryDate.isNotEmpty)
+                Text(
+                  '${AppText.t('ينتهي في', 'Expires')}: ${sop.expiryDate.length >= 10 ? sop.expiryDate.substring(0, 10) : sop.expiryDate}',
+                  style: TextStyle(
+                    fontSize: 12.spMax,
+                    color: sop.isExpired
+                        ? AppColors.danger
+                        : AppColors.textMuted,
+                  ),
                 ),
             ],
           ),
@@ -535,38 +548,4 @@ class _ReadsCard extends StatelessWidget {
   }
 }
 
-class _Field extends StatelessWidget {
-  const _Field(this.label, this.value, {this.danger = false});
 
-  final String label;
-  final String value;
-  final bool danger;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 110,
-            child: Text(
-              label,
-              style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value.isEmpty ? '-' : value,
-              style: TextStyle(
-                fontSize: 13.spMax,
-                color: danger ? AppColors.danger : AppColors.textStrong,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

@@ -405,29 +405,22 @@ class _OverviewTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Simplified (plan §4): code auto, no KPIs/type/site in UI.
               _Field(
                 AppText.t('الرمز', 'Code'),
                 goal.code.isEmpty ? '-' : goal.code,
               ),
-              _Field(AppText.t('النوع', 'Type'), goal.goalType),
               _Field(
-                AppText.t('المالك', 'Owner'),
-                goal.ownerName.isNotEmpty ? goal.ownerName : goal.ownerId,
+                AppText.t('المسؤول', 'Owner'),
+                goal.ownerName.isNotEmpty
+                    ? goal.ownerName
+                    : (goal.ownerId.isNotEmpty ? goal.ownerId : '-'),
               ),
-              _Field(AppText.t('البداية', 'Start'), _dateLabel(goal.startDate)),
-              _Field(AppText.t('الاستحقاق', 'Due'), _dateLabel(goal.dueDate)),
-              if (goal.targetValue != null)
-                _Field(
-                  AppText.t('المستهدف', 'Target'),
-                  '${goal.targetValue} ${goal.targetUnit}',
-                ),
-              if (goal.baselineValue != null)
-                _Field(
-                  AppText.t('خط الأساس', 'Baseline'),
-                  '${goal.baselineValue}',
-                ),
-              if (goal.currentValue != null)
-                _Field(AppText.t('الحالي', 'Current'), '${goal.currentValue}'),
+              _Field(
+                AppText.t('الموعد', 'Due'),
+                _dateLabel(goal.dueDate),
+                danger: goal.isOverdue,
+              ),
               if (goal.description.isNotEmpty) ...[
                 const Divider(),
                 Text(goal.description),
@@ -789,7 +782,7 @@ class _AssignmentsTab extends StatelessWidget {
   }
 }
 
-/// The steps, each with its own finisher and its own blocked reason.
+/// Simplified steps (plan §4): checkbox list, quick add, one-tap done.
 class _ActionsTab extends StatelessWidget {
   const _ActionsTab({required this.state});
 
@@ -797,76 +790,172 @@ class _ActionsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (state.actions.isEmpty) {
-      return AppEmptyState(
-        icon: Icons.checklist,
-        title: AppText.t('لا توجد خطوات', 'No steps yet'),
-      );
-    }
-    return ListView.separated(
+    return ListView(
       padding: const EdgeInsets.all(AppSpacing.md),
-      itemCount: state.actions.length,
-      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
-      itemBuilder: (context, i) {
-        final action = state.actions[i];
-        return AppCard(
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      action.actionText,
-                      style: TextStyle(fontSize: 13.spMax),
-                    ),
-                    if (action.dueDate.isNotEmpty)
-                      Text(
-                        _dateLabel(action.dueDate),
-                        style: TextStyle(
-                          fontSize: 11.spMax,
-                          color: action.isOverdue
-                              ? AppColors.danger
-                              : AppColors.textMuted,
-                        ),
-                      ),
-                    if (action.isBlocked && action.blockedReason.isNotEmpty)
-                      Text(
-                        action.blockedReason,
-                        style: TextStyle(
-                          fontSize: 11.spMax,
-                          color: AppColors.danger,
-                        ),
-                      ),
-                    if (action.isDone && action.doneAt.isNotEmpty)
-                      Text(
-                        '${AppText.t('أنجزها', 'Done by')}: '
-                        '${action.doneByLabel}',
-                        style: TextStyle(
-                          fontSize: 11.spMax,
-                          color: AppColors.success,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-              GoalPill.actionStatus(action.status),
-              if (!action.isDone &&
-                  action.status != QcGoalActionStatus.cancelled)
-                IconButton(
-                  icon: const Icon(Icons.check_circle_outline, size: 18),
-                  tooltip: AppText.t('إنجاز', 'Complete'),
-                  onPressed: () =>
-                      _completeActionDialog(context, action.actionId!),
-                ),
-            ],
-          ),
-        );
-      },
+      children: [
+        _AddStepRow(state: state),
+        const SizedBox(height: AppSpacing.md),
+        if (state.actions.isEmpty)
+          AppEmptyState(
+            icon: Icons.checklist,
+            title: AppText.t('لا توجد خطوات — أضف أول خطوة', 'No steps — add one'),
+          )
+        else
+          for (var i = 0; i < state.actions.length; i++) ...[
+            _ActionTile(action: state.actions[i], state: state),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+      ],
     );
   }
 
-  Future<void> _completeActionDialog(BuildContext context, int actionId) async {
+}
+
+/// Quick-add row: "[+ إضافة خطوة]" per plan §4.
+class _AddStepRow extends StatefulWidget {
+  const _AddStepRow({required this.state});
+
+  final QcGoalDetailState state;
+
+  @override
+  State<_AddStepRow> createState() => _AddStepRowState();
+}
+
+class _AddStepRowState extends State<_AddStepRow> {
+  final _controller = TextEditingController();
+  bool _open = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cubit = context.read<QcGoalDetailCubit>();
+    if (!_open) {
+      return OutlinedButton.icon(
+        onPressed: () => setState(() => _open = true),
+        icon: const Icon(Icons.add, size: 18),
+        label: Text(AppText.t('+ إضافة خطوة', '+ Add step')),
+      );
+    }
+    return Row(
+      children: [
+        Expanded(
+          child: TextField(
+            controller: _controller,
+            autofocus: true,
+            decoration: InputDecoration(
+              hintText: AppText.t('نص الخطوة...', 'Step text...'),
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+            onSubmitted: (_) => _submit(cubit),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        FilledButton(
+          onPressed: widget.state.saving ? null : () => _submit(cubit),
+          child: Text(AppText.t('إضافة', 'Add')),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submit(QcGoalDetailCubit cubit) async {
+    final text = _controller.text.trim();
+    if (text.isEmpty) {
+      setState(() => _open = false);
+      return;
+    }
+    await cubit.addAction(actionText: text);
+    if (mounted) {
+      setState(() {
+        _controller.clear();
+        _open = false;
+      });
+    }
+  }
+}
+
+/// One step row: checkbox + text + finisher, one-tap done.
+class _ActionTile extends StatelessWidget {
+  const _ActionTile({required this.action, required this.state});
+
+  final QcGoalAction action;
+  final QcGoalDetailState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      child: Row(
+        children: [
+          Checkbox(
+            value: action.isDone,
+            onChanged: (v) {
+              if (v == true && action.actionId != null) {
+                _complete(context, action.actionId!);
+              }
+            },
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  action.actionText,
+                  style: TextStyle(
+                    fontSize: 13.spMax,
+                    decoration: action.isDone
+                        ? TextDecoration.lineThrough
+                        : null,
+                  ),
+                ),
+                if (action.isBlocked && action.blockedReason.isNotEmpty)
+                  Text(
+                    action.blockedReason,
+                    style: TextStyle(
+                      fontSize: 11.spMax,
+                      color: AppColors.danger,
+                    ),
+                  ),
+                if (action.isDone && action.doneByLabel.isNotEmpty)
+                  Text(
+                    '${AppText.t('أنجزها', 'Done by')}: ${action.doneByLabel}',
+                    style: TextStyle(
+                      fontSize: 11.spMax,
+                      color: AppColors.success,
+                    ),
+                  )
+                else if (action.isOverdue)
+                  Text(
+                    AppText.t('متأخرة', 'Overdue'),
+                    style: TextStyle(
+                      fontSize: 11.spMax,
+                      color: AppColors.danger,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          GoalPill.actionStatus(action.status),
+          if (!action.isDone &&
+              action.status != QcGoalActionStatus.cancelled)
+            IconButton(
+              icon: const Icon(Icons.check_circle_outline, size: 20),
+              tooltip: AppText.t('إنجاز', 'Complete'),
+              onPressed: action.actionId == null
+                  ? null
+                  : () => _complete(context, action.actionId!),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _complete(BuildContext context, int actionId) async {
     final cubit = context.read<QcGoalDetailCubit>();
     final who = TextEditingController();
     final name = TextEditingController();
@@ -898,8 +987,7 @@ class _ActionsTab extends StatelessWidget {
     );
     final w = who.text.trim();
     final n = name.text.trim();
-    if (result != true) return;
-    if (!context.mounted) return;
+    if (result != true || !context.mounted) return;
     if (w.isEmpty || n.isEmpty) {
       AppFeedback.error(
         context,
@@ -1419,10 +1507,11 @@ class _HistoryTab extends StatelessWidget {
 }
 
 class _Field extends StatelessWidget {
-  const _Field(this.label, this.value);
+  const _Field(this.label, this.value, {this.danger = false});
 
   final String label;
   final String value;
+  final bool danger;
 
   @override
   Widget build(BuildContext context) {
@@ -1439,7 +1528,14 @@ class _Field extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Text(value, style: TextStyle(fontSize: 13.spMax)),
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 13.spMax,
+                color: danger ? AppColors.danger : null,
+                fontWeight: danger ? FontWeight.w600 : null,
+              ),
+            ),
           ),
         ],
       ),

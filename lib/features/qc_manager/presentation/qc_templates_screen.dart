@@ -236,6 +236,15 @@ class _TemplateTile extends StatelessWidget {
                 archived: template.isArchived,
               ),
               QcPill.type(template.type),
+              QcPill(
+                template.isPeriodic
+                    ? AppText.t(
+                        'مهام ${_recurrenceAr(template.recurrence)}',
+                        '${template.recurrence} tasks',
+                      )
+                    : AppText.t('فحص جودة', 'Quality check'),
+                template.isPeriodic ? AppColors.info : AppColors.success,
+              ),
             ],
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -285,6 +294,14 @@ class _TemplateTile extends StatelessWidget {
     );
   }
 }
+
+/// Arabic label for a recurrence value (plan §3: نوعان فقط).
+String _recurrenceAr(String r) => switch (r) {
+  QcRecurrence.daily => 'يومية',
+  QcRecurrence.weekly => 'أسبوعية',
+  QcRecurrence.monthly => 'شهرية',
+  _ => 'لمرة واحدة',
+};
 
 class _Meta extends StatelessWidget {
   const _Meta({required this.icon, required this.text, this.danger = false});

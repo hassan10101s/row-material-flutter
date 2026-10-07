@@ -17,6 +17,7 @@ import '../../../design_system/widgets/app_status_badge.dart';
 import '../../../design_system/widgets/app_summary_card.dart';
 import '../../../design_system/widgets/app_window.dart';
 import '../../../di/service_locator.dart';
+import '../../../core/database/database_helper.dart';
 import '../../inspections/domain/inspection_repository.dart';
 import '../../reference/domain/reference_repository.dart';
 import '../../inspections/presentation/cubit/inspection_form_cubit.dart';
@@ -186,6 +187,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             todayRejected: kpi.todayRejected,
                             totalCount: kpi.totalCount,
                           ),
+                          // Plan §6: quick quality card + daily tasks card.
+                          _QcQuickCard(kpi: kpi),
+                          const _DailyTasksCard(),
                         ],
                       ),
                     ),
@@ -767,19 +771,21 @@ class _ActionButton extends StatefulWidget {
 class _ActionButtonState extends State<_ActionButton> {
   bool _isHovered = false;
 
+  void _setHovered(bool value) {
+    if (!mounted || _isHovered == value) return;
+    setState(() => _isHovered = value);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
+      onEnter: (_) => _setHovered(true),
+      onExit: (_) => _setHovered(false),
       cursor: SystemMouseCursors.click,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
         curve: Curves.easeOutCubic,
-        transform: _isHovered
-            ? (Matrix4.identity()..translate(0.0, -2.0))
-            : Matrix4.identity(),
         decoration: BoxDecoration(
           color: _isHovered
               ? widget.color.withValues(alpha: isDark ? 0.20 : 0.08)
@@ -897,6 +903,258 @@ class _KpiRow extends StatelessWidget {
                 ),
               ),
           ],
+        );
+      },
+    );
+  }
+}
+
+/// Plan §6 — بطاقة الجودة السريعة: فحوصات الفترة من `qc_inspections`
+/// مع معدل القبول والرفض بشكل واضح.
+class _QcQuickCard extends StatelessWidget {
+  final DashboardKpisState kpi;
+  const _QcQuickCard({required this.kpi});
+
+  @override
+  Widget build(BuildContext context) {
+    final qc = kpi.bundle.qc;
+    final total = qc.total;
+    final acceptRate = total == 0
+        ? 0.0
+        : (qc.pass / total * 100);
+    final rejectRate = total == 0
+        ? 0.0
+        : (qc.fail / total * 100);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.verified_outlined,
+                  color: AppColors.success,
+                  size: 22.r,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    AppText.t('جودة الفحوصات', 'Inspection quality'),
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.success.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${AppText.t('قبول', 'Accept')}: ${acceptRate.toStringAsFixed(1)}%',
+                    style: TextStyle(
+                      fontSize: 12.spMax,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.success,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            if (total == 0)
+              Text(
+                AppText.t(
+                  'لا توجد فحوصات جودة في هذه الفترة',
+                  'No quality checks in this period',
+                ),
+                style: TextStyle(color: AppColors.textMuted),
+              )
+            else ...[
+              Wrap(
+                spacing: AppSpacing.md,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  _DecisionBadge(
+                    AppText.t('مطابق', 'Pass'),
+                    '${qc.pass}',
+                    AppColors.success,
+                  ),
+                  _DecisionBadge(
+                    AppText.t('مشروط', 'Conditional'),
+                    '${qc.conditional}',
+                    AppColors.info,
+                  ),
+                  _DecisionBadge(
+                    AppText.t('غير مطابق', 'Fail'),
+                    '${qc.fail}',
+                    AppColors.danger,
+                  ),
+                  _DecisionBadge(
+                    AppText.t('منتظر', 'Pending'),
+                    '${qc.pending}',
+                    AppColors.textMuted,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: (acceptRate / 100).clamp(0.0, 1.0),
+                  minHeight: 10,
+                  color: AppColors.success,
+                  backgroundColor: AppColors.danger.withValues(alpha: 0.2),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Flexible(
+                    child: Text(
+                      '${AppText.t('الإجمالي', 'Total')}: $total',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12.spMax,
+                      ),
+                    ),
+                  ),
+                  Flexible(
+                    child: Text(
+                      '${AppText.t('رفض', 'Reject')}: ${rejectRate.toStringAsFixed(1)}%',
+                      style: TextStyle(
+                        color: AppColors.danger,
+                        fontSize: 12.spMax,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Plan §6 — بطاقة المهام اليومية: القوائم الدورية المنشورة مقابل
+/// ما بدأ منها اليوم (مثال: "3 من 5 مهام يومية منجزة").
+class _DailyTasksCard extends StatelessWidget {
+  const _DailyTasksCard();
+
+  Future<({int total, int done})> _load() async {
+    try {
+      final db = await getIt<DatabaseHelper>().database;
+      // Periodic published lists (plan §3).
+      List<Map<String, Object?>> templates = const [];
+      try {
+        templates = await db.rawQuery(
+          "SELECT template_id FROM qc_templates WHERE deleted_at IS NULL "
+          "AND is_published = 1 AND is_archived = 0 "
+          "AND COALESCE(recurrence,'once') != 'once'",
+        );
+      } catch (_) {
+        // Column missing on very old installs: fall back to zero.
+        return (total: 0, done: 0);
+      }
+      if (templates.isEmpty) return (total: 0, done: 0);
+      final ids = <int>{};
+      for (final t in templates) {
+        final id = (t['template_id'] as num?)?.toInt();
+        if (id != null) ids.add(id);
+      }
+      final now = DateTime.now();
+      String p(int v) => v.toString().padLeft(2, '0');
+      final today = '${now.year}-${p(now.month)}-${p(now.day)}';
+      final placeholders = List.filled(ids.length, '?').join(',');
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT template_id FROM qc_inspections '
+        'WHERE deleted_at IS NULL AND template_id IN ($placeholders) '
+        "AND substr(COALESCE(inspection_date,created_at,''),1,10) = ?",
+        [...ids, today],
+      );
+      return (total: ids.length, done: rows.length);
+    } catch (_) {
+      return (total: 0, done: 0);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<({int total, int done})>(
+      future: _load(),
+      builder: (context, snap) {
+        final total = snap.data?.total ?? 0;
+        final done = snap.data?.done ?? 0;
+        if (snap.connectionState == ConnectionState.done && total == 0) {
+          // No periodic lists: hide the card (plan §6 cleanup).
+          return const SizedBox.shrink();
+        }
+        final pct = total == 0 ? 0.0 : done / total;
+        return Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      Icons.task_alt_outlined,
+                      color: AppColors.info,
+                      size: 22.r,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        AppText.t('المهام اليومية', 'Daily tasks'),
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    ),
+                    Text(
+                      AppText.t(
+                        '$done من $total منجزة',
+                        '$done of $total done',
+                      ),
+                      style: TextStyle(
+                        fontSize: 12.spMax,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.info,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: pct.clamp(0.0, 1.0),
+                    minHeight: 8,
+                    color: AppColors.info,
+                    backgroundColor: AppColors.borderMuted,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => context.go('/qc-templates'),
+                    icon: const Icon(Icons.arrow_forward, size: 16),
+                    label: Text(AppText.t('عرض المهام', 'View tasks')),
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
@@ -1150,7 +1408,7 @@ class _MonthlyTrendSection extends StatelessWidget {
 
 class _MonthlyTrendRow extends StatefulWidget {
   final Map<String, dynamic> item;
-  const _MonthlyTrendRow({super.key, required this.item});
+  const _MonthlyTrendRow({required this.item});
 
   @override
   State<_MonthlyTrendRow> createState() => _MonthlyTrendRowState();
@@ -1503,7 +1761,6 @@ class _TopItemProgress extends StatefulWidget {
   final double value;
   final Color color;
   const _TopItemProgress({
-    super.key,
     required this.label,
     required this.count,
     required this.rate,
@@ -1856,6 +2113,10 @@ class _LabQcSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final lab = kpi.bundle.lab;
     final qc = kpi.bundle.qc;
+    // Plan §6 cleanup: hide when always empty.
+    if (lab.totalTests == 0 && qc.total == 0) {
+      return const SizedBox.shrink();
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1934,6 +2195,8 @@ class _NcrSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final n = kpi.bundle.ncr;
+    // Plan §6 cleanup: hide when always empty.
+    if (n.total == 0) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2046,6 +2309,10 @@ class _SopGoalsSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = kpi.bundle.sopGoals;
+    // Plan §6 cleanup: hide when always empty.
+    if (s.sopTotal == 0 && s.goalTotal == 0) {
+      return const SizedBox.shrink();
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2119,6 +2386,8 @@ class _InventorySection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final inv = kpi.bundle.inventory;
+    // Plan §6 cleanup: hide when always empty.
+    if (inv.skus == 0) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2905,7 +3174,6 @@ class _SupplierRow extends StatefulWidget {
   final double maxScore;
   final int rank;
   const _SupplierRow({
-    super.key,
     required this.score,
     required this.maxScore,
     required this.rank,

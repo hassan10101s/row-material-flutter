@@ -156,6 +156,21 @@ abstract final class QcTemplateType {
   static String normalize(String? v) => all.contains(v) ? v as String : other;
 }
 
+/// How often a checklist repeats. `once` = quality inspection on a shipment;
+/// `daily`/`weekly`/`monthly` = periodic task list done with a "تم" tick.
+abstract final class QcRecurrence {
+  static const String once = 'once';
+  static const String daily = 'daily';
+  static const String weekly = 'weekly';
+  static const String monthly = 'monthly';
+
+  static const List<String> all = [once, daily, weekly, monthly];
+
+  static String normalize(String? v) => all.contains(v) ? v as String : once;
+
+  static bool isPeriodic(String? v) => normalize(v) != once;
+}
+
 /// The input control a checklist item renders, which in turn decides how a
 /// response is validated and scored.
 ///

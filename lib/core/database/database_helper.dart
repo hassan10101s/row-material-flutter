@@ -1097,6 +1097,13 @@ class DatabaseHelper {
     await _ensureColumn(db, 'qc_sops', 'published_at', 'published_at TEXT');
     await _ensureColumn(db, 'qc_sections', 'deleted_at', 'deleted_at TEXT');
     await _ensureColumn(db, 'qc_items', 'deleted_at', 'deleted_at TEXT');
+    // Plan §3: periodic task lists — safe ALTER, existing rows stay 'once'.
+    await _ensureColumn(
+      db,
+      'qc_templates',
+      'recurrence',
+      "recurrence TEXT NOT NULL DEFAULT 'once'",
+    );
     await _ensureColumn(
       db,
       'qc_goals',
@@ -1638,7 +1645,8 @@ class DatabaseHelper {
         updated_at TEXT NOT NULL,
         created_by TEXT,
         updated_by TEXT,
-        revision_note TEXT
+        revision_note TEXT,
+        recurrence TEXT NOT NULL DEFAULT 'once'
       )
     ''');
     await db.execute('''

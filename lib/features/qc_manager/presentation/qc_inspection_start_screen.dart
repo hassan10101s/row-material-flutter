@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -19,24 +19,19 @@ import '../domain/qc_enums.dart';
 import '../domain/qc_inspection.dart';
 import '../domain/qc_template.dart';
 import 'cubit/qc_inspections_cubit.dart';
-import 'widgets/qc_pill.dart';
 import 'qc_inspection_sheet_screen.dart';
 
 /// Starts a new checklist execution.
 ///
-/// Deliberately a form over the register's cubit rather than a cubit of its
-/// own: the sheet it creates has to appear in the list underneath it, and a
-/// second cubit would mean the same save-and-reload logic in two places.
-///
-/// On success it pops and hands the new id to [QcInspectionSheetScreen], so the
-/// inspector lands on the sheet they just started instead of hunting for it.
+/// Simplified form: only 3 fields are visible:
+///   1. Checklist picker (required)
+///   2. Lot / shipment number (optional, auto-generated if empty)
+///   3. Quick note (optional)
 class QcInspectionStartScreen extends StatefulWidget {
   const QcInspectionStartScreen({super.key});
 
   static Future<void> open(BuildContext context) {
     final cubit = context.read<QcInspectionsCubit>();
-    // Loaded on demand rather than with the register: the checklist list is
-    // only needed once someone actually opens this form.
     if (cubit.state.startTemplates.isEmpty) {
       cubit.loadStartOptions();
     }
@@ -50,10 +45,6 @@ class QcInspectionStartScreen extends StatefulWidget {
     );
   }
 
-  /// Whether this session may start an inspection at all.
-  ///
-  /// The repository refuses the write regardless; this only avoids offering a
-  /// button that cannot do anything.
   static bool get canStart => getIt<AuthGate>().canWrite(Permission.qcWrite);
 
   @override
@@ -63,20 +54,13 @@ class QcInspectionStartScreen extends StatefulWidget {
 
 class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
   final _lot = TextEditingController();
-  final _refId = TextEditingController();
-  final _batch = TextEditingController();
-  final _po = TextEditingController();
   final _remarks = TextEditingController();
   int? _templateId;
-  String _refType = QcRefType.lot;
   bool _handled = false;
 
   @override
   void dispose() {
     _lot.dispose();
-    _refId.dispose();
-    _batch.dispose();
-    _po.dispose();
     _remarks.dispose();
     super.dispose();
   }
@@ -88,55 +72,38 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
     return null;
   }
 
-  void _warn(BuildContext context, String message) {
-    AppFeedback.error(context, message);
-  }
-
-  /// Builds the header row and hands it to the register.
-  ///
-  /// The form is *not* popped here: it stays up behind the repository call so
-  /// the listener below can catch the result, and so a refusal leaves the typed
-  /// values on screen to correct.
   void _start(BuildContext context, List<QcTemplate> templates) {
     final template = _selected(templates);
     if (template == null) {
-      _warn(context, AppText.t('اختر قائمة فحص', 'Pick a checklist'));
+      AppFeedback.error(
+          context, AppText.t('اختر قائمة فحص', 'Pick a checklist'));
       return;
     }
-    if (_refType == QcRefType.lot && _lot.text.trim().isEmpty) {
-      _warn(context, AppText.t('أدخل رقم اللوط', 'Enter a lot number'));
-      return;
-    }
-    if (_refType != QcRefType.lot && _refId.text.trim().isEmpty) {
-      _warn(
-        context,
-        AppText.t(
-          'أدخل رقم ${QcPill.refTypeLabel(_refType)}',
-          'Enter the ${QcPill.refTypeLabel(_refType)} number',
-        ),
-      );
-      return;
-    }
-    // Stamped from the session rather than asked for: the person performing the
-    // inspection is whoever is signed in, and a sheet whose inspector can be
-    // mistyped is not a traceability record.
     final user = getIt<AuthGate>().currentUser;
     if (user == null) {
-      _warn(context, AppText.t('انتهت الجلسة', 'Session expired'));
+      AppFeedback.error(
+          context, AppText.t('انتهت الجلسة', 'Session expired'));
       return;
     }
+    final now = DateTime.now();
+    final lotRaw = _lot.text.trim();
+    final lot = lotRaw.isNotEmpty
+        ? lotRaw
+        : 'LOT-${now.year}'
+            '${now.month.toString().padLeft(2, '0')}'
+            '${now.day.toString().padLeft(2, '0')}'
+            '-${now.hour.toString().padLeft(2, '0')}'
+            '${now.minute.toString().padLeft(2, '0')}';
     final stamp = nowIso();
     context.read<QcInspectionsCubit>().startInspection(
       QcInspection(
         templateId: template.templateId ?? 0,
-        // Captured at start so publishing a revision later cannot change what
-        // this sheet meant.
         templateVersion: template.version,
-        refType: _refType,
-        refId: _refId.text.trim(),
-        lotNo: _lot.text.trim(),
-        batchNo: _batch.text.trim(),
-        poNo: _po.text.trim(),
+        refType: QcRefType.lot,
+        refId: '',
+        lotNo: lot,
+        batchNo: '',
+        poNo: '',
         dept: template.dept,
         site: template.site,
         status: QcInspectionStatus.inProgress,
@@ -162,8 +129,6 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
         if (id == null) return;
         _handled = true;
         final navigator = Navigator.of(context);
-        // Pop the form first, then push the sheet: popping last would take the
-        // sheet down with the form that opened it.
         navigator.pop();
         QcInspectionSheetScreen.open(navigator.context, inspectionId: id);
       },
@@ -171,7 +136,8 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
         final templates = state.startTemplates;
         final selected = _selected(templates);
         return Scaffold(
-          appBar: AppTopAppBar(title: AppText.t('فحص جديد', 'New inspection')),
+          appBar: AppTopAppBar(
+              title: AppText.t('فحص جديد', 'New inspection')),
           body: templates.isEmpty
               ? AppEmptyState(
                   icon: Icons.checklist_outlined,
@@ -184,15 +150,17 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
                     'Publish a checklist before starting an inspection',
                   ),
                   action: FilledButton.tonal(
-                    onPressed: () =>
-                        context.read<QcInspectionsCubit>().loadStartOptions(),
+                    onPressed: () => context
+                        .read<QcInspectionsCubit>()
+                        .loadStartOptions(),
                     child: Text(AppText.t('إعادة المحاولة', 'Retry')),
                   ),
                 )
               : ListView(
                   padding: const EdgeInsets.all(AppSpacing.md),
                   children: [
-                    _label(AppText.t('قائمة الفحص', 'Checklist')),
+                    // ── 1. Checklist ─────────────────────────────────────────
+                    _label(AppText.t('قائمة الفحص *', 'Checklist *')),
                     AppEntityAutocomplete(
                       options: [
                         for (final t in templates)
@@ -203,21 +171,18 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
                           },
                       ],
                       selectedId: _templateId,
-                      hint: AppText.t(
-                        'ابحث برقم أو اسم القائمة…',
-                        'Search checklists…',
-                      ),
+                      hint: AppText.t('ابحث باسم القائمة…', 'Search checklists…'),
                       prefixIcon: Icons.checklist_outlined,
                       displayOf: (t) => '${t['code']} — ${t['name']}',
                       filter: (t, q) => entityMatches(t, q, [
                         (r) => '${r['code'] ?? ''}',
                         (r) => '${r['name'] ?? ''}',
                       ]),
-                      onSelected: (v) => setState(
-                          () => _templateId = (v as num).toInt()),
+                      onSelected: (v) =>
+                          setState(() => _templateId = (v as num).toInt()),
                     ),
                     if (selected != null) ...[
-                      const SizedBox(height: AppSpacing.sm),
+                      const SizedBox(height: AppSpacing.xs),
                       Text(
                         AppText.t(
                           'الإصدار ${selected.version}',
@@ -229,64 +194,57 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
                         ),
                       ),
                     ],
-                    const SizedBox(height: AppSpacing.md),
-                    _label(AppText.t('نوع المرجع', 'Reference type')),
-                    DropdownButtonFormField<String>(
-                      initialValue: _refType,
-                      isExpanded: true,
-                      items: [
-                        for (final type in QcRefType.all)
-                          DropdownMenuItem(
-                            value: type,
-                            child: Text(QcPill.refTypeLabel(type)),
-                          ),
-                      ],
-                      onChanged: (v) =>
-                          setState(() => _refType = v ?? QcRefType.other),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    if (_refType == QcRefType.lot)
-                      AppField(
-                        label: AppText.t('رقم اللوط', 'Lot number'),
-                        controller: _lot,
-                      )
-                    else
-                      AppField(
-                        label: AppText.t(
-                          'رقم ${QcPill.refTypeLabel(_refType)}',
-                          '${QcPill.refTypeLabel(_refType)} number',
-                        ),
-                        controller: _refId,
+                    const SizedBox(height: AppSpacing.lg),
+
+                    // ── 2. Lot number (optional, auto-generated) ─────────────
+                    _label(AppText.t(
+                      'رقم الشحنة / اللوط  (اختياري)',
+                      'Shipment / Lot number  (optional)',
+                    )),
+                    AppField(
+                      label: AppText.t(
+                        'يُولَّد تلقائياً إذا تُرك فارغاً',
+                        'Auto-generated if left empty',
                       ),
-                    const SizedBox(height: AppSpacing.md),
-                    AppField(
-                      label: AppText.t('رقم الدفعة', 'Batch number'),
-                      controller: _batch,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    AppField(
-                      label: AppText.t('أمر الشراء', 'Purchase order'),
-                      controller: _po,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    AppField(
-                      label: AppText.t('ملاحظات', 'Remarks'),
-                      controller: _remarks,
-                      maxLines: 3,
+                      controller: _lot,
                     ),
                     const SizedBox(height: AppSpacing.lg),
+
+                    // ── 3. Quick note (optional) ─────────────────────────────
+                    _label(AppText.t(
+                      'ملاحظة سريعة  (اختياري)',
+                      'Quick note  (optional)',
+                    )),
+                    AppField(
+                      label: AppText.t('اكتب أي ملاحظة…', 'Any note…'),
+                      controller: _remarks,
+                      maxLines: 2,
+                    ),
+                    const SizedBox(height: AppSpacing.xl),
+
+                    // ── Start button ─────────────────────────────────────────
                     FilledButton.icon(
                       onPressed: state.saving
                           ? null
                           : () => _start(context, templates),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(52),
+                        textStyle: TextStyle(
+                          fontSize: 16.spMax,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       icon: state.saving
                           ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
                             )
-                          : const Icon(Icons.play_arrow),
-                      label: Text(AppText.t('بدء الفحص', 'Start')),
+                          : const Icon(Icons.play_arrow_rounded, size: 22),
+                      label: Text(AppText.t('ابدأ الفحص', 'Start inspection')),
                     ),
                   ],
                 ),
@@ -296,10 +254,10 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
   }
 
   Widget _label(String text) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-    child: Text(
-      text,
-      style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
-    ),
-  );
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+        child: Text(
+          text,
+          style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+        ),
+      );
 }

@@ -142,6 +142,16 @@ class _Tree extends StatelessWidget {
             QcPill.version('v${template.version}'),
             const SizedBox(width: AppSpacing.xs),
             QcPill.type(template.type),
+            const SizedBox(width: AppSpacing.xs),
+            QcPill(
+              template.isPeriodic
+                  ? AppText.t(
+                      'مهام ${_recurrenceAr(template.recurrence)}',
+                      template.recurrence,
+                    )
+                  : AppText.t('فحص جودة', 'Quality'),
+              template.isPeriodic ? AppColors.info : AppColors.success,
+            ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
@@ -210,6 +220,13 @@ class _Tree extends StatelessWidget {
     );
   }
 }
+
+String _recurrenceAr(String r) => switch (r) {
+  QcRecurrence.daily => 'يومية',
+  QcRecurrence.weekly => 'أسبوعية',
+  QcRecurrence.monthly => 'شهرية',
+  _ => 'لمرة واحدة',
+};
 
 /// Asks for one line of text; returns it, or null if the reader backed out.
 ///
@@ -306,6 +323,15 @@ class _TemplateMetaCard extends StatelessWidget {
         children: [
           if (template.code.isNotEmpty)
             _Row(label: AppText.t('الرمز', 'Code'), value: template.code),
+          _Row(
+            label: AppText.t('الطبيعة', 'Kind'),
+            value: template.isPeriodic
+                ? AppText.t(
+                    'مهام ${_recurrenceAr(template.recurrence)}',
+                    '${template.recurrence} tasks',
+                  )
+                : AppText.t('فحص جودة', 'Quality check'),
+          ),
           _Row(label: AppText.t('القسم', 'Department'), value: template.dept),
           _Row(
             label: AppText.t('ساري من', 'Effective'),
@@ -923,6 +949,14 @@ class _NewTemplateFormState extends State<_NewTemplateForm> {
   final _dept = TextEditingController();
   final _description = TextEditingController();
   String _type = QcTemplateType.incoming;
+  String _recurrence = QcRecurrence.once;
+
+  static String _recurrenceLabel(String r) => switch (r) {
+    QcRecurrence.daily => AppText.t('مهام يومية', 'Daily tasks'),
+    QcRecurrence.weekly => AppText.t('مهام أسبوعية', 'Weekly tasks'),
+    QcRecurrence.monthly => AppText.t('مهام شهرية', 'Monthly tasks'),
+    _ => AppText.t('فحص جودة (مرة واحدة)', 'Quality check (once)'),
+  };
 
   /// Why the last create was refused, rendered inline.
   ///
@@ -1023,6 +1057,21 @@ class _NewTemplateFormState extends State<_NewTemplateForm> {
               onChanged: (v) => setState(() => _type = v ?? _type),
             ),
             const SizedBox(height: AppSpacing.sm),
+            // Plan §3 — نوعان فقط: فحص جودة (مرة واحدة) أو مهام دورية.
+            DropdownButtonFormField<String>(
+              initialValue: _recurrence,
+              decoration: InputDecoration(
+                labelText: AppText.t('طبيعة القائمة', 'List kind'),
+                border: const OutlineInputBorder(),
+                isDense: true,
+              ),
+              items: [
+                for (final r in QcRecurrence.all)
+                  DropdownMenuItem(value: r, child: Text(_recurrenceLabel(r))),
+              ],
+              onChanged: (v) => setState(() => _recurrence = v ?? _recurrence),
+            ),
+            const SizedBox(height: AppSpacing.sm),
             TextFormField(
               controller: _description,
               maxLines: 3,
@@ -1053,6 +1102,7 @@ class _NewTemplateFormState extends State<_NewTemplateForm> {
         dept: _dept.text.trim(),
         description: _description.text.trim(),
         type: _type,
+        recurrence: _recurrence,
         createdAt: now,
         updatedAt: now,
       ),

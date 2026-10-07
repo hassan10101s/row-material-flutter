@@ -278,9 +278,17 @@ class QcInspectionsCubit extends AppCubit<QcInspectionsState> {
     if (source == null) return;
     try {
       final rows = await source.listTemplates(publishedOnly: true);
+      // Simplified plan §3: start-inspection offers only one-shot quality
+      // checklists; periodic task lists live independently (dashboard card).
       final usable =
           rows
-              .where((t) => t.isPublished && !t.isArchived && !t.isDeleted)
+              .where(
+                (t) =>
+                    t.isPublished &&
+                    !t.isArchived &&
+                    !t.isDeleted &&
+                    t.isOneShot,
+              )
               .toList()
             ..sort((a, b) => a.name.compareTo(b.name));
       safeEmit(state.copyWith(startTemplates: usable));

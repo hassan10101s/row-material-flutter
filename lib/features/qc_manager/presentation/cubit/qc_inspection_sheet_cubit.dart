@@ -560,7 +560,95 @@ class QcInspectionSheetCubit extends AppCubit<QcInspectionSheetState> {
     }
   }
 
+  /// Records a failing answer together with its inline non-conformance.
+  ///
+  /// Simplified flow (plan §2): the reason + severity are typed directly under
+  /// the failed item — no separate NCR window. The finding is logged with the
+  /// same stamp so the sheet header and the NCR list agree.
+  Future<void> answerFailWithNc({
+    required QcItem item,
+    String reason = '',
+    String severity = '',
+  }) async {
+    final inspection = state.inspection;
+    if (inspection == null || !inspection.isEditable) return;
+    await answer(item: item, result: QcResponseResult.fail);
+    final desc = reason.trim().isNotEmpty ? reason.trim() : item.label;
+    await raiseNc(item: item, description: desc, severity: severity);
+  }
+
+  /// Final decision: approve the shipment directly (no review step by default).
+  Future<void> approve({String notes = ''}) async {
+    final inspection = state.inspection;
+    if (inspection == null || !inspection.isEditable) return;
+    final progress = _progress(state.sections);
+    if (!progress.canSubmit) {
+      safeEmit(state.copyWith(error: progress.blockers.join(' • ')));
+      return;
+    }
+    final stamp = nowIso();
+    final updated = inspection.copyWith(
+      status: QcInspectionStatus.approved,
+      resultOverall: QcOverallResult.pass,
+      submittedAt: inspection.submittedAt.isEmpty ? stamp : inspection.submittedAt,
+      reviewedAt: stamp,
+      approvedAt: stamp,
+      endAt: inspection.endAt.isEmpty ? stamp : inspection.endAt,
+      reviewComments: notes.isNotEmpty ? notes : inspection.reviewComments,
+      updatedAt: stamp,
+    );
+    safeEmit(state.copyWith(submitting: true, error: null));
+    try {
+      await repo.saveInspection(updated);
+      safeEmit(
+        state.copyWith(inspection: updated, submitting: false, submitted: true),
+      );
+    } on AppError catch (e) {
+      safeEmit(state.copyWith(submitting: false, error: e.message));
+    } catch (e) {
+      safeEmit(state.copyWith(submitting: false, error: '$e'));
+    }
+  }
+
+  /// Final decision: reject the shipment with a single mandatory note.
+  Future<void> reject({required String reason}) async {
+    final inspection = state.inspection;
+    if (inspection == null || !inspection.isEditable) return;
+    if (reason.trim().isEmpty) {
+      safeEmit(
+        state.copyWith(
+          error: AppText.t('اكتب سبب الرفض', 'A rejection reason is required'),
+        ),
+      );
+      return;
+    }
+    final stamp = nowIso();
+    final updated = inspection.copyWith(
+      status: QcInspectionStatus.rejected,
+      resultOverall: QcOverallResult.fail,
+      submittedAt: inspection.submittedAt.isEmpty ? stamp : inspection.submittedAt,
+      rejectedAt: stamp,
+      endAt: inspection.endAt.isEmpty ? stamp : inspection.endAt,
+      rejectionReason: reason.trim(),
+      updatedAt: stamp,
+    );
+    safeEmit(state.copyWith(submitting: true, error: null));
+    try {
+      await repo.saveInspection(updated);
+      safeEmit(
+        state.copyWith(inspection: updated, submitting: false, submitted: true),
+      );
+    } on AppError catch (e) {
+      safeEmit(state.copyWith(submitting: false, error: e.message));
+    } catch (e) {
+      safeEmit(state.copyWith(submitting: false, error: '$e'));
+    }
+  }
+
   /// Commits the sheet for review.
+  ///
+  /// Kept for backward compatibility (older sheets / reviewer flow). The
+  /// simplified UI calls [approve]/[reject] directly instead.
   ///
   /// Refuses locally on anything [QcSheetProgress.canSubmit] flags, so the
   /// inspector gets an immediate, specific reason instead of a server error. A

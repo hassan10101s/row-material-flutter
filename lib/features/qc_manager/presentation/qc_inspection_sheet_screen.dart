@@ -119,8 +119,8 @@ class _Body extends StatelessWidget {
             ),
             child: Text(
               AppText.t(
-                'كل البنود مستوفاة — يمكنك الإرسال للمراجعة',
-                'All items answered — ready to submit for review',
+                'كل البنود مستوفاة — اختر اعتماد أو رفض الشحنة',
+                'All items answered — approve or reject the shipment',
               ),
               style: TextStyle(
                 color: AppColors.success,
@@ -277,8 +277,8 @@ class _FindingsStrip extends StatelessWidget {
   }
 }
 
-/// What is being inspected, and by whom. Read-only: the header is set when the
-/// sheet starts.
+/// Simplified header: lot, inspector, date. Technical ref/batch/PO rows hidden
+/// (kept in DB, not shown on the plant floor).
 class _MetaCard extends StatelessWidget {
   const _MetaCard({required this.inspection});
 
@@ -286,28 +286,16 @@ class _MetaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final lot = inspection.lotNo.isNotEmpty
+        ? inspection.lotNo
+        : inspection.refLabel;
+    final inspector = inspection.inspectorName.isNotEmpty
+        ? inspection.inspectorName
+        : inspection.inspectorId;
     final rows = <(String, String)>[
-      (
-        AppText.t('قائمة الفحص', 'Checklist'),
-        '#${inspection.templateId} v${inspection.templateVersion}',
-      ),
-      (
-        AppText.t('نوع المرجع', 'Reference'),
-        QcPill.refTypeLabel(inspection.refType),
-      ),
-      if (inspection.batchNo.isNotEmpty)
-        (AppText.t('الدفعة', 'Batch'), inspection.batchNo),
-      if (inspection.poNo.isNotEmpty)
-        (AppText.t('أمر الشراء', 'PO'), inspection.poNo),
-      if (inspection.dept.isNotEmpty)
-        (AppText.t('القسم', 'Department'), inspection.dept),
-      if (inspection.inspectorName.isNotEmpty)
-        (AppText.t('الفاحص', 'Inspector'), inspection.inspectorName),
-      // A sheet can be started by hand in the database or imported, so fall
-      // back to the id rather than leaving the row out and making it look
-      // unattributed.
-      if (inspection.inspectorName.isEmpty && inspection.inspectorId.isNotEmpty)
-        (AppText.t('الفاحص', 'Inspector'), inspection.inspectorId),
+      (AppText.t('رقم الشحنة / اللوط', 'Lot'), lot),
+      if (inspector.isNotEmpty)
+        (AppText.t('الفاحص', 'Inspector'), inspector),
       (AppText.t('التاريخ', 'Date'), inspection.inspectionDate),
     ];
     return AppCard(
@@ -453,11 +441,13 @@ class _ItemRow extends StatelessWidget {
                   ),
               ],
             ),
-            if (item.helpText.isNotEmpty || item.boundsLabel.isNotEmpty) ...[
+            // Simplified: measurement bounds only for numeric items.
+            if (item.helpText.isNotEmpty ||
+                (item.isNumeric && item.boundsLabel.isNotEmpty)) ...[
               const SizedBox(height: 2),
               Text(
                 [
-                  if (item.boundsLabel.isNotEmpty)
+                  if (item.isNumeric && item.boundsLabel.isNotEmpty)
                     AppText.t(
                       'المسموح: ${item.boundsLabel}',
                       'Allowed: ${item.boundsLabel}',
@@ -475,7 +465,6 @@ class _ItemRow extends StatelessWidget {
               _ItemControls(row: row)
             else
               _ReadOnlyAnswer(row: row),
-            if (row.isFail && editable) _FailureActions(row: row),
           ],
         ),
       ),
@@ -520,21 +509,48 @@ class _ItemControls extends StatelessWidget {
   }
 }
 
-/// Pass / Fail / N/A. One tap answers - the whole point of the control.
+/// Simplified item: 3 buttons only — مطابق / غير مطابق / ملاحظة.
 ///
-/// The evidence fields sit under the buttons rather than only appearing once
-/// the item has failed: a fail with nowhere to write a note is a sheet that can
-/// never be submitted, and the inspector would have to fail it, hunt for the
-/// note field, and re-tap to find out why the button was greyed out.
-class _PassFailRow extends StatelessWidget {
+/// When "غير مطابق" is tapped, reason + severity appear inline and are saved
+/// as an NCR linked to the inspection (no separate window).
+class _PassFailRow extends StatefulWidget {
   const _PassFailRow({required this.row});
 
   final QcSheetItem row;
 
   @override
+  State<_PassFailRow> createState() => _PassFailRowState();
+}
+
+class _PassFailRowState extends State<_PassFailRow> {
+  bool _showNote = false;
+  String _severity = NcSeverity.minor;
+  late final TextEditingController _reason = TextEditingController(
+    text: context.read<QcInspectionSheetCubit>().notesFor(widget.row),
+  );
+  late final TextEditingController _note = TextEditingController(
+    text: context.read<QcInspectionSheetCubit>().notesFor(widget.row),
+  );
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  static String _severityLabel(String s) => switch (s) {
+    NcSeverity.critical => 'حرج',
+    NcSeverity.major => 'متوسط',
+    _ => 'طفيف',
+  };
+
+  @override
   Widget build(BuildContext context) {
     final cubit = context.read<QcInspectionSheetCubit>();
+    final row = widget.row;
     final result = row.response?.result;
+    final isFail = result == QcResponseResult.fail;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -542,7 +558,7 @@ class _PassFailRow extends StatelessWidget {
           children: [
             Expanded(
               child: _ChoiceButton(
-                label: AppText.t('مطابق', 'Pass'),
+                label: AppText.t('✅ مطابق', 'Pass'),
                 icon: Icons.check_circle_outline,
                 color: AppColors.success,
                 selected: result == QcResponseResult.pass,
@@ -552,28 +568,88 @@ class _PassFailRow extends StatelessWidget {
             const SizedBox(width: AppSpacing.xs),
             Expanded(
               child: _ChoiceButton(
-                label: AppText.t('غير مطابق', 'Fail'),
+                label: AppText.t('❌ غير مطابق', 'Fail'),
                 icon: Icons.cancel_outlined,
                 color: AppColors.danger,
-                selected: result == QcResponseResult.fail,
-                onTap: () => cubit.markResult(row.item, QcResponseResult.fail),
+                selected: isFail,
+                onTap: () async {
+                  await cubit.markResult(row.item, QcResponseResult.fail);
+                  if (mounted) setState(() => _showNote = true);
+                },
               ),
             ),
-            if (row.item.allowNa) ...[
-              const SizedBox(width: AppSpacing.xs),
-              _ChoiceButton(
-                label: 'N/A',
-                icon: Icons.remove_circle_outline,
-                color: AppColors.textMuted,
-                selected: result == QcResponseResult.na,
-                onTap: () => cubit.markNotApplicable(row.item),
-                compact: true,
-              ),
-            ],
+            const SizedBox(width: AppSpacing.xs),
+            _ChoiceButton(
+              label: AppText.t('💬 ملاحظة', 'Note'),
+              icon: Icons.notes_outlined,
+              color: AppColors.info,
+              selected: _showNote,
+              compact: true,
+              onTap: () => setState(() => _showNote = !_showNote),
+            ),
           ],
         ),
-        const SizedBox(height: AppSpacing.xs),
-        _EvidenceFields(row: row),
+        // Inline NCR: reason + severity directly under a failed item.
+        if (isFail) ...[
+          const SizedBox(height: AppSpacing.xs),
+          AppField(
+            label: AppText.t('اكتب السبب...', 'Why did it fail?...'),
+            controller: _reason,
+            maxLines: 2,
+            onChanged: (v) => cubit.stageNotes(row.item.itemId ?? 0, v),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            children: [
+              Text(
+                AppText.t('درجة الخطورة:', 'Severity:'),
+                style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              for (final s in [
+                NcSeverity.minor,
+                NcSeverity.major,
+                NcSeverity.critical,
+              ])
+                Padding(
+                  padding: const EdgeInsets.only(right: AppSpacing.xs),
+                  child: ChoiceChip(
+                    label: Text(_severityLabel(s)),
+                    selected: _severity == s,
+                    onSelected: (_) => setState(() => _severity = s),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          FilledButton.tonalIcon(
+            onPressed: () => cubit.answerFailWithNc(
+              item: row.item,
+              reason: _reason.text,
+              severity: _severity,
+            ),
+            icon: const Icon(Icons.save_outlined, size: 18),
+            label: Text(AppText.t('حفظ السبب', 'Save reason')),
+          ),
+        ] else if (_showNote) ...[
+          const SizedBox(height: AppSpacing.xs),
+          AppField(
+            label: AppText.t('ملاحظة...', 'Note...'),
+            controller: _note,
+            maxLines: 2,
+            onChanged: (v) => cubit.stageNotes(row.item.itemId ?? 0, v),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          OutlinedButton.icon(
+            onPressed: () => cubit.answer(
+              item: row.item,
+              result: result ?? QcResponseResult.pass,
+              notes: _note.text,
+            ),
+            icon: const Icon(Icons.save_outlined, size: 18),
+            label: Text(AppText.t('حفظ الملاحظة', 'Save note')),
+          ),
+        ],
       ],
     );
   }
@@ -855,6 +931,7 @@ class _EvidenceFieldsState extends State<_EvidenceFields> {
       path = null;
     }
     if (path == null || path.isEmpty) {
+      if (!context.mounted) return;
       AppFeedback.error(
         context,
         AppText.t(
@@ -903,31 +980,6 @@ class _ReadOnlyAnswer extends StatelessWidget {
     return Text(
       parts.isEmpty ? AppText.t('تم التسجيل', 'Recorded') : parts.join(' • '),
       style: TextStyle(fontSize: 12.spMax),
-    );
-  }
-}
-
-/// Raising an NC and attaching evidence, offered only on a failure.
-class _FailureActions extends StatelessWidget {
-  const _FailureActions({required this.row});
-
-  final QcSheetItem row;
-
-  @override
-  Widget build(BuildContext context) {
-    final cubit = context.read<QcInspectionSheetCubit>();
-    return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.xs),
-      child: Row(
-        children: [
-          TextButton.icon(
-            onPressed: () =>
-                cubit.raiseNc(item: row.item, description: row.item.label),
-            icon: const Icon(Icons.report_gmailerrorred, size: 18),
-            label: Text(AppText.t('رفع عدم مطابقة', 'Raise NC')),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -997,8 +1049,8 @@ class _ChoiceButton extends StatelessWidget {
   }
 }
 
-/// The persistent submit bar: progress and the one button that commits the
-/// sheet, so it is reachable without scrolling a long checklist back up.
+/// Simplified final decision: two big buttons — approve / reject directly.
+/// No intermediate "submit for review" step by default.
 class _SubmitBar extends StatelessWidget {
   const _SubmitBar({required this.state});
 
@@ -1009,19 +1061,28 @@ class _SubmitBar extends StatelessWidget {
     final cubit = context.read<QcInspectionSheetCubit>();
     final progress = state.progress;
     if (!state.isEditable) {
+      final insp = state.inspection!;
+      final label = switch (insp.status) {
+        QcInspectionStatus.approved =>
+          AppText.t('تم اعتماد الشحنة ✅', 'Shipment approved'),
+        QcInspectionStatus.rejected =>
+          AppText.t('تم رفض الشحنة ❌', 'Shipment rejected'),
+        _ => insp.isSubmitted
+            ? AppText.t('تم الإرسال للمراجعة', 'Submitted for review')
+            : AppText.t('هذا الفحص مقفل', 'This sheet is locked'),
+      };
       return SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Text(
-            state.inspection!.isSubmitted
-                ? AppText.t('تم الإرسال للمراجعة', 'Submitted for review')
-                : AppText.t('هذا الفحص مقفل', 'This sheet is locked'),
+            label,
             textAlign: TextAlign.center,
             style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
           ),
         ),
       );
     }
+    final outstanding = progress.blocking + progress.missingEvidence;
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),
@@ -1052,27 +1113,101 @@ class _SubmitBar extends StatelessWidget {
                   ],
                 ),
               ),
-            FilledButton.icon(
-              onPressed: state.submitting ? null : () => cubit.submit(),
-              icon: state.submitting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.send),
-              label: Text(
-                progress.canSubmit
-                    ? AppText.t('إرسال للمراجعة', 'Submit for review')
-                    : AppText.t(
-                        'متبقٍ ${progress.blocking + progress.missingEvidence}',
-                        '${progress.blocking + progress.missingEvidence} outstanding',
-                      ),
+            if (!progress.canSubmit)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                child: Text(
+                  AppText.t(
+                    'متبقٍ $outstanding بند قبل القرار',
+                    '$outstanding item(s) before decision',
+                  ),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: AppColors.danger,
+                    fontSize: 12.spMax,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: state.submitting || !progress.canSubmit
+                        ? null
+                        : () => cubit.approve(),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: AppColors.success,
+                    ),
+                    icon: state.submitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.check_circle),
+                    label: Text(AppText.t('اعتماد الشحنة', 'Approve')),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: state.submitting || !progress.canSubmit
+                        ? null
+                        : () => _rejectDialog(context, cubit),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: AppColors.danger,
+                    ),
+                    icon: const Icon(Icons.cancel),
+                    label: Text(AppText.t('رفض الشحنة', 'Reject')),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _rejectDialog(
+    BuildContext context,
+    QcInspectionSheetCubit cubit,
+  ) async {
+    final controller = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(AppText.t('رفض الشحنة', 'Reject shipment')),
+        content: TextField(
+          controller: controller,
+          maxLines: 3,
+          autofocus: true,
+          decoration: InputDecoration(
+            hintText: AppText.t('اكتب سبب الرفض...', 'Rejection reason...'),
+            border: const OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(AppText.t('إلغاء', 'Cancel')),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(AppText.t('رفض', 'Reject')),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && context.mounted) {
+      await cubit.reject(reason: controller.text);
+    }
   }
 }
