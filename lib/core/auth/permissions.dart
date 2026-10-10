@@ -3,6 +3,8 @@
 /// The identical lists live in `firestore.rules`
 /// (`function rolePermissions(role)`); `test/security/permissions_parity_test.dart`
 /// fails if the two ever drift apart.
+import '../constants/app_strings.dart';
+
 enum Permission {
   orgRead('org.read', false),
   orgUpdate('org.update', true),
@@ -107,10 +109,10 @@ abstract final class AppRoles {
   static bool isReadOnlyRole(String? role) => role == viewer;
 
   static String label(String role) => switch (role) {
-    admin => 'مدير المؤسسة',
-    qualityManager => 'مدير الجودة',
-    lab => 'اخصائي جودة',
-    viewer => 'اطّلاع فقط',
+    admin => AppText.t('مدير المؤسسة', 'Organization owner'),
+    qualityManager => AppText.t('مدير الجودة', 'Quality manager'),
+    lab => AppText.t('اخصائي جودة', 'Quality specialist'),
+    viewer => AppText.t('اطّلاع فقط', 'Viewer'),
     _ => role,
   };
 }

@@ -224,52 +224,58 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
               begin: const Offset(0, -1),
               end: Offset.zero,
             ).animate(animation),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: Material(
-                key: const ValueKey('app-feedback-banner'),
-                color: accent,
-                elevation: 12,
-                shadowColor: Colors.black54,
-                borderRadius: const BorderRadius.vertical(
-                  bottom: Radius.circular(14),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: _close,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(icon, color: Colors.white, size: 22),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ConstrainedBox(
-                            // A raw SQLite/Firebase error can be very long; keep
-                            // the banner from swallowing the whole screen.
-                            constraints: const BoxConstraints(maxHeight: 240),
-                            child: SingleChildScrollView(
-                              child: SelectableText(
-                                widget.message,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 13.5,
-                                  height: 1.4,
+            child: Center(
+              child: ConstrainedBox(
+                // Pernit-style: floating top overlay, never full-bleed on
+                // wide desktop windows (maxWidth 560).
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                  child: Material(
+                    key: const ValueKey('app-feedback-banner'),
+                    color: accent,
+                    elevation: 12,
+                    shadowColor: Colors.black54,
+                    borderRadius: BorderRadius.circular(12),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      onTap: _close,
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 6, 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(icon, color: Colors.white, size: 22),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: ConstrainedBox(
+                                // A raw SQLite/Firebase error can be very long; keep
+                                // the banner from swallowing the whole screen.
+                                constraints:
+                                    const BoxConstraints(maxHeight: 240),
+                                child: SingleChildScrollView(
+                                  child: SelectableText(
+                                    widget.message,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 13.5,
+                                      height: 1.4,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
+                            IconButton(
+                              onPressed: _close,
+                              icon: const Icon(Icons.close, size: 18),
+                              color: Colors.white70,
+                              tooltip: MaterialLocalizations.of(context)
+                                  .closeButtonTooltip,
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ],
                         ),
-                        IconButton(
-                          onPressed: _close,
-                          icon: const Icon(Icons.close, size: 18),
-                          color: Colors.white70,
-                          tooltip: MaterialLocalizations.of(context)
-                              .closeButtonTooltip,
-                          visualDensity: VisualDensity.compact,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),

@@ -68,16 +68,27 @@ class ShellTopBar extends StatelessWidget {
   Widget _bar(BuildContext context) {
     return Material(
       color: AppColors.surface,
-      elevation: 0.5,
+      elevation: 0,
       child: Container(
-        height: 56.h,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        height: 60.h,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          border: Border(
+            bottom: BorderSide(color: AppColors.borderMuted),
+          ),
+        ),
         child: Row(
           children: [
             if (onMenu != null) ...[
               IconButton(
                 tooltip: AppText.t('القائمة', 'Menu'),
                 onPressed: onMenu,
+                style: IconButton.styleFrom(
+                  backgroundColor:
+                      AppColors.primary.withValues(alpha: 0.08),
+                  foregroundColor: AppColors.primary,
+                ),
                 icon: const Icon(Icons.menu),
               ),
               const SizedBox(width: 8),
@@ -154,13 +165,21 @@ class ShellFloatingRound extends StatelessWidget {
       message: tooltip,
       child: Material(
         color: AppColors.surfaceSoft,
-        shape: const CircleBorder(),
-        elevation: 2,
-        shadowColor: Colors.black26,
+        borderRadius: BorderRadius.circular(12.r),
+        elevation: 0,
         child: InkWell(
-          customBorder: const CircleBorder(),
+          borderRadius: BorderRadius.circular(12.r),
           onTap: onPressed,
-          child: Padding(padding: const EdgeInsets.all(9), child: child),
+          child: Container(
+            width: 40.r,
+            height: 40.r,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12.r),
+              border: Border.all(color: AppColors.borderMuted),
+            ),
+            child: child,
+          ),
         ),
       ),
     );
@@ -188,38 +207,90 @@ class ShellNavItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-        decoration: BoxDecoration(
-          color: active
-              ? AppColors.primary.withValues(alpha: 0.12)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(10.r),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: 18.r,
-              color: active ? AppColors.primary : AppColors.textMuted,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                label,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 14.spMax,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w400,
-                  color: active ? AppColors.primary : AppColors.textStrong,
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12.r),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        children: [
+          Material(
+            color: active
+                ? AppColors.primary.withValues(alpha: 0.1)
+                : Colors.transparent,
+            child: InkWell(
+              onTap: onTap,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 34.r,
+                      height: 34.r,
+                      decoration: BoxDecoration(
+                        color: active
+                            ? AppColors.primary.withValues(alpha: 0.16)
+                            : AppColors.surfaceSoft,
+                        borderRadius: BorderRadius.circular(10.r),
+                        border: Border.all(
+                          color: active
+                              ? AppColors.primary.withValues(alpha: 0.25)
+                              : AppColors.borderMuted,
+                        ),
+                      ),
+                      child: Icon(
+                        icon,
+                        size: 18.r,
+                        color: active
+                            ? AppColors.primary
+                            : AppColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        label,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 14.spMax,
+                          fontWeight:
+                              active ? FontWeight.w700 : FontWeight.w500,
+                          color: active
+                              ? AppColors.primary
+                              : AppColors.textStrong,
+                        ),
+                      ),
+                    ),
+                    if (active)
+                      Icon(
+                        isRtl
+                            ? Icons.keyboard_arrow_left
+                            : Icons.keyboard_arrow_right,
+                        size: 18.r,
+                        color: AppColors.primary,
+                      ),
+                  ],
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+          if (active)
+            PositionedDirectional(
+              start: 0,
+              top: 8,
+              bottom: 8,
+              child: Container(
+                width: 3.5,
+                decoration: BoxDecoration(
+                  color: AppColors.primary,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -247,38 +318,86 @@ class ShellIdentityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final initial = user.fullName.isEmpty
+        ? '?'
+        : user.fullName.substring(0, 1).toUpperCase();
     return Padding(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
       child: Column(
         children: [
-          Icon(Icons.science, size: 44.r, color: AppColors.primary),
-          const SizedBox(height: 8),
-          Text(
-            AppStrings.appTitle,
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          Text(
-            AppStrings.tagline,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+          Row(
+            children: [
+              Container(
+                width: 46.r,
+                height: 46.r,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topRight,
+                    end: Alignment.bottomLeft,
+                    colors: [
+                      AppColors.primary,
+                      AppColors.primary.withValues(alpha: 0.65),
+                    ],
+                  ),
+                  borderRadius: BorderRadius.circular(14.r),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.primary.withValues(alpha: 0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Icon(Icons.science, size: 24.r, color: Colors.white),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      AppStrings.appTitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 16.spMax,
+                        fontWeight: FontWeight.w800,
+                        height: 1.2,
+                      ),
+                    ),
+                    Text(
+                      AppStrings.tagline,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: AppColors.textMuted, fontSize: 11.spMax),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: AppSpacing.md),
           Container(
             decoration: BoxDecoration(
               color: AppColors.surfaceSoft,
-              borderRadius: BorderRadius.circular(12.r),
+              borderRadius: BorderRadius.circular(14.r),
+              border: Border.all(color: AppColors.borderMuted),
             ),
-            padding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
+            padding: EdgeInsetsDirectional.only(
+                start: 10.w, end: 4.w, top: 8.h, bottom: 8.h),
             child: Row(
               children: [
                 CircleAvatar(
                   radius: 18.r,
                   backgroundColor: AppColors.primary,
                   child: Text(
-                    user.fullName.isEmpty
-                        ? '?'
-                        : user.fullName.substring(0, 1).toUpperCase(),
-                    style: TextStyle(color: Colors.white, fontSize: 16.spMax),
+                    initial,
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 15.spMax,
+                        fontWeight: FontWeight.w700),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -290,8 +409,8 @@ class ShellIdentityCard extends StatelessWidget {
                         user.fullName,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14.spMax,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13.spMax,
                         ),
                       ),
                       Text(
@@ -310,11 +429,13 @@ class ShellIdentityCard extends StatelessWidget {
                     'تسجيل الخروج من هذا الجهاز فقط',
                     'Sign out of this device only',
                   ),
+                  visualDensity: VisualDensity.compact,
                   onPressed: onLogoutThisDevice,
                   icon: Icon(Icons.phone_iphone, size: 18.r),
                 ),
                 IconButton(
                   tooltip: AppText.t('تسجيل الخروج', 'Logout'),
+                  visualDensity: VisualDensity.compact,
                   onPressed: onLogout,
                   icon: Icon(Icons.logout, size: 18.r),
                 ),

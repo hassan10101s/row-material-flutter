@@ -213,12 +213,14 @@ class PullWorker {
       final accepts = entity.accepts;
       if (accepts != null && !accepts(document)) return _ApplyOutcome.skipped;
       // `localId` first, then the natural key: a document written on another
-      // device carries an id that means nothing in this database.
+      // device carries an id that means nothing in this database. Our own
+      // device id lets the lookup tell the two cases apart (see findLocalRef).
       final localRef = await findLocalRef(
         txn,
         entity,
         document.id,
         document.data,
+        localDeviceId: _session.deviceId,
       );
       final existing = localRef == null
           ? const <Map<String, Object?>>[]
@@ -240,6 +242,10 @@ class PullWorker {
             organizationId: organizationId,
           ),
         );
+        // A foreign document's `localId` is the origin device's row id and
+        // must never become our primary key (see `naturalKeyIdentity`):
+        // inserting with it would REPLACE our unrelated row of that id.
+        if (entity.naturalKeyIdentity) row.remove('id');
         row['remote_synced_at'] = nowIso();
         row['sync_state'] = 'synced';
         row.removeWhere(

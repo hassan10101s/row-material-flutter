@@ -5,6 +5,7 @@ import '../../core/responsive/form_factor.dart';
 import '../../core/responsive/layout_spec.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
+import '../animations/app_animations.dart';
 import 'app_adaptive.dart';
 import 'app_card.dart';
 import 'app_empty_state.dart';
@@ -36,13 +37,8 @@ class AppDataRow {
 
 /// Renders [rows] as a table on desktop and as a card list on mobile.
 ///
-/// This is an adaptive primitive, so the form-factor branch inside it is the one
-/// responsive guard rule 4 permits. Everything above it describes *data*; this
-/// is the only place that knows a phone cannot have a `DataTable`.
-///
-/// Desktop is unchanged by construction: it builds the same [AppPaginatedTable]
-/// with the same defaults, so the 1280x720 grid the existing screens were
-/// authored against does not move.
+/// Set [cardsOnly] to always render the card list (unified mobile logic on
+/// every form factor). Callers constrain the width on wide screens.
 class AppAdaptiveDataView extends StatefulWidget {
   const AppAdaptiveDataView({
     super.key,
@@ -55,6 +51,7 @@ class AppAdaptiveDataView extends StatefulWidget {
     this.totalLabel,
     this.loading = false,
     this.headerTrailing,
+    this.cardsOnly = false,
   });
 
   final List<String> headers;
@@ -67,17 +64,23 @@ class AppAdaptiveDataView extends StatefulWidget {
   final bool loading;
   final Widget? headerTrailing;
 
+  /// Cards on desktop too — the table variant is skipped.
+  final bool cardsOnly;
+
   @override
   State<AppAdaptiveDataView> createState() => _AppAdaptiveDataViewState();
 }
 
 class _AppAdaptiveDataViewState extends State<AppAdaptiveDataView> {
   @override
-  Widget build(BuildContext context) => appAdaptiveVariant(
-        context,
-        desktop: _buildDesktop,
-        mobile: _buildMobile,
-      );
+  Widget build(BuildContext context) {
+    if (widget.cardsOnly) return _buildMobile(context);
+    return appAdaptiveVariant(
+      context,
+      desktop: _buildDesktop,
+      mobile: _buildMobile,
+    );
+  }
 
   /// Byte-for-byte the pre-split surface: same widget, same defaults.
   Widget _buildDesktop(BuildContext context) {
@@ -101,8 +104,11 @@ class _AppAdaptiveDataViewState extends State<AppAdaptiveDataView> {
     if (widget.rows.isEmpty) {
       return AppCard(
         padding: EdgeInsets.zero,
-        child: SizedBox(
-          height: 470,
+        // Compact min-height for phones: the old fixed 470dp filled a
+        // desktop-sized card on a 400dp phone. ConstrainedBox lets taller
+        // content grow while short empty states stay compact.
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 240),
           child: Center(
             child: widget.empty ??
                 AppEmptyState(
@@ -160,18 +166,26 @@ class _DataCard extends StatelessWidget {
         horizontal: AppSpacing.md,
         vertical: AppSpacing.sm,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          DefaultTextStyle(
-            style: TextStyle(
-              fontSize: 13.spMax,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textStrong,
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceSoft.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+          border: Border.all(color: AppColors.borderMuted),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            DefaultTextStyle(
+              style: TextStyle(
+                fontSize: 14.spMax,
+                fontWeight: FontWeight.w800,
+                height: 1.3,
+                color: AppColors.textStrong,
+              ),
+              child: primary,
             ),
-            child: primary,
-          ),
           if (row.secondary != null) ...[
             const SizedBox(height: 2),
             Text(
@@ -183,25 +197,27 @@ class _DataCard extends StatelessWidget {
           ],
           for (final fact in facts)
             Padding(
-              padding: const EdgeInsets.only(top: 3),
+              padding: const EdgeInsets.only(top: 4),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   SizedBox(
-                    width: 104,
+                    width: 108,
                     child: Text(
                       fact.label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 11.spMax,
+                        fontWeight: FontWeight.w600,
                         color: AppColors.textMuted,
                       ),
                     ),
                   ),
                   Expanded(child: DefaultTextStyle.merge(
                     style: TextStyle(
-                      fontSize: 12.spMax,
+                      fontSize: 12.5.spMax,
+                      height: 1.4,
                       color: AppColors.textStrong,
                     ),
                     child: fact.value,
@@ -209,7 +225,8 @@ class _DataCard extends StatelessWidget {
                 ],
               ),
             ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -222,18 +239,23 @@ class _CardListSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppCard(
       padding: EdgeInsets.zero,
+      // Bounded height (not minHeight): AppShimmer's ShaderMask needs a
+      // finite box. 320dp is compact on a 400dp phone vs the old 470dp
+      // desktop-sized card, while staying bounded for the shimmer.
       child: SizedBox(
-        height: 470,
-        child: ListView.builder(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-          itemCount: 6,
-          itemBuilder: (context, index) => Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: Container(
-              height: 56,
-              decoration: BoxDecoration(
-                color: AppColors.borderMuted,
-                borderRadius: BorderRadius.circular(7),
+        height: 320,
+        child: AppShimmer(
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            itemCount: 5,
+            itemBuilder: (context, index) => Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Container(
+                height: 56,
+                decoration: BoxDecoration(
+                  color: AppColors.borderMuted,
+                  borderRadius: BorderRadius.circular(7),
+                ),
               ),
             ),
           ),

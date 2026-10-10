@@ -92,8 +92,10 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<ConnectivityService>(ConnectivityService.new);
 
   final secret = await _localSecret();
-  final dbHelper = await _databaseHelper();
-  final hasher = PasswordHasher(
+  // The QR scanner needs the same seal key the reports were sealed with to
+  // verify same-device prints (cross-device prints resolve by entry code).
+  getIt.registerSingleton<LocalSecret>(secret);
+  final dbHelper = await _databaseHelper();  final hasher = PasswordHasher(
     pepper: String.fromCharCodes(await secret.load()),
   );
 
@@ -217,6 +219,10 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<ReferenceRepo>(
       () => referenceFacade ??= OfflineFirstReferenceRepository(
         dbHelper: dbHelper,
+        // Device-scoped entry codes: minted rows carry this device's tag so
+        // two offline devices can never mint the same entry_code (which is
+        // also the sync document id). Empty before registration → legacy.
+        deviceTagProvider: () => getIt<SyncMetadata>().get(SyncMetadata.deviceIdKey),
         guard: getIt<WriteGuard>(),
         queue: queue,
         audit: audit,

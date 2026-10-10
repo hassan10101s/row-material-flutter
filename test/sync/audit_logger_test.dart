@@ -88,7 +88,10 @@ void main() {
     expect(report.pushed, 1);
     expect(report.failed, 0);
 
-    final doc = remote.documents.values.single;
+    // The heartbeat bump shares the remote with the audit document.
+    final doc = remote.documents.values.singleWhere(
+      (d) => '${d['action']}' == AuditAction.qcApproved,
+    );
     expect(doc['action'], AuditAction.qcApproved);
     expect(doc['entityType'], 'qualityCheck');
     expect(doc['userId'], 'uid_admin');

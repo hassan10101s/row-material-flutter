@@ -55,6 +55,7 @@ class SyncMetadata {
   static String lastPushAtKey = 'last_push_at';
   static String lastErrorKey = 'last_error';
   static String heartbeatSeenAtKey = 'heartbeat_seen_at';
+  static String heartbeatSeenMarkerKey = 'heartbeat_seen_marker';
   static String orgBoundAtKey = 'org_bound_at';
   static String lastFullSyncAtKey = 'last_full_sync_at';
   static String syncEnabledKey = 'sync_enabled';

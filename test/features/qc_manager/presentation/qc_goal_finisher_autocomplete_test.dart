@@ -9,7 +9,7 @@ import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_goal.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_repositories.dart';
 import 'package:material_lab/features/qc_manager/presentation/cubit/qc_goal_detail_cubit.dart';
-import 'package:material_lab/features/qc_manager/presentation/qc_goal_detail_screen.dart';
+import 'package:material_lab/features/qc_manager/presentation/goals/qc_goal_detail_screen.dart';
 
 class _GoalsMock extends Mock implements QcGoalRepository {}
 

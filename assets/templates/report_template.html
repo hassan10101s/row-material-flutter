@@ -684,7 +684,7 @@
 
         <div class="meta-grid">
             <div class="meta-card">
-                <span class="label">اسم الخامة | Material</span>
+                <span class="label">{% if is_product %}اسم المنتج | Product{% else %}اسم الخامة | Material{% endif %}</span>
                 <span class="value">{{ material_name }}</span>
             </div>
             <div class="meta-card">
@@ -699,6 +699,16 @@
                 <span class="label">تاريخ انتهاء الصلاحية | Expiry Date</span>
                 <span class="value">{{ expiry_date }}</span>
             </div>
+            {% if is_product %}
+            <div class="meta-card">
+                <span class="label">رقم الفورمولا | Formula Number</span>
+                <span class="value">{{ formula_number }}</span>
+            </div>
+            <div class="meta-card">
+                <span class="label">رقم التشغيلة | Batch Number</span>
+                <span class="value">{{ batch_number }}</span>
+            </div>
+            {% else %}
             <div class="meta-card">
                 <span class="label">المورد | Supplier</span>
                 <span class="value">{{ supplier }}</span>
@@ -707,6 +717,7 @@
                 <span class="label">رقم السيارة | Truck Number</span>
                 <span class="value">{{ truck_number }}</span>
             </div>
+            {% endif %}
             <div class="meta-card">
                 <span class="label">الكمية | Quantity (Ton)</span>
                 <span class="value">{{ quantity }}</span>

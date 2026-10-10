@@ -25,6 +25,7 @@ import 'reference_repo.dart';
 class OfflineFirstReferenceRepository extends ReferenceRepo {
   OfflineFirstReferenceRepository({
     required super.dbHelper,
+    super.deviceTagProvider,
     required this.guard,
     required this.queue,
     required this.audit,
@@ -210,6 +211,34 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
             'name': name.trim(),
             'dimension': dimension.trim(),
           },
+        );
+      }
+    });
+  }
+
+  /// Registry side-effect of an already-authorized save: no extra permission
+  /// gate (the caller's own `_check` already passed), but the row still joins
+  /// the lab-config sync like a Units-tab creation.
+  @override
+  Future<void> ensureUnit(String symbol, [DatabaseExecutor? exec]) async {
+    final db = await dbHelper.database;
+    await db.transaction((txn) async {
+      await ReferenceRepo.registerUnit(txn, symbol);
+      final trimmed = symbol.trim();
+      if (trimmed.isEmpty) return;
+      final rows = await txn.query(
+        'lab_units',
+        where: 'symbol = ?',
+        whereArgs: [trimmed],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        await _enqueueLabUnit(
+          txn,
+          Map<String, dynamic>.from(rows.first),
+          operation: 'upsert',
+          action: AuditAction.settingsUpdated,
+          details: {'symbol': trimmed, 'operation': 'ensure'},
         );
       }
     });

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
+import 'app_dialogs.dart';
 import 'app_window.dart';
 
 /// The "really delete this?" confirmation used by every master-data tab.
@@ -31,11 +32,15 @@ class AppDeleteConfirmDialog extends StatelessWidget {
   final String? cancelLabel;
   final String? confirmLabel;
 
-  /// Shows the dialog and resolves to `true` only if the user confirmed.
+  /// Shows the confirmation and resolves to `true` only if the user
+  /// confirmed.
   ///
-  /// Every caller ends up with the same guard clause afterwards, so it lives
-  /// here too - a caller that forgets to check the result would delete a row
-  /// just for dismissing the dialog.
+  /// Adaptive like [showAppConfirm]: the unified [AppWindow] dialog on wide
+  /// screens, a bottom sheet with 48dp actions on phones — a fixed 440px
+  /// dialog plus keyboard never fit a phone. Every caller ends up with the
+  /// same guard clause afterwards, so it lives here too - a caller that
+  /// forgets to check the result would delete a row just for dismissing
+  /// the dialog.
   static Future<bool> show(
     BuildContext context, {
     required String title,
@@ -43,16 +48,15 @@ class AppDeleteConfirmDialog extends StatelessWidget {
     String? cancelLabel,
     String? confirmLabel,
   }) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AppDeleteConfirmDialog(
-        title: title,
-        name: name,
-        cancelLabel: cancelLabel,
-        confirmLabel: confirmLabel,
-      ),
+    return showAppConfirm(
+      context,
+      title: title,
+      message: '${AppText.t('حذف', 'Delete')} "$name"؟',
+      confirmLabel: confirmLabel ?? AppStrings.delete,
+      cancelLabel: cancelLabel,
+      danger: true,
+      icon: Icons.delete_outline,
     );
-    return confirmed == true;
   }
 
   @override

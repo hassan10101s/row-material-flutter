@@ -34,7 +34,9 @@ class DashboardRepo implements DashboardRepository {
     String? status,
   }) async {
     final db = await _db;
-    final conditions = <String>[];
+    // Raw-material analytics only: production batches live in the same table
+    // (`inspection_kind = 'product'`) and must not pollute material KPIs.
+    final conditions = <String>["inspection_kind = 'raw'"];
     final args = <Object?>[];
     switch (period) {
       case '7d':
@@ -255,7 +257,7 @@ class DashboardRepo implements DashboardRepository {
     final today = todayIso();
     var todayCount = 0, todayApproved = 0, todayRejected = 0;
     final rows = await db.query('inspections',
-        columns: ['decision_status'], where: 'inspection_date = ?', whereArgs: [today]);
+        columns: ['decision_status'], where: "inspection_kind = 'raw' AND inspection_date = ?", whereArgs: [today]);
     for (final r in rows) {
       todayCount++;
       switch (_normalizeStatus('${r['decision_status'] ?? ''}')) {
@@ -270,7 +272,7 @@ class DashboardRepo implements DashboardRepository {
       }
     }
     final totalCount = Sqflite.firstIntValue(
-            await db.rawQuery('SELECT COUNT(*) AS c FROM inspections')) ??
+            await db.rawQuery("SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw'")) ??
         0;
     return {
       'today_count': todayCount,
@@ -500,7 +502,7 @@ class DashboardRepo implements DashboardRepository {
           where: 'active = 1',
           orderBy: 'material_name ASC'),
       db.rawQuery(
-          "SELECT DISTINCT supplier FROM inspections WHERE supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC"),
+          "SELECT DISTINCT supplier FROM inspections WHERE inspection_kind = 'raw' AND supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC"),
     ]);
     final matRows = results[0];
     final supRows = results[1];
@@ -685,7 +687,7 @@ class DashboardRepo implements DashboardRepository {
     // Follow-up note is not projected by _filtered; count it directly.
     try {
       final rows = await db.rawQuery(
-          "SELECT COUNT(*) AS c FROM inspections WHERE decision_status IN ('CONDITIONAL_APPROVAL','CONDITIONAL') AND COALESCE(follow_up_note,'') <> ''");
+          "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND decision_status IN ('CONDITIONAL_APPROVAL','CONDITIONAL') AND COALESCE(follow_up_note,'') <> ''");
       followUps = _int(rows.first['c']);
     } catch (_) {}
     var weekAvg = 0.0;
@@ -694,7 +696,7 @@ class DashboardRepo implements DashboardRepository {
       final cutoff = _day(DateTime.now().subtract(const Duration(days: 6)));
       final rows = await db.rawQuery(
           'SELECT substr(inspection_date,1,10) AS d, COUNT(*) AS c FROM inspections '
-          'WHERE substr(inspection_date,1,10) >= ? GROUP BY d',
+          "WHERE inspection_kind = 'raw' AND substr(inspection_date,1,10) >= ? GROUP BY d",
           [cutoff]);
       if (rows.isNotEmpty) {
         var sum = 0;
@@ -707,7 +709,7 @@ class DashboardRepo implements DashboardRepository {
     var total = 0;
     try {
       total = Sqflite.firstIntValue(
-              await db.rawQuery('SELECT COUNT(*) AS c FROM inspections')) ??
+              await db.rawQuery("SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw'")) ??
           filtered.length;
     } catch (_) {
       total = filtered.length;
@@ -732,7 +734,7 @@ class DashboardRepo implements DashboardRepository {
           'SELECT COUNT(*) AS t, '
           "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
           "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
-          'FROM inspections WHERE substr(inspection_date,1,10) = ?',
+          "FROM inspections WHERE inspection_kind = 'raw' AND substr(inspection_date,1,10) = ?",
           [today])).first;
       return [_int(row['t']), _int(row['a']), _int(row['r'])];
     } catch (_) {
@@ -1151,7 +1153,7 @@ FROM lab_inventory''')).first;
       final grouped = await db.rawQuery(
           "SELECT substr(inspection_date,1,7) AS m, COUNT(*) AS t, "
           "SUM(CASE WHEN decision_status='APPROVED' THEN 1 ELSE 0 END) AS a "
-          'FROM inspections WHERE substr(inspection_date,1,7) >= ? GROUP BY m',
+          "FROM inspections WHERE inspection_kind = 'raw' AND substr(inspection_date,1,7) >= ? GROUP BY m",
           [firstKey]);
       final byMonth = <String, Map<String, int>>{
         for (final r in grouped)

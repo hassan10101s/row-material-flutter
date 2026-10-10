@@ -13,6 +13,14 @@ class InspectionFormState extends Equatable {
   final Map<String, dynamic> physicalReference;
   final Map<String, dynamic> chemicalReference;
   final int refRevision;
+
+  /// Supplier history for the selected material (Vue parity autocomplete).
+  /// Row shape: `{name, lastDate, uses}`, most recent first, de-duplicated.
+  final List<Map<String, dynamic>> supplierOptions;
+
+  /// Sample-taker history (the technicians log), same row shape.
+  final List<Map<String, dynamic>> sampleTakerOptions;
+
   final bool loading;
   final bool saving;
   final String? error;
@@ -26,6 +34,8 @@ class InspectionFormState extends Equatable {
     this.physicalReference = const {},
     this.chemicalReference = const {},
     this.refRevision = 0,
+    this.supplierOptions = const [],
+    this.sampleTakerOptions = const [],
     this.loading = true,
     this.saving = false,
     this.error,
@@ -40,6 +50,8 @@ class InspectionFormState extends Equatable {
     Map<String, dynamic>? physicalReference,
     Map<String, dynamic>? chemicalReference,
     int? refRevision,
+    List<Map<String, dynamic>>? supplierOptions,
+    List<Map<String, dynamic>>? sampleTakerOptions,
     bool? loading,
     bool? saving,
     String? error,
@@ -53,6 +65,8 @@ class InspectionFormState extends Equatable {
         physicalReference: physicalReference ?? this.physicalReference,
         chemicalReference: chemicalReference ?? this.chemicalReference,
         refRevision: refRevision ?? this.refRevision,
+        supplierOptions: supplierOptions ?? this.supplierOptions,
+        sampleTakerOptions: sampleTakerOptions ?? this.sampleTakerOptions,
         loading: loading ?? this.loading,
         saving: saving ?? this.saving,
         error: error ?? this.error,
@@ -68,6 +82,8 @@ class InspectionFormState extends Equatable {
         physicalReference,
         chemicalReference,
         refRevision,
+        supplierOptions,
+        sampleTakerOptions,
         loading,
         saving,
         error,

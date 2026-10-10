@@ -17,6 +17,12 @@ abstract interface class FileDelivery {
   /// Whether [reveal] can succeed for a file on this platform.
   bool get canReveal;
 
+  /// Whether the *containing folder* can be opened in the platform file
+  /// manager. False on phones: the sandbox (`.../files/MaterialLab/...`) is
+  /// unreachable by any file manager, so the call cannot be made to work —
+  /// the UI must hide the affordance instead of offering a tap that fails.
+  bool get canRevealFolder;
+
   /// Whether [share] can succeed for a file on this platform.
   bool get canShare;
 
@@ -37,6 +43,9 @@ class DesktopFileDelivery implements FileDelivery {
 
   @override
   bool get canReveal => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+
+  @override
+  bool get canRevealFolder => canReveal;
 
   @override
   bool get canShare => true;
@@ -79,6 +88,9 @@ class UnsupportedFileDelivery implements FileDelivery {
 
   @override
   bool get canReveal => false;
+
+  @override
+  bool get canRevealFolder => false;
 
   @override
   bool get canShare => false;

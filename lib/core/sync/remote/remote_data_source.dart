@@ -123,6 +123,15 @@ abstract interface class RemoteDataSource {
   /// probe that replaces full pull cycles.
   Future<RemoteDocument> readHeartbeat(String organizationId);
 
+  /// Bump the heartbeat after a successful push batch so the other devices'
+  /// 10 s probes notice within seconds instead of on their 60 s timer.
+  /// Best-effort by contract: implementations must merge (never delete) and
+  /// callers must never fail a push over it.
+  Future<void> writeHeartbeat({
+    required String organizationId,
+    required Map<String, dynamic> data,
+  });
+
   /// Registry of devices (`organizations/{orgId}/devices`).
   Future<void> registerDevice({
     required String organizationId,

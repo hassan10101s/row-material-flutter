@@ -105,25 +105,82 @@ class _MobileAppShellState extends State<MobileAppShell> {
     if (paths.isEmpty) return;
     final labels = {for (final e in widget.entries) e.path: e.label};
     final icons = {for (final e in widget.entries) e.path: e.icon};
+    // Captured from the page's context: the sheet route has no GoRouterState.
+    String? currentPath;
+    try {
+      currentPath = GoRouterState.of(context).uri.path;
+    } catch (_) {
+      currentPath = null;
+    }
 
     final chosen = await showModalBottomSheet<String>(
       context: context,
+      showDragHandle: true,
       builder: (sheetContext) => SafeArea(
         child: ListView(
           shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
               child: Text(
                 AppText.t('انتقل إلى', 'Jump to'),
-                style: Theme.of(sheetContext).textTheme.titleMedium,
+                style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
               ),
             ),
             for (final path in paths)
-              ListTile(
-                leading: Icon(icons[path]),
-                title: Text(labels[path] ?? path),
-                onTap: () => Navigator.of(sheetContext).pop(path),
+              Builder(
+                builder: (context) {
+                  final selected = currentPath == path;
+                  return ListTile(
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    tileColor: selected
+                        ? Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withValues(alpha: 0.1)
+                        : null,
+                    leading: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withValues(alpha: selected ? 0.16 : 0.07),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(
+                        icons[path],
+                        size: 19,
+                        color: selected
+                            ? Theme.of(context).colorScheme.primary
+                            : Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    title: Text(
+                      labels[path] ?? path,
+                      style: TextStyle(
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
+                    ),
+                    trailing: selected
+                        ? Icon(
+                            Icons.check_circle,
+                            color:
+                                Theme.of(context).colorScheme.primary,
+                            size: 20,
+                          )
+                        : null,
+                    onTap: () => Navigator.of(sheetContext).pop(path),
+                  );
+                },
               ),
           ],
         ),

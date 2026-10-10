@@ -64,8 +64,7 @@ void main() {
       expect('${rows.single['payload']}', contains('"attempt":2'));
     });
 
-    test('a tombstone wins over a pending create and over an update', () async {
-      final id = await insertSample('QC-3');
+    test('a tombstone wins over a pending create and over an update', () async {      final id = await insertSample('QC-3');
 
       await fixture.transaction((txn) => queue.enqueue(
             txn,
@@ -95,6 +94,43 @@ void main() {
       final rows = await queue.listQueue();
       expect(rows, hasLength(1));
       expect(rows.single['operation'], 'tombstone');
+    });
+
+    test('onEnqueued fires on insert and on merge, never breaks the write',
+        () async {
+      var calls = 0;
+      queue.onEnqueued = () => calls++;
+      final id = await insertSample('QC-HOOK');
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-HOOK',
+            localRef: id,
+            operation: 'create',
+            payload: const {},
+          ));
+      expect(calls, 1);
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-HOOK',
+            localRef: id,
+            operation: 'update',
+            payload: const {},
+          ));
+      expect(calls, 2);
+
+      // A throwing listener must not break the business write it observes.
+      queue.onEnqueued = () => throw StateError('listener blew up');
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-HOOK2',
+            localRef: id,
+            operation: 'create',
+            payload: const {},
+          ));
+      expect(await queue.countPending(), 2);
     });
 
     test('a fresh edit clears the backoff and the error', () async {
@@ -216,7 +252,7 @@ void main() {
       }
     });
 
-    test('after maxRetries the row is failed, not retried forever', () async {
+    test('transient failures retry forever with capped backoff, never park', () async {
       final id = await insertSample('QC-8');
       await fixture.transaction((txn) => queue.enqueue(
             txn,
@@ -228,7 +264,9 @@ void main() {
           ));
 
       QueueEntry entry = (await queue.claim()).single;
-      for (var i = 0; i < SyncQueue.maxRetries; i++) {
+      // Far past the old retry budget: the row must still be pending with a
+      // capped backoff, never parked for a manual tap.
+      for (var i = 0; i < 25; i++) {
         await queue.markRetry(entry, 'offline $i');
         // Clear the backoff so the next claim picks the row up again.
         await fixture.db.update(
@@ -241,13 +279,16 @@ void main() {
         if (claimed.isEmpty) break;
         entry = claimed.single;
       }
+      // The loop ends on a claim (in_flight in the db): one last retry
+      // settles it back without re-claiming.
+      await queue.markRetry(entry, 'offline final');
 
       final row = (await queue.listQueue()).single;
-      expect(row['status'], 'failed');
-      expect(row['retry_count'], SyncQueue.maxRetries);
-      expect(await queue.countBlocked(), greaterThanOrEqualTo(1));
+      expect(row['status'], 'pending');
+      expect(row['retry_count'], 26);
+      expect(await queue.countBlocked(), 0);
       final local = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
-      expect(local['sync_state'], 'conflict');
+      expect(local['sync_state'], 'queued');
     });
   });
 
@@ -455,7 +496,7 @@ void main() {
       );
     });
 
-    test('retryBlocked puts a failed row back into the queue', () async {
+    test('retryBlocked drains legacy failed rows and live conflicts', () async {
       final id = await insertSample('QC-11');
       await fixture.transaction((txn) => queue.enqueue(
             txn,
@@ -465,19 +506,13 @@ void main() {
             operation: 'create',
             payload: const {},
           ));
-      var entry = (await queue.claim()).single;
-      for (var i = 0; i < SyncQueue.maxRetries; i++) {
-        await queue.markRetry(entry, 'nope');
-        await fixture.db.update(
-          'sync_queue',
-          {'next_attempt_at': null},
-          where: 'id = ?',
-          whereArgs: [entry.id],
-        );
-        final claimed = await queue.claim();
-        if (claimed.isEmpty) break;
-        entry = claimed.single;
-      }
+      // `failed` is only ever written by older versions now; simulate one.
+      await fixture.db.update(
+        'sync_queue',
+        {'status': 'failed', 'retry_count': 20, 'next_attempt_at': null},
+        where: 'id = ?',
+        whereArgs: [(await queue.claim()).single.id],
+      );
       expect((await queue.listQueue()).single['status'], 'failed');
 
       expect(await queue.retryBlocked(), 1);
@@ -543,7 +578,7 @@ void main() {
       expect(reclaimed.single.baseVersion, 7);
     });
 
-    test('a stranded row that had exhausted its retries fails instead of looping',
+    test('a stranded row with a high retry count still returns to pending',
         () async {
       final id = await insertSample('QC-STALL3');
       await fixture.transaction((txn) => queue.enqueue(
@@ -555,20 +590,20 @@ void main() {
             payload: const {},
           ));
       await queue.claim();
-      // Simulate the row already having burned its budget before it stranded.
+      // Simulate the row having burned a big budget before it stranded.
       await fixture.db.update(
         'sync_queue',
-        {'retry_count': SyncQueue.maxRetries - 1},
+        {'retry_count': 19},
         where: '1 = 1',
       );
 
       expect(await queue.recoverStalled(), 1);
 
       final row = (await queue.listQueue()).single;
-      expect(row['status'], 'failed');
-      expect(row['next_attempt_at'], isNull, reason: 'a failed row waits for retry');
-      expect(row['last_error'], contains('retry limit'));
-      expect(await queue.countBlocked(), 1, reason: 'surfaces on the sync badge');
+      expect(row['status'], 'pending');
+      expect(row['next_attempt_at'], isNotNull, reason: 'backoff is re-armed');
+      expect(row['last_error'], contains('interrupted mid-push'));
+      expect(await queue.countBlocked(), 0, reason: 'nothing waits for a tap');
     });
 
     test('recovery leaves pending, failed and conflict rows alone', () async {

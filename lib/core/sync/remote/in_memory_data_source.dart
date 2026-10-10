@@ -194,6 +194,23 @@ class InMemoryDataSource implements RemoteDataSource {
   }
 
   @override
+  Future<void> writeHeartbeat({
+    required String organizationId,
+    required Map<String, dynamic> data,
+  }) async {
+    if (offline) return;
+    final key = _key(organizationId, SyncCollection.meta, 'state');
+    final existing = documents[key];
+    documents[key] = <String, dynamic>{
+      ...?existing,
+      'lastWriteAt': _serverNow(),
+      if (data['lastWriteBy'] != null) 'lastWriteBy': data['lastWriteBy'],
+      if (data['lastEntity'] != null) 'lastEntity': data['lastEntity'],
+      if (data['version'] != null) 'version': data['version'],
+    };
+  }
+
+  @override
   Future<void> registerDevice({
     required String organizationId,
     required String deviceId,

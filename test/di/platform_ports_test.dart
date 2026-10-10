@@ -14,6 +14,8 @@ class _FakeFileDelivery implements FileDelivery {
   @override
   bool get canReveal => true;
   @override
+  bool get canRevealFolder => true;
+  @override
   bool get canShare => true;
   @override
   Future<bool> reveal(String filePath) async => true;

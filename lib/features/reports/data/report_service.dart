@@ -54,7 +54,8 @@ class ReportService implements ReportRepository {
   /// Summary columns used by period reports (mirrors controller.py
   /// `report_columns`). Summary rows are NOT JSON-enriched.
   static const String reportColumns = '''
-      id, entry_code, material_name, material_code, inspection_date, expiry_date, supplier, quantity,
+      id, entry_code, inspection_kind, product_id, formula_number, batch_number,
+      material_name, material_code, inspection_date, expiry_date, supplier, quantity,
       sample_taken_by, specialist_name, decision_status, decision_reason, follow_up_note,
       rejected_quantity, created_by_name, created_at, updated_at
   ''';
@@ -113,7 +114,7 @@ class ReportService implements ReportRepository {
     final db = await dbHelper.readDatabase;
     final rows = await db.rawQuery(
       'SELECT inspection_date, decision_status, quantity, rejected_quantity '
-      'FROM inspections WHERE inspection_date >= ? AND inspection_date < ?',
+      "FROM inspections WHERE inspection_kind = 'raw' AND inspection_date >= ? AND inspection_date < ?",
       [_dateOnlyIso(windowStart), _dateOnlyIso(windowEnd)],
     );
     return [for (final r in rows) Map<String, dynamic>.from(r)];
@@ -141,6 +142,14 @@ class ReportService implements ReportRepository {
 
   /// Convert HTML to PDF via headless Edge/Chrome, falling back to the
   /// dart-pdf renderer when no headless browser is available or it fails.
+  ///
+  /// Phones have no desktop browser, so mobile exports always take the
+  /// native [PdfRenderer] path — which is why the mobile PDF is drawn by a
+  /// second, hand-maintained layout instead of the HTML template. There is
+  /// deliberately no on-device HTML tier: the only packaged converter
+  /// (`printing.convertHtml`) is deprecated upstream and unimplemented on
+  /// Android, so it would fail exactly where it is needed. Native-renderer
+  /// parity with the template is maintained in [PdfRenderer] instead.
   Future<Uint8List> _exportHtmlPdf(
     String templateName,
     Map<String, dynamic> context, {
@@ -272,7 +281,7 @@ class ReportService implements ReportRepository {
     final day = dateStr.trim().substring(0, 10);
     final nextDayIso = _dateOnlyIso(DateTime(parsed.year, parsed.month, parsed.day + 1));
     final inspections = await _querySummaries(
-      'WHERE inspection_date >= ? AND inspection_date < ? '
+      "WHERE inspection_kind = 'raw' AND inspection_date >= ? AND inspection_date < ? "
       'ORDER BY inspection_date DESC, id DESC',
       [day, nextDayIso],
     );
@@ -303,7 +312,7 @@ class ReportService implements ReportRepository {
         ? DateTime(year + 1, 1, 1)
         : DateTime(year, month + 1, 1);
     final inspections = await _querySummaries(
-      'WHERE inspection_date >= ? AND inspection_date < ? '
+      "WHERE inspection_kind = 'raw' AND inspection_date >= ? AND inspection_date < ? "
       'ORDER BY inspection_date DESC, created_at DESC, id DESC',
       [_dateOnlyIso(monthStart), _dateOnlyIso(nextMonthStart)],
     );
@@ -335,7 +344,7 @@ class ReportService implements ReportRepository {
     final yearStart = DateTime(year, 1, 1);
     final nextYearStart = DateTime(year + 1, 1, 1);
     final inspections = await _querySummaries(
-      'WHERE inspection_date >= ? AND inspection_date < ? '
+      "WHERE inspection_kind = 'raw' AND inspection_date >= ? AND inspection_date < ? "
       'ORDER BY inspection_date DESC, created_at DESC, id DESC',
       [_dateOnlyIso(yearStart), _dateOnlyIso(nextYearStart)],
     );

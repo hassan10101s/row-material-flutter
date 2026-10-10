@@ -11,7 +11,7 @@ import 'package:material_lab/core/sync/conflict_resolver.dart';
 import 'package:material_lab/core/sync/sync_engine.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/di/service_locator.dart';
-import 'package:material_lab/features/sync/presentation/sync_screen.dart';
+import 'package:material_lab/features/sync/presentation/sync/sync_screen.dart';
 
 class _MockEngine extends Mock implements SyncEngine {}
 

@@ -31,33 +31,46 @@ class AppSummaryCard extends StatefulWidget {
 class _AppSummaryCardState extends State<AppSummaryCard> {
   bool _isHovered = false;
 
+  void _setHovered(bool value) {
+    if (!mounted || _isHovered == value) return;
+    setState(() => _isHovered = value);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isInteractive = widget.onTap != null;
     return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      cursor: widget.onTap != null ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: isInteractive ? (_) => _setHovered(true) : null,
+      onExit: isInteractive ? (_) => _setHovered(false) : null,
+      cursor: isInteractive ? SystemMouseCursors.click : MouseCursor.defer,
       child: AppCard(
+        enableHover: false,
         onTap: widget.onTap,
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(14.r),
         child: Row(
           children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOutCubic,
-              padding: const EdgeInsets.all(10),
+            Container(
+              width: 46.r,
+              height: 46.r,
               decoration: BoxDecoration(
-                color: widget.color.withValues(alpha: _isHovered ? 0.22 : 0.12),
+                gradient: LinearGradient(
+                  begin: Alignment.topRight,
+                  end: Alignment.bottomLeft,
+                  colors: [
+                    widget.color.withValues(alpha: _isHovered ? 0.28 : 0.18),
+                    widget.color.withValues(alpha: _isHovered ? 0.14 : 0.08),
+                  ],
+                ),
                 borderRadius: BorderRadius.circular(AppRadii.md),
                 border: Border.all(
-                  color: widget.color.withValues(alpha: _isHovered ? 0.45 : 0.0),
+                  color: widget.color.withValues(alpha: _isHovered ? 0.4 : 0.16),
                 ),
               ),
               child: AnimatedScale(
-                scale: _isHovered ? 1.08 : 1.0,
+                scale: _isHovered ? 1.1 : 1.0,
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeOutCubic,
-                child: Icon(widget.icon, color: widget.color, size: 24.r),
+                child: Icon(widget.icon, color: widget.color, size: 22.r),
               ),
             ),
             const SizedBox(width: AppSpacing.md),

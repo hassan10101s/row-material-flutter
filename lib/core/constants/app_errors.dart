@@ -44,9 +44,17 @@ class AppErrors {
   static String get materialNameRequired =>
       AppText.t('اسم المادة مطلوب.', 'Material name is required.');
   static String get materialTypeInvalid => AppText.t(
-    'نوع المادة يجب أن يكون liquid أو powder.',
-    'Material type must be liquid or powder.',
+    'نوع المادة يجب أن يكون سائل أو مسحوق أو عدد.',
+    'Material type must be liquid, powder or count.',
   );
+
+  /// A unit that does not fit the item category (grams on a liquid, litres
+  /// on a powder, anything but pieces on a counted item).
+  static String unitNotAllowedForCategory(String unit, String categoryLabel) =>
+      AppText.t(
+        'الوحدة "$unit" لا تناسب النوع "$categoryLabel".',
+        'Unit "$unit" does not fit the "$categoryLabel" type.',
+      );
   static String get unitNotSupported =>
       AppText.t('الوحدة غير مدعومة.', 'Unit is not supported.');
   static String get materialExists => AppText.t(
@@ -110,6 +118,19 @@ class AppErrors {
       AppText.t('التحليل غير موجود.', 'Analysis was not found.');
   static String get testNotFound =>
       AppText.t('الاختبار غير موجود.', 'Test was not found.');
+
+  // ── Equipment (lab, device-local) ────────────────────────────────────
+
+  static String get equipmentNameRequired =>
+      AppText.t('اسم الجهاز مطلوب.', 'Equipment name is required.');
+  static String get equipmentExists => AppText.t(
+    'يوجد جهاز بنفس الاسم بالفعل.',
+    'Equipment with this name already exists.',
+  );
+  static String get equipmentNotFound =>
+      AppText.t('الجهاز غير موجود.', 'Equipment was not found.');
+  static String get equipmentEventNotFound =>
+      AppText.t('الحدث غير موجود.', 'Event was not found.');
   static String get sourceTypeInvalid => AppText.t(
     'نوع المصدر يجب أن يكون raw_material أو product.',
     'Source type must be raw_material or product.',
@@ -223,6 +244,10 @@ class AppErrors {
   );
   static String get inspectionNotFound =>
       AppText.t('الفحص غير موجود.', 'Inspection not found.');
+  static String requiredInspectionField(String label) => AppText.t(
+        'الحقل "$label" مطلوب: يجب إدخال قيمته قبل حفظ المحضر.',
+        '"$label" is required: must be filled before saving.',
+      );
   static String get noDecisionChange =>
       AppText.t('لا يوجد تغيير في القرار.', 'No decision change detected.');
   static String get decisionStatusRequired =>

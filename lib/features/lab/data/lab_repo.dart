@@ -40,6 +40,60 @@ class LabRepo {
     return (executor ?? await _db).rawInsert(sql, args);
   }
 
+  /// Units registry: every unit string written anywhere is registered into
+  /// `lab_units` (INSERT OR IGNORE) so the Units table holds all program
+  /// units and every picker inherits from it. Never throws: a missing table
+  /// on a hand-built test database simply skips.
+  static Future<void> registerUnit(
+      DatabaseExecutor exec, String? symbol) async {
+    final s = (symbol ?? '').trim();
+    if (s.isEmpty) return;
+    try {
+      await exec.rawInsert(
+        'INSERT OR IGNORE INTO lab_units (symbol, is_active, created_at) '
+        'VALUES (?, 1, ?)',
+        [s, nowIso()],
+      );
+    } catch (_) {}
+  }
+
+  /// A unit is acceptable when the `lab_units` registry holds it. On a
+  /// database whose registry is still empty (or a hand-built test database
+  /// without the table) the legacy hardcoded list applies as fallback, so
+  /// fresh installs and old tests keep working.
+  static Future<bool> unitAllowed(
+      DatabaseExecutor exec, String unit) async {
+    final clean = unit.trim();
+    if (clean.isEmpty) return false;
+    try {
+      final rows =
+          await exec.rawQuery('SELECT symbol FROM lab_units WHERE is_active = 1');
+      if (rows.isEmpty) return inventoryUnits.contains(clean);
+      return rows.any((r) => '${r['symbol']}' == clean);
+    } catch (_) {
+      return inventoryUnits.contains(clean);
+    }
+  }
+
+  /// Registry symbols for every unit picker in the lab surfaces. Falls back
+  /// to the legacy hardcoded list when the registry is empty/missing.
+  Future<List<String>> listUnitSymbols([DatabaseExecutor? executor]) async {
+    try {
+      final rows = await (executor ?? await _db).rawQuery(
+        'SELECT symbol FROM lab_units WHERE is_active = 1 '
+        'ORDER BY symbol COLLATE NOCASE ASC',
+      );
+      final out = [
+        for (final r in rows)
+          if ('${r['symbol'] ?? ''}'.trim().isNotEmpty)
+            '${r['symbol']}'.trim(),
+      ];
+      return out.isEmpty ? List<String>.from(inventoryUnits) : out;
+    } catch (_) {
+      return List<String>.from(inventoryUnits);
+    }
+  }
+
   // ── Inspection resolution ─────────────────────────────────────
 
   Future<Map<String, dynamic>?> resolveInspection(String entryCode) async {
@@ -47,7 +101,8 @@ class LabRepo {
     if (code.isEmpty) return null;
     return fetchOne(
         null,
-        'SELECT id, material_id, material_name, material_code, inspection_date '
+        'SELECT id, material_id, product_id, material_name, material_code, '
+        'inspection_kind, formula_number, batch_number, inspection_date '
         'FROM inspections WHERE entry_code = ?',
         [code]);
   }
@@ -61,6 +116,7 @@ class LabRepo {
              COUNT(i.id) AS inspection_count
       FROM reference_materials m
       JOIN inspections i ON i.material_id = m.id AND i.deleted_at IS NULL
+        AND i.inspection_kind = 'raw'
       WHERE m.active = 1
       GROUP BY m.id, m.material_name, m.material_code
       ORDER BY m.material_name COLLATE NOCASE ASC
@@ -76,13 +132,60 @@ class LabRepo {
       null,
       '''
       SELECT id, entry_code, material_id, material_name, material_code,
-             inspection_date, supplier, truck_number, quantity,
+             inspection_kind, inspection_date, supplier, truck_number, quantity,
              decision_status, sample_names_json
       FROM inspections
-      WHERE material_id = ? AND deleted_at IS NULL
+      WHERE material_id = ? AND inspection_kind = 'raw' AND deleted_at IS NULL
       ORDER BY inspection_date DESC, id DESC
       ''',
       [materialId],
+    );
+    return [
+      for (final row in rows)
+        {
+          ...row,
+          'sample_names': jsonLoadsList(
+            '${row['sample_names_json'] ?? ''}',
+            const ['Result'],
+          ),
+        },
+    ];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listProductInspectionMaterials() async {
+    return fetchAll(
+      null,
+      '''
+      SELECT p.id, p.name AS material_name, p.name AS product_name,
+             COUNT(i.id) AS inspection_count
+      FROM lab_products p
+      JOIN inspections i ON i.product_id = p.id AND i.deleted_at IS NULL
+        AND i.inspection_kind = 'product'
+      WHERE p.active = 1
+      GROUP BY p.id, p.name
+      ORDER BY p.name COLLATE NOCASE ASC
+      ''',
+    );
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listProductInspectionRecords(
+    int productId,
+  ) async {
+    final rows = await fetchAll(
+      null,
+      '''
+      SELECT id, entry_code, product_id, material_name, material_code,
+             inspection_kind, formula_number, batch_number,
+             inspection_date, quantity,
+             decision_status, sample_names_json
+      FROM inspections
+      WHERE product_id = ? AND inspection_kind = 'product'
+        AND deleted_at IS NULL
+      ORDER BY inspection_date DESC, id DESC
+      ''',
+      [productId],
     );
     return [
       for (final row in rows)
@@ -132,9 +235,18 @@ class LabRepo {
     if (!inventoryCategories.contains(category)) {
       throw ValidationError(AppErrors.materialTypeInvalid);
     }
-    if (!inventoryUnits.contains(unit)) {
+    final cleanUnit = unit.trim();
+    if (!unitAllowedForCategory(cleanUnit, category)) {
+      throw ValidationError(AppErrors.unitNotAllowedForCategory(
+        cleanUnit.isEmpty ? '-' : cleanUnit,
+        inventoryCategoryLabel(category),
+      ));
+    }
+    final db = executor ?? await _db;
+    if (!await unitAllowed(db, unit)) {
       throw ValidationError(AppErrors.unitNotSupported);
     }
+    await registerUnit(db, unit);
     final existing =
         await fetchOne(executor, 'SELECT id FROM lab_inventory WHERE name = ?', [cleanName]);
     if (existing != null) {
@@ -184,10 +296,29 @@ class LabRepo {
       throw ValidationError(AppErrors.materialTypeInvalid);
     }
 
-    if (updates.containsKey('unit') && !inventoryUnits.contains(updates['unit'])) {
-      throw ValidationError(AppErrors.unitNotSupported);
+    if (updates.containsKey('unit')) {
+      final db = executor ?? await _db;
+      if (!await unitAllowed(db, '${updates['unit']}')) {
+        throw ValidationError(AppErrors.unitNotSupported);
+      }
+      await registerUnit(db, '${updates['unit']}');
     }
-    
+
+    // The effective category/unit pair must stay compatible: changing the
+    // category keeps the old unit (and vice versa) unless the caller fixes
+    // both together.
+    if (updates.containsKey('unit') || updates.containsKey('category')) {
+      final effectiveCategory =
+          '${updates['category'] ?? existing['category'] ?? ''}';
+      final effectiveUnit = '${updates['unit'] ?? existing['unit'] ?? ''}';
+      if (!unitAllowedForCategory(effectiveUnit, effectiveCategory)) {
+        throw ValidationError(AppErrors.unitNotAllowedForCategory(
+          effectiveUnit.isEmpty ? '-' : effectiveUnit,
+          inventoryCategoryLabel(effectiveCategory),
+        ));
+      }
+    }
+
     if (updates.containsKey('min_qty')) {
       updates['min_qty'] =
           (safeFloat(updates['min_qty']) ?? 0.0).clamp(0.0, double.infinity);
@@ -243,7 +374,243 @@ class LabRepo {
         ''');
   }
 
+  // ── Equipment (device-local registry + event log) ─────────────
+
+  /// Event kinds for the equipment log. Stored as-is in
+  /// `lab_equipment_events.event_type`.
+  static const String equipmentEventCalibration = 'calibration';
+  static const String equipmentEventMaintenance = 'maintenance';
+  static const String equipmentEventRepair = 'repair';
+
+  static const List<String> equipmentEventTypes = [
+    equipmentEventCalibration,
+    equipmentEventMaintenance,
+    equipmentEventRepair,
+  ];
+
+  static String normalizeEquipmentEventType(Object? value) {
+    final t = '$value'.trim().toLowerCase();
+    if (t == equipmentEventMaintenance || t == 'صيانة') {
+      return equipmentEventMaintenance;
+    }
+    if (t == equipmentEventRepair || t == 'إصلاح' || t == 'اصلاح') {
+      return equipmentEventRepair;
+    }
+    return equipmentEventCalibration;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listEquipment() async {
+    return fetchAll(null, '''
+        SELECT e.*,
+               (SELECT COUNT(*) FROM lab_equipment_events v
+                WHERE v.equipment_id = e.id) AS events_count
+        FROM lab_equipment e
+        ORDER BY e.name COLLATE NOCASE ASC
+        ''');
+  }
+
+  @override
+  Future<Map<String, dynamic>> getEquipment(int equipmentId,
+      [DatabaseExecutor? executor]) async {
+    final row = await fetchOne(executor,
+        'SELECT * FROM lab_equipment WHERE id = ?', [equipmentId]);
+    if (row == null) throw NotFoundError(AppErrors.equipmentNotFound);
+    return row;
+  }
+
+  /// Next automatic device code (`EQ-0001`, …) from the highest used id.
+  Future<String> _nextEquipmentCode(DatabaseExecutor db) async {
+    final rows =
+        await db.rawQuery('SELECT MAX(id) AS max_id FROM lab_equipment');
+    final maxId = rows.isEmpty
+        ? 0
+        : ((rows.first['max_id'] as num?)?.toInt() ?? 0);
+    return 'EQ-${(maxId + 1).toString().padLeft(4, '0')}';
+  }
+
+  @override
+  Future<Map<String, dynamic>> createEquipment({
+    required String name,
+    String manufacturer = '',
+    String description = '',
+    String lastCalibrationDate = '',
+    DatabaseExecutor? executor,
+  }) async {
+    final cleanName = name.trim();
+    if (cleanName.isEmpty) {
+      throw ValidationError(AppErrors.equipmentNameRequired);
+    }
+    final db = executor ?? await _db;
+    final dup = await fetchOne(db,
+        'SELECT id FROM lab_equipment WHERE name = ? COLLATE NOCASE', [cleanName]);
+    if (dup != null) throw ValidationError(AppErrors.equipmentExists);
+    final timestamp = nowIso();
+    final id = await executeReturnId(db, '''
+        INSERT INTO lab_equipment (
+            name, code, manufacturer, description,
+            last_calibration_date, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', [
+      cleanName,
+      await _nextEquipmentCode(db),
+      manufacturer.trim(),
+      description.trim(),
+      lastCalibrationDate.trim(),
+      timestamp,
+      timestamp,
+    ]);
+    return getEquipment(id, db);
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateEquipment(
+      int equipmentId, Map<String, dynamic> fields,
+      [DatabaseExecutor? executor]) async {
+    final db = executor ?? await _db;
+    await getEquipment(equipmentId, db);
+    final updates = <String, Object?>{};
+    if (fields.containsKey('name')) {
+      final clean = '${fields['name'] ?? ''}'.trim();
+      if (clean.isEmpty) throw ValidationError(AppErrors.equipmentNameRequired);
+      final dup = await fetchOne(db,
+          'SELECT id FROM lab_equipment WHERE name = ? COLLATE NOCASE AND id != ?',
+          [clean, equipmentId]);
+      if (dup != null) throw ValidationError(AppErrors.equipmentExists);
+      updates['name'] = clean;
+    }
+    for (final key in ['manufacturer', 'description', 'last_calibration_date']) {
+      if (fields.containsKey(key)) updates[key] = '${fields[key] ?? ''}'.trim();
+    }
+    if (updates.isEmpty) return getEquipment(equipmentId, db);
+    final sets = updates.keys.map((key) => '$key = ?').join(', ');
+    final params = <Object?>[...updates.values, nowIso(), equipmentId];
+    await db.rawUpdate(
+        'UPDATE lab_equipment SET $sets, updated_at = ? WHERE id = ?', params);
+    return getEquipment(equipmentId, db);
+  }
+
+  @override
+  Future<void> deleteEquipment(int equipmentId,
+      [DatabaseExecutor? executor]) async {
+    final db = executor ?? await _db;
+    await getEquipment(equipmentId, db);
+    await db.rawDelete(
+        'DELETE FROM lab_equipment_events WHERE equipment_id = ?',
+        [equipmentId]);
+    await db.rawDelete(
+        'DELETE FROM lab_equipment WHERE id = ?', [equipmentId]);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listEquipmentEvents(
+      int equipmentId) async {
+    return fetchAll(null, '''
+        SELECT * FROM lab_equipment_events
+        WHERE equipment_id = ?
+        ORDER BY event_date DESC, id DESC
+        ''', [equipmentId]);
+  }
+
+  @override
+  Future<Map<String, dynamic>> addEquipmentEvent({
+    required int equipmentId,
+    required String eventType,
+    required String eventDate,
+    String notes = '',
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await _db;
+    await getEquipment(equipmentId, db);
+    final type = normalizeEquipmentEventType(eventType);
+    final date = eventDate.trim().isEmpty ? todayIso() : eventDate.trim();
+    final id = await executeReturnId(db, '''
+        INSERT INTO lab_equipment_events (
+            equipment_id, event_type, event_date, notes, created_at
+        ) VALUES (?, ?, ?, ?, ?)
+        ''', [
+      equipmentId,
+      type,
+      date,
+      notes.trim(),
+      nowIso(),
+    ]);
+    if (type == equipmentEventCalibration) {
+      await db.rawUpdate(
+          'UPDATE lab_equipment SET last_calibration_date = ?, updated_at = ? '
+          'WHERE id = ? AND last_calibration_date < ?',
+          [date, nowIso(), equipmentId, date]);
+    }
+    final rows = await db.rawQuery(
+        'SELECT * FROM lab_equipment_events WHERE id = ?', [id]);
+    return Map<String, dynamic>.from(rows.first);
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateEquipmentEvent(
+      int eventId, Map<String, dynamic> fields,
+      [DatabaseExecutor? executor]) async {
+    final db = executor ?? await _db;
+    final existing = await fetchOne(
+        db, 'SELECT * FROM lab_equipment_events WHERE id = ?', [eventId]);
+    if (existing == null) {
+      throw NotFoundError(AppErrors.equipmentEventNotFound);
+    }
+    final updates = <String, Object?>{};
+    if (fields.containsKey('event_type')) {
+      updates['event_type'] =
+          normalizeEquipmentEventType(fields['event_type']);
+    }
+    if (fields.containsKey('event_date')) {
+      final date = '${fields['event_date'] ?? ''}'.trim();
+      updates['event_date'] = date.isEmpty ? todayIso() : date;
+    }
+    if (fields.containsKey('notes')) {
+      updates['notes'] = '${fields['notes'] ?? ''}'.trim();
+    }
+    if (updates.isEmpty) return Map<String, dynamic>.from(existing);
+    final sets = updates.keys.map((key) => '$key = ?').join(', ');
+    final params = <Object?>[...updates.values, eventId];
+    await db.rawUpdate(
+        'UPDATE lab_equipment_events SET $sets WHERE id = ?', params);
+    if (updates['event_type'] == equipmentEventCalibration) {
+      final date = '${updates['event_date'] ?? existing['event_date'] ?? ''}';
+      await db.rawUpdate(
+          'UPDATE lab_equipment SET last_calibration_date = ?, updated_at = ? '
+          'WHERE id = ? AND last_calibration_date < ?',
+          [
+            date,
+            nowIso(),
+            (existing['equipment_id'] as num).toInt(),
+            date,
+          ]);
+    }
+    final rows = await db.rawQuery(
+        'SELECT * FROM lab_equipment_events WHERE id = ?', [eventId]);
+    return Map<String, dynamic>.from(rows.first);
+  }
+
+  @override
+  Future<void> deleteEquipmentEvent(int eventId,
+      [DatabaseExecutor? executor]) async {
+    final db = executor ?? await _db;
+    await db.rawDelete(
+        'DELETE FROM lab_equipment_events WHERE id = ?', [eventId]);
+  }
+
   // ── Products ──────────────────────────────────────────────────
+
+  /// Attaches the parsed physical/chemical reference maps to a raw
+  /// `lab_products` row (tolerates hand-built databases missing the new
+  /// columns — the maps just come back empty).
+  static Map<String, dynamic> _withProductReferences(
+      Map<String, dynamic> product) {
+    product['physical_reference'] =
+        jsonLoads('${product['physical_reference_json'] ?? ''}');
+    product['chemical_reference'] =
+        jsonLoads('${product['chemical_reference_json'] ?? ''}');
+    return product;
+  }
 
   Future<List<Map<String, dynamic>>> listProducts() async {
     // Single round-trip: products + all ranges, grouped in memory.
@@ -259,11 +626,11 @@ class LabRepo {
     }
     return [
       for (final row in rows)
-        {
+        _withProductReferences({
           ...Map<String, dynamic>.from(row),
           'ranges': byProduct[int.tryParse('${row['id']}') ?? 0] ??
               const <Map<String, dynamic>>[],
-        },
+        }),
     ];
   }
 
@@ -272,7 +639,7 @@ class LabRepo {
     final row =
         await fetchOne(executor, 'SELECT * FROM lab_products WHERE id = ?', [productId]);
     if (row == null) throw NotFoundError(AppErrors.productNotFound);
-    final product = Map<String, dynamic>.from(row);
+    final product = _withProductReferences(Map<String, dynamic>.from(row));
     product['ranges'] = await getProductRanges(productId, executor);
     return product;
   }
@@ -284,6 +651,7 @@ class LabRepo {
                 lpa.id, lpa.product_id, lpa.analysis_id, lpa.min_value, lpa.max_value,
                 CASE WHEN a.parameter_id IS NOT NULL THEN COALESCE(p.unit, '')
                      ELSE COALESCE(NULLIF(a.unit, ''), lpa.unit) END AS unit,
+                COALESCE(lpa.is_required, 0) AS is_required,
                 a.name AS analysis_name, a.parameter_id
             FROM lab_product_analyses lpa
             JOIN lab_analyses a ON a.id = lpa.analysis_id
@@ -299,6 +667,7 @@ class LabRepo {
                 lpa.id, lpa.product_id, lpa.analysis_id, lpa.min_value, lpa.max_value,
                 CASE WHEN a.parameter_id IS NOT NULL THEN COALESCE(p.unit, '')
                      ELSE COALESCE(NULLIF(a.unit, ''), lpa.unit) END AS unit,
+                COALESCE(lpa.is_required, 0) AS is_required,
                 a.name AS analysis_name, a.parameter_id
             FROM lab_product_analyses lpa
             JOIN lab_analyses a ON a.id = lpa.analysis_id
@@ -408,6 +777,15 @@ class LabRepo {
       }
     }
     // Pass 3: batch bounds + analyses (no per-field SELECT anymore).
+    // Units registry: batch-safe (a missing `lab_units` on a hand-built
+    // test database skips instead of failing the commit).
+    var hasUnitsTable = false;
+    try {
+      final t = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'lab_units'",
+      );
+      hasUnitsTable = t.isNotEmpty;
+    } catch (_) {}
     var boundsAdded = 0, analysesAdded = 0, linked = 0;
     // Preload existing bounds once so the second sync is a true no-op
     // (INSERT OR IGNORE would otherwise still count as an attempt).
@@ -425,6 +803,9 @@ class LabRepo {
     final writeBatch = (db as dynamic).batch() as dynamic;
     var hasWrites = false;
     final pendingAnalyses = <String>{};
+    // A Batch is not a DatabaseExecutor, so units cannot be registered
+    // through it: collect them here and register after the commit.
+    final unitsSeen = <String>{};
     for (final m in materials) {
       final materialId = int.parse('${m['id']}');
       final fields = <(String, String, Object?)>[
@@ -444,6 +825,8 @@ class LabRepo {
         final pid = int.parse('${parameter['id']}');
         final boundKey = '$materialId:$pid';
         final unit = referenceUnitText(value);
+        final seen = unit.trim();
+        if (seen.isNotEmpty) unitsSeen.add(seen);
         if (!existingBounds.contains(boundKey)) {
           final limits = parseReferenceLimits(value);
           writeBatch.rawInsert(
@@ -495,6 +878,11 @@ class LabRepo {
       }
     }
     if (hasWrites) await writeBatch.commit(noResult: true);
+    if (hasUnitsTable) {
+      for (final u in unitsSeen) {
+        await registerUnit(db, u);
+      }
+    }
     return {
       'materials': materials.length,
       'parameters': paramsAdded,
@@ -562,18 +950,25 @@ class LabRepo {
       final precision = precisionText.isEmpty ? null : int.tryParse(precisionText);
       final unit = '${spec['unit'] ?? (parameter['unit'] ?? '')}'.trim();
       final pid = int.parse('${parameter['id']}');
+      final isRequired = spec['is_required'] == true ||
+              spec['is_required'] == 1 ||
+              '${spec['is_required'] ?? ''}' == '1'
+          ? 1
+          : 0;
+      await registerUnit(db, unit);
       await db.rawInsert(
           'INSERT INTO material_parameter_bounds '
-          '(material_id, parameter_id, parameter_type, unit, min_value, max_value, precision) '
-          'VALUES (?, ?, ?, ?, ?, ?, ?) '
+          '(material_id, parameter_id, parameter_type, unit, min_value, max_value, precision, is_required) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?) '
           'ON CONFLICT(material_id, parameter_id) DO UPDATE SET '
           'parameter_type = excluded.parameter_type, '
           'unit = excluded.unit, '
           'min_value = excluded.min_value, '
           'max_value = excluded.max_value, '
           'precision = excluded.precision, '
+          'is_required = excluded.is_required, '
           'active = 1',
-          [materialId, pid, type, unit, minValue, maxValue, precision]);
+          [materialId, pid, type, unit, minValue, maxValue, precision, isRequired]);
       var analysis = analysisByName[key];
       if (analysis == null) {
         await db.rawInsert(
@@ -609,6 +1004,7 @@ class LabRepo {
                b.parameter_type,
                CASE WHEN p.id IS NOT NULL THEN COALESCE(p.unit, '') ELSE b.unit END AS unit,
                b.min_value, b.max_value, b.precision,
+               COALESCE(b.is_required, 0) AS is_required,
                p.id AS parameter_id, p.parameter_name, p.unit AS canonical_unit,
                a.id AS analysis_id, a.name AS analysis_name
         FROM reference_materials m
@@ -660,6 +1056,7 @@ class LabRepo {
         'min': r['min_value'],
         'max': r['max_value'],
         'precision': r['precision'],
+        'is_required': (r['is_required'] == 1 || r['is_required'] == true) ? 1 : 0,
       });
     }
     for (final e in result.values) {
@@ -710,6 +1107,8 @@ class LabRepo {
     String category = '',
     String description = '',
     List<Map<String, dynamic>>? ranges,
+    Map<String, dynamic>? physicalReference,
+    Map<String, dynamic>? chemicalReference,
     Map<String, dynamic>? user,
     DatabaseExecutor? executor,
   }) async {
@@ -717,41 +1116,119 @@ class LabRepo {
     if (cleanName.isEmpty) throw ValidationError(AppErrors.productNameRequired);
     final dup = await fetchOne(executor, 'SELECT id FROM lab_products WHERE name = ?', [cleanName]);
     if (dup != null) throw ValidationError(AppErrors.productExists);
+    final db = executor ?? await _db;
     final productId = await executeReturnId(executor, '''
-            INSERT INTO lab_products (name, category, description, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO lab_products (
+                name, category, description,
+                physical_reference_json, chemical_reference_json,
+                created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', [
       cleanName,
       category.trim(),
       description.trim(),
+      jsonDumps(physicalReference ?? {}),
+      jsonDumps(chemicalReference ?? {}),
       _userId(user),
       nowIso(),
     ]);
-    for (final item in ranges ?? []) {
-      final analysisId = int.tryParse('${item['analysis_id'] ?? 0}') ?? 0;
-      if (analysisId <= 0) {
-        throw ValidationError(AppErrors.analysisIdRangeRequired);
+    if (chemicalReference != null) {
+      // Source of truth is the reference maps (mirrors materials);
+      // the ranges table stays as a derived back-compat copy.
+      await _deriveProductRanges(db, productId, chemicalReference);
+    } else {
+      for (final item in ranges ?? []) {
+        final analysisId = int.tryParse('${item['analysis_id'] ?? 0}') ?? 0;
+        if (analysisId <= 0) {
+          throw ValidationError(AppErrors.analysisIdRangeRequired);
+        }
+        final minValue = item['min_value'];
+        final maxValue = item['max_value'];
+        final unit = '${item['unit'] ?? '%'}'.trim();
+        final isRequired = item['is_required'] == true ||
+                item['is_required'] == 1 ||
+                '${item['is_required'] ?? ''}' == '1'
+            ? 1
+            : 0;
+        await registerUnit(executor ?? await _db, unit);
+        await execute(executor, '''
+                  INSERT INTO lab_product_analyses (
+                      product_id, analysis_id, min_value, max_value, unit, is_required
+                  ) VALUES (?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(product_id, analysis_id) DO UPDATE SET
+                      min_value = excluded.min_value,
+                      max_value = excluded.max_value,
+                      unit = excluded.unit,
+                      is_required = excluded.is_required
+                  ''', [
+          productId,
+          analysisId,
+          (minValue != null && '$minValue' != '') ? safeFloat(minValue) : null,
+          (maxValue != null && '$maxValue' != '') ? safeFloat(maxValue) : null,
+          unit,
+          isRequired,
+        ]);
       }
-      final minValue = item['min_value'];
-      final maxValue = item['max_value'];
-      final unit = '${item['unit'] ?? '%'}'.trim();
-      await execute(executor, '''
-                INSERT INTO lab_product_analyses (
-                    product_id, analysis_id, min_value, max_value, unit
-                ) VALUES (?, ?, ?, ?, ?)
-                ON CONFLICT(product_id, analysis_id) DO UPDATE SET
-                    min_value = excluded.min_value,
-                    max_value = excluded.max_value,
-                    unit = excluded.unit
-                ''', [
-        productId,
-        analysisId,
-        (minValue != null && '$minValue' != '') ? safeFloat(minValue) : null,
-        (maxValue != null && '$maxValue' != '') ? safeFloat(maxValue) : null,
-        unit,
-      ]);
     }
     return getProduct(productId, executor);
+  }
+
+  /// Rebuilds the derived `lab_product_analyses` rows of [productId] from a
+  /// chemical reference map: every entry whose name matches an analysis
+  /// (by analysis name or canonical parameter name) becomes a range row
+  /// carrying its limits, unit and مطلوب flag. Unmatched entries live only
+  /// in the reference JSON (which is what inspections read).
+  Future<void> _deriveProductRanges(
+    DatabaseExecutor db,
+    int productId,
+    Map<String, dynamic> chemicalReference,
+  ) async {
+    await db.rawDelete(
+        'DELETE FROM lab_product_analyses WHERE product_id = ?', [productId]);
+    if (chemicalReference.isEmpty) return;
+    final analyses = await db.rawQuery('''
+        SELECT a.id, a.name, a.unit,
+               p.parameter_name AS canonical_name
+        FROM lab_analyses a
+        LEFT JOIN parameters p ON p.id = a.parameter_id
+        WHERE a.active = 1
+        ''');
+    final byName = <String, Map<String, dynamic>>{};
+    for (final a in analyses) {
+      final row = Map<String, dynamic>.from(a);
+      final name = '${row['name'] ?? ''}'.trim().toLowerCase();
+      if (name.isNotEmpty) byName.putIfAbsent(name, () => row);
+      final canonical = '${row['canonical_name'] ?? ''}'.trim().toLowerCase();
+      if (canonical.isNotEmpty) byName.putIfAbsent(canonical, () => row);
+    }
+    for (final entry in chemicalReference.entries) {
+      final key = '${entry.key}'.trim();
+      if (key.isEmpty) continue;
+      final analysis = byName[key.toLowerCase()];
+      if (analysis == null) continue;
+      final limits = parseReferenceLimits(entry.value);
+      var unit = referenceUnitText(entry.value).trim();
+      if (unit.isEmpty) unit = '${analysis['unit'] ?? '%'}'.trim();
+      if (unit.isEmpty) unit = '%';
+      await registerUnit(db, unit);
+      await db.rawInsert('''
+          INSERT INTO lab_product_analyses (
+              product_id, analysis_id, min_value, max_value, unit, is_required
+          ) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(product_id, analysis_id) DO UPDATE SET
+              min_value = excluded.min_value,
+              max_value = excluded.max_value,
+              unit = excluded.unit,
+              is_required = excluded.is_required
+          ''', [
+        productId,
+        (analysis['id'] as num).toInt(),
+        limits.min,
+        limits.max,
+        unit,
+        isReferenceRequired(entry.value) ? 1 : 0,
+      ]);
+    }
   }
 
   Future<Map<String, dynamic>> updateProduct(
@@ -775,6 +1252,24 @@ class LabRepo {
       final params = <Object?>[...updates.values, productId];
       await execute(executor, 'UPDATE lab_products SET $sets WHERE id = ?', params);
     }
+    if (fields.containsKey('physical_reference') ||
+        fields.containsKey('chemical_reference')) {
+      final refUpdates = <String, Object?>{};
+      if (fields.containsKey('physical_reference')) {
+        final ref = fields['physical_reference'];
+        refUpdates['physical_reference_json'] =
+            jsonDumps(ref is Map ? Map<String, dynamic>.from(ref) : {});
+      }
+      if (fields.containsKey('chemical_reference')) {
+        final ref = fields['chemical_reference'];
+        refUpdates['chemical_reference_json'] =
+            jsonDumps(ref is Map ? Map<String, dynamic>.from(ref) : {});
+      }
+      final sets = refUpdates.keys.map((key) => '$key = ?').join(', ');
+      final params = <Object?>[...refUpdates.values, productId];
+      await execute(
+          executor, 'UPDATE lab_products SET $sets WHERE id = ?', params);
+    }
     if (fields.containsKey('ranges')) {
       await execute(executor, 'DELETE FROM lab_product_analyses WHERE product_id = ?', [productId]);
       for (final item in (fields['ranges'] as List? ?? [])) {
@@ -784,18 +1279,33 @@ class LabRepo {
         final minValue = m['min_value'];
         final maxValue = m['max_value'];
         final unit = '${m['unit'] ?? '%'}'.trim();
+        final isRequired = m['is_required'] == true ||
+                m['is_required'] == 1 ||
+                '${m['is_required'] ?? ''}' == '1'
+            ? 1
+            : 0;
+        await registerUnit(executor ?? await _db, unit);
         await execute(executor, '''
                     INSERT INTO lab_product_analyses (
-                        product_id, analysis_id, min_value, max_value, unit
-                    ) VALUES (?, ?, ?, ?, ?)
+                        product_id, analysis_id, min_value, max_value, unit, is_required
+                    ) VALUES (?, ?, ?, ?, ?, ?)
                     ''', [
           productId,
           analysisId,
           (minValue != null && '$minValue' != '') ? safeFloat(minValue) : null,
           (maxValue != null && '$maxValue' != '') ? safeFloat(maxValue) : null,
           unit,
+          isRequired,
         ]);
       }
+    } else if (fields.containsKey('chemical_reference')) {
+      // Reference-first saves rebuild the derived ranges from the map.
+      final ref = fields['chemical_reference'];
+      await _deriveProductRanges(
+        executor ?? await _db,
+        productId,
+        ref is Map ? Map<String, dynamic>.from(ref) : {},
+      );
     }
     return getProduct(productId, executor);
   }
@@ -907,6 +1417,7 @@ class LabRepo {
         final unit = '${link['unit'] ?? ''}'.trim().isEmpty
             ? 'mL'
             : '${link['unit']}'.trim();
+        await registerUnit(executor ?? await _db, unit);
         await execute(executor, '''
                 INSERT INTO lab_field_chemical_links
                     (analysis_id, dynamic_field, kind, inventory_id, unit, fixed_value, list_values, created_at)
@@ -1000,6 +1511,8 @@ class LabRepo {
         targetUnit: finalUnit,
       );
     }
+    final db = executor ?? await _db;
+    await registerUnit(db, finalUnit);
     final analysisId = await executeReturnId(executor, '''
             INSERT INTO lab_analyses
                 (name, unit, description, dynamic_fields_json, formula_json, parameter_id, created_at)
@@ -1018,6 +1531,8 @@ class LabRepo {
       if (inventoryId == 0) continue;
       final qtyPerSample = safeFloat(item['qty_per_sample']);
       final itemUnit = '${item['unit'] ?? ''}'.trim();
+      await _checkConsumedUnit(executor, inventoryId, itemUnit);
+      await registerUnit(db, itemUnit);
       final exists = await fetchOne(executor,
           'SELECT id FROM lab_analysis_items WHERE analysis_id = ? AND inventory_id = ?',
           [analysisId, inventoryId]);
@@ -1033,16 +1548,42 @@ class LabRepo {
 
   Future<Map<String, dynamic>> updateAnalysis({
     required int analysisId,
+    String? name,
     String? description,
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String? unit,
     int? parameterId,
+    bool clearParameter = false,
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
     DatabaseExecutor? executor,
   }) async {
     await getAnalysis(analysisId, executor);
+    if (clearParameter) {
+      // Manual mode: drop the reference link and keep the hand-typed name.
+      final clean = (name ?? '').trim();
+      if (clean.isEmpty) throw ValidationError(AppErrors.analysisNameRequired);
+      final dup = await fetchOne(executor,
+          'SELECT id FROM lab_analyses WHERE name = ? AND id != ?',
+          [clean, analysisId]);
+      if (dup != null) throw ValidationError(AppErrors.analysisExists);
+      await execute(
+        executor,
+        'UPDATE lab_analyses SET parameter_id = NULL, name = ? WHERE id = ?',
+        [clean, analysisId],
+      );
+    } else if (name != null && parameterId == null) {
+      // Manual rename of an analysis that never had a reference link.
+      final clean = name.trim();
+      if (clean.isEmpty) throw ValidationError(AppErrors.analysisNameRequired);
+      final dup = await fetchOne(executor,
+          'SELECT id FROM lab_analyses WHERE name = ? AND id != ?',
+          [clean, analysisId]);
+      if (dup != null) throw ValidationError(AppErrors.analysisExists);
+      await execute(executor, 'UPDATE lab_analyses SET name = ? WHERE id = ?',
+          [clean, analysisId]);
+    }
     if (parameterId != null) {
       final parameter = await fetchOne(
         executor,
@@ -1060,6 +1601,7 @@ class LabRepo {
         [canonicalName, analysisId],
       );
       if (duplicate != null) throw ValidationError(AppErrors.analysisExists);
+      await registerUnit(executor ?? await _db, canonicalUnit);
       await execute(
         executor,
         'UPDATE lab_analyses SET parameter_id = ?, name = ?, unit = ? WHERE id = ?',
@@ -1077,6 +1619,7 @@ class LabRepo {
     }
     if (unit != null && parameterId == null) {
       final clean = unit.trim();
+      await registerUnit(executor ?? await _db, clean.isEmpty ? '%' : clean);
       await execute(executor, 'UPDATE lab_analyses SET unit = ? WHERE id = ?',
           [clean.isEmpty ? '%' : clean, analysisId]);
     }
@@ -1108,11 +1651,14 @@ class LabRepo {
     }
     if (items != null) {
       await execute(executor, 'DELETE FROM lab_analysis_items WHERE analysis_id = ?', [analysisId]);
+      final db = executor ?? await _db;
       for (final item in items) {
         final inventoryId = int.tryParse('${item['inventory_id'] ?? 0}') ?? 0;
         if (inventoryId == 0) continue;
         final qtyPerSample = safeFloat(item['qty_per_sample']);
         final itemUnit = '${item['unit'] ?? ''}'.trim();
+        await _checkConsumedUnit(executor, inventoryId, itemUnit);
+        await registerUnit(db, itemUnit);
         await execute(executor, '''
                     INSERT INTO lab_analysis_items (analysis_id, inventory_id, qty_per_sample, unit)
                     VALUES (?, ?, ?, ?)
@@ -1173,6 +1719,7 @@ class LabRepo {
       throw ValidationError(AppErrors.constantValueNumeric);
     }
     final now = nowIso();
+    await registerUnit(executor ?? await _db, unit);
     Map<String, dynamic>? row;
     if (cid != null && '$cid'.trim().isNotEmpty) {
       await execute(executor, '''
@@ -1249,7 +1796,35 @@ class LabRepo {
 
   static String inventoryCategoryForUnit(String unit) {
     final u = unit.trim();
+    if (u.toLowerCase() == 'pc') return 'count';
+    final dim = unitDimOf(u);
+    if (dim == 'volume') return 'liquid';
+    if (dim == 'mass') return 'powder';
     return (u == 'L' || u == 'mL') ? 'liquid' : 'powder';
+  }
+
+  /// Rejects a consumed-item unit that does not fit the linked inventory
+  /// item's category (grams on a liquid, litres on a powder, anything but
+  /// pieces on a counted item). An empty unit keeps the legacy behaviour
+  /// (treated as the inventory's own unit downstream) so old rows keep
+  /// saving; every editor always sends an explicit unit.
+  Future<void> _checkConsumedUnit(
+    DatabaseExecutor? executor,
+    int inventoryId,
+    String itemUnit,
+  ) async {
+    final clean = itemUnit.trim();
+    if (clean.isEmpty) return;
+    final inv = await fetchOne(executor,
+        'SELECT category FROM lab_inventory WHERE id = ?', [inventoryId]);
+    if (inv == null) throw NotFoundError(AppErrors.inventoryItemNotFound);
+    final category = '${inv['category'] ?? ''}';
+    if (!unitAllowedForCategory(clean, category)) {
+      throw ValidationError(AppErrors.unitNotAllowedForCategory(
+        clean,
+        inventoryCategoryLabel(category),
+      ));
+    }
   }
 
   Future<int> resolveInventoryId(
@@ -1416,16 +1991,23 @@ class LabRepo {
       var cleanSourceName = sourceName.trim();
       var cleanEntryCode = entryCode.trim();
       var resolvedSourceRefId = sourceRefId;
-      if (sourceType == 'raw_material' && cleanEntryCode.isNotEmpty) {
+      if ((sourceType == 'raw_material' || sourceType == 'product') &&
+          cleanEntryCode.isNotEmpty) {
         final inspection = await fetchOne(
-            txn, 'SELECT id, material_id, material_name, material_code, inspection_date FROM inspections WHERE entry_code = ?',
+            txn, 'SELECT id, material_id, product_id, material_name, material_code, inspection_kind, inspection_date FROM inspections WHERE entry_code = ?',
             [cleanEntryCode]);
         if (inspection == null) {
           throw ValidationError(AppErrors.entryCodeNotFound(cleanEntryCode));
         }
-        resolvedSourceRefId = inspection['material_id'] != null
-            ? int.parse('${inspection['material_id']}')
-            : sourceRefId;
+        if (sourceType == 'product') {
+          final pid = inspection['product_id'];
+          final parsed = pid == null ? null : int.tryParse('$pid');
+          if (parsed != null && parsed > 0) resolvedSourceRefId = parsed;
+        } else {
+          resolvedSourceRefId = inspection['material_id'] != null
+              ? int.parse('${inspection['material_id']}')
+              : sourceRefId;
+        }
         cleanSourceName =
             ('${inspection['material_name'] ?? ''}'.trim().isNotEmpty
                 ? '${inspection['material_name']}'
@@ -1750,6 +2332,45 @@ class LabRepo {
     return result;
   }
 
+  /// Edits the fillable fields of an existing sample test. Only the data
+  /// entry fields change (sample/result/dynamics/entry code) — the analysis,
+  /// source and consumption log are history and stay untouched.
+  Future<Map<String, dynamic>> updateSampleTest(
+    int testId, {
+    String? sampleName,
+    String? resultText,
+    Map<String, dynamic>? dynamicValues,
+    String? entryCode,
+    Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await _db;
+    final existing = await fetchOne(
+        db, 'SELECT * FROM lab_sample_tests WHERE id = ?', [testId]);
+    if (existing == null) throw NotFoundError(AppErrors.testNotFound);
+    final patch = <String, Object?>{};
+    if (sampleName != null) {
+      final clean = sampleName.trim();
+      if (clean.isEmpty) throw ValidationError(AppErrors.sampleAndSourceRequired);
+      patch['sample_name'] = clean.substring(0, clean.length.clamp(0, 50));
+    }
+    if (resultText != null) {
+      patch['result_text'] = resultText.trim().substring(0, resultText.trim().length.clamp(0, 50));
+    }
+    if (dynamicValues != null) {
+      patch['dynamic_values_json'] = jsonDumps(dynamicValues);
+    }
+    if (entryCode != null) {
+      patch['entry_code'] = entryCode.trim();
+    }
+    if (patch.isEmpty) return getSampleTest(testId);
+    patch['updated_by'] = _userId(user);
+    patch['updated_at'] = nowIso();
+    await db.update('lab_sample_tests', patch,
+        where: 'id = ?', whereArgs: [testId]);
+    return getSampleTest(testId);
+  }
+
   Future<List<Map<String, dynamic>>> listSampleTests({
     String? sourceType,
     int? sourceRefId,
@@ -1803,7 +2424,7 @@ class LabRepo {
       FROM lab_sample_tests t
       JOIN lab_analyses a ON a.id = t.analysis_id
       LEFT JOIN parameters p ON p.id = a.parameter_id
-      WHERE t.source_type = 'raw_material' AND t.entry_code = ?
+      WHERE t.entry_code = ?
         AND (p.parameter_type = 'chemical' OR a.parameter_id IS NULL)
       ORDER BY t.tested_at DESC, t.id DESC
       ''',
@@ -2217,13 +2838,14 @@ class LabRepo {
     final materialName = '${inspection['material_name'] ?? ''}'.trim();
     final inspectionDate = '${inspection['inspection_date'] ?? ''}'.trim();
     if (entryCode.isNotEmpty) {
+      // `entry_code` is UNIQUE across raw and product inspections, so it
+      // identifies the record regardless of kind.
       final rows = await fetchAll(null, '''
                 SELECT
                     t.*, a.name AS analysis_name, a.unit AS analysis_unit
                 FROM lab_sample_tests t
                 JOIN lab_analyses a ON a.id = t.analysis_id
-                WHERE t.source_type = 'raw_material'
-                  AND t.entry_code = ?
+                WHERE t.entry_code = ?
                 ORDER BY t.tested_at DESC, t.id DESC
                 ''', [entryCode]);
       final tests = [for (final r in rows) Map<String, dynamic>.from(r)];

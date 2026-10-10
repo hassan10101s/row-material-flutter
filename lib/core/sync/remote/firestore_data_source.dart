@@ -211,6 +211,28 @@ class FirestoreDataSource implements RemoteDataSource {
   }
 
   @override
+  Future<void> writeHeartbeat({
+    required String organizationId,
+    required Map<String, dynamic> data,
+  }) async {
+    // Merge-set so concurrent bumps from two devices never clobber each
+    // other into a missing document; the Rules only allow the four listed
+    // keys plus `lastWriteBy == auth.uid`, which the push worker provides.
+    final payload = <String, dynamic>{
+      'lastWriteAt': FieldValue.serverTimestamp(),
+      if (data['lastWriteBy'] != null) 'lastWriteBy': data['lastWriteBy'],
+      if (data['lastEntity'] != null) 'lastEntity': data['lastEntity'],
+      if (data['version'] != null) 'version': data['version'],
+    };
+    await _db
+        .collection('organizations')
+        .doc(organizationId)
+        .collection('meta')
+        .doc('state')
+        .set(payload, SetOptions(merge: true));
+  }
+
+  @override
   Future<void> registerDevice({
     required String organizationId,
     required String deviceId,

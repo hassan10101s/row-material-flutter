@@ -250,6 +250,16 @@
                 </div>
 
                 <div class="info-grid">
+                    {% if inspection.inspection_kind == 'product' %}
+                    <div class="info-item">
+                        <div class="info-label">Formula Number</div>
+                        <div class="info-value">{{ inspection.formula_number or '-' }}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Batch Number</div>
+                        <div class="info-value">{{ inspection.batch_number or '-' }}</div>
+                    </div>
+                    {% else %}
                     <div class="info-item">
                         <div class="info-label">Supplier</div>
                         <div class="info-value">{{ inspection.supplier or '-' }}</div>
@@ -258,6 +268,7 @@
                         <div class="info-label">Truck Number</div>
                         <div class="info-value">{{ inspection.truck_number or '-' }}</div>
                     </div>
+                    {% endif %}
                     <div class="info-item">
                         <div class="info-label">Quantity</div>
                         <div class="info-value">{{ quantity_display }} Ton</div>

@@ -16,6 +16,12 @@ class MobileFileDelivery implements FileDelivery {
   @override
   bool get canReveal => true;
 
+  /// Always false: `reveal` on mobile opens the single *file* in a viewer
+  /// (there is no folder to open), so a "open folder" button must stay
+  /// hidden — otherwise every tap ends in "could not open the folder".
+  @override
+  bool get canRevealFolder => false;
+
   @override
   bool get canShare => true;
 

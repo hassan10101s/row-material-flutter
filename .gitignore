@@ -57,3 +57,8 @@ assets/**/*.local.json
 # Real Firebase keys for local `flutter run` (see tool/firebase/README.md).
 tool/firebase/dev.json
 tool/firebase/*.env
+# Local secrets folder (ven/): real API keys for local builds. NEVER commit.
+# Each developer keeps their own copy; the file name is referenced by hand in
+# the run/build command, e.g.:
+#   flutter run --dart-define-from-file=ven/firebase-android.json
+/ven/

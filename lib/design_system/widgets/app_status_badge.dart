@@ -16,19 +16,45 @@ class AppStatusBadge extends StatelessWidget {
     final color = statusColorsPut(status);
     final bg = color.withValues(alpha: 0.12);
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 4.h),
+      padding: EdgeInsets.symmetric(horizontal: 10.w, vertical: 5.h),
       decoration: BoxDecoration(
         color: outline ? Colors.transparent : bg,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withValues(alpha: outline ? 1 : 0.4)),
+        border: Border.all(color: color.withValues(alpha: outline ? 1 : 0.35)),
       ),
-      child: Text(
-        statusLabel(status),
-        style: TextStyle(
-          color: color,
-          fontSize: 12.spMax,
-          fontWeight: FontWeight.w600,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 7.r,
+            height: 7.r,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.5),
+                  blurRadius: 4,
+                ),
+              ],
+            ),
+          ),
+          SizedBox(width: 6.w),
+          Flexible(
+            child: Text(
+              statusLabel(status),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              softWrap: false,
+              style: TextStyle(
+                color: color,
+                fontSize: 12.spMax,
+                fontWeight: FontWeight.w700,
+                height: 1.2,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -259,12 +259,12 @@ class DatabaseHelper {
       options: OpenDatabaseOptions(
         version: 1,
         onConfigure: (db) async {
-          await db.execute('PRAGMA journal_mode=WAL');
-          await db.execute('PRAGMA synchronous=NORMAL');
-          await db.execute('PRAGMA busy_timeout=5000');
-          await db.execute('PRAGMA temp_store=MEMORY');
-          await db.execute('PRAGMA cache_size=-20000');
-          await db.execute('PRAGMA mmap_size=268435456');
+          await db.rawQuery('PRAGMA journal_mode=WAL');
+          await db.rawQuery('PRAGMA synchronous=NORMAL');
+          await db.rawQuery('PRAGMA busy_timeout=5000');
+          await db.rawQuery('PRAGMA temp_store=MEMORY');
+          await db.rawQuery('PRAGMA cache_size=-20000');
+          await db.rawQuery('PRAGMA mmap_size=268435456');
         },
       ),
     );
@@ -281,13 +281,13 @@ class DatabaseHelper {
       options: OpenDatabaseOptions(
         version: 1,
         onConfigure: (db) async {
-          await db.execute('PRAGMA foreign_keys=ON');
-          await db.execute('PRAGMA journal_mode=WAL');
-          await db.execute('PRAGMA synchronous=NORMAL');
-          await db.execute('PRAGMA busy_timeout=5000');
-          await db.execute('PRAGMA temp_store=MEMORY');
-          await db.execute('PRAGMA cache_size=-20000');
-          await db.execute('PRAGMA mmap_size=268435456');
+          await db.rawQuery('PRAGMA foreign_keys=ON');
+          await db.rawQuery('PRAGMA journal_mode=WAL');
+          await db.rawQuery('PRAGMA synchronous=NORMAL');
+          await db.rawQuery('PRAGMA busy_timeout=5000');
+          await db.rawQuery('PRAGMA temp_store=MEMORY');
+          await db.rawQuery('PRAGMA cache_size=-20000');
+          await db.rawQuery('PRAGMA mmap_size=268435456');
         },
         onCreate: (db, version) async {
           await _createSchema(db);
@@ -355,6 +355,10 @@ class DatabaseHelper {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         expiry_date TEXT,
+        inspection_kind TEXT NOT NULL DEFAULT 'raw',
+        product_id INTEGER REFERENCES lab_products(id),
+        formula_number TEXT,
+        batch_number TEXT,
         FOREIGN KEY(material_id) REFERENCES reference_materials(id),
         FOREIGN KEY(created_by) REFERENCES users(id)
       )
@@ -394,6 +398,8 @@ class DatabaseHelper {
         name TEXT NOT NULL UNIQUE,
         category TEXT,
         description TEXT,
+        physical_reference_json TEXT NOT NULL DEFAULT '{}',
+        chemical_reference_json TEXT NOT NULL DEFAULT '{}',
         created_by INTEGER,
         created_at TEXT NOT NULL,
         active INTEGER NOT NULL DEFAULT 1
@@ -407,6 +413,7 @@ class DatabaseHelper {
         min_value REAL,
         max_value REAL,
         unit TEXT,
+        is_required INTEGER NOT NULL DEFAULT 0,
         UNIQUE(product_id, analysis_id)
       )
     ''');
@@ -437,7 +444,7 @@ class DatabaseHelper {
       CREATE TABLE IF NOT EXISTS lab_inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
-        category TEXT CHECK(category IN ('liquid', 'powder')),
+        category TEXT CHECK(category IN ('liquid', 'powder', 'count')),
         unit TEXT,
         current_qty REAL NOT NULL DEFAULT 0,
         min_qty REAL NOT NULL DEFAULT 0,
@@ -495,6 +502,7 @@ class DatabaseHelper {
         updated_at TEXT
       )
     ''');
+    await _createLabEquipmentTables(db);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS lab_worksheet (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -577,13 +585,15 @@ class DatabaseHelper {
         max_value REAL,
         precision INTEGER,
         active INTEGER NOT NULL DEFAULT 1,
+        is_required INTEGER NOT NULL DEFAULT 0,
         UNIQUE(material_id, parameter_id)
       )
     ''');
 
     // QC Manager tables and their indexes are guaranteed by
     // `_runLegacyGuarantees`, which runs on every open - see the note there.
-    await _createIndexes(db);
+    // (Perf indexes too: they must run after the column guarantees, so they
+    // live at the end of `_runLegacyGuarantees`, not here.)
     await _createSyncTables(db);
     await _runLegacyGuarantees(db);
   }
@@ -742,100 +752,172 @@ class DatabaseHelper {
   ];
 
   Future<void> _createIndexes(Database db) async {
-    await db.execute(
+    // A guarantee must never abort the open (see `_ensureColumn`): a legacy
+    // or crash-damaged database may lack whole tables, and a missing table
+    // must mean a skipped index, not an unopenable database. Columns are
+    // deliberately NOT guarded: this runs at the end of
+    // `_runLegacyGuarantees`, after every `_ensureColumn`, so a missing
+    // column on an existing table is a real schema bug that must still throw.
+    final tables = (await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    )).map((r) => '${r['name']}').toSet();
+
+    Future<void> index(String table, String sql) async {
+      if (!tables.contains(table)) {
+        debugPrint('[DatabaseHelper] skipping index on missing table "$table".');
+        return;
+      }
+      try {
+        await db.execute(sql);
+      } on DatabaseException catch (e) {
+        // A crash-damaged or hand-built legacy file can hold a stub table
+        // that lacks even the indexed column (the migration-recovery tests
+        // seed exactly such stubs). An index is pure performance: skip it
+        // and let the query fall back to a scan rather than refusing to
+        // open the user's data. Anything else is a real schema bug.
+        final message = e.toString();
+        if (message.contains('no such table') ||
+            message.contains('no such column')) {
+          debugPrint('[DatabaseHelper] skipping index: $e');
+          return;
+        }
+        rethrow;
+      }
+    }
+
+    await index(
+      'lab_consumption_log',
       'CREATE INDEX IF NOT EXISTS idx_consumption_log_sample_test ON lab_consumption_log(sample_test_id)',
     );
-    await db.execute(
+    await index(
+      'lab_consumption_log',
       'CREATE INDEX IF NOT EXISTS idx_consumption_log_inventory ON lab_consumption_log(inventory_id, reversal_of_log_id)',
     );
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_created_at_desc ON inspections(created_at DESC, id DESC)',
     );
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_date_created_desc ON inspections(inspection_date, created_at DESC, id DESC)',
     );
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_inspection_date ON inspections(inspection_date)',
     );
     // Covers the `deleted_at IS NULL` working-set filter used by every list.
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_alive ON inspections(deleted_at, inspection_date DESC, id DESC)',
     );
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_material_code_date ON inspections(material_code, inspection_date)',
     );
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_material_id ON inspections(material_id)',
     );
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_status ON inspections(decision_status)',
     );
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_supplier ON inspections(supplier)',
     );
-    await db.execute(
+    await index(
+      'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_entry_code ON inspections(entry_code)',
     );
-    await db.execute(
+    await index(
+      'inspections',
+      "CREATE INDEX IF NOT EXISTS idx_inspections_kind ON inspections(inspection_kind, deleted_at, inspection_date DESC, id DESC)",
+    );
+    await index(
+      'inspections',
+      'CREATE INDEX IF NOT EXISTS idx_inspections_product ON inspections(product_id)',
+    );
+    await index(
+      'lab_sample_tests',
       'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_analysis ON lab_sample_tests(worksheet_row_id, analysis_id)',
     );
-    await db.execute(
+    await index(
+      'lab_sample_tests',
       'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_entry_code ON lab_sample_tests(entry_code)',
     );
-    await db.execute(
+    await index(
+      'lab_sample_tests',
       'CREATE INDEX IF NOT EXISTS idx_sample_tests_worksheet_row ON lab_sample_tests(worksheet_row_id)',
     );
     // listSampleTests / findTestsForAnalysisAndSource filters.
-    await db.execute(
+    await index(
+      'lab_sample_tests',
       'CREATE INDEX IF NOT EXISTS idx_sample_tests_source ON lab_sample_tests(source_type, source_ref_id, tested_at DESC)',
     );
-    await db.execute(
+    await index(
+      'lab_sample_tests',
       'CREATE INDEX IF NOT EXISTS idx_sample_tests_analysis ON lab_sample_tests(analysis_id)',
     );
-    await db.execute(
+    await index(
+      'inspection_status_history',
       'CREATE INDEX IF NOT EXISTS idx_status_history_inspection_version ON inspection_status_history(inspection_id, version DESC, id DESC)',
     );
-    await db.execute(
+    await index(
+      'lab_stock_adjustments',
       'CREATE INDEX IF NOT EXISTS idx_stock_adjustments_adj_at ON lab_stock_adjustments(adjusted_at DESC, id DESC)',
     );
-    await db.execute(
+    await index(
+      'lab_stock_adjustments',
       'CREATE INDEX IF NOT EXISTS idx_stock_adjustments_inventory ON lab_stock_adjustments(inventory_id)',
     );
     // Lookup / ordering helpers (all previously full-scans).
-    await db.execute(
+    await index(
+      'lab_worksheet',
       'CREATE INDEX IF NOT EXISTS idx_worksheet_status ON lab_worksheet(status, entry_code)',
     );
-    await db.execute(
+    await index(
+      'lab_analysis_items',
       'CREATE INDEX IF NOT EXISTS idx_analysis_items_analysis ON lab_analysis_items(analysis_id)',
     );
-    await db.execute(
+    await index(
+      'lab_field_chemical_links',
       'CREATE INDEX IF NOT EXISTS idx_field_links_analysis ON lab_field_chemical_links(analysis_id)',
     );
-    await db.execute(
+    await index(
+      'lab_product_analyses',
       'CREATE INDEX IF NOT EXISTS idx_product_analyses_product ON lab_product_analyses(product_id)',
     );
-    await db.execute(
+    await index(
+      'lab_material_analyses',
       'CREATE INDEX IF NOT EXISTS idx_material_analyses_material ON lab_material_analyses(material_id)',
     );
-    await db.execute(
+    await index(
+      'material_parameter_bounds',
       'CREATE INDEX IF NOT EXISTS idx_bounds_param ON material_parameter_bounds(parameter_id)',
     );
-    await db.execute(
+    await index(
+      'material_parameter_bounds',
       'CREATE INDEX IF NOT EXISTS idx_bounds_material ON material_parameter_bounds(material_id)',
     );
-    await db.execute(
+    await index(
+      'lab_inventory',
       'CREATE INDEX IF NOT EXISTS idx_inventory_name ON lab_inventory(name COLLATE NOCASE)',
     );
-    await db.execute(
+    await index(
+      'lab_products',
       'CREATE INDEX IF NOT EXISTS idx_products_name ON lab_products(name COLLATE NOCASE)',
     );
-    await db.execute(
+    await index(
+      'lab_analyses',
       'CREATE INDEX IF NOT EXISTS idx_analyses_name ON lab_analyses(name COLLATE NOCASE)',
     );
-    await db.execute(
+    await index(
+      'users',
       'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
     );
-    await db.execute(
+    await index(
+      'reference_materials',
       'CREATE INDEX IF NOT EXISTS idx_reference_active ON reference_materials(active)',
     );
 
@@ -1051,10 +1133,11 @@ class DatabaseHelper {
   Future<void> _runLegacyGuarantees(Database db) async {
     await _rebuildFieldChemicalLinks(db);
 
-    // Perf indexes are IF NOT EXISTS: running here (every open) migrates
-    // existing installs that were created before the index existed.
-    // New databases already get them via _createSchema → _createIndexes.
-    await _createIndexes(db);
+    // NOTE: perf indexes are created at the END of this method, not here.
+    // SQLite resolves an index's columns when the index is created, so an
+    // index over a column that only the `_ensureColumn` guarantees below add
+    // (e.g. `inspections.deleted_at`) kills a fresh open with "no such
+    // column" if it runs first.
 
     // QC Manager (plan V6 §5.2): tables, then the indexes over them.
     //
@@ -1221,6 +1304,7 @@ class DatabaseHelper {
         max_value REAL,
         precision INTEGER,
         active INTEGER NOT NULL DEFAULT 1,
+        is_required INTEGER NOT NULL DEFAULT 0,
         UNIQUE(material_id, parameter_id)
       )
     ''');
@@ -1228,7 +1312,44 @@ class DatabaseHelper {
       db,
       'lab_inventory',
       'category',
-      "category TEXT CHECK(category IN ('liquid', 'powder'))",
+      "category TEXT CHECK(category IN ('liquid', 'powder', 'count'))",
+    );
+    // Old installs carry CHECK(category IN ('liquid','powder')) on the
+    // column, which SQLite cannot ALTER: rebuild the table once so the
+    // `count` category (pieces only) can be stored. Existing rows are
+    // liquid/powder, so no data changes — only the constraint widens.
+    await _migrateInventoryCategoryCheck(db);
+    // مطلوب flag per field: which physical/chemical params must have a value
+    // at inspection time. JSON-embedded for materials (no backfill needed),
+    // column-backed for product ranges + material bounds.
+    await _ensureColumn(
+      db,
+      'lab_product_analyses',
+      'is_required',
+      'is_required INTEGER NOT NULL DEFAULT 0',
+    );
+    await _ensureColumn(
+      db,
+      'material_parameter_bounds',
+      'is_required',
+      'is_required INTEGER NOT NULL DEFAULT 0',
+    );
+    // Lab equipment registry (device-local, like inventory): master table +
+    // event log. Idempotent so existing installs gain them on next open.
+    await _createLabEquipmentTables(db);
+    // Lab products carry the same physical/chemical reference maps as
+    // materials now (the product editor mirrors the material editor).
+    await _ensureColumn(
+      db,
+      'lab_products',
+      'physical_reference_json',
+      "physical_reference_json TEXT NOT NULL DEFAULT '{}'",
+    );
+    await _ensureColumn(
+      db,
+      'lab_products',
+      'chemical_reference_json',
+      "chemical_reference_json TEXT NOT NULL DEFAULT '{}'",
     );
     await _ensureColumn(
       db,
@@ -1284,7 +1405,114 @@ class DatabaseHelper {
       );
       await _ensureColumn(db, table, 'deleted_at', 'deleted_at TEXT');
     }
+    // Product inspections (same `inspections` table, `inspection_kind='product'`):
+    // the kind/product/formula/batch columns for existing installs. The
+    // sentinel material row that product rows point at (`material_id` is
+    // NOT NULL + FK-enforced, and a lab product is not a reference material)
+    // is created lazily by `ensureProductSentinelMaterialId` on the first
+    // product save — never at open — so it can never steal `id = 1` from a
+    // fresh database's first real material.
+    await _ensureColumn(
+      db,
+      'inspections',
+      'inspection_kind',
+      "inspection_kind TEXT NOT NULL DEFAULT 'raw'",
+    );
+    await _ensureColumn(
+      db,
+      'inspections',
+      'product_id',
+      'product_id INTEGER REFERENCES lab_products(id)',
+    );
+    await _ensureColumn(
+      db,
+      'inspections',
+      'formula_number',
+      'formula_number TEXT',
+    );
+    await _ensureColumn(
+      db,
+      'inspections',
+      'batch_number',
+      'batch_number TEXT',
+    );
+    // Units registry: every unit string used anywhere in the program must
+    // appear in `lab_units` so all pickers inherit from one table.
+    await _backfillLabUnits(db);
     await _ensureUnknownUserRow(db);
+    // Perf indexes are IF NOT EXISTS: running here (every open) migrates
+    // existing installs that were created before the index existed, and fresh
+    // databases get them too. This MUST stay last: SQLite resolves an index's
+    // columns at creation time, so any index over an ensured column
+    // (`inspections.deleted_at`, ...) has to run after the guarantees above.
+    await _createIndexes(db);
+  }
+
+  /// Registers every unit symbol used across the database into `lab_units`.
+  ///
+  /// Idempotent (`INSERT OR IGNORE` on the UNIQUE symbol): runs on every open
+  /// so a unit typed anywhere — parameters, analyses, inventory, constants,
+  /// QC checklists/goals — shows up in the Units table and becomes pickable
+  /// everywhere else. Each source is guarded so a missing table/column on an
+  /// old install skips instead of failing the open.
+  static const List<(String, String)> _unitSources = [
+    ('parameters', 'unit'),
+    ('lab_analyses', 'unit'),
+    ('lab_analysis_items', 'unit'),
+    ('lab_inventory', 'unit'),
+    ('lab_constants', 'unit'),
+    ('lab_product_analyses', 'unit'),
+    ('lab_field_chemical_links', 'unit'),
+    ('material_parameter_bounds', 'unit'),
+    ('qc_items', 'unit'),
+    ('qc_inspections', 'qty_unit'),
+    ('qc_findings_nc', 'qty_unit'),
+    ('qc_goals', 'target_unit'),
+    ('qc_goal_kpis', 'unit'),
+  ];
+
+  /// Fallback symbols that must exist even on an empty database (the old
+  /// hardcoded `inventoryUnits` plus the lab default `%`).
+  static const List<String> _defaultUnits = [
+    '%',
+    'L',
+    'mL',
+    'kg',
+    'g',
+    'pc',
+  ];
+
+  Future<void> _backfillLabUnits(Database db) async {
+    final stamp = DateTime.now().toIso8601String();
+    for (final symbol in _defaultUnits) {
+      try {
+        await db.rawInsert(
+          'INSERT OR IGNORE INTO lab_units (symbol, is_active, created_at) '
+          'VALUES (?, 1, ?)',
+          [symbol, stamp],
+        );
+      } catch (_) {
+        // `lab_units` itself missing would already have failed earlier DDL.
+      }
+    }
+    final existing =
+        (await db.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type = 'table'",
+        )).map((r) => '${r['name']}').toSet();
+    for (final (table, column) in _unitSources) {
+      if (!existing.contains(table)) continue;
+      try {
+        await db.rawInsert(
+          'INSERT OR IGNORE INTO lab_units (symbol, is_active, created_at) '
+          'SELECT DISTINCT TRIM("$column"), 1, ? FROM "$table" '
+          'WHERE TRIM(COALESCE("$column", \'\')) <> \'\'',
+          [stamp],
+        );
+      } catch (_) {
+        // Missing column on an old install: skip, the column guarantee
+        // above will add it and the next open picks the values up.
+      }
+    }
   }
 
   /// Current definition of `lab_field_chemical_links`.
@@ -1388,6 +1616,102 @@ class DatabaseHelper {
   /// When that member has not been mirrored on this device yet, the pull
   /// stores `0` - so the row has to exist, otherwise every pull of a sample
   /// written elsewhere dies on the foreign key.
+  /// Sentinel reference material that product-inspection rows point at.
+  ///
+  /// `inspections.material_id` is `NOT NULL REFERENCES reference_materials(id)`
+  /// with FK enforcement ON, but a production batch references a *lab product*,
+  /// not a reference material (its real link is `inspections.product_id`). The
+  /// sentinel absorbs the FK the same way the `users.id = 0` row does for
+  /// author columns. It is `active = 0` plus a reserved name, so the material
+  /// pickers (`active = 1`) never show it; `listAllMaterials` filters it by
+  /// name as well.
+  static const String productSentinelMaterialName = '__PRODUCT_SENTINEL__';
+
+  Future<int> ensureProductSentinelMaterialId(DatabaseExecutor db) async {
+    final rows = await db.query(
+      'reference_materials',
+      columns: ['id'],
+      where: 'material_name = ?',
+      whereArgs: [productSentinelMaterialName],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) return (rows.first['id'] as num).toInt();
+    return db.insert('reference_materials', {
+      'material_name': productSentinelMaterialName,
+      'material_code': 'PRD',
+      'physical_reference_json': '{}',
+      'chemical_reference_json': '{}',
+      'imported_at': DateTime.now().toIso8601String(),
+      'active': 0,
+    });
+  }
+
+  /// Widens `lab_inventory.category` CHECK to include `count`.
+  ///
+  /// Runs only when the stored table SQL still names the old two-value
+  /// check; fresh databases already create the wide one. Follows the same
+  /// guarded rebuild as [_migrateUsersTable]: FKs off, rename, recreate,
+  /// copy with ids preserved, drop, integrity check, FKs back on.
+  Future<void> _migrateInventoryCategoryCheck(Database db) async {
+    final schema = await db.rawQuery(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'lab_inventory'",
+    );
+    if (schema.isEmpty) return;
+    final sql = '${schema.first['sql'] ?? ''}';
+    if (sql.contains("'count'")) return;
+    await db.rawQuery('PRAGMA foreign_keys=OFF');
+    await db.rawQuery('PRAGMA legacy_alter_table=ON');
+    try {
+      await db.transaction((txn) async {
+        await txn.execute('ALTER TABLE lab_inventory RENAME TO lab_inventory_legacy_v1');
+        await txn.execute('''
+          CREATE TABLE lab_inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE,
+            category TEXT CHECK(category IN ('liquid', 'powder', 'count')),
+            unit TEXT,
+            current_qty REAL NOT NULL DEFAULT 0,
+            min_qty REAL NOT NULL DEFAULT 0,
+            description TEXT,
+            created_by INTEGER,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        ''');
+        await txn.execute('''
+          INSERT INTO lab_inventory
+            (id, name, category, unit, current_qty, min_qty, description,
+             created_by, created_at, updated_at)
+          SELECT id, name, category, unit, current_qty, min_qty, description,
+             created_by, created_at, updated_at
+          FROM lab_inventory_legacy_v1
+        ''');
+        // Rows counted in pieces (tablets and the like) were stored under
+        // liquid/powder before the `count` category existed; pieces can only
+        // be `count` now, so normalize them instead of stranding the rows
+        // behind a validation their own editor can no longer satisfy.
+        await txn.execute('''
+          UPDATE lab_inventory SET category = 'count'
+          WHERE LOWER(TRIM(unit)) = 'pc' AND category != 'count'
+        ''');
+        await txn.execute('DROP TABLE lab_inventory_legacy_v1');
+        await txn.execute(
+          'UPDATE sqlite_sequence SET seq = (SELECT MAX(id) FROM lab_inventory) '
+          "WHERE name = 'lab_inventory'",
+        );
+      });
+      final check = await db.rawQuery('PRAGMA integrity_check');
+      final ok =
+          check.isNotEmpty && '${check.first.values.first}'.trim() == 'ok';
+      if (!ok) {
+        throw StateError('integrity_check failed after inventory migration');
+      }
+    } finally {
+      await db.rawQuery('PRAGMA legacy_alter_table=OFF');
+      await db.rawQuery('PRAGMA foreign_keys=ON');
+    }
+  }
+
   Future<void> _ensureUnknownUserRow(Database db) async {
     final existing = await db.query('users', where: 'id = 0', limit: 1);
     if (existing.isNotEmpty) return;
@@ -1423,10 +1747,10 @@ class DatabaseHelper {
       return;
     }
 
-    await db.execute('PRAGMA foreign_keys=OFF');
+    await db.rawQuery('PRAGMA foreign_keys=OFF');
     // Without legacy_alter_table, RENAME rewrites the REFERENCES clauses of
     // other tables (inspections.created_by → users_legacy_v1).
-    await db.execute('PRAGMA legacy_alter_table=ON');
+    await db.rawQuery('PRAGMA legacy_alter_table=ON');
     try {
       await db.transaction((txn) async {
         await txn.execute('ALTER TABLE users RENAME TO users_legacy_v1');
@@ -1470,9 +1794,44 @@ class DatabaseHelper {
         throw StateError('integrity_check failed after users migration');
       }
     } finally {
-      await db.execute('PRAGMA legacy_alter_table=OFF');
-      await db.execute('PRAGMA foreign_keys=ON');
+      await db.rawQuery('PRAGMA legacy_alter_table=OFF');
+      await db.rawQuery('PRAGMA foreign_keys=ON');
     }
+  }
+
+  /// Lab equipment registry (device-local, like inventory): one master row
+  /// per device plus its calibration/maintenance/repair log.
+  ///
+  /// Idempotent (`IF NOT EXISTS`): called from both `_createSchema` (fresh
+  /// installs) and `_runLegacyGuarantees` (every open, so existing installs
+  /// gain the tables without a version bump).
+  Future<void> _createLabEquipmentTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS lab_equipment (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        code TEXT NOT NULL UNIQUE,
+        manufacturer TEXT NOT NULL DEFAULT '',
+        description TEXT NOT NULL DEFAULT '',
+        last_calibration_date TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS lab_equipment_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        equipment_id INTEGER NOT NULL REFERENCES lab_equipment(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL DEFAULT 'calibration',
+        event_date TEXT NOT NULL,
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_equipment_events_equipment
+        ON lab_equipment_events(equipment_id, event_date DESC, id DESC)
+    ''');
   }
 
   Future<void> _ensureColumn(

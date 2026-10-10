@@ -714,6 +714,10 @@ class OfflineFirstQcInspectionRepository implements QcInspectionRepository {
   );
 
   @override
+  Future<Set<int>> templateIdsInspectedOn(String day) =>
+      localRepo.templateIdsInspectedOn(day);
+
+  @override
   Future<List<QcResponse>> listResponses(int inspectionId) =>
       localRepo.listResponses(inspectionId);
 

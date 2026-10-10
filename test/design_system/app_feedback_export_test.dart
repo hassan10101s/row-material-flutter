@@ -15,6 +15,8 @@ class _RecordingDelivery implements FileDelivery {
   @override
   final bool canReveal;
   @override
+  bool get canRevealFolder => canReveal;
+  @override
   final bool canShare;
 
   final List<String> calls = <String>[];

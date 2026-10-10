@@ -81,8 +81,10 @@ class AppWindow extends StatelessWidget {
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       backgroundColor: AppColors.surface,
+      elevation: 8,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadii.lg),
+        borderRadius: BorderRadius.circular(20),
+        side: BorderSide(color: AppColors.borderMuted),
       ),
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -174,6 +176,12 @@ class AppWindow extends StatelessWidget {
   /// `leading` stays start-aligned, `actions` end-aligned. The spacer exists
   /// only when both sides are present: with actions alone it would steal
   /// width from `Expanded` buttons that are meant to fill the row.
+  ///
+  /// Stays a [Row] on purpose: callers pass `Expanded` footers (full-width
+  /// mobile CTAs) and `Expanded` requires `FlexParentData` — a [Wrap] would
+  /// crash those with an incompatible-ParentData error. Keep footers to two
+  /// actions per side; longer sets should fold manually in a [Wrap] at the
+  /// call site instead of adding them here.
   static Widget _footerRow({List<Widget>? leading, List<Widget>? actions}) {
     final hasLeading = leading != null && leading.isNotEmpty;
     final hasActions = actions != null && actions.isNotEmpty;
@@ -217,6 +225,8 @@ class AppWindow extends StatelessWidget {
               children: [
                 Text(
                   title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 17.spMax,
                     fontWeight: FontWeight.w700,
@@ -227,6 +237,8 @@ class AppWindow extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 12.spMax,
                       color: AppColors.textMuted,
@@ -291,6 +303,11 @@ Future<T?> showAppWindow<T>(
 /// Use this for filter/action sheets that today are `showModalBottomSheet`
 /// everywhere (and so look broken on a 1080p window). The content builder
 /// receives a close callback that pops the overlay with [result].
+///
+/// [actions]/[leadingActions] render as the window footer on desktop and
+/// as an end-aligned action row at the sheet's foot on phones, so converting
+/// a `showAppWindow` call into this is pixel-identical on desktop: same
+/// [AppWindow], same title, same footer.
 Future<T?> showAppOverlay<T>(
   BuildContext context, {
   required String title,
@@ -302,6 +319,8 @@ Future<T?> showAppOverlay<T>(
   IconData? icon,
   Color? accent,
   AppWindowSize size = AppWindowSize.sm,
+  List<Widget>? actions,
+  List<Widget>? leadingActions,
 }) {
   final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
   if (wide) {
@@ -311,6 +330,8 @@ Future<T?> showAppOverlay<T>(
       icon: icon,
       accent: accent,
       size: size,
+      actions: actions,
+      leadingActions: leadingActions,
       child: Builder(
         builder: (context) => builder(
           context,
@@ -358,6 +379,19 @@ Future<T?> showAppOverlay<T>(
                 ),
               ),
             ),
+            if ((leadingActions?.isNotEmpty ?? false) ||
+                (actions?.isNotEmpty ?? false)) ...[
+              const SizedBox(height: AppSpacing.lg),
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                alignment: WrapAlignment.end,
+                children: [
+                  ...?leadingActions,
+                  ...?actions,
+                ],
+              ),
+            ],
           ],
         ),
       ),

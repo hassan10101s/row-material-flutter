@@ -12,7 +12,7 @@ import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_inspection.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_repositories.dart';
 import 'package:material_lab/features/qc_manager/presentation/cubit/qc_inspections_cubit.dart';
-import 'package:material_lab/features/qc_manager/presentation/qc_inspections_screen.dart';
+import 'package:material_lab/features/qc_manager/presentation/inspections/qc_inspections_screen.dart';
 
 class _InspectionsMock extends Mock implements QcInspectionRepository {}
 

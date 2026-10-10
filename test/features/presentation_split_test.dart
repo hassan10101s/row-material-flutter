@@ -7,19 +7,14 @@ import 'package:mocktail/mocktail.dart';
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/design_system/widgets/app_window.dart';
-import 'package:material_lab/features/lab/domain/lab_local_repository.dart';
 import 'package:material_lab/features/lab/domain/lab_result_repository.dart';
-import 'package:material_lab/features/lab/presentation/cubit/constants_cubit.dart';
-import 'package:material_lab/features/lab/presentation/constants_tab.dart';
 import 'package:material_lab/features/reference/domain/reference_repository.dart';
 import 'package:material_lab/features/reference/presentation/cubit/params_cubit.dart';
 import 'package:material_lab/features/reference/presentation/cubit/reference_cubit.dart';
 import 'package:material_lab/features/reference/presentation/cubit/units_cubit.dart';
-import 'package:material_lab/features/reference/presentation/materials_tab.dart';
-import 'package:material_lab/features/reference/presentation/params_tab.dart';
-import 'package:material_lab/features/reference/presentation/units_tab.dart';
-
-class _LocalMock extends Mock implements LabLocalRepository {}
+import 'package:material_lab/features/reference/presentation/materials/materials_tab.dart';
+import 'package:material_lab/features/reference/presentation/params/params_tab.dart';
+import 'package:material_lab/features/reference/presentation/units/units_tab.dart';
 
 class _ReferenceMock extends Mock implements ReferenceRepository {}
 
@@ -29,31 +24,12 @@ class _LabConfigMock extends Mock implements LabConfigurationRepository {}
 const desktopGrid = Size(1280, 720);
 const mobileGrid = Size(400, 860);
 
-/// What the constants editor must store for the input [saveConstant] types.
-///
-/// Written out here rather than compared against the other variant's write:
-/// a payload that both variants got wrong the same way would otherwise pass.
-Map<String, dynamic> expectedConstant() => <String, dynamic>{
-  'name': 'Carbon',
-  'symbol': 'C',
-  'unit': '',
-  'description': '',
-  'is_expression': false,
-  'expression': '',
-  'value_text': '',
-};
-
 void main() {
-  late _LocalMock local;
   late _ReferenceMock reference;
   late _LabConfigMock labConfig;
-  late ConstantsCubit constants;
   late ParamsCubit chemical;
   late UnitsCubit units;
   late ReferenceCubit referenceCubit;
-
-  /// Every payload the constants editor asked to store, in order.
-  late List<Map<String, dynamic>> constantWrites;
 
   /// Every `(name, unit)` the parameter editor upserted, in order.
   late List<(String, String)> paramWrites;
@@ -70,28 +46,10 @@ void main() {
     // stable whichever language the previous test left behind.
     AppText.useLanguage('en');
 
-    local = _LocalMock();
     reference = _ReferenceMock();
     labConfig = _LabConfigMock();
-    constantWrites = [];
     paramWrites = [];
     unitWrites = [];
-
-    when(() => local.listGlobalConstants()).thenAnswer(
-      (_) async => <Map<String, dynamic>>[
-        {'id': 1, 'name': 'Carbon', 'symbol': 'C', 'value_text': '0.5'},
-      ],
-    );
-    // Captured rather than verified: the assertions below hold both variants
-    // to a payload written out independently of either of them, and a verified
-    // call would have to be re-stubbed between the two.
-    when(() => local.upsertGlobalConstant(any())).thenAnswer((inv) async {
-      constantWrites.add(inv.positionalArguments.first as Map<String, dynamic>);
-      return <String, dynamic>{};
-    });
-    when(
-      () => local.deleteGlobalConstant(any()),
-    ).thenAnswer((_) async => <String, dynamic>{});
 
     when(
       () =>
@@ -133,7 +91,6 @@ void main() {
       ));
     });
 
-    constants = ConstantsCubit(repo: local);
     chemical = ParamsCubit.chemical(repo: reference);
     units = UnitsCubit(repo: reference);
     referenceCubit = ReferenceCubit(repo: reference);
@@ -151,14 +108,12 @@ void main() {
     // Loaded up front rather than per test: an unloaded cubit renders a
     // shimmering skeleton, and `pumpAndSettle` never settles against a
     // repeating animation.
-    await constants.load();
     await chemical.load();
     await units.load();
     await referenceCubit.load();
   });
 
   tearDown(() async {
-    await constants.close();
     await chemical.close();
     await units.close();
     await referenceCubit.close();
@@ -191,11 +146,6 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
-
-  Widget constantsHost() => BlocProvider<ConstantsCubit>.value(
-    value: constants,
-    child: ConstantsTab(repo: local),
-  );
 
   Widget paramsHost() => BlocProvider<ParamsCubit>.value(
     value: chemical,
@@ -230,35 +180,7 @@ void main() {
     );
   }
 
-  group('the host dispatches on the platform, not the window', () {
-    testWidgets('desktop form factor builds the desktop variant', (
-      tester,
-    ) async {
-      await pumpAs(tester, AppFormFactor.desktop, constantsHost());
-
-      expect(find.byType(DataTable), findsOneWidget);
-    });
-
-    testWidgets('mobile form factor builds the mobile variant', (tester) async {
-      await pumpAs(tester, AppFormFactor.mobile, constantsHost());
-
-      expect(find.byType(DataTable), findsNothing);
-      // The card list, not a table: a DataTable at 400dp would be six
-      // ellipsised columns behind a horizontal scrollbar.
-      expect(find.text('Carbon'), findsOneWidget);
-    });
-  });
-
   group('a table on desktop becomes a card list on a phone', () {
-    testWidgets('constants', (tester) async {
-      await pumpAs(tester, AppFormFactor.desktop, constantsHost());
-      expect(find.byType(DataTable), findsOneWidget);
-
-      await pumpAs(tester, AppFormFactor.mobile, constantsHost());
-      expect(find.byType(DataTable), findsNothing);
-      expect(find.text('Carbon'), findsOneWidget);
-    });
-
     testWidgets('chemical parameters', (tester) async {
       await pumpAs(tester, AppFormFactor.desktop, paramsHost());
       expect(find.byType(DataTable), findsOneWidget);
@@ -294,22 +216,6 @@ void main() {
     // because each copy would still pass its own tests. Both variants are held
     // here to a payload written out independently of either of them.
 
-    /// Opens the constant editor, fills it and saves.
-    Future<void> saveConstant(WidgetTester tester) async {
-      await tester.tap(find.text('Add constant'));
-      await tester.pumpAndSettle();
-
-      // Indexed rather than looked up by label: the editor shows a value field
-      // or an expression field depending on the switch, so the field count
-      // moves. Name and symbol are always the first two.
-      await tester.enterText(find.byType(TextField).at(0), 'Carbon');
-      await tester.enterText(find.byType(TextField).at(1), 'C');
-      await tester.pump();
-
-      await tester.tap(find.text('Save'));
-      await tester.pumpAndSettle();
-    }
-
     /// Opens the parameter editor, fills it and saves.
     Future<void> saveParam(WidgetTester tester) async {
       await tester.tap(find.text('New Parameter'));
@@ -338,48 +244,6 @@ void main() {
 
     // The unified window chrome, not a bare AlertDialog: every desktop
     // editor inherits AppWindow.
-    testWidgets('the desktop editor is a dialog', (tester) async {
-      await pumpAs(tester, AppFormFactor.desktop, constantsHost());
-      expect(find.byType(AppWindow), findsNothing);
-
-      await tester.tap(find.text('Add constant'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AppWindow), findsOneWidget);
-
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(constantWrites, isEmpty, reason: 'cancelling must not save');
-    });
-
-    testWidgets('the phone editor is a full-screen route, not a dialog', (
-      tester,
-    ) async {
-      await pumpAs(tester, AppFormFactor.mobile, constantsHost());
-      expect(find.byType(AppWindow), findsNothing);
-
-      await tester.tap(find.text('Add constant'));
-      await tester.pumpAndSettle();
-      // A route with its own Scaffold and app bar, replacing the tab rather
-      // than floating over it - which is what makes the system back gesture
-      // and the keyboard-inset behave. The tab's own Scaffold is offstage
-      // behind the opaque route, hence one and not two.
-      expect(find.byType(Scaffold), findsOneWidget);
-      expect(find.byType(AppBar), findsOneWidget);
-      expect(find.byType(AppWindow), findsNothing);
-      // The route's title, not the button behind it.
-      expect(find.text('Add constant'), findsOneWidget);
-    });
-
-    testWidgets('both constant variants store the canonical payload', (
-      tester,
-    ) async {
-      for (final factor in AppFormFactor.values) {
-        constantWrites.clear();
-        await pumpAs(tester, factor, constantsHost());
-        await saveConstant(tester);
-        expect(constantWrites, [expectedConstant()], reason: '$factor');
-      }
-    });
 
     testWidgets('both parameter variants upsert the same name and unit', (
       tester,

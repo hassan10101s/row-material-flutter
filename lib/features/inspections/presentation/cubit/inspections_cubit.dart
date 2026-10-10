@@ -8,11 +8,19 @@ import 'inspections_state.dart';
 /// pagination. The DB does the filtering (indexed `idx_inspections_alive` +
 /// status/supplier), the cubit only holds the current page.
 class InspectionsCubit extends AppCubit<InspectionsState> {
-  InspectionsCubit({required this.repo, required this.reports})
-      : super(const InspectionsState());
+  InspectionsCubit({
+    required this.repo,
+    required this.reports,
+    this.kind = 'raw',
+  }) : super(const InspectionsState());
 
   final InspectionRepository repo;
   final ReportRepository reports;
+
+  /// Inspection kind this register shows (`raw` or `product`).
+  final String kind;
+
+  bool get isProduct => kind == 'product';
 
   Future<void> load({int page = 0}) async {
     safeEmit(state.copyWith(loading: true, error: null, page: page));
@@ -25,8 +33,9 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
           limit: state.pageSize,
           offset: page * state.pageSize,
           orderBy: 'inspection_date DESC, id DESC',
+          kind: kind,
         ),
-        repo.count(query: state.query, status: state.status),
+        repo.count(query: state.query, status: state.status, kind: kind),
       ]);
       final rows = settled[0] as List<Map<String, dynamic>>;
       final total = settled[1] as int;
@@ -59,6 +68,32 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
   Future<void> setStatus(String status) async {
     safeEmit(state.copyWith(status: status));
     await load(page: 0);
+  }
+
+  /// Toggles one inspection id in the bulk-export selection.
+  void toggleSelect(int id) {
+    final next = Set<int>.of(state.selectedIds);
+    if (!next.remove(id)) next.add(id);
+    safeEmit(state.copyWith(selectedIds: next));
+  }
+
+  /// Selects (`select` true) or deselects all of [ids] — typically the ids
+  /// of the current page, driven by the header checkbox.
+  void setPageSelection(List<int> ids, bool select) {
+    final next = Set<int>.of(state.selectedIds);
+    if (select) {
+      next.addAll(ids);
+    } else {
+      next.removeAll(ids);
+    }
+    safeEmit(state.copyWith(selectedIds: next));
+  }
+
+  /// Empties the bulk-export selection (after a successful export, or the
+  /// explicit "clear selection" action — mirroring the Vue register).
+  void clearSelection() {
+    if (state.selectedIds.isEmpty) return;
+    safeEmit(state.copyWith(selectedIds: const {}));
   }
 
   /// Returns the saved report path, or `null` when there is nothing to export.

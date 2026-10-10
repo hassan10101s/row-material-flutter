@@ -57,6 +57,12 @@ class _FakeSheet implements QcInspectionRepository {
   }) async => inspections.length;
 
   @override
+  Future<Set<int>> templateIdsInspectedOn(String day) async => {
+    for (final i in inspections)
+      if (i.inspectionDate.startsWith(day)) i.templateId,
+  };
+
+  @override
   Future<int> createInspection(QcInspection inspection) async {
     inspections.add(inspection.copyWith(inspectionId: 1));
     return 1;

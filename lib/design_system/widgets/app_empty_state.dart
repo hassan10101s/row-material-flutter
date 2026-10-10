@@ -26,13 +26,25 @@ class AppEmptyState extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 56.r, color: AppColors.border),
-            const SizedBox(height: AppSpacing.md),
+            Container(
+              padding: EdgeInsets.all(18.r),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.14),
+                ),
+              ),
+              child: Icon(icon, size: 40.r, color: AppColors.primary),
+            ),
+            const SizedBox(height: AppSpacing.lg),
             Text(
               title,
               textAlign: TextAlign.center,
               style: TextStyle(
-                  color: AppColors.textMuted, fontSize: 15.spMax, fontWeight: FontWeight.w600),
+                  color: AppColors.textStrong,
+                  fontSize: 15.spMax,
+                  fontWeight: FontWeight.w700),
             ),
             if (subtitle != null) ...[
               const SizedBox(height: AppSpacing.xs),
@@ -49,6 +61,39 @@ class AppEmptyState extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Dedicated error state with retry: screens should use this instead of
+/// hand-rolling `AppEmptyState(icon: error)` + a button each time.
+class AppErrorState extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final String retryLabel;
+  final VoidCallback? onRetry;
+
+  const AppErrorState({
+    super.key,
+    required this.title,
+    this.subtitle,
+    this.retryLabel = 'إعادة المحاولة',
+    this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AppEmptyState(
+      icon: Icons.error_outline,
+      title: title,
+      subtitle: subtitle,
+      action: onRetry == null
+          ? null
+          : OutlinedButton.icon(
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh, size: 18),
+              label: Text(retryLabel),
+            ),
     );
   }
 }

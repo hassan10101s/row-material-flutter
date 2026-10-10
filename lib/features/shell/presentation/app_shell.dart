@@ -123,7 +123,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _openPdfFolder() async {
     final delivery = widget.fileDelivery;
-    if (!delivery.canReveal) return;
+    if (!delivery.canRevealFolder) return;
     final picker = widget.folderPicker;
     final exportRoot = widget.exportRoot;
     try {
@@ -180,7 +180,7 @@ class _AppShellState extends State<AppShell> {
           onLogout: _logout,
           onLogoutThisDevice: _logoutThisDevice,
           onOpenPdfFolder: _openPdfFolder,
-          canOpenPdfFolder: widget.fileDelivery.canReveal,
+          canOpenPdfFolder: widget.fileDelivery.canRevealFolder,
           child: widget.child,
         ),
         mobile: (_) => MobileAppShell(
@@ -193,7 +193,7 @@ class _AppShellState extends State<AppShell> {
           onLogout: _logout,
           onLogoutThisDevice: _logoutThisDevice,
           onOpenPdfFolder: _openPdfFolder,
-          canOpenPdfFolder: widget.fileDelivery.canReveal,
+          canOpenPdfFolder: widget.fileDelivery.canRevealFolder,
           child: widget.child,
         ),
       );

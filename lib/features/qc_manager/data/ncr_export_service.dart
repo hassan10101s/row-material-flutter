@@ -1,12 +1,17 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../../../../core/app_paths.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_dates.dart';
+import '../../reports/data/html_pdf_exporter.dart';
+import '../../reports/data/report_builder.dart';
+import '../../reports/data/tiny_jinja.dart';
 import '../domain/ncr_filters.dart';
 import '../domain/ncr_kpis.dart';
 import '../domain/ncr_report_row.dart';
@@ -57,9 +62,12 @@ class NcrExportResult {
 
 /// Writes the NCR report to PDF and Excel (plan V6_ENHANCED 22.7).
 class NcrExportService {
-  NcrExportService({AppPaths? paths}) : _paths = paths ?? AppPaths();
+  NcrExportService({AppPaths? paths, HtmlPdfExporter? htmlPdf})
+      : _paths = paths ?? AppPaths(),
+        _htmlPdf = htmlPdf ?? HtmlPdfExporter();
 
   final AppPaths _paths;
+  final HtmlPdfExporter _htmlPdf;
 
   static const List<String> _pdfColumns = [
     'Ref',
@@ -116,13 +124,62 @@ class NcrExportService {
     r.isOpen ? 'YES' : 'NO',
   ];
 
+  /// PDF through the shared HTML pipeline: the shipped
+  /// `ncr_report_template.html` (same tiny_jinja + headless-browser flow as
+  /// every other report), falling back to the hand-drawn renderer below when
+  /// no browser exists — which is always the case on phones.
   Future<NcrExportResult> exportPdf(
     NcrExportBundle bundle, {
     Directory? directory,
   }) async {
+    final ctx = buildNcrReportContext(bundle);
+    final template = await _readTemplate();
+    final html = tinyJinjaRender(template, ctx);
+    Uint8List bytes;
+    try {
+      bytes = await _htmlPdf.exportPdf(html);
+    } on HtmlToPdfUnavailableException {
+      bytes = await _renderNativePdf(bundle);
+    } on HtmlToPdfException {
+      bytes = await _renderNativePdf(bundle);
+    }
+
+    final file = await _write(directory, (dir) async {
+      final path = _uniquePath(dir, _stamp(bundle.generatedAt), 'pdf');
+      await File(path).writeAsBytes(bytes);
+      return path;
+    });
+
+    return NcrExportResult(
+      path: file,
+      rowCount: bundle.rows.length,
+      scope: bundle.filters.describe,
+    );
+  }
+
+  /// Prefer rootBundle (production build); fall back to a direct file read for
+  /// test environments where the flutter-test asset bundle can be stale.
+  static Future<String> _readTemplate() async {
+    const path = 'assets/templates/ncr_report_template.html';
+    try {
+      return await rootBundle.loadString(path);
+    } catch (_) {
+      return File(path).readAsString();
+    }
+  }
+
+  /// Hand-drawn fallback mirroring the template's sections in order (scope,
+  /// KPI tiles, top defects, aging, findings table) for environments without
+  /// a headless browser.
+  Future<Uint8List> _renderNativePdf(NcrExportBundle bundle) async {
+    await _ensureFont();
+    final theme = _baseFont == null
+        ? null
+        : pw.ThemeData.withFont(base: _baseFont!, bold: _boldFont!);
     final doc = pw.Document(
       title: 'NCR report',
       author: bundle.generatedBy.isEmpty ? 'MaterialLab' : bundle.generatedBy,
+      theme: theme,
     );
 
     final dark = PdfColors.grey900;
@@ -187,17 +244,31 @@ class NcrExportService {
       ),
     );
 
-    final file = await _write(directory, (dir) async {
-      final path = _uniquePath(dir, _stamp(bundle.generatedAt), 'pdf');
-      await File(path).writeAsBytes(await doc.save());
-      return path;
-    });
+    return doc.save();
+  }
 
-    return NcrExportResult(
-      path: file,
-      rowCount: bundle.rows.length,
-      scope: bundle.filters.describe,
-    );
+  /// Arabic-capable font for the native fallback: without it every Arabic
+  /// string in the fallback PDF renders as tofu boxes. Same asset + pattern
+  /// as the shared [PdfRenderer].
+  static pw.Font? _baseFont;
+  static pw.Font? _boldFont;
+
+  static Future<void> _ensureFont() async {
+    if (_baseFont != null) return;
+    try {
+      ByteData data;
+      try {
+        data = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
+      } catch (_) {
+        final bytes = await File('assets/fonts/Cairo-Variable.ttf')
+            .readAsBytes();
+        data = ByteData.sublistView(bytes);
+      }
+      _baseFont = pw.Font.ttf(data);
+      _boldFont = pw.Font.ttf(data);
+    } catch (_) {
+      // No Arabic font: the fallback still prints latin tokens correctly.
+    }
   }
 
   Future<NcrExportResult> exportExcel(

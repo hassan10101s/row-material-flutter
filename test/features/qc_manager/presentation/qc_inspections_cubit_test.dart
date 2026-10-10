@@ -99,6 +99,12 @@ class _FakeInspections implements QcInspectionRepository {
   }
 
   @override
+  Future<Set<int>> templateIdsInspectedOn(String day) async => {
+    for (final i in inspections)
+      if (!i.isDeleted && i.inspectionDate.startsWith(day)) i.templateId,
+  };
+
+  @override
   Future<int> createInspection(QcInspection inspection) async {
     if (failWith != null) throw failWith!;
     createCalls++;

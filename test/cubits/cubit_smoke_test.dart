@@ -26,7 +26,6 @@ import 'package:material_lab/features/lab/domain/lab_local_repository.dart';
 import 'package:material_lab/features/lab/domain/lab_result_repository.dart';
 import 'package:material_lab/features/lab/presentation/cubit/activity_cubit.dart';
 import 'package:material_lab/features/lab/presentation/cubit/analyses_cubit.dart';
-import 'package:material_lab/features/lab/presentation/cubit/constants_cubit.dart';
 import 'package:material_lab/features/lab/presentation/cubit/inventory_cubit.dart';
 import 'package:material_lab/features/lab/presentation/cubit/lab_cubit.dart';
 import 'package:material_lab/features/lab/presentation/cubit/lab_reports_cubit.dart';
@@ -244,6 +243,7 @@ void main() {
             limit: any(named: 'limit'),
             offset: any(named: 'offset'),
             orderBy: any(named: 'orderBy'),
+            kind: any(named: 'kind'),
           )).thenAnswer((_) async => [
                 {'id': 1, 'decision_status': 'APPROVED'},
                 {'id': 2, 'decision_status': 'REJECTED'},
@@ -251,6 +251,7 @@ void main() {
       when(() => repo.count(
             query: any(named: 'query'),
             status: any(named: 'status'),
+            kind: any(named: 'kind'),
           )).thenAnswer((_) async => 2);
       final cubit = InspectionsCubit(repo: repo, reports: reports);
       await cubit.load();
@@ -264,12 +265,14 @@ void main() {
             limit: any(named: 'limit'),
             offset: any(named: 'offset'),
             orderBy: any(named: 'orderBy'),
+            kind: any(named: 'kind'),
           )).thenAnswer((_) async => [
                 {'id': 1, 'decision_status': 'APPROVED'},
               ]);
       when(() => repo.count(
             query: any(named: 'query'),
             status: 'APPROVED',
+            kind: any(named: 'kind'),
           )).thenAnswer((_) async => 1);
       await cubit.setStatus('APPROVED');
       expect(cubit.state.visible, hasLength(1));
@@ -281,9 +284,13 @@ void main() {
             limit: any(named: 'limit'),
             offset: any(named: 'offset'),
             orderBy: any(named: 'orderBy'),
+            kind: any(named: 'kind'),
           )).thenAnswer((_) async => const []);
-      when(() => repo.count(query: 'zzz', status: any(named: 'status')))
-          .thenAnswer((_) async => 0);
+      when(() => repo.count(
+            query: 'zzz',
+            status: any(named: 'status'),
+            kind: any(named: 'kind'),
+          )).thenAnswer((_) async => 0);
       await cubit.setQuery('zzz');
       expect(cubit.state.visible, isEmpty);
       await cubit.close();
@@ -389,6 +396,66 @@ void main() {
       verify(() => repo.create(any(), any())).called(1);
       await cubit.close();
     });
+
+    test('loadForEdit restores material, entry code and decision', () async {
+      final repo = _InspectionRepoMock();
+      final reference = _ReferenceRepoMock();
+      when(() => reference.getMaterial(1, inspectionDate: '2026-09-05'))
+          .thenAnswer((_) async => {
+                'material_code': 'S-1',
+                'next_entry_code': 'QC-9',
+                'physical_reference': {'Moisture': '14%'},
+                'chemical_reference': <String, dynamic>{},
+              });
+      final cubit =
+          InspectionFormCubit(repo: repo, reference: reference);
+
+      await cubit.loadForEdit({
+        'id': 7,
+        'material_id': 1,
+        'inspection_date': '2026-09-05',
+        'entry_code': 'QC-3',
+        'decision_status': 'FULL_REJECTION',
+      });
+
+      expect(cubit.isEditing, isTrue);
+      expect(cubit.state.materialId, 1);
+      expect(cubit.state.entryCode, 'QC-3');
+      expect(cubit.state.decision, 'FULL_REJECTION');
+      await cubit.close();
+    });
+
+    test('save updates when editing instead of creating', () async {
+      final repo = _InspectionRepoMock();
+      final reference = _ReferenceRepoMock();
+      when(() => reference.getMaterial(1, inspectionDate: '2026-09-05'))
+          .thenAnswer((_) async => {
+                'material_code': 'S-1',
+                'next_entry_code': 'QC-9',
+                'physical_reference': <String, dynamic>{},
+                'chemical_reference': <String, dynamic>{},
+              });
+      when(() => repo.update(any(), any(), any()))
+          .thenAnswer((_) async => <String, dynamic>{});
+      final cubit =
+          InspectionFormCubit(repo: repo, reference: reference);
+      await cubit.loadForEdit({
+        'id': 7,
+        'material_id': 1,
+        'inspection_date': '2026-09-05',
+        'entry_code': 'QC-3',
+      });
+
+      final ok = await cubit.save(
+        {'supplier': 'Acme'},
+        const UserContext(id: 1, fullName: 'U', role: 'Admin'),
+      );
+
+      expect(ok, isTrue);
+      verify(() => repo.update(7, any(), any())).called(1);
+      verifyNever(() => repo.create(any(), any()));
+      await cubit.close();
+    });
   });
 
   group('ReferenceCubit', () {
@@ -411,6 +478,10 @@ void main() {
       final repo = _ReportServiceMock();
       when(() => repo.dailyReport('2026-09-05'))
           .thenAnswer((_) async => _doc('d.pdf'));
+      // The cubit persists the generated doc; the recorded export is the
+      // saved file's path.
+      when(() => repo.saveReport(any()))
+          .thenAnswer((_) async => File('d.pdf'));
 
       final cubit = ReportsCubit(repo: repo);
       await cubit.runDaily('2026-09-05');
@@ -426,6 +497,8 @@ void main() {
       final completer = Completer<ReportDoc>();
       when(() => repo.dailyReport('2026-09-05'))
           .thenAnswer((_) => completer.future);
+      when(() => repo.saveReport(any()))
+          .thenAnswer((_) async => File('d.pdf'));
 
       final cubit = ReportsCubit(repo: repo);
       final first = cubit.runDaily('2026-09-05');
@@ -682,26 +755,6 @@ void main() {
     });
   });
 
-  group('ConstantsCubit', () {
-    test('loads constants and deletes one', () async {
-      final repo = _LabRepoMock();
-      when(() => repo.listGlobalConstants())
-          .thenAnswer((_) async => [
-                {'id': 1, 'name': 'Pi'},
-              ]);
-      when(() => repo.deleteGlobalConstant(1))
-          .thenAnswer((_) async => {'deleted': true});
-
-      final cubit = ConstantsCubit(repo: repo);
-      await cubit.load();
-
-      expect(cubit.state.rows, hasLength(1));
-      await cubit.delete(1);
-      verify(() => repo.deleteGlobalConstant(1)).called(1);
-      await cubit.close();
-    });
-  });
-
   group('ActivityCubit', () {
     test('loads the activity log', () async {
       final repo = _LabRepoMock();
@@ -748,6 +801,8 @@ void main() {
       when(() => repo.listProducts()).thenAnswer((_) async => [
             {'id': 3, 'name': 'Gel'},
           ]);
+      when(() => repo.listInspectionMaterials())
+          .thenAnswer((_) async => <Map<String, dynamic>>[]);
 
       final cubit = RunTestCubit(config: repo, results: repo, local: repo);
       await cubit.load();
@@ -765,6 +820,8 @@ void main() {
             {'id': 1, 'name': 'pH', 'unit': 'pH', 'dynamic_fields': ['Sample Name']},
           ]);
       when(() => repo.listProducts()).thenAnswer((_) async => []);
+      when(() => repo.listInspectionMaterials())
+          .thenAnswer((_) async => <Map<String, dynamic>>[]);
       when(() => repo.resolveInspection('QC-9'))
           .thenAnswer((_) async => {'material_id': 4, 'material_name': 'Sugar'});
       when(() => repo.runSampleTest(

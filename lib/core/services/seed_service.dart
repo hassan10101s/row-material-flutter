@@ -1,3 +1,4 @@
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
@@ -42,22 +43,22 @@ class SeedService {
 
   Future<List<List<dynamic>>> _readSheet(
       ByteData bytes, String label) async {
-    final excel = Excel.decodeBytes(bytes.buffer.asUint8List());
-    if (excel.tables.isEmpty) {
-      throw ValidationError(AppErrors.seedNoWorksheet(label));
-    }
-    final table = excel.tables.values.first;
-    final rows = table.rows;
-    final result = <List<dynamic>>[];
-    for (var i = 0; i < rows.length; i++) {
-      final row = rows[i];
-      final values = <dynamic>[];
-      for (final cell in row) {
-        values.add(cell?.value);
+    // Excel parsing is CPU-heavy: decode off the main isolate. The raw
+    // bytes cross the isolate boundary once; only plain stringified cells
+    // come back, so the result stays transferable.
+    final raw = bytes.buffer.asUint8List();
+    return Isolate.run(() {
+      final excel = Excel.decodeBytes(raw);
+      if (excel.tables.isEmpty) {
+        throw ValidationError(AppErrors.seedNoWorksheet(label));
       }
-      result.add(values);
-    }
-    return result;
+      final table = excel.tables.values.first;
+      final result = <List<dynamic>>[];
+      for (final row in table.rows) {
+        result.add([for (final cell in row) cell?.value]);
+      }
+      return result;
+    });
   }
 
   Future<int> importReference() async {
@@ -75,6 +76,9 @@ class SeedService {
     final headerMap = {for (var i = 0; i < headers.length; i++) headers[i]: i};
     final timestamp = nowIso();
     var count = 0;
+    // Single batch + one commit: the old per-row `await db.execute()` issued
+    // ~96 round-trips through the DB lock during startup.
+    final batch = db.batch();
     for (var i = 1; i < sheet.length; i++) {
       final row = sheet[i];
       final materialName = '${_at(row, headerMap['Raw_Material_Name']) ?? ''}'.trim();
@@ -84,7 +88,7 @@ class SeedService {
       final chemicalRaw = '${_at(row, headerMap['Chemical_Analysis_Reference']) ?? '{}'}'.trim();
       final physical = jsonLoads(physicalRaw);
       final chemical = jsonLoads(chemicalRaw);
-      await db.execute(
+      batch.execute(
         'INSERT INTO reference_materials '
         '(material_name, material_code, physical_reference_json, '
         'chemical_reference_json, source_row, imported_at) '
@@ -106,6 +110,7 @@ class SeedService {
       );
       count++;
     }
+    if (count > 0) await batch.commit(noResult: true);
     return count;
   }
 
@@ -157,6 +162,7 @@ class SeedService {
     final typeIdx = headers.indexOf('Type');
     final timestamp = nowIso();
     var count = 0;
+    final batch = db.batch();
     for (var i = 1; i < sheet.length; i++) {
       final row = sheet[i];
       final name = '${_at(row, nameIdx) ?? ''}'.trim();
@@ -169,15 +175,25 @@ class SeedService {
       final type = raw.trim().isEmpty
           ? ParameterType.chemical
           : ParameterType.parse(raw);
-      await db.execute(
+      batch.execute(
         'INSERT INTO parameters (parameter_name, unit, parameter_type, imported_at) '
         'VALUES (?, ?, ?, ?) '
         'ON CONFLICT(parameter_name) DO UPDATE SET '
         'unit = excluded.unit, imported_at = excluded.imported_at',
         [name, unit, type.value, timestamp],
       );
+      // Units registry: every seeded unit also lands in `lab_units` so the
+      // Units table holds all program units and every picker inherits it.
+      if (unit.isNotEmpty) {
+        batch.execute(
+          'INSERT OR IGNORE INTO lab_units (symbol, is_active, created_at) '
+          'VALUES (?, 1, ?)',
+          [unit, timestamp],
+        );
+      }
       count++;
     }
+    if (count > 0) await batch.commit(noResult: true);
     return count;
   }
 
@@ -197,7 +213,10 @@ class SeedService {
     final rows = await db.rawQuery(
       'SELECT parameter_name, parameter_type, unit FROM parameters',
     );
-    var fixed = 0;
+    // Collect first, write once: the old per-row `rawUpdate` held the DB
+    // lock across a full-table scan on every startup.
+    final chemicalFixes = <String>[];
+    final normalizeFixes = <String>[];
     for (final row in rows) {
       final name = '${row['parameter_name'] ?? ''}';
       final key = name.trim().toLowerCase();
@@ -205,23 +224,29 @@ class SeedService {
       final current = '${row['parameter_type'] ?? ''}'.trim().toLowerCase();
       final unit = '${row['unit'] ?? ''}'.trim();
       if (current.isEmpty) {
-        // Dirty typeless row: normalize through the same reader the UI uses.
-        await db.rawUpdate(
-          'UPDATE parameters SET parameter_type = ? WHERE parameter_name = ?',
-          [ParameterType.ofDb(null).value, name],
-        );
-        fixed++;
+        normalizeFixes.add(name);
       } else if (current == ParameterType.physical.value &&
           asset == ParameterType.chemical &&
           unit.isNotEmpty) {
-        await db.rawUpdate(
-          'UPDATE parameters SET parameter_type = ? WHERE parameter_name = ?',
-          [ParameterType.chemical.value, name],
-        );
-        fixed++;
+        chemicalFixes.add(name);
       }
     }
-    return fixed;
+    if (chemicalFixes.isEmpty && normalizeFixes.isEmpty) return 0;
+    final batch = db.batch();
+    for (final name in normalizeFixes) {
+      batch.rawUpdate(
+        'UPDATE parameters SET parameter_type = ? WHERE parameter_name = ?',
+        [ParameterType.ofDb(null).value, name],
+      );
+    }
+    for (final name in chemicalFixes) {
+      batch.rawUpdate(
+        'UPDATE parameters SET parameter_type = ? WHERE parameter_name = ?',
+        [ParameterType.chemical.value, name],
+      );
+    }
+    await batch.commit(noResult: true);
+    return chemicalFixes.length + normalizeFixes.length;
   }
 
   dynamic _at(List<dynamic> row, int? index) {

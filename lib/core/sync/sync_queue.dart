@@ -97,6 +97,23 @@ class SyncQueue {
 
   final DatabaseHelper dbHelper;
 
+  /// Fired at the end of every [enqueue] (inside the business transaction).
+  ///
+  /// The service locator points this at `SyncEngine.scheduleSync`, which turns
+  /// every local mutation into a debounced push within seconds — no waiting
+  /// for the 60 s timer and no manual "sync now" tap. Fires pre-commit, so a
+  /// rolled-back transaction causes at most one empty sync cycle. Null in
+  /// tests and in any context without an engine.
+  void Function()? onEnqueued;
+
+  void _notifyEnqueued() {
+    try {
+      onEnqueued?.call();
+    } on Object {
+      // A listener must never break the business write it observes.
+    }
+  }
+
   Database? _resolved;
 
   /// `DatabaseHelper.database` is a `Future`, so it has to be awaited; the
@@ -171,6 +188,7 @@ class SyncQueue {
         'status': 'pending',
         'last_error': null,
       });
+      _notifyEnqueued();
       return;
     }
     final row = existing.first;
@@ -191,6 +209,7 @@ class SyncQueue {
       where: 'id = ?',
       whereArgs: [row['id']],
     );
+    _notifyEnqueued();
   }
 
   static int maxOf(int a, int b) => a > b ? a : b;
@@ -251,9 +270,9 @@ class SyncQueue {
   ///     restore.
   ///
   /// `retry_count` is deliberately preserved rather than reset: a push that
-  /// crashes the process every attempt must still climb towards [maxRetries]
-  /// and end up as `failed`, instead of being granted an infinite series of
-  /// fresh first attempts.
+  /// crashes the process every attempt keeps climbing the backoff ladder
+  /// instead of being granted an infinite series of fresh first attempts.
+  /// It never parks for a manual tap — transient work retries forever.
   Future<int> recoverStalled() async {
     return _withDb('queue.recoverStalled', (db) async {
       return tracedTransaction(db, 'queue.recoverStalled', (txn) async {
@@ -265,18 +284,17 @@ class SyncQueue {
         final now = nowIso();
         var recovered = 0;
         for (final row in rows) {
+          // Crash recovery preserves the backoff climb: a push that crashes
+          // the process every attempt keeps its retry_count (see the note on
+          // recoverStalled), it just never parks for a manual tap anymore.
           final attempts = (row['retry_count'] as num?)?.toInt() ?? 0;
-          final exhausted = attempts + 1 >= maxRetries;
           final updated = await txn.update(
             'sync_queue',
             {
-              'status': exhausted ? 'failed' : 'pending',
-              'next_attempt_at': exhausted
-                  ? null
-                  : nowIsoAt(DateTime.now().add(backoffDelay(attempts))),
-              'last_error': exhausted
-                  ? 'interrupted mid-push (retry limit reached)'
-                  : 'interrupted mid-push',
+              'status': 'pending',
+              'next_attempt_at':
+                  nowIsoAt(DateTime.now().add(backoffDelay(attempts))),
+              'last_error': 'interrupted mid-push',
               'updated_at': now,
             },
             where: "id = ? AND status = 'in_flight'",
@@ -349,10 +367,16 @@ class SyncQueue {
     });
   }
 
-  /// Transient failure → exponential backoff (`min(5s * 2^n, 15min) ± 20%`).
+  /// Transient failure → exponential backoff (`min(5s * 2^n, 15min) ± 20%`),
+  /// retried forever.
   ///
-  /// After [maxRetries] the row becomes `failed` and waits for a manual retry
-  /// from the Sync screen (plan §9.5).
+  /// A push that can never succeed on its own (denied, oversized, unknown
+  /// entity) never reaches this path — those become manual `conflict` rows.
+  /// Everything landing here is transient by construction (offline,
+  /// throttled, 5xx), so parking it for a manual "retry" tap after N attempts
+  /// only guaranteed that every network blip needed a human. The `failed`
+  /// status survives for rows written by older versions; nothing new creates
+  /// it, and `retryBlocked`/`retryRow` still drain it.
   Future<void> markRetry(QueueEntry entry, String error) async {
     await tracedTransaction(
         await _db, 'queue.markRetry', (txn) => _markRetry(txn, entry, error));
@@ -365,15 +389,13 @@ class SyncQueue {
     String error,
   ) async {
     final attempts = entry.retryCount + 1;
-    final exhausted = attempts >= maxRetries;
     await txn.update(
       'sync_queue',
       {
-        'status': exhausted ? 'failed' : 'pending',
+        'status': 'pending',
         'retry_count': attempts,
-        'next_attempt_at': exhausted
-            ? null
-            : nowIsoAt(DateTime.now().add(backoffDelay(attempts - 1))),
+        'next_attempt_at':
+            nowIsoAt(DateTime.now().add(backoffDelay(attempts - 1))),
         'last_error': error,
         'updated_at': nowIso(),
       },
@@ -384,14 +406,12 @@ class SyncQueue {
     if (entity != null && entry.localRef != null) {
       await txn.update(
         entity.localTable,
-        {'sync_state': exhausted ? 'conflict' : 'queued'},
+        {'sync_state': 'queued'},
         where: 'id = ?',
         whereArgs: [entry.localRef],
       );
     }
   }
-
-  static const int maxRetries = 20;
 
   /// Deterministic-with-jitter backoff; [attempt] is 0-based.
   static Duration backoffDelay(int attempt) {

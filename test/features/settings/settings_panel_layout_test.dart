@@ -11,7 +11,7 @@ import 'package:material_lab/core/theme/theme_service.dart';
 import 'package:material_lab/di/service_locator.dart';
 import 'package:material_lab/features/backup/domain/backup_service.dart';
 import 'package:material_lab/features/settings/domain/settings_repository.dart';
-import 'package:material_lab/features/settings/presentation/settings_screen.dart';
+import 'package:material_lab/features/settings/presentation/settings/settings_screen.dart';
 
 class _SettingsMock extends Mock implements SettingsRepository {}
 

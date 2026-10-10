@@ -276,6 +276,16 @@
                                 <span class="label-material">{{ lbl.material_name }}</span>
                             </div>
                             <div class="info-grid">
+                                {% if lbl.is_product %}
+                                <div class="info-item">
+                                    <div class="info-label">Formula Number</div>
+                                    <div class="info-value">{{ lbl.formula_number or '-' }}</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">Batch Number</div>
+                                    <div class="info-value">{{ lbl.batch_number or '-' }}</div>
+                                </div>
+                                {% else %}
                                 <div class="info-item">
                                     <div class="info-label">Supplier</div>
                                     <div class="info-value">{{ lbl.supplier or '-' }}</div>
@@ -284,6 +294,7 @@
                                     <div class="info-label">Truck Number</div>
                                     <div class="info-value">{{ lbl.truck_number or '-' }}</div>
                                 </div>
+                                {% endif %}
                                 <div class="info-item">
                                     <div class="info-label">Quantity</div>
                                     <div class="info-value">{{ lbl.quantity_display }} Ton</div>

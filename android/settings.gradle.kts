@@ -21,6 +21,12 @@ plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
     id("com.android.application") version "9.0.1" apply false
     id("org.jetbrains.kotlin.android") version "2.3.20" apply false
+    // Firebase: reads android/app/google-services.json and generates the
+    // string resources (google_app_id, gcm_defaultSenderId, ...) the
+    // Firebase and Play-services SDKs resolve at runtime. The json declares
+    // package "com.materiallab", so applicationId must match it exactly or
+    // the build fails with "No matching client found".
+    id("com.google.gms.google-services") version "4.5.0" apply false
 }
 
 include(":app")

@@ -273,8 +273,18 @@ void main() {
           hasLength(1),
           reason: 'the item belongs here',
         );
-        // The three tables that share the id are untouched.
-        expect((await fixture.db.query('lab_units')).single['symbol'], 'mg');
+        // The three tables that share the id are untouched. `lab_units`
+        // always holds the seeded default symbols too, so the mg row is
+        // picked out by symbol rather than assumed alone.
+        final units = await fixture.db.query('lab_units');
+        expect(
+          units.where((u) => u['symbol'] == 'mg'),
+          hasLength(1),
+        );
+        expect(
+          units.firstWhere((u) => u['symbol'] == 'mg')['name'],
+          'Milligram',
+        );
         expect(
           (await fixture.db.query('lab_products')).single['name'],
           'Cement bag',
@@ -318,7 +328,12 @@ void main() {
           final products = await fixture.db.query('lab_products');
           expect(products, hasLength(1));
           expect(products.single['name'], 'Cement bag');
-          expect(await fixture.db.query('lab_units'), isEmpty);
+          // The products pull must not register units: only the registry
+          // defaults seeded on every open may be present.
+          final unitSymbols = (await fixture.db.query('lab_units'))
+              .map((u) => '${u['symbol']}')
+              .toSet();
+          expect(unitSymbols, {'%', 'L', 'mL', 'kg', 'g', 'pc'});
           expect(await fixture.db.query('lab_analyses'), isEmpty);
           expect(await fixture.db.query('lab_analysis_items'), isEmpty);
         },

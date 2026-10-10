@@ -71,8 +71,10 @@ class RestoreReport {
 }
 
 /// Orchestrates the offline-first lifecycle (plan §9.3, §13):
-/// timer every 60s · immediate run when connectivity returns · manual "sync
-/// now" · dashboard-driven 5-minute pulls.
+/// timer every 60s · immediate run when connectivity returns · debounced run
+/// seconds after every local mutation · heartbeat probe every 10s that pulls
+/// only when another device wrote · manual "sync now" · dashboard-driven
+/// 5-minute pulls.
 class SyncEngine {
   SyncEngine({
     required this.pushWorker,
@@ -85,6 +87,8 @@ class SyncEngine {
     this.trail,
     this.timerInterval = const Duration(seconds: 60),
     this.dashboardInterval = const Duration(minutes: 5),
+    this.heartbeatInterval = const Duration(seconds: 10),
+    this.mutationDelay = const Duration(seconds: 2),
   });
 
   final PushWorker pushWorker;
@@ -133,12 +137,22 @@ class SyncEngine {
   final Duration timerInterval;
   final Duration dashboardInterval;
 
+  /// How often the shared heartbeat document is probed for other devices'
+  /// writes (see [_pollHeartbeat]). One tiny document read per interval.
+  final Duration heartbeatInterval;
+
+  /// Coalescing window for [scheduleSync]: a burst of local writes (an import,
+  /// a form save + its history rows) triggers one cycle, not one per row.
+  final Duration mutationDelay;
+
   final StreamController<SyncStatusSnapshot> _status =
       StreamController<SyncStatusSnapshot>.broadcast();
 
   StreamSubscription<bool>? _connectivitySubscription;
   Timer? _timer;
   Timer? _dashboardTimer;
+  Timer? _heartbeatTimer;
+  Timer? _mutationTimer;
   bool _running = false;
   bool _inFlight = false;
   bool _disposed = false;
@@ -161,8 +175,62 @@ class SyncEngine {
       }
     });
     _timer = Timer.periodic(timerInterval, (_) => unawaited(syncNow(reason: 'timer')));
+    _heartbeatTimer = Timer.periodic(
+      heartbeatInterval,
+      (_) => unawaited(_pollHeartbeat()),
+    );
     unawaited(syncNow(reason: 'start'));
   }
+
+  /// A local mutation landed in the outbox ([SyncQueue.onEnqueued]: every
+  /// repository funnels through `enqueue`). Push it within seconds instead of
+  /// making the user wait for the 60 s timer or tap "sync now".
+  ///
+  /// Debounced and coalesced: safe to call per write, even in import loops.
+  /// Quiet when stopped/disposed; the start/connectivity/timer triggers cover
+  /// anything scheduled while offline or before [start].
+  void scheduleSync({bool pullOnly = false}) {
+    if (_disposed || !_running) return;
+    _mutationTimer?.cancel();
+    _mutationTimer = Timer(mutationDelay, () {
+      if (_disposed || !_running) return;
+      unawaited(syncNow(reason: 'mutation', pullOnly: pullOnly));
+    });
+  }
+
+  /// Heartbeat leg of the realtime story: one tiny `meta/state` read per
+  /// [heartbeatInterval]; a full pull walk happens only when the heartbeat
+  /// advanced past what this device has seen — i.e. another device pushed.
+  ///
+  /// Own pushes mark the heartbeat seen at write time (see the push worker),
+  /// so this never pulls on our own writes. The 60 s timer stays as the
+  /// fallback for a bump that was lost with its push.
+  Future<void> _pollHeartbeat() async {
+    if (_disposed || !_running || _inFlight) return;
+    if (!connectivity.isOnline || !pushWorker.remote.isSignedIn) return;
+    final organizationId = pushWorker.session.organizationId;
+    if (organizationId.isEmpty) return;
+    try {
+      final beat = await pushWorker.remote.readHeartbeat(organizationId);
+      if (!beat.exists) return;
+      final marker = _heartbeatMarker(beat);
+      if (marker.isEmpty || marker.startsWith('#')) return;
+      final seen = await metadata.get(SyncMetadata.heartbeatSeenMarkerKey);
+      if (seen == marker) return;
+      await metadata.set(SyncMetadata.heartbeatSeenMarkerKey, marker);
+      await metadata.markHeartbeatSeen(DateTime.now());
+      await syncNow(reason: 'heartbeat', pullOnly: true);
+    } on Object {
+      // Best-effort probe by design; failures are silent, the timer covers.
+    }
+  }
+
+  /// Identity of a heartbeat write: the server's `lastWriteAt` plus the
+  /// document version, so two pushes inside one millisecond still differ.
+  /// The meta/state document carries no `updatedAt` envelope field — the
+  /// timestamp lives in `lastWriteAt` (see the rules' `hasOnly` list).
+  static String _heartbeatMarker(RemoteDocument beat) =>
+      '${beat.data['lastWriteAt'] ?? beat.updatedAt ?? ''}#${beat.version}';
 
   /// Dashboard visible: pull at most every 5 minutes (plan §9.3).
   void onDashboardVisible() {
@@ -446,6 +514,8 @@ class SyncEngine {
     _running = false;
     _timer?.cancel();
     _dashboardTimer?.cancel();
+    _heartbeatTimer?.cancel();
+    _mutationTimer?.cancel();
     await _connectivitySubscription?.cancel();
     await _status.close();
   }
@@ -464,14 +534,20 @@ SyncEngine buildSyncEngine({
   required RemoteDataSource remote,
   PullWorker? auditPullWorker,
   AuditTrail? trail,
-}) =>
-    SyncEngine(
-      pushWorker: pushWorker,
-      pullWorker: pullWorker,
-      queue: queue,
-      metadata: metadata,
-      audit: audit,
-      connectivity: connectivity,
-      auditPullWorker: auditPullWorker,
-      trail: trail,
-    );
+}) {
+  final engine = SyncEngine(
+    pushWorker: pushWorker,
+    pullWorker: pullWorker,
+    queue: queue,
+    metadata: metadata,
+    audit: audit,
+    connectivity: connectivity,
+    auditPullWorker: auditPullWorker,
+    trail: trail,
+  );
+  // Every local mutation funnels through `enqueue`, so this one hook turns
+  // all of them — inspections, lab, reference, members — into a debounced
+  // push seconds later. Set here (not in the locator) so tests get it too.
+  queue.onEnqueued = engine.scheduleSync;
+  return engine;
+}

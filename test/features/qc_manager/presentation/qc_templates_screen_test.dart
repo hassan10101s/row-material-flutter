@@ -12,8 +12,8 @@ import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_repositories.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_template.dart';
 import 'package:material_lab/features/qc_manager/presentation/cubit/qc_templates_cubit.dart';
-import 'package:material_lab/features/qc_manager/presentation/qc_template_editor_screen.dart';
-import 'package:material_lab/features/qc_manager/presentation/qc_templates_screen.dart';
+import 'package:material_lab/features/qc_manager/presentation/templates/qc_template_editor_screen.dart';
+import 'package:material_lab/features/qc_manager/presentation/templates/qc_templates_screen.dart';
 import 'package:material_lab/features/qc_manager/presentation/widgets/qc_pill.dart';
 
 class _TemplatesMock extends Mock implements QcTemplateRepository {}

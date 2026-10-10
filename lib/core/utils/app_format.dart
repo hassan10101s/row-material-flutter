@@ -141,6 +141,8 @@ String referenceValueText(Object? value) {
 }
 
 /// with_reference_unit: idempotent {value, unit} enrichment.
+/// Preserves an existing `required` flag so marking a field مطلوب survives
+/// re-enrichment (material/product reference -> inspection reference).
 Object? withReferenceUnit(Object? value, String unit) {
   Object? baseValue = unwrapReferenceValue(value);
   if (baseValue is Map) {
@@ -149,8 +151,55 @@ Object? withReferenceUnit(Object? value, String unit) {
   final normalizedUnit = unit.trim().isNotEmpty
       ? unit.trim()
       : referenceUnitText(value);
-  if (normalizedUnit.isNotEmpty) {
-    return {'value': baseValue, 'unit': normalizedUnit};
+  final wasRequired = isReferenceRequired(value);
+  if (normalizedUnit.isNotEmpty || wasRequired) {
+    final out = <String, dynamic>{'value': baseValue};
+    if (normalizedUnit.isNotEmpty) out['unit'] = normalizedUnit;
+    if (wasRequired) out['required'] = true;
+    // Plain value with no unit and no flag stays unwrapped for legacy rows.
+    if (out.length == 1) return baseValue;
+    return out;
   }
   return baseValue;
+}
+
+/// Whether a stored reference value is marked مطلوب (required).
+///
+/// Accepts every legacy shape: plain strings/numbers (never required), and
+/// maps like `{value, unit, required}` — including nested `{value: {...}}`
+/// produced by repeated [withReferenceUnit] enrichment. Truthy forms
+/// (`true`, `1`, `'1'`, `'true'`) all count.
+bool isReferenceRequired(Object? value) {
+  var current = value;
+  for (var i = 0; i < 8; i++) {
+    if (current is! Map) return false;
+    final raw = current['required'];
+    if (raw == true) return true;
+    if (raw == 1) return true;
+    if (raw is String) {
+      final t = raw.trim().toLowerCase();
+      if (t == 'true' || t == '1') return true;
+    }
+    final nested = current['value'];
+    if (nested is Map) {
+      current = nested;
+    } else {
+      return false;
+    }
+  }
+  return false;
+}
+
+/// Returns [value] with the مطلوب flag set/cleared, preserving any
+/// existing display value and unit. Plain legacy values become
+/// `{value, unit?, required?}` maps only when needed.
+Object? withReferenceRequired(Object? value, bool required, [String? unit]) {
+  final baseValue = unwrapReferenceValue(value);
+  final display = baseValue is Map ? referenceValueText(baseValue) : baseValue;
+  final normalizedUnit = (unit ?? referenceUnitText(value)).trim();
+  if (!required && normalizedUnit.isEmpty) return display;
+  final out = <String, dynamic>{'value': display};
+  if (normalizedUnit.isNotEmpty) out['unit'] = normalizedUnit;
+  if (required) out['required'] = true;
+  return out;
 }

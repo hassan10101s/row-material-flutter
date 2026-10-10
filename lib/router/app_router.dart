@@ -9,6 +9,7 @@ import '../core/auth/app_session.dart';
 import '../core/auth/permissions.dart';
 import '../core/locale/locale_service.dart';
 import '../core/network/connectivity_service.dart';
+import '../core/responsive/form_factor.dart';
 import '../core/sync/sync_metadata.dart';
 import '../core/sync/sync_queue.dart';
 import '../core/theme/theme_service.dart';
@@ -16,23 +17,23 @@ import '../design_system/animations/app_animations.dart';
 import '../di/platform_ports.dart';
 import '../di/service_locator.dart';
 import '../features/audit/presentation/audit_controller.dart';
-import '../features/audit/presentation/audit_screen.dart';
+import '../features/audit/presentation/audit/audit_screen.dart';
 import '../features/auth/domain/auth_repository.dart';
 import '../features/auth/presentation/cubit/create_organization_cubit.dart';
 import '../features/auth/presentation/cubit/login_cubit.dart';
-import '../features/auth/presentation/create_organization_screen.dart';
-import '../features/auth/presentation/login_screen.dart';
-import '../features/auth/presentation/waiting_activation_screen.dart';
+import '../features/auth/presentation/create_organization/create_organization_screen.dart';
+import '../features/auth/presentation/login/login_screen.dart';
+import '../features/auth/presentation/waiting_activation/waiting_activation_screen.dart';
 
 import '../features/dashboard/domain/dashboard_repository.dart';
 import '../features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import '../features/dashboard/presentation/cubit/dashboard_kpis_cubit.dart';
-import '../features/dashboard/presentation/dashboard_screen.dart';
+import '../features/dashboard/presentation/dashboard/dashboard_screen.dart';
 import '../features/inspections/domain/inspection_repository.dart';
 import '../features/inspections/presentation/cubit/inspection_form_cubit.dart';
 import '../features/inspections/presentation/cubit/inspections_cubit.dart';
-import '../features/inspections/presentation/inspection_center_screen.dart';
-import '../features/inspections/presentation/inspection_form_screen.dart';
+import '../features/inspections/presentation/center/inspection_center_screen.dart';
+import '../features/inspections/presentation/form/inspection_form_screen.dart';
 import '../features/lab/presentation/cubit/lab_cubit.dart';
 import '../features/lab/presentation/lab_screen.dart';
 import '../features/organizations/domain/organization_repository.dart';
@@ -41,27 +42,27 @@ import '../features/qc_manager/presentation/cubit/qc_goals_cubit.dart';
 import '../features/qc_manager/presentation/cubit/qc_inspection_sheet_cubit.dart';
 import '../features/qc_manager/presentation/cubit/qc_inspections_cubit.dart';
 import '../features/qc_manager/presentation/cubit/qc_ncr_cubit.dart';
-import '../features/qc_manager/presentation/qc_goal_detail_screen.dart';
+import '../features/qc_manager/presentation/goals/qc_goal_detail_screen.dart';
 import '../features/qc_manager/presentation/cubit/qc_sops_cubit.dart';
 import '../features/qc_manager/presentation/cubit/qc_templates_cubit.dart';
-import '../features/qc_manager/presentation/qc_goals_screen.dart';
-import '../features/qc_manager/presentation/qc_inspection_sheet_screen.dart';
-import '../features/qc_manager/presentation/qc_inspections_screen.dart';
-import '../features/qc_manager/presentation/qc_ncr_dashboard_screen.dart';
-import '../features/qc_manager/presentation/qc_ncr_detail_screen.dart';
-import '../features/qc_manager/presentation/qc_ncr_list_screen.dart';
-import '../features/qc_manager/presentation/qc_management_screen.dart';
-import '../features/qc_manager/presentation/qc_sops_screen.dart';
-import '../features/qc_manager/presentation/qc_templates_screen.dart';
-import '../features/members/presentation/members_screen.dart';
+import '../features/qc_manager/presentation/goals/qc_goals_screen.dart';
+import '../features/qc_manager/presentation/inspections/qc_inspection_sheet_screen.dart';
+import '../features/qc_manager/presentation/inspections/qc_inspections_screen.dart';
+import '../features/qc_manager/presentation/ncr/qc_ncr_dashboard_screen.dart';
+import '../features/qc_manager/presentation/ncr/qc_ncr_detail_screen.dart';
+import '../features/qc_manager/presentation/ncr/qc_ncr_list_screen.dart';
+import '../features/qc_manager/presentation/management/qc_management_screen.dart';
+import '../features/qc_manager/presentation/sops/qc_sops_screen.dart';
+import '../features/qc_manager/presentation/templates/qc_templates_screen.dart';
+import '../features/members/presentation/members/members_screen.dart';
 import '../features/reference/domain/reference_repository.dart';
 import '../features/reference/presentation/reference_screen.dart';
 import '../features/reports/domain/report_repository.dart';
 import '../features/reports/presentation/cubit/reports_cubit.dart';
 import '../features/settings/domain/export_root_service.dart';
-import '../features/settings/presentation/settings_screen.dart';
+import '../features/settings/presentation/settings/settings_screen.dart';
 import '../features/shell/presentation/app_shell.dart';
-import '../features/sync/presentation/sync_screen.dart';
+import '../features/sync/presentation/sync/sync_screen.dart';
 
 /// Route names used for navigation.
 abstract final class AppRoutes {
@@ -207,7 +208,10 @@ class AppRouter {
                   repo: getIt<InspectionRepository>(),
                   reference: getIt<ReferenceRepository>(),
                 )..loadMaterials(),
+                // Stepped wizard on phones, full design-system form on
+                // desktop (router is a form-factor authority).
                 child: InspectionFormScreen(
+                  wizard: FormFactor.current.isMobile,
                   onSaved: () => GoRouter.of(c).go(AppRoutes.inspections),
                 ),
               ),

@@ -10,8 +10,8 @@ import 'package:material_lab/features/qc_manager/domain/ncr_kpis.dart';
 import 'package:material_lab/features/qc_manager/domain/ncr_report_repository.dart';
 import 'package:material_lab/features/qc_manager/domain/ncr_report_row.dart';
 import 'package:material_lab/features/qc_manager/presentation/cubit/qc_ncr_cubit.dart';
-import 'package:material_lab/features/qc_manager/presentation/qc_ncr_detail_screen.dart';
-import 'package:material_lab/features/qc_manager/presentation/qc_ncr_list_screen.dart';
+import 'package:material_lab/features/qc_manager/presentation/ncr/qc_ncr_detail_screen.dart';
+import 'package:material_lab/features/qc_manager/presentation/ncr/qc_ncr_list_screen.dart';
 
 class _RepoMock extends Mock implements QcNcReportRepository {}
 

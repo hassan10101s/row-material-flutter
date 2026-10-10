@@ -209,7 +209,7 @@ class BackupManager implements BackupService {
     await target.parent.create(recursive: true);
 
     await DbTrace.run('backup.walCheckpoint',
-        () => db.execute('PRAGMA wal_checkpoint(FULL)'));
+        () => db.rawQuery('PRAGMA wal_checkpoint(FULL)'));
     await DbTrace.run('backup.vacuumInto',
         () => db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'"));
 
@@ -243,7 +243,7 @@ class BackupManager implements BackupService {
       // connection, while the UI is already reading: a full-database rewrite
       // holds the connection for as long as the file takes.
       await DbTrace.run('autoBackup.walCheckpoint',
-          () => db.execute('PRAGMA wal_checkpoint(FULL)'));
+          () => db.rawQuery('PRAGMA wal_checkpoint(FULL)'));
       await DbTrace.run('autoBackup.vacuumInto',
           () => db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'"));
 
@@ -307,7 +307,7 @@ class BackupManager implements BackupService {
       // Post-restore checkpoint parity with controller.py:340 (TRUNCATE so the
       // restored file is not shadowed by stale WAL frames).
       final restoredDb = await dbHelper.database;
-      await restoredDb.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+      await restoredDb.rawQuery('PRAGMA wal_checkpoint(TRUNCATE)');
     } catch (e) {
       throw AppError(AppErrors.backupRestoreFailed(e));
     } finally {
@@ -390,7 +390,7 @@ class BackupManager implements BackupService {
       final timestamp = nowIso();
       final idMap = <int, int>{};
 
-      await db.execute('PRAGMA foreign_keys = OFF');
+      await db.rawQuery('PRAGMA foreign_keys = OFF');
       try {
         await db.transaction((txn) async {
           final newMaterials = <List<Object?>>[];
@@ -501,7 +501,7 @@ class BackupManager implements BackupService {
           }
         });
       } finally {
-        await db.execute('PRAGMA foreign_keys = ON');
+        await db.rawQuery('PRAGMA foreign_keys = ON');
       }
     } finally {
       await source?.close();

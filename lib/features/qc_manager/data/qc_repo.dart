@@ -41,6 +41,21 @@ Map<String, dynamic> qcInsertable(Map<String, dynamic> row, String pk) {
   return out;
 }
 
+/// Units registry: registers a unit symbol used by a QC save into `lab_units`
+/// so the Units table holds every program unit and every picker inherits it.
+/// Never throws and never overwrites curated rows.
+Future<void> qcEnsureUnit(DatabaseExecutor exec, String? symbol) async {
+  final s = (symbol ?? '').trim();
+  if (s.isEmpty) return;
+  try {
+    await exec.rawInsert(
+      'INSERT OR IGNORE INTO lab_units (symbol, is_active, created_at) '
+      'VALUES (?, 1, ?)',
+      [s, nowIso()],
+    );
+  } catch (_) {}
+}
+
 /// The row as updated: creation facts are never rewritten.
 Map<String, dynamic> qcUpdatable(
   Map<String, dynamic> row,
@@ -540,6 +555,7 @@ class QcTemplateRepo extends QcLocalRepo {
             'section_id': sectionId,
           }, 'item_id'),
         );
+        await qcEnsureUnit(txn, item.unit);
       }
     }
   }
@@ -799,6 +815,19 @@ class QcInspectionRepo extends QcLocalRepo {
     return (rows.first['n'] as num?)?.toInt() ?? 0;
   }
 
+  Future<Set<int>> templateIdsInspectedOn(
+    String day, {
+    DatabaseExecutor? exec,
+  }) async {
+    final rows = await use(exec, await db).rawQuery(
+      'SELECT DISTINCT template_id AS id FROM qc_inspections '
+      'WHERE $qcAliveFilter AND '
+      "substr(COALESCE(inspection_date,created_at,''),1,10) = ?",
+      [day],
+    );
+    return {for (final r in rows) (r['id'] as num).toInt()};
+  }
+
   /// Creates the inspection and one unanswered `qc_responses` row per item of
   /// the template.
   ///
@@ -810,6 +839,7 @@ class QcInspectionRepo extends QcLocalRepo {
     DatabaseExecutor? exec,
   }) async {
     Future<int> run(DatabaseExecutor txn) async {
+      await qcEnsureUnit(txn, inspection.qtyUnit);
       final inspectionId = await txn.insert(
         'qc_inspections',
         qcInsertable(inspection.toMap(withId: false), 'inspection_id'),
@@ -844,7 +874,9 @@ class QcInspectionRepo extends QcLocalRepo {
     QcInspection inspection, {
     DatabaseExecutor? exec,
   }) async {
-    await use(exec, await db).update(
+    final dbExec = use(exec, await db);
+    await qcEnsureUnit(dbExec, inspection.qtyUnit);
+    await dbExec.update(
       'qc_inspections',
       qcUpdatable(inspection.toMap(withId: false), 'inspection_id'),
       where: 'inspection_id = ?',
@@ -1076,6 +1108,7 @@ class QcNcCapaRepo extends QcLocalRepo {
     DatabaseExecutor? exec,
   }) async {
     Future<int> run(DatabaseExecutor txn) async {
+      await qcEnsureUnit(txn, finding.qtyUnit);
       final findingId = await txn.insert(
         'qc_findings_nc',
         qcInsertable(finding.toMap(withId: false), 'finding_id'),
@@ -1092,6 +1125,7 @@ class QcNcCapaRepo extends QcLocalRepo {
     DatabaseExecutor? exec,
   }) async {
     Future<void> run(DatabaseExecutor txn) async {
+      await qcEnsureUnit(txn, finding.qtyUnit);
       await txn.update(
         'qc_findings_nc',
         qcUpdatable(finding.toMap(withId: false), 'finding_id'),
@@ -1278,6 +1312,7 @@ class QcGoalRepo extends QcLocalRepo {
     if (clash.isNotEmpty) {
       throw StateError('A QC goal with code "$code" already exists');
     }
+    await qcEnsureUnit(txn, goal.targetUnit);
     return txn.insert(
       'qc_goals',
       qcInsertable(goal.toMap(withId: false), 'goal_id'),
@@ -1308,6 +1343,7 @@ class QcGoalRepo extends QcLocalRepo {
       throw StateError('Cannot save a QC goal with no id');
     }
     final txn = use(exec, await db);
+    await qcEnsureUnit(txn, goal.targetUnit);
     final existing = await txn.query(
       'qc_goals',
       columns: ['completed_by', 'completed_by_name'],
@@ -1444,14 +1480,18 @@ class QcGoalRepo extends QcLocalRepo {
   /// A measured target on a goal. `target` is a number rather than free text so
   /// progress is a comparison, not a reading of a sentence.
   Future<int> addKpi(QcGoalKpi kpi, {DatabaseExecutor? exec}) async {
-    return use(
-      exec,
-      await db,
-    ).insert('qc_goal_kpis', qcInsertable(kpi.toMap(withId: false), 'kpi_id'));
+    final dbExec = use(exec, await db);
+    await qcEnsureUnit(dbExec, kpi.unit);
+    return dbExec.insert(
+      'qc_goal_kpis',
+      qcInsertable(kpi.toMap(withId: false), 'kpi_id'),
+    );
   }
 
   Future<void> saveKpi(QcGoalKpi kpi, {DatabaseExecutor? exec}) async {
-    await use(exec, await db).update(
+    final dbExec = use(exec, await db);
+    await qcEnsureUnit(dbExec, kpi.unit);
+    await dbExec.update(
       'qc_goal_kpis',
       qcUpdatable(kpi.toMap(withId: false), 'kpi_id'),
       where: 'kpi_id = ?',

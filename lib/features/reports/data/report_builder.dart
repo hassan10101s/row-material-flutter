@@ -1,6 +1,7 @@
 import 'package:intl/intl.dart';
 
 import '../../lab/core/formula_engine.dart';
+import '../../qc_manager/data/ncr_export_service.dart';
 import '../../reference/data/reference_repo.dart';
 import '../../../core/domain/rules.dart';
 import '../../../core/security/qr_builder.dart';
@@ -231,16 +232,19 @@ Map<String, dynamic> buildInspectionContext(
   }
 
   final statusTimeline = buildStatusTimeline(inspection);
-final qrPayloadText = buildQrPayloadText(
-      inspection: inspection,
-      physicalData: physicalData,
-      chemicalData: chemicalData,
-      encryptKey: encryptionSecret,
-    );
+  // Entry-code-only sealed pointer (slim, camera-friendly QR).
+  final qrPayloadText = buildQrPayloadText(
+    inspection: inspection,
+    encryptKey: encryptionSecret,
+  );
 
   final decisionReason = '${inspection['decision_reason'] ?? ''}'.trim();
+  final isProduct = '${inspection['inspection_kind'] ?? 'raw'}' == 'product';
   return {
     'inspection_id': inspection['id'] ?? '-',
+    'is_product': isProduct,
+    'formula_number': inspection['formula_number'] ?? '-',
+    'batch_number': inspection['batch_number'] ?? '-',
     'date': inspection['inspection_date'],
     'expiry_date': inspection['expiry_date'] ?? '-',
     'sample_number': inspection['entry_code'],
@@ -285,23 +289,11 @@ Map<String, dynamic> buildLabelContext(
   double heightCm = 5,
   List<int>? encryptionSecret,
 }) {
-  final sampleNames = resolveSampleNames(inspection['sample_names']);
-  final physicalData = buildPhysicalData(
-    inspection['physical_reference'] as Map<String, dynamic>? ?? {},
-    inspection['physical_results'] as Map<String, dynamic>? ?? {},
-    sampleNames,
+  // Entry-code-only sealed pointer (slim, camera-friendly QR).
+  final qrPayloadText = buildQrPayloadText(
+    inspection: inspection,
+    encryptKey: encryptionSecret,
   );
-  final chemicalData = buildChemicalData(
-    inspection['chemical_reference'] as Map<String, dynamic>? ?? {},
-    inspection['chemical_results'] as Map<String, dynamic>? ?? {},
-    sampleNames,
-  );
-final qrPayloadText = buildQrPayloadText(
-      inspection: inspection,
-      physicalData: physicalData,
-      chemicalData: chemicalData,
-      encryptKey: encryptionSecret,
-    );
   return {
     'inspection': inspection,
     'qr_payload_text': qrPayloadText,
@@ -322,21 +314,9 @@ Map<String, dynamic> buildBatchLabelsContext(
 }) {
   final labels = <Map<String, dynamic>>[];
   for (final insp in inspections) {
-    final sampleNames = resolveSampleNames(insp['sample_names']);
-    final physicalData = buildPhysicalData(
-      insp['physical_reference'] as Map<String, dynamic>? ?? {},
-      insp['physical_results'] as Map<String, dynamic>? ?? {},
-      sampleNames,
-    );
-    final chemicalData = buildChemicalData(
-      insp['chemical_reference'] as Map<String, dynamic>? ?? {},
-      insp['chemical_results'] as Map<String, dynamic>? ?? {},
-      sampleNames,
-);
-final qrPayloadText = buildQrPayloadText(
+    // Entry-code-only sealed pointer (slim, camera-friendly QR).
+    final qrPayloadText = buildQrPayloadText(
       inspection: insp,
-      physicalData: physicalData,
-      chemicalData: chemicalData,
       encryptKey: encryptionSecret,
     );
     final decisionStatus = '${insp['decision_status'] ?? ''}';
@@ -344,6 +324,9 @@ final qrPayloadText = buildQrPayloadText(
     labels.add({
       'id': insp['id'] ?? '',
       'entry_code': insp['entry_code'] ?? '',
+      'is_product': '${insp['inspection_kind'] ?? 'raw'}' == 'product',
+      'formula_number': insp['formula_number'] ?? '',
+      'batch_number': insp['batch_number'] ?? '',
       'material_name': insp['material_name'] ?? '',
       'inspection_date': insp['inspection_date'] ?? '',
       'supplier': insp['supplier'] ?? '',
@@ -1168,5 +1151,92 @@ Map<String, dynamic> buildLabReportContext(
         settings['department_label'] ?? 'Quality Assurance Department',
     'report_logo_data_uri': settings['report_logo_data_uri'] ?? '',
     'generation_time': nowIso(),
+  };
+}
+
+/// Port of the NCR export context: one map describing the whole bundle
+/// (scope, KPIs, top defects, aging, findings) for
+/// `assets/templates/ncr_report_template.html`.
+///
+/// Values stay verbatim database tokens (codes, severities, statuses) so an
+/// exported file greps back against the database; only the pre-formatted
+/// display strings (`*_display`) are humanized. Same convention as every
+/// other `build*Context` in this file.
+Map<String, dynamic> buildNcrReportContext(NcrExportBundle bundle) {
+  final k = bundle.kpis;
+  String pct(double? value) =>
+      value == null ? '-' : '${value.toStringAsFixed(1)}%';
+  String days(double? value) =>
+      value == null ? '-' : '${value.toStringAsFixed(1)} d';
+  final agingTotal = bundle.aging.fold<int>(0, (sum, b) => sum + b.count);
+  String share(int count) => agingTotal == 0
+      ? '0.0%'
+      : '${(count / agingTotal * 100).toStringAsFixed(1)}%';
+
+  return {
+    'scope': bundle.filters.describe,
+    'generated_at': nowIsoAt(bundle.generatedAt),
+    'generated_by':
+        bundle.generatedBy.isEmpty ? '-' : bundle.generatedBy,
+    'department_label': 'Quality Assurance Department',
+    'report_logo_data_uri': '',
+    'total': bundle.rows.length,
+    'kpis': {
+      'total': k.total,
+      'open': k.open,
+      'assigned': k.assigned,
+      'in_progress': k.inProgress,
+      'verified': k.verified,
+      'closed': k.closed,
+      'rejected': k.rejected,
+      'critical': k.critical,
+      'major': k.major,
+      'minor': k.minor,
+      'overdue': k.overdue,
+      'closed_on_time': k.closedOnTime,
+      'capa_linked': k.capaLinked,
+      'capa_overdue': k.capaOverdue,
+      'on_time_closure_display': pct(k.onTimeClosurePct),
+      'critical_open_display': pct(k.criticalOpenPct),
+      'overdue_display': pct(k.overduePct),
+      'mttc_display': days(k.mttcDays),
+      'mttv_display': days(k.mttvDays),
+    },
+    'top_defects': [
+      for (final d in bundle.topDefects)
+        {
+          'label': d.label,
+          'code': d.code,
+          'category': d.category,
+          'count': d.count,
+          'critical_count': d.criticalCount,
+        },
+    ],
+    'aging': [
+      for (final b in bundle.aging)
+        {'label': b.label, 'count': b.count, 'share': share(b.count)},
+    ],
+    'rows': [
+      for (final r in bundle.rows)
+        {
+          'reference': r.reference,
+          'description': r.description,
+          'severity': r.severity,
+          'status': r.status,
+          'inspection': r.inspectionRefId.isEmpty
+              ? (r.inspectorName.isEmpty ? '-' : r.inspectorName)
+              : r.inspectionRefId,
+          'lot_batch':
+              r.lotNo.isNotEmpty ? r.lotNo : r.batchNo,
+          'assignee':
+              r.assignedToName.isEmpty ? '-' : r.assignedToName,
+          'due': r.dueDate.isEmpty ? '-' : r.dueDate,
+          'is_overdue': r.isOverdue,
+          'overdue_display': r.isOverdue ? 'YES' : 'NO',
+          'capa': r.capaStatus.isEmpty ? '-' : r.capaStatus,
+          'created': r.createdAt.isEmpty ? '-' : r.createdAt,
+          'closed': r.closedAt.isEmpty ? '-' : r.closedAt,
+        },
+    ],
   };
 }

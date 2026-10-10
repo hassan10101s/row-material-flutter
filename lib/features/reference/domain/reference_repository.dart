@@ -59,6 +59,20 @@ abstract interface class ReferenceRepository {
   /// Soft-deletes a material (`active = 0`), matching `materials_delete`.
   Future<void> deleteMaterial(int id);
 
+  // ── Products (for product inspections) ─────────────────────────
+
+  /// Active lab products for the product-inspection form's product picker.
+  /// Each row carries its analysis ranges (`ranges`).
+  Future<List<Map<String, dynamic>>> listProductsForInspection();
+
+  /// The enriched product inspection context: product name/code, the next free
+  /// entry code for [inspectionDate], and the physical/chemical reference maps
+  /// built from the product's analysis ranges. Throws when unknown/inactive.
+  Future<Map<String, dynamic>> getProductForInspection(
+    int id, {
+    String? inspectionDate,
+  });
+
   // ── Entry code ─────────────────────────────────────────────────
 
   /// `<code>-<yyyymmdd>-<seq>` where `seq` continues the highest already issued
@@ -87,6 +101,14 @@ abstract interface class ReferenceRepository {
     String name = '',
     String dimension = '',
   });
+
+  /// Registers a unit symbol in `lab_units` without touching curated
+  /// name/dimension. Used by saves so every unit in the program appears in
+  /// the Units table and every picker inherits it.
+  Future<void> ensureUnit(String symbol);
+
+  /// Reference counts per symbol across every table that stores units.
+  Future<Map<String, int>> unitUsageCounts();
 
   Future<void> deleteUnit(String symbol);
 }

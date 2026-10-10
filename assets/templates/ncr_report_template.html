@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>تقرير عدم المطابقة - {{ scope }}</title>
+    {% if base_url %}<base href="{{ base_url }}">{% endif %}
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <style>
+        @page {
+            size: A4 landscape;
+            margin: 9mm 8mm;
+        }
+
+        :root {
+            --navy-900: #000000;
+            --navy-800: #000000;
+            --navy-700: #1a1a1a;
+            --teal-600: #000000;
+            --teal-100: #dff5f4;
+            --gold-500: #c4972f;
+            --gold-100: #fbf2dc;
+            --slate-900: #182537;
+            --slate-700: #43566d;
+            --slate-500: #6d7f93;
+            --slate-300: #ccd6e2;
+            --slate-200: #dde5ef;
+            --slate-100: #f3f6fa;
+            --white: #ffffff;
+            --success-bg: #e3f7ef;
+            --success-text: #0b6b47;
+            --warning-bg: #fff3dc;
+            --warning-text: #9b5d00;
+            --danger-bg: #fde7e7;
+            --danger-text: #a12626;
+            --shadow: 0 14px 34px rgba(11, 31, 51, 0.08);
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', 'IBM Plex Sans Arabic', "Segoe UI", Tahoma, Arial, sans-serif;
+            color: var(--slate-900);
+            background: var(--white);
+            line-height: 1.45;
+        }
+
+        .page {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .report-shell {
+            position: relative;
+            z-index: 1;
+            border: 1px solid var(--slate-300);
+            border-radius: 18px;
+            overflow: hidden;
+            box-shadow: var(--shadow);
+            background: var(--white);
+        }
+
+        .top-band {
+            height: 8px;
+            background: linear-gradient(90deg, #000000, #334155, #000000);
+        }
+
+        .header {
+            padding: 18px 20px 14px;
+            border-bottom: 1px solid var(--slate-200);
+            background:
+                linear-gradient(180deg, rgba(243, 246, 250, 0.9), rgba(255, 255, 255, 1));
+        }
+
+        .header-grid {
+            display: grid;
+            grid-template-columns: 112px 1fr 112px;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-side {
+            min-height: 72px;
+        }
+
+        .brand-logo {
+            width: 92px;
+            height: 92px;
+            margin: 0 auto;
+            object-fit: contain;
+            display: block;
+        }
+
+        .brand-center {
+            text-align: center;
+        }
+
+        .eyebrow {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 999px;
+            background: var(--gold-100);
+            color: var(--gold-500);
+            font-size: 11px;
+            font-weight: 800;
+            letter-spacing: 0.9px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .title {
+            margin: 0;
+            color: var(--navy-900);
+            font-size: 24px;
+            font-weight: 900;
+            letter-spacing: 0.2px;
+        }
+
+        .subtitle {
+            margin: 6px 0 0;
+            color: var(--slate-700);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .meta-strip {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .meta-card {
+            border: 1px solid var(--slate-200);
+            border-radius: 12px;
+            background: var(--slate-100);
+            padding: 10px 12px;
+        }
+
+        .meta-card .label {
+            display: block;
+            font-size: 10px;
+            color: var(--slate-500);
+            margin-bottom: 4px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .meta-card .value {
+            display: block;
+            font-size: 13px;
+            color: var(--navy-900);
+            font-weight: 800;
+        }
+
+        .body {
+            padding: 18px 20px 20px;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(8, minmax(0, 1fr));
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+
+        .summary-card {
+            border: 1px solid var(--slate-200);
+            border-radius: 14px;
+            padding: 12px;
+            background: var(--white);
+            min-height: 92px;
+        }
+
+        .summary-card .summary-label {
+            display: block;
+            color: var(--slate-500);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+
+        .summary-card .summary-value {
+            display: block;
+            font-size: 24px;
+            font-weight: 900;
+            color: var(--navy-900);
+            line-height: 1;
+        }
+
+        .summary-card .summary-note {
+            display: block;
+            margin-top: 7px;
+            font-size: 11px;
+            color: var(--slate-700);
+            font-weight: 600;
+        }
+
+        .summary-card.primary {
+            background: linear-gradient(145deg, var(--navy-900), var(--navy-700));
+            border-color: transparent;
+        }
+
+        .summary-card.primary .summary-label,
+        .summary-card.primary .summary-value,
+        .summary-card.primary .summary-note {
+            color: var(--white);
+        }
+
+        .summary-card.success {
+            background: var(--success-bg);
+        }
+
+        .summary-card.success .summary-value {
+            color: var(--success-text);
+        }
+
+        .summary-card.warning {
+            background: var(--warning-bg);
+        }
+
+        .summary-card.warning .summary-value {
+            color: var(--warning-text);
+        }
+
+        .summary-card.danger {
+            background: var(--danger-bg);
+        }
+
+        .summary-card.danger .summary-value {
+            color: var(--danger-text);
+        }
+
+        .section-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin: 14px 0 10px;
+        }
+
+        .section-title {
+            margin: 0;
+            font-size: 16px;
+            font-weight: 900;
+            color: var(--navy-900);
+        }
+
+        .section-caption {
+            color: var(--slate-500);
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .panel-card {
+            border: 1px solid var(--slate-200);
+            border-radius: 16px;
+            overflow: hidden;
+            background: linear-gradient(180deg, #fbfdff, #ffffff);
+            page-break-inside: avoid;
+            margin-bottom: 14px;
+        }
+
+        .table-wrap {
+            padding: 12px 14px 14px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        thead {
+            display: table-header-group;
+        }
+
+        th {
+            background: #ebf2fa;
+            color: var(--navy-900);
+            font-size: 10px;
+            font-weight: 800;
+            padding: 9px 6px;
+            border: 1px solid var(--slate-200);
+            text-align: center;
+        }
+
+        td {
+            font-size: 10px;
+            color: var(--slate-900);
+            padding: 8px 6px;
+            border: 1px solid var(--slate-200);
+            vertical-align: middle;
+            text-align: center;
+            word-break: break-word;
+        }
+
+        tbody tr:nth-child(even) {
+            background: #fbfdff;
+        }
+
+        .pill {
+            display: inline-block;
+            border-radius: 4px;
+            border: 1px solid rgba(0,0,0,0.05);
+            padding: 4px 8px;
+            font-weight: 800;
+        }
+
+        .muted {
+            color: var(--slate-500);
+        }
+
+        .empty-state {
+            border: 1px dashed var(--slate-300);
+            border-radius: 16px;
+            background: linear-gradient(180deg, #fafcff, #f3f6fa);
+            padding: 34px 20px;
+            text-align: center;
+        }
+
+        .empty-state h3 {
+            margin: 0 0 8px;
+            color: var(--navy-900);
+            font-size: 18px;
+            font-weight: 900;
+        }
+
+        .empty-state p {
+            margin: 0;
+            color: var(--slate-700);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 20px 16px;
+            border-top: 1px solid var(--slate-200);
+            background: var(--slate-100);
+            font-size: 11px;
+            color: var(--slate-700);
+        }
+
+        .footer strong {
+            color: var(--navy-900);
+        }
+
+        @media print {
+            body {
+                background: #ffffff;
+            }
+
+            .report-shell {
+                box-shadow: none;
+            }
+
+            .panel-card {
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="report-shell">
+            <div class="top-band"></div>
+
+            <div class="header">
+                <div class="header-grid">
+                    <div class="header-side">
+                        {% if report_logo_data_uri %}
+                        <img class="brand-logo" src="{{ report_logo_data_uri }}" alt="Report Logo">
+                        {% endif %}
+                    </div>
+
+                    <div class="brand-center">
+                        <div class="eyebrow">Non-Conformance Report</div>
+                        <h1 class="title">تقرير عدم المطابقة | Non-Conformance Report</h1>
+                        <p class="subtitle">{{ department_label }}</p>
+                        <p class="subtitle">{{ generated_at }} | {{ generated_by }}</p>
+                    </div>
+
+                    <div class="header-side"></div>
+                </div>
+
+                <div class="meta-strip">
+                    <div class="meta-card">
+                        <span class="label">Report Scope</span>
+                        <span class="value">{{ scope }}</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="label">Total Findings</span>
+                        <span class="value">{{ total }}</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="label">Generated At</span>
+                        <span class="value">{{ generated_at }}</span>
+                    </div>
+                    <div class="meta-card">
+                        <span class="label">Generated By</span>
+                        <span class="value">{{ generated_by }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="body">
+                <div class="summary-grid">
+                    <div class="summary-card primary">
+                        <span class="summary-label">Total</span>
+                        <span class="summary-value">{{ kpis.total }}</span>
+                        <span class="summary-note">إجمالي الحالات</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">Open</span>
+                        <span class="summary-value">{{ kpis.open }}</span>
+                        <span class="summary-note">حالات مفتوحة</span>
+                    </div>
+                    <div class="summary-card {% if kpis.overdue > 0 %}danger{% endif %}">
+                        <span class="summary-label">Overdue</span>
+                        <span class="summary-value">{{ kpis.overdue }}</span>
+                        <span class="summary-note">حالات متأخرة</span>
+                    </div>
+                    <div class="summary-card {% if kpis.critical > 0 %}danger{% endif %}">
+                        <span class="summary-label">Critical</span>
+                        <span class="summary-value">{{ kpis.critical }}</span>
+                        <span class="summary-note">حالات حرجة</span>
+                    </div>
+                    <div class="summary-card success">
+                        <span class="summary-label">Closed</span>
+                        <span class="summary-value">{{ kpis.closed }}</span>
+                        <span class="summary-note">حالات مغلقة</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">On-Time %</span>
+                        <span class="summary-value">{{ kpis.on_time_closure_display }}</span>
+                        <span class="summary-note">إغلاق في الموعد</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">MTTC</span>
+                        <span class="summary-value">{{ kpis.mttc_display }}</span>
+                        <span class="summary-note">متوسط أيام الإغلاق</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">MTTV</span>
+                        <span class="summary-value">{{ kpis.mttv_display }}</span>
+                        <span class="summary-note">متوسط أيام التحقق</span>
+                    </div>
+                </div>
+
+                <div class="summary-grid" style="grid-template-columns: repeat(8, minmax(0, 1fr)); margin-top: -4px;">
+                    <div class="summary-card">
+                        <span class="summary-label">Assigned</span>
+                        <span class="summary-value">{{ kpis.assigned }}</span>
+                        <span class="summary-note">مسندة</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">In Progress</span>
+                        <span class="summary-value">{{ kpis.in_progress }}</span>
+                        <span class="summary-note">قيد المعالجة</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">Verified</span>
+                        <span class="summary-value">{{ kpis.verified }}</span>
+                        <span class="summary-note">تم التحقق</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">Major</span>
+                        <span class="summary-value">{{ kpis.major }}</span>
+                        <span class="summary-note">حالات كبرى</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">Minor</span>
+                        <span class="summary-value">{{ kpis.minor }}</span>
+                        <span class="summary-note">حالات بسيطة</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">CAPA Linked</span>
+                        <span class="summary-value">{{ kpis.capa_linked }}</span>
+                        <span class="summary-note">مرتبطة بإجراء</span>
+                    </div>
+                    <div class="summary-card {% if kpis.capa_overdue > 0 %}danger{% endif %}">
+                        <span class="summary-label">CAPA Overdue</span>
+                        <span class="summary-value">{{ kpis.capa_overdue }}</span>
+                        <span class="summary-note">إجراء متأخر</span>
+                    </div>
+                    <div class="summary-card">
+                        <span class="summary-label">Rejected</span>
+                        <span class="summary-value">{{ kpis.rejected }}</span>
+                        <span class="summary-note">حالات مرفوضة</span>
+                    </div>
+                </div>
+
+                {% if top_defects %}
+                <div class="section-head">
+                    <h2 class="section-title">أكثر العيوب تكراراً</h2>
+                    <div class="section-caption">Top Recurring Defects</div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 50%;">الرمز / التصنيف</th>
+                                    <th style="width: 25%;">العدد</th>
+                                    <th style="width: 25%;">حرجة</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for d in top_defects %}
+                                <tr>
+                                    <td>{{ d.label }}</td>
+                                    <td>{{ d.count }}</td>
+                                    <td>{{ d.critical_count }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
+
+                {% if aging %}
+                <div class="section-head">
+                    <h2 class="section-title">التوزيع العمري</h2>
+                    <div class="section-caption">Aging Distribution</div>
+                </div>
+
+                <div class="panel-card">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 40%;">الفئة</th>
+                                    <th style="width: 30%;">العدد</th>
+                                    <th style="width: 30%;">النسبة</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for b in aging %}
+                                <tr>
+                                    <td>{{ b.label }}</td>
+                                    <td>{{ b.count }}</td>
+                                    <td>{{ b.share }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="section-head">
+                    <h2 class="section-title">الحالات المطابقة ({{ total }})</h2>
+                    <div class="section-caption">Matching Findings</div>
+                </div>
+
+                {% if rows %}
+                <div class="panel-card">
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th style="width: 8%;">المرجع</th>
+                                    <th style="width: 22%;">الوصف</th>
+                                    <th style="width: 7%;">الخطورة</th>
+                                    <th style="width: 8%;">الحالة</th>
+                                    <th style="width: 8%;">التفتيش</th>
+                                    <th style="width: 9%;">التشغيلة</th>
+                                    <th style="width: 9%;">المسند</th>
+                                    <th style="width: 9%;">الاستحقاق</th>
+                                    <th style="width: 6%;">متأخرة</th>
+                                    <th style="width: 14%;">الإجراء</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for row in rows %}
+                                <tr {% if row.is_overdue %}style="background: #fdf0f0;"{% endif %}>
+                                    <td>{{ row.reference }}</td>
+                                    <td>{{ row.description }}</td>
+                                    <td><span class="pill" style="
+                                        {% if row.severity == 'Critical' %}
+                                            color: var(--danger-text); background-color: var(--danger-bg);
+                                        {% elif row.severity == 'Major' %}
+                                            color: var(--warning-text); background-color: var(--warning-bg);
+                                        {% elif row.severity == 'Minor' %}
+                                            color: var(--success-text); background-color: var(--success-bg);
+                                        {% endif %}
+                                    ">{{ row.severity }}</span></td>
+                                    <td><span class="pill" style="
+                                        {% if row.status == 'Closed' %}
+                                            color: var(--success-text); background-color: var(--success-bg);
+                                        {% elif row.status == 'Rejected' %}
+                                            color: var(--danger-text); background-color: var(--danger-bg);
+                                        {% elif row.status == 'Open' %}
+                                            color: var(--warning-text); background-color: var(--warning-bg);
+                                        {% endif %}
+                                    ">{{ row.status }}</span></td>
+                                    <td>{{ row.inspection }}</td>
+                                    <td>{{ row.lot_batch or '-' }}</td>
+                                    <td>{{ row.assignee }}</td>
+                                    <td>{{ row.due }}</td>
+                                    <td>{{ row.overdue_display }}</td>
+                                    <td>{{ row.capa }}</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% else %}
+                <div class="empty-state">
+                    <h3>لا توجد حالات مطابقة لمعايير التصفية</h3>
+                    <p>لم يتم العثور على بيانات.</p>
+                </div>
+                {% endif %}
+            </div>
+
+            <div class="footer">
+                <div><strong>Material Lab</strong> | نظام ادارة المعمل الداخلي</div>
+                <div>Prepared Automatically by {{ department_label }}</div>
+            </div>
+        </div>
+    </div>
+    <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
+        Powered by Material Lab
+    </div>
+</body>
+</html>

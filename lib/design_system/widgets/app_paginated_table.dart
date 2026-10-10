@@ -5,8 +5,10 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
+import '../animations/app_animations.dart';
 import 'app_card.dart';
 import 'app_empty_state.dart';
+import 'app_icon.dart';
 
 /// Data table with a pinned header, vertical scrolling body, optional
 /// horizontal scroll and built-in pagination.
@@ -49,6 +51,17 @@ class AppPaginatedTable extends StatefulWidget {
   /// variant passes a larger value for a finger-sized target.
   final double rowHeight;
 
+  /// Multi-row selection (the Vue register's checkbox column). The column
+  /// appears iff [onToggleIndex] is set; indices are table indices — the
+  /// owner maps them to ids (e.g. `visible[index]['id']`). [selectedIndices]
+  /// holds the checked rows, [selectAllValue] drives the tristate header
+  /// checkbox (`true` all / `null` some / `false` none), [onToggleAll]
+  /// selects or clears the page.
+  final Set<int>? selectedIndices;
+  final ValueChanged<int>? onToggleIndex;
+  final bool? selectAllValue;
+  final ValueChanged<bool?>? onToggleAll;
+
   const AppPaginatedTable({
     super.key,
     required this.headers,
@@ -66,7 +79,16 @@ class AppPaginatedTable extends StatefulWidget {
     this.total,
     this.page,
     this.onPageChanged,
+    this.selectedIndices,
+    this.onToggleIndex,
+    this.selectAllValue,
+    this.onToggleAll,
   });
+
+  /// Fixed width of the selection column (Vue uses 44px).
+  static const double selectionWidth = 44;
+
+  bool get selectable => onToggleIndex != null;
 
   /// True when the owner drives pagination (DB LIMIT/OFFSET).
   bool get isServerDriven => total != null && onPageChanged != null;
@@ -196,7 +218,8 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
 
   /// Column widths in logical px for the given total table width.
   List<double> _columnWidths(double totalWidth) {
-    final usable = math.max(0.0, totalWidth - 2 * AppSpacing.lg);
+    var usable = math.max(0.0, totalWidth - 2 * AppSpacing.lg);
+    if (widget.selectable) usable = math.max(0.0, usable - AppPaginatedTable.selectionWidth);
     final flex = List<double>.filled(widget.headers.length, 1.0);
     if (widget.columnFlex != null) {
       for (
@@ -219,6 +242,17 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
       color: AppColors.surfaceSoft,
       child: Row(
         children: [
+          if (widget.selectable)
+            SizedBox(
+              width: AppPaginatedTable.selectionWidth,
+              child: widget.onToggleAll == null
+                  ? const SizedBox.shrink()
+                  : Checkbox(
+                      tristate: true,
+                      value: widget.selectAllValue ?? false,
+                      onChanged: widget.onToggleAll,
+                    ),
+            ),
           for (var i = 0; i < widget.headers.length; i++)
             SizedBox(
               width: widths[i],
@@ -258,6 +292,14 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
           child: Row(
             children: [
+              if (widget.selectable)
+                SizedBox(
+                  width: AppPaginatedTable.selectionWidth,
+                  child: Checkbox(
+                    value: widget.selectedIndices?.contains(realIndex) ?? false,
+                    onChanged: (_) => widget.onToggleIndex!(realIndex),
+                  ),
+                ),
               for (var i = 0; i < row.length; i++)
                 SizedBox(
                   width: i < widths.length ? widths[i] : 120,
@@ -280,16 +322,18 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
   }
 
   Widget _loadingBody() {
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-      itemCount: 6,
-      itemBuilder: (context, index) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Container(
-          height: 14,
-          decoration: BoxDecoration(
-            color: AppColors.borderMuted,
-            borderRadius: BorderRadius.circular(7),
+    return AppShimmer(
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+        itemCount: 6,
+        itemBuilder: (context, index) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Container(
+            height: 14,
+            decoration: BoxDecoration(
+              color: AppColors.borderMuted,
+              borderRadius: BorderRadius.circular(7),
+            ),
           ),
         ),
       ),
@@ -306,10 +350,19 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
 
   Widget _footer(BuildContext context, int total) {
     return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+      // Fixed chrome height, but content wraps instead of overflowing on
+      // narrow windows / large text scale.
+      constraints: const BoxConstraints(minHeight: 48),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: 4,
+      ),
       color: AppColors.surfaceSoft,
-      child: Row(
+      child: Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: WrapAlignment.spaceBetween,
+        spacing: AppSpacing.sm,
+        runSpacing: 4,
         children: [
           Text(
             widget.totalLabel ??
@@ -317,24 +370,31 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
           ),
-          const Spacer(),
-          IconButton(
-            tooltip: appTextOf(context, 'السابق', 'Previous'),
-            onPressed: _effectivePage > 0 ? () => _changePage(-1) : null,
-            icon: const Icon(Icons.chevron_left),
-            visualDensity: VisualDensity.compact,
-          ),
-          Text(
-            '${_effectivePage + 1} ${appTextOf(context, 'من', 'of')} $_pageCount',
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-          ),
-          IconButton(
-            tooltip: appTextOf(context, 'التالي', 'Next'),
-            onPressed: _effectivePage < _pageCount - 1
-                ? () => _changePage(1)
-                : null,
-            icon: const Icon(Icons.chevron_right),
-            visualDensity: VisualDensity.compact,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: appTextOf(context, 'السابق', 'Previous'),
+                onPressed: _effectivePage > 0 ? () => _changePage(-1) : null,
+                icon: Icon(AppIcons.previousOf(context)),
+                visualDensity: VisualDensity.compact,
+              ),
+              Text(
+                '${_effectivePage + 1} ${appTextOf(context, 'من', 'of')} $_pageCount',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12.spMax,
+                ),
+              ),
+              IconButton(
+                tooltip: appTextOf(context, 'التالي', 'Next'),
+                onPressed: _effectivePage < _pageCount - 1
+                    ? () => _changePage(1)
+                    : null,
+                icon: Icon(AppIcons.nextOf(context)),
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
           ),
         ],
       ),

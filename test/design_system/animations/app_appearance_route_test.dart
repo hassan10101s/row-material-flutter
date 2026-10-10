@@ -25,12 +25,16 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             home: Navigator(
+              // NOTE: intentionally non-const. A const child is
+              // canonicalized to the identical widget, which lets
+              // Element.update elide the rebuild entirely — the very
+              // rebuild this test exists to verify.
               onGenerateRoute: (_) => useMaterialRoute
                   ? appMaterialPageRoute<void>(
-                      builder: (_) => const _AppearanceProbe(),
+                      builder: (_) => _AppearanceProbe(),
                     )
                   : AppPageRoute<void>(
-                      builder: (_) => const _AppearanceProbe(),
+                      builder: (_) => _AppearanceProbe(),
                     ),
             ),
           ),
@@ -53,7 +57,8 @@ void main() {
 }
 
 class _AppearanceProbe extends StatefulWidget {
-  const _AppearanceProbe();
+  // ignore: prefer_const_constructors_in_immutables — see note above.
+  _AppearanceProbe();
 
   @override
   State<_AppearanceProbe> createState() => _AppearanceProbeState();

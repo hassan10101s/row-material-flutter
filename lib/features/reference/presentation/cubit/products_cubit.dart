@@ -29,6 +29,8 @@ class ProductsCubit extends AppCubit<ProductsState> {
     String category = '',
     String description = '',
     List<Map<String, dynamic>>? ranges,
+    Map<String, dynamic>? physicalReference,
+    Map<String, dynamic>? chemicalReference,
   }) async {
     safeEmit(state.copyWith(loading: true, clearError: true));
     try {
@@ -37,6 +39,8 @@ class ProductsCubit extends AppCubit<ProductsState> {
         category: category,
         description: description,
         ranges: ranges,
+        physicalReference: physicalReference,
+        chemicalReference: chemicalReference,
       );
       await load();
       return product;

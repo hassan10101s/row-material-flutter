@@ -1,11 +1,20 @@
 plugins {
     id("com.android.application")
+    // Firebase: must come after the Android plugin. Reads
+    // android/app/google-services.json (package "com.materiallab").
+    id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+import java.io.FileInputStream
+import java.util.Properties
+
 android {
-    namespace = "com.materiallab.material_lab"
+    // Must match the Firebase console Android app (google-services.json
+    // "package_name"); the google-services plugin rejects any other
+    // applicationId at build time.
+    namespace = "com.materiallab"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -14,11 +23,29 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
+    // Release signing lives OUTSIDE the repo: F:/material lab/key.properties
+    // (upload keystore + passwords). If the file is absent (another machine),
+    // release falls back to debug keys so `flutter run --release` still works.
+    val keystorePropsFile = file("F:/material lab/key.properties")
+    val keystoreProps = Properties()
+    if (keystorePropsFile.exists()) {
+        FileInputStream(keystorePropsFile).use { keystoreProps.load(it) }
+    }
+
+    signingConfigs {
+        if (keystoreProps.containsKey("storeFile")) {
+            create("upload") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.materiallab.material_lab"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
+        applicationId = "com.materiallab"
+        // Firebase Auth / Play-services libraries require API 23+.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -27,9 +54,10 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Uses the "upload" signing config when F:/material lab/key.properties
+            // exists, otherwise debug keys (see above).
+            signingConfig = signingConfigs.findByName("upload")
+                ?: signingConfigs.getByName("debug")
         }
     }
 }

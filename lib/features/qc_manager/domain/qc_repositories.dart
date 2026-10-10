@@ -132,6 +132,12 @@ abstract interface class QcInspectionRepository {
     String refId = '',
   });
 
+  /// Distinct template ids with a live inspection on [day] (`yyyy-MM-dd`,
+  /// matched against the date part of the inspection date). Backs the
+  /// dashboard's daily-tasks card through the contract, so presentation
+  /// never needs raw SQL for it.
+  Future<Set<int>> templateIdsInspectedOn(String day);
+
   /// Creates an inspection and stamps every item of [templateId] into
   /// `qc_responses` as unanswered, so scoring and progress never have to special
   /// case "no row yet".

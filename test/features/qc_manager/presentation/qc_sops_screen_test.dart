@@ -10,8 +10,8 @@ import 'package:material_lab/features/qc_manager/domain/qc_sop.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_repositories.dart';
 import 'package:material_lab/features/qc_manager/presentation/cubit/qc_sop_detail_cubit.dart';
 import 'package:material_lab/features/qc_manager/presentation/cubit/qc_sops_cubit.dart';
-import 'package:material_lab/features/qc_manager/presentation/qc_sop_detail_screen.dart';
-import 'package:material_lab/features/qc_manager/presentation/qc_sops_screen.dart';
+import 'package:material_lab/features/qc_manager/presentation/sops/qc_sop_detail_screen.dart';
+import 'package:material_lab/features/qc_manager/presentation/sops/qc_sops_screen.dart';
 import 'package:material_lab/features/qc_manager/presentation/widgets/sop_pill.dart';
 
 class _SopsMock extends Mock implements QcSopRepository {}

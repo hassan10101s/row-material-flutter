@@ -13,7 +13,17 @@ import '../domain/reference_repository.dart';
 class ReferenceRepo implements ReferenceRepository {
   final DatabaseHelper dbHelper;
 
-  ReferenceRepo({required this.dbHelper});
+  /// Resolves the current device tag used to scope minted entry codes.
+  ///
+  /// Two offline devices must never mint the same `entry_code`: the sync
+  /// document id of an inspection IS its entry code, so a collision means one
+  /// device's push overwrites (or version-conflicts with) the other's and a
+  /// human has to untangle it on the Sync screen. Scoping the sequence per
+  /// device (`CODE-DATE-TAG-SEQ`) makes collisions structurally impossible.
+  /// Null (tests, pre-registration) keeps the legacy `CODE-DATE-SEQ` format.
+  final Future<String> Function()? deviceTagProvider;
+
+  ReferenceRepo({required this.dbHelper, this.deviceTagProvider});
 
   Future<Database> get _db => dbHelper.database;
 
@@ -31,7 +41,11 @@ class ReferenceRepo implements ReferenceRepository {
   @override
   Future<List<Map<String, dynamic>>> listAllMaterials() async {
     final db = await _db;
+    // The `__PRODUCT_SENTINEL__` row is storage plumbing for product
+    // inspections, never a catalog entry.
     final rows = await db.query('reference_materials',
+        where: 'material_name != ?',
+        whereArgs: [DatabaseHelper.productSentinelMaterialName],
         orderBy: 'active DESC, material_name COLLATE NOCASE ASC');
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
@@ -205,14 +219,174 @@ class ReferenceRepo implements ReferenceRepository {
     }
   }
 
+  // ── Products (for product inspections) ────────────────────────
+
+  /// Active lab products with their analysis ranges, for the
+  /// product-inspection form's product picker.
+  @override
+  Future<List<Map<String, dynamic>>> listProductsForInspection() async {
+    final db = await _db;
+    final products = await db.query(
+      'lab_products',
+      where: 'active = 1',
+      orderBy: 'name COLLATE NOCASE ASC',
+    );
+    if (products.isEmpty) return [];
+    final ranges = await db.rawQuery('''
+      SELECT lpa.product_id, lpa.min_value, lpa.max_value,
+             CASE WHEN a.parameter_id IS NOT NULL THEN COALESCE(p.unit, '')
+                  ELSE COALESCE(NULLIF(a.unit, ''), lpa.unit) END AS unit,
+             COALESCE(lpa.is_required, 0) AS is_required,
+             a.name AS analysis_name
+      FROM lab_product_analyses lpa
+      JOIN lab_analyses a ON a.id = lpa.analysis_id
+      LEFT JOIN parameters p ON p.id = a.parameter_id
+      ORDER BY lpa.product_id ASC, a.name ASC
+    ''');
+    final byProduct = <int, List<Map<String, dynamic>>>{};
+    for (final r in ranges) {
+      final pid = (r['product_id'] as num?)?.toInt() ?? 0;
+      byProduct.putIfAbsent(pid, () => []).add(Map<String, dynamic>.from(r));
+    }
+    return [
+      for (final p in products)
+        {
+          ...Map<String, dynamic>.from(p),
+          'product_code': productCodeFor('${p['name'] ?? ''}'),
+          'ranges': byProduct[(p['id'] as num?)?.toInt() ?? 0] ??
+              const <Map<String, dynamic>>[],
+        },
+    ];
+  }
+
+  /// Product inspection context: name/code, next entry code and the
+  /// physical/chemical reference maps.
+  ///
+  /// Reference-first (mirrors materials): when the product carries
+  /// `physical/chemical_reference_json` those maps are used (مطلوب flags
+  /// included); otherwise the legacy `lab_product_analyses` ranges are
+  /// converted (products saved before the reference editor existed).
+  @override
+  Future<Map<String, dynamic>> getProductForInspection(
+    int id, {
+    String? inspectionDate,
+    DatabaseExecutor? exec,
+  }) async {
+    final db = exec ?? await _db;
+    final rows = await db.query(
+      'lab_products',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw NotFoundError(AppErrors.productNotFound);
+    final product = Map<String, dynamic>.from(rows.first);
+    if ((product['active'] as num?) != 1) {
+      throw const ValidationError(
+          'Selected product is inactive (archived) and cannot be used in a new inspection.');
+    }
+    final paramUnits = await _params(exec: exec);
+    Map<String, dynamic> physical = {};
+    Map<String, dynamic> chemical = {};
+    final physJson =
+        jsonLoads('${product['physical_reference_json'] ?? ''}');
+    final chemJson =
+        jsonLoads('${product['chemical_reference_json'] ?? ''}');
+    if (physJson.isNotEmpty || chemJson.isNotEmpty) {
+      for (final e in physJson.entries) {
+        physical[e.key] =
+            withReferenceUnit(e.value, paramUnits[e.key] ?? '');
+      }
+      for (final e in chemJson.entries) {
+        chemical[e.key] =
+            withReferenceUnit(e.value, paramUnits[e.key] ?? '');
+      }
+    } else {
+      final ranges = await db.rawQuery(
+        '''
+        SELECT lpa.min_value, lpa.max_value,
+               CASE WHEN a.parameter_id IS NOT NULL THEN COALESCE(p.unit, '')
+                    ELSE COALESCE(NULLIF(a.unit, ''), lpa.unit) END AS unit,
+               COALESCE(lpa.is_required, 0) AS is_required,
+               a.name AS analysis_name
+        FROM lab_product_analyses lpa
+        JOIN lab_analyses a ON a.id = lpa.analysis_id
+        LEFT JOIN parameters p ON p.id = a.parameter_id
+        WHERE lpa.product_id = ?
+        ORDER BY a.name ASC
+        ''',
+        [id],
+      );
+      for (final r in ranges) {
+        final name = '${r['analysis_name'] ?? ''}'.trim();
+        if (name.isEmpty) continue;
+        final required =
+            r['is_required'] == 1 || r['is_required'] == true;
+        final withUnit = withReferenceUnit(
+          _productRangeText(r['min_value'], r['max_value']),
+          '${r['unit'] ?? ''}',
+        );
+        chemical[name] =
+            required ? withReferenceRequired(withUnit, true) : withUnit;
+      }
+    }
+    final code = productCodeFor('${product['name'] ?? ''}');
+    return {
+      'id': product['id'],
+      'product_name': '${product['name'] ?? ''}',
+      'product_code': code,
+      'physical_reference': physical,
+      'chemical_reference': chemical,
+      'active': product['active'],
+      'next_entry_code': await generateEntryCode(
+        code,
+        inspectionDate ?? todayIso(),
+        exec: exec,
+      ),
+    };
+  }
+
+  /// Stable short code Minted from the product name for entry codes
+  /// (`P` + up to 3 latin alphanumerics, else `PRD`): entry codes stay
+  /// readable (`PPRO-20260101-001`) while the date+sequence keeps them unique.
+  static String productCodeFor(String name) {
+    final stripped =
+        name.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    final core = stripped.isEmpty
+        ? 'PRD'
+        : stripped.substring(0, stripped.length.clamp(0, 3));
+    return 'P$core';
+  }
+
+  static String _productRangeText(Object? min, Object? max) {
+    final lo = min == null ? '' : '$min'.trim();
+    final hi = max == null ? '' : '$max'.trim();
+    if (lo.isNotEmpty && hi.isNotEmpty) {
+      if (lo == hi) return lo;
+      return '$lo-$hi';
+    }
+    if (lo.isNotEmpty) return 'min $lo';
+    if (hi.isNotEmpty) return 'max $hi';
+    return '';
+  }
+
   // ── Entry code ────────────────────────────────────────────────
 
+  /// Mints the next entry code for [materialCode] on [inspectionDate].
+  ///
+  /// The sequence is per (material, day, device): with a device tag two
+  /// offline devices mint disjoint code spaces, so their rows can never share
+  /// a sync document id. Without a tag the legacy global-per-day sequence is
+  /// kept (single-device history and every existing test).
   @override
   Future<String> generateEntryCode(String materialCode, String inspectionDate,
       {DatabaseExecutor? exec}) async {
     final db = exec ?? await _db;
     final dateFragment = inspectionDate.replaceAll('-', '');
-    final prefix = '$materialCode-$dateFragment-';
+    final tag = await _deviceTag();
+    final prefix = tag.isEmpty
+        ? '$materialCode-$dateFragment-'
+        : '$materialCode-$dateFragment-$tag-';
     final rows = await db.rawQuery(
       'SELECT MAX(CAST(SUBSTR(entry_code, ?) AS INTEGER)) AS max_seq '
       'FROM inspections WHERE entry_code LIKE ?',
@@ -222,6 +396,21 @@ class ReferenceRepo implements ReferenceRepository {
         ? (rows.first['max_seq'] as num?)?.toInt() ?? 0
         : 0;
     return '$prefix${(maxSeq + 1).toString().padLeft(3, '0')}';
+  }
+
+  /// Uppercase alphanumeric tag (6 chars) identifying this device inside
+  /// minted codes, or empty when no provider is wired (legacy format).
+  Future<String> _deviceTag() async {
+    final provider = deviceTagProvider;
+    if (provider == null) return '';
+    try {
+      final raw = await provider();
+      final clean = raw.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+      if (clean.isEmpty) return '';
+      return clean.length <= 6 ? clean : clean.substring(0, 6);
+    } on Object {
+      return '';
+    }
   }
 
   // ── Parameters ────────────────────────────────────────────────
@@ -258,6 +447,7 @@ class ReferenceRepo implements ReferenceRepository {
         '${existing.first['parameter_type'] ?? ''}' != parameterType) {
       throw ValidationError(AppErrors.parameterTypeInvalid);
     }
+    await registerUnit(db, unit);
     final values = {
       'parameter_name': trimmed,
       'unit': unit.trim(),
@@ -322,10 +512,83 @@ class ReferenceRepo implements ReferenceRepository {
     );
   }
 
+  /// Batch/transaction-safe registry write. Static (not virtual) so saves
+  /// running inside a transaction never re-enter through an override.
+  static Future<void> registerUnit(
+      DatabaseExecutor db, String symbol) async {
+    final trimmed = symbol.trim();
+    if (trimmed.isEmpty) return;
+    try {
+      await db.rawInsert(
+        'INSERT OR IGNORE INTO lab_units (symbol, is_active, created_at) '
+        'VALUES (?, 1, ?)',
+        [trimmed, nowIso()],
+      );
+    } catch (_) {}
+  }
+
+  /// Units registry: silently registers a unit symbol used by a save so the
+  /// Units table holds every program unit. Never throws and never overwrites
+  /// curated name/dimension — use [upsertUnit] for that.
+  @override
+  Future<void> ensureUnit(String symbol, [DatabaseExecutor? exec]) async {
+    await registerUnit(exec ?? await _db, symbol);
+  }
+
   @override
   Future<void> deleteUnit(String symbol, [DatabaseExecutor? exec]) async {
     final db = exec ?? await _db;
     await db.delete('lab_units', where: 'symbol = ?', whereArgs: [symbol]);
+  }
+
+  /// Every table/column whose unit strings belong to the `lab_units` registry.
+  static const List<(String, String)> unitSources = [
+    ('parameters', 'unit'),
+    ('lab_analyses', 'unit'),
+    ('lab_analysis_items', 'unit'),
+    ('lab_inventory', 'unit'),
+    ('lab_constants', 'unit'),
+    ('lab_product_analyses', 'unit'),
+    ('lab_field_chemical_links', 'unit'),
+    ('material_parameter_bounds', 'unit'),
+    ('qc_items', 'unit'),
+    ('qc_inspections', 'qty_unit'),
+    ('qc_findings_nc', 'qty_unit'),
+    ('qc_goals', 'target_unit'),
+    ('qc_goal_kpis', 'unit'),
+  ];
+
+  /// How many rows reference each unit symbol across the program — what the
+  /// Units table shows as inheritance ("used in N places") and what guards
+  /// deletion of a unit that is still in use.
+  @override
+  Future<Map<String, int>> unitUsageCounts([DatabaseExecutor? exec]) async {
+    final db = exec ?? await _db;
+    final out = <String, int>{};
+    late final Set<String> tables;
+    try {
+      tables = (await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'table'",
+      )).map((r) => '${r['name']}').toSet();
+    } catch (_) {
+      return out;
+    }
+    for (final (table, column) in unitSources) {
+      if (!tables.contains(table)) continue;
+      try {
+        final rows = await db.rawQuery(
+          'SELECT TRIM("$column") AS s, COUNT(*) AS c FROM "$table" '
+          'WHERE TRIM(COALESCE("$column", \'\')) <> \'\' '
+          'GROUP BY TRIM("$column")',
+        );
+        for (final r in rows) {
+          final s = '${r['s'] ?? ''}';
+          if (s.isEmpty) continue;
+          out[s] = (out[s] ?? 0) + ((r['c'] as num?)?.toInt() ?? 0);
+        }
+      } catch (_) {}
+    }
+    return out;
   }
 
   // ── Enrichment ────────────────────────────────────────────────

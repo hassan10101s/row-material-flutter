@@ -49,6 +49,7 @@ class ConflictResolver {
           entity,
           '${conflict['entity_id']}',
           localPayload,
+          localDeviceId: session.deviceId,
         );
         final columns = await availableColumns(db, entity.localTable);
         await tracedTransaction(db, 'conflicts.keepLocal', (txn) async {

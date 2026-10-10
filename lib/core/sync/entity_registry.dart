@@ -18,6 +18,7 @@ class SyncEntity {
     this.permission,
     this.payloadBuilder,
     this.usesLocalIdAsRef = true,
+    this.naturalKeyIdentity = false,
     this.accepts,
   });
 
@@ -60,6 +61,20 @@ class SyncEntity {
   /// of a document written elsewhere is the primary key of an unrelated local
   /// row, and matching on it would silently overwrite that row.
   final bool usesLocalIdAsRef;
+
+  /// Whether the table's natural key is its true cross-device identity.
+  ///
+  /// When true, a pulled document that matches nothing locally is inserted
+  /// with a FRESH local id: the envelope's `localId` is the origin device's
+  /// row id and means nothing here. Inserting with it (plus
+  /// `ConflictAlgorithm.replace`) would overwrite the unrelated local row
+  /// that happens to hold that id — autoincrement ids collide across devices
+  /// by construction (both devices' first inspection is row 1).
+  ///
+  /// False for the lab-config tables, whose document ids (`lc_<table>_<id>`)
+  /// ARE the origin row id: keeping it preserves the doc↔row mapping, and
+  /// same-content seeds converge version-wise instead of duplicating.
+  final bool naturalKeyIdentity;
 
   /// Whether a *pulled* document belongs to this entity.
   ///
@@ -139,9 +154,14 @@ final List<SyncEntity> syncEntities = [
     type: 'sample',
     collection: SyncCollection.samples,
     localTable: 'inspections',
+    naturalKeyIdentity: true,
     docId: (row) => '${row['entry_code']}',
     permission: 'samples.update',
     mutableFields: {
+      'inspectionKind',
+      'productId',
+      'formulaNumber',
+      'batchNumber',
       'materialName',
       'materialCode',
       'inspectionDate',
@@ -176,6 +196,7 @@ final List<SyncEntity> syncEntities = [
     type: 'qualityCheck',
     collection: SyncCollection.qualityChecks,
     localTable: 'inspection_status_history',
+    naturalKeyIdentity: true,
     docId: qcDocId,
     permission: 'qc.approve',
     appendOnly: true,
@@ -185,6 +206,7 @@ final List<SyncEntity> syncEntities = [
     type: 'labResult',
     collection: SyncCollection.labResults,
     localTable: 'lab_sample_tests',
+    naturalKeyIdentity: true,
     docId: labTestDocId,
     permission: 'lab_results.update',
     mutableFields: {
@@ -337,6 +359,7 @@ final List<SyncEntity> syncEntities = [
     type: 'member',
     collection: SyncCollection.members,
     localTable: 'users',
+    naturalKeyIdentity: true,
     docId: userDocId,
     permission: 'users.update',
     mutableFields: {
@@ -358,6 +381,7 @@ final SyncEntity auditLogEntity = SyncEntity(
   type: 'auditLog',
   collection: SyncCollection.auditLogs,
   localTable: 'audit_logs',
+  naturalKeyIdentity: true,
   docId: (row) => 'al_${row['device_id']}_${row['occurred_at']}_${row['id']}',
   appendOnly: true,
   mutableFields: const {},
@@ -514,14 +538,30 @@ Future<Set<String>> availableColumns(DatabaseExecutor db, String table) async {
 /// Tries the envelope's `localId` first, then the natural key of the table, so
 /// a document created on another device (whose `localId` is meaningless here)
 /// still lands on the right row. Null ⇒ the local database has no such row.
+///
+/// The `localId` branch is skipped for **foreign** documents whenever the
+/// table has a natural key: autoincrement ids collide across devices (both
+/// devices' first inspection is row 1), so a foreign `localId` would match an
+/// unrelated local row — overwriting it or swallowing the incoming document.
+/// Same-device documents (`localDeviceId` unknown or equal to the doc's
+/// `deviceId`) keep the legacy fast path, which also survives a locally
+/// edited natural key. Tables without a natural key (lab config) always use
+/// `localId`; their convergence is version-based instead.
 Future<int?> findLocalRef(
   DatabaseExecutor db,
   SyncEntity entity,
   String entityId,
-  Map<String, dynamic> data,
-) async {
+  Map<String, dynamic> data, {
+  String? localDeviceId,
+}) async {
   final localId = data['localId'];
-  if (entity.usesLocalIdAsRef && localId is num) {
+  final docDeviceId = '${data['deviceId'] ?? ''}';
+  final foreign = localDeviceId != null &&
+      localDeviceId.isNotEmpty &&
+      docDeviceId.isNotEmpty &&
+      docDeviceId != localDeviceId;
+  final natural = _naturalKey(entity, entityId, data);
+  if (entity.usesLocalIdAsRef && localId is num && (!foreign || natural == null)) {
     final rows = await db.query(
       entity.localTable,
       columns: ['id'],
@@ -531,7 +571,6 @@ Future<int?> findLocalRef(
     );
     if (rows.isNotEmpty) return (rows.first['id'] as num).toInt();
   }
-  final natural = _naturalKey(entity, entityId, data);
   if (natural == null) return null;
   final rows = await db.query(
     entity.localTable,
@@ -552,6 +591,8 @@ Future<int?> findLocalRef(
 ) {
   switch (entity.localTable) {
     case 'inspections':
+      // `entry_code` is UNIQUE across both kinds (raw + product share one
+      // code space), so it stays the cross-device identity for both.
       return ('entry_code = ?', [entityId]);
     case 'inspection_status_history':
       final inspectionId = data['inspectionId'] ?? data['inspection_id'];

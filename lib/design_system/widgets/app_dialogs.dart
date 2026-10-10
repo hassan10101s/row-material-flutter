@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../tokens/app_breakpoints.dart';
 import '../tokens/app_colors.dart';
+import '../tokens/app_spacing.dart';
 import 'app_button.dart';
 import 'app_window.dart';
 
 /// Confirmation dialog consistent with the app design system.
 /// Returns `true` when the user confirms.
 ///
-/// Renders in the unified [AppWindow] chrome like every other dialog.
+/// Desktop keeps the unified [AppWindow] chrome byte-for-byte; phones get
+/// the same content as a bottom sheet with 48dp actions (no cramped
+/// 440px dialog + keyboard).
 Future<bool> showAppConfirm(
   BuildContext context, {
   required String title,
@@ -18,30 +22,94 @@ Future<bool> showAppConfirm(
   bool danger = false,
   IconData icon = Icons.help_outline,
 }) async {
-  final result = await showAppWindow<bool>(
+  final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+  if (wide) {
+    final result = await showAppWindow<bool>(
+      context,
+      title: title,
+      icon: icon,
+      accent: danger ? AppColors.danger : AppColors.primary,
+      size: AppWindowSize.sm,
+      // Builder (not the caller's context): the buttons must pop the
+      // dialog route. With shell branch navigators, `Navigator.of(context)`
+      // from the caller resolves to the *page* navigator, so popping here
+      // used to close the page itself with a bool result (bool vs page
+      // type crash) instead of dismissing the dialog.
+      actions: [
+        Builder(
+          builder: (dialogContext) => AppButton(
+            label: cancelLabel ?? 'إلغاء',
+            style: AppButtonStyle.secondary,
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+          ),
+        ),
+        Builder(
+          builder: (dialogContext) => AppButton(
+            label: confirmLabel ?? 'تأكيد',
+            style: danger ? AppButtonStyle.danger : AppButtonStyle.primary,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+          ),
+        ),
+      ],
+      child: Text(
+        message,
+        style: TextStyle(
+          fontSize: 14.spMax,
+          height: 1.5,
+          color: AppColors.textMuted,
+        ),
+      ),
+    );
+    return result ?? false;
+  }
+  final result = await showAppOverlay<bool>(
     context,
     title: title,
     icon: icon,
     accent: danger ? AppColors.danger : AppColors.primary,
     size: AppWindowSize.sm,
-    actions: [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(false),
-        child: Text(cancelLabel ?? 'إلغاء'),
-      ),
-      AppButton(
-        label: confirmLabel ?? 'تأكيد',
-        style: danger ? AppButtonStyle.danger : AppButtonStyle.primary,
-        onPressed: () => Navigator.of(context).pop(true),
-      ),
-    ],
-    child: Text(
-      message,
-      style: TextStyle(
-        fontSize: 14.spMax,
-        height: 1.5,
-        color: AppColors.textMuted,
-      ),
+    builder: (context, close) => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          message,
+          style: TextStyle(
+            fontSize: 14.spMax,
+            height: 1.5,
+            color: AppColors.textMuted,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Row(
+          children: [
+            Expanded(
+              child: SizedBox(
+                height: AppSpacing.mobileCtaHeight,
+                child: AppButton(
+                  label: cancelLabel ?? 'إلغاء',
+                  style: AppButtonStyle.secondary,
+                  onPressed: () => close(false),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(
+              flex: 2,
+              child: SizedBox(
+                height: AppSpacing.mobileCtaHeight,
+                child: AppButton(
+                  label: confirmLabel ?? 'تأكيد',
+                  style: danger
+                      ? AppButtonStyle.danger
+                      : AppButtonStyle.primary,
+                  onPressed: () => close(true),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     ),
   );
   return result ?? false;
@@ -49,7 +117,9 @@ Future<bool> showAppConfirm(
 
 /// Simple alert dialog consistent with the app design system.
 ///
-/// Renders in the unified [AppWindow] chrome like every other dialog.
+/// Desktop keeps the unified [AppWindow] chrome; phones get the same content
+/// as a bottom sheet (previously this always built a fixed 440dp dialog, which
+/// overflowed a 400dp phone once the keyboard appeared).
 Future<void> showAppAlert(
   BuildContext context, {
   required String title,
@@ -57,28 +127,64 @@ Future<void> showAppAlert(
   String? okLabel,
   IconData icon = Icons.info_outline,
 }) {
-  return showAppWindow<void>(
+  final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+  if (wide) {
+    return showAppWindow<void>(
+      context,
+      title: title,
+      icon: icon,
+      accent: AppColors.info,
+      size: AppWindowSize.sm,
+      actions: [
+        Builder(
+          builder: (dialogContext) => AppButton(
+            label: okLabel ?? 'حسناً',
+            style: AppButtonStyle.secondary,
+            onPressed: () => Navigator.of(dialogContext).pop(),
+          ),
+        ),
+      ],
+      child: message == null
+          ? const SizedBox.shrink()
+          : Text(
+              message,
+              style: TextStyle(
+                fontSize: 14.spMax,
+                height: 1.5,
+                color: AppColors.textMuted,
+              ),
+            ),
+    );
+  }
+  return showAppOverlay<void>(
     context,
     title: title,
     icon: icon,
     accent: AppColors.info,
     size: AppWindowSize.sm,
-    actions: [
-      AppButton(
-        label: okLabel ?? 'حسناً',
-        style: AppButtonStyle.secondary,
-        onPressed: () => Navigator.of(context).pop(),
-      ),
-    ],
-    child: message == null
-        ? const SizedBox.shrink()
-        : Text(
+    builder: (context, close) => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (message != null)
+          Text(
             message,
             style: TextStyle(
               fontSize: 14.spMax,
-              height: 1.5,
+              height: 1.6,
               color: AppColors.textMuted,
             ),
           ),
+        const SizedBox(height: AppSpacing.lg),
+        SizedBox(
+          height: AppSpacing.mobileCtaHeight,
+          child: AppButton(
+            label: okLabel ?? 'حسناً',
+            expanded: true,
+            onPressed: () => close(),
+          ),
+        ),
+      ],
+    ),
   );
 }

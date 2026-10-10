@@ -112,4 +112,14 @@ class AppTextTheme {
         minScaleFactor: minTextScaleFactor,
         maxScaleFactor: maxTextScaleFactor,
       );
+
+  /// Pernit-style clamped font size: `size.sp` bounded to `[min, max]`.
+  ///
+  /// Use for mobile-first text that must stay readable on a 360dp phone
+  /// without exploding on a wide desktop window. Desktop call sites keep
+  /// using `.spMax`; mobile cards/wizards prefer this helper.
+  static double clamped(double size, double min, double max) {
+    final scaled = size.sp;
+    return scaled.clamp(min, max).toDouble();
+  }
 }

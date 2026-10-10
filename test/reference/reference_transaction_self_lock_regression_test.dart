@@ -92,6 +92,12 @@ void main() {
     await repo.deleteUnit('kHz').timeout(const Duration(seconds: 15));
 
     expect(await fixture.db.query('parameters'), isEmpty);
-    expect(await fixture.db.query('lab_units'), isEmpty);
+    // The registry is pre-seeded with defaults on every open and accumulates
+    // every used symbol, so only the deleted unit's own absence is asserted.
+    final unitSymbols = (await fixture.db.query('lab_units'))
+        .map((r) => '${r['symbol']}')
+        .toSet();
+    expect(unitSymbols, isNot(contains('kHz')));
+    expect(unitSymbols, containsAll(['%', 'L', 'mL', 'kg', 'g', 'pc']));
   }, timeout: const Timeout(Duration(seconds: 25)));
 }

@@ -24,6 +24,8 @@ class AppTopAppBar extends StatelessWidget implements PreferredSizeWidget {
     return AppBar(
       title: Text(
         title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: TextStyle(fontWeight: AppFontWeights.bold, fontSize: 18.spMax),
       ),
       centerTitle: true,
@@ -35,8 +37,9 @@ class AppTopAppBar extends StatelessWidget implements PreferredSizeWidget {
       backgroundColor: AppColors.surface,
       foregroundColor: AppColors.textStrong,
       elevation: 0,
-      scrolledUnderElevation: 0,
+      scrolledUnderElevation: 1,
       surfaceTintColor: AppColors.surface,
+      shape: Border(bottom: BorderSide(color: AppColors.borderMuted)),
     );
   }
 }

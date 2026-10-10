@@ -29,15 +29,17 @@ abstract interface class SampleRepository {
   /// [InspectionRepository.getById].
   Future<void> delete(int inspectionId);
 
+  /// [kind] filters by inspection kind (`raw` / `product`); empty = both.
   Future<List<Map<String, dynamic>>> list({
     String query = '',
     String status = '',
     int limit = 50,
     int offset = 0,
     String orderBy = 'id DESC',
+    String kind = '',
   });
 
-  Future<int> count({String query = '', String status = ''});
+  Future<int> count({String query = '', String status = '', String kind = ''});
 
   Future<Map<String, dynamic>> getById(int id);
 }
@@ -96,9 +98,10 @@ abstract interface class InspectionRepository {
     int limit = 50,
     int offset = 0,
     String orderBy = 'id DESC',
+    String kind = '',
   });
 
-  Future<int> count({String query = '', String status = ''});
+  Future<int> count({String query = '', String status = '', String kind = ''});
 
   Future<List<Map<String, dynamic>>> getStatusHistory(int inspectionId);
 
@@ -106,4 +109,22 @@ abstract interface class InspectionRepository {
   Future<void> markPdfExported(int inspectionId, String pdfPath);
 
   Future<void> delete(int inspectionId);
+
+  // ── History autocomplete (Vue parity) ────────────────────────────
+
+  /// Distinct suppliers used before, most recent first. Scoped to one
+  /// material when [materialId] is given (the inspection form's supplier
+  /// field), otherwise global. Each row: `{name, lastDate, uses}`.
+  /// De-duplicated case-insensitively — the same supplier typed with
+  /// different casing appears once.
+  Future<List<Map<String, dynamic>>> listSupplierHistory({
+    int? materialId,
+    int limit = 30,
+  });
+
+  /// Distinct sample-taker names (the technicians log), most recent first.
+  /// Same row shape and de-duplication as [listSupplierHistory].
+  Future<List<Map<String, dynamic>>> listSampleTakerHistory({
+    int limit = 30,
+  });
 }

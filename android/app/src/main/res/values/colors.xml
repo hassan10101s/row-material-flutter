@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Black in both modes: the logo background is black, so the splash is
+         seamless instead of showing a black box on a light field. -->
+    <color name="splash_background">#FF000000</color>
+    <color name="splash_background_dark">#FF000000</color>
+</resources>

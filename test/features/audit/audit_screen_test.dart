@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/sync/audit_trail.dart';
 import 'package:material_lab/features/audit/presentation/audit_controller.dart';
-import 'package:material_lab/features/audit/presentation/audit_screen.dart';
+import 'package:material_lab/features/audit/presentation/audit/audit_screen.dart';
 
 /// Plan §14-P9.2: the audit screen renders the trail, filters it, pages it, and
 /// refuses to show anything without `audit.read`.

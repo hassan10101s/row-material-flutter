@@ -63,4 +63,27 @@ class AppIcons {
   static const IconData arrowForward = Icons.arrow_forward;
   static const IconData note = Icons.sticky_note_2_outlined;
   static const IconData swap = Icons.swap_horiz;
+
+  /// Direction-aware navigation icons. In RTL [Directionality], previous
+  /// points right and next points left so pagination/forward chevrons mirror
+  /// automatically instead of leaking LTR assumptions into screens.
+  static IconData previousOf(BuildContext context) =>
+      Directionality.of(context) == TextDirection.rtl
+          ? Icons.chevron_right
+          : Icons.chevron_left;
+
+  static IconData nextOf(BuildContext context) =>
+      Directionality.of(context) == TextDirection.rtl
+          ? Icons.chevron_left
+          : Icons.chevron_right;
+
+  static IconData forwardOf(BuildContext context) =>
+      Directionality.of(context) == TextDirection.rtl
+          ? Icons.arrow_back
+          : Icons.arrow_forward;
+
+  static IconData backOf(BuildContext context) =>
+      Directionality.of(context) == TextDirection.rtl
+          ? Icons.arrow_forward
+          : Icons.arrow_back;
 }

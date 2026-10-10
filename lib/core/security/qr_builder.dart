@@ -1,73 +1,35 @@
 import 'dart:convert';
 
-import '../domain/rules.dart';
+import 'qr_payload.dart';
 import 'seal_codec.dart';
 
 /// Port of core/utils.py build_qr_payload_text.
+///
+/// The QR carries the inspection entry code **only**, still sealed: a dense
+/// QR packed with the whole report (material, results, history) prints too
+/// small for phone cameras to read reliably. Everything else the scanner
+/// needs lives in the local database behind that code, so the print stays
+/// tiny and scannable.
+///
+/// The envelope keeps the entry code in plaintext next to the sealed body
+/// (see qr_payload.dart): it is already printed human-readable on the
+/// report/label itself, and without it a phone could never resolve a print
+/// made on another device (only the origin device can unseal).
 String buildQrPayloadText({
   required Map<String, dynamic> inspection,
-  required List<dynamic> physicalData,
-  required List<dynamic> chemicalData,
   List<int>? encryptKey,
 }) {
-  Map<String, dynamic> latestDecision = {};
-  final history = (inspection['status_history'] as List<dynamic>?) ?? const [];
-  for (final row in history.reversed) {
-    if (row is Map) {
-      final statusCode = '${row['new_status'] ?? ''}';
-      if (isDecisionStatus(statusCode)) {
-        latestDecision = {
-          's': statusCode,
-          'v': '${row['version'] ?? ''}',
-          'r': '${row['change_reason'] ?? ''}',
-        };
-        break;
-      }
-    }
-  }
+  final entryCode = '${inspection['entry_code'] ?? ''}';
 
-  final physicalSummary = <String, List<dynamic>>{};
-  for (final param in physicalData) {
-    if (param is Map) {
-      final name = '${param['name'] ?? '-'}';
-      final results = (param['actuals'] as List<dynamic>?) ?? const [];
-      physicalSummary[name] = results.map((r) => r ?? '-').toList();
-    }
-  }
-
-  final chemicalSummary = <String, List<dynamic>>{};
-  for (final param in chemicalData) {
-    if (param is Map) {
-      final name = '${param['name'] ?? '-'}';
-      final results = (param['actuals'] as List<dynamic>?) ?? const [];
-      chemicalSummary[name] = results.map((r) => r ?? '-').toList();
-    }
-  }
-
-  // Python's `or` also falls back on empty strings, not just nulls.
-  final rawBy = inspection['sample_taken_by'];
-  final by = rawBy is String && rawBy.trim().isNotEmpty
-      ? rawBy.trim()
-      : '${inspection['specialist_name'] ?? ''}'.trim();
-
-  final payload = <String, dynamic>{
-    'ec': inspection['entry_code'] ?? '',
-    'm': inspection['material_name'] ?? '',
-    'mc': inspection['material_code'] ?? '',
-    'd': inspection['inspection_date'] ?? '',
-    's': inspection['supplier'] ?? '',
-    't': inspection['truck_number'] ?? '',
-    'q': inspection['quantity'] ?? '',
-    'by': by,
-    'sn': inspection['sample_names'] ?? const [],
-    'dec': latestDecision,
-    'ph': physicalSummary,
-    'ch': chemicalSummary,
-  };
-
-  final raw = jsonEncode(payload);
+  final raw = jsonEncode({'ec': entryCode});
+  final String body;
   if (encryptKey != null && encryptKey.isNotEmpty) {
-    return sealText(raw, encryptKey);
+    body = sealText(raw, encryptKey);
+  } else {
+    body = raw;
   }
-  return raw;
+  // Envelope with the entry-code pointer: any device can resolve WHICH
+  // inspection a print refers to (see qr_payload.dart); the sealed body
+  // keeps its tamper-evidence for the origin device.
+  return encodeAppQrPayload(entryCode: entryCode, body: body);
 }

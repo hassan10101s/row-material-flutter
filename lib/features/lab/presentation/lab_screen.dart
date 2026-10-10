@@ -8,19 +8,18 @@ import '../../../di/service_locator.dart';
 import '../domain/lab_local_repository.dart';
 import '../domain/lab_result_repository.dart';
 import '../../reports/domain/report_repository.dart';
-import 'activity_tab.dart';
-import 'analyses_tab.dart';
-import 'constants_tab.dart';
+import 'activity/activity_tab.dart';
+import 'analyses/analyses_tab.dart';
 import 'cubit/activity_cubit.dart';
 import 'cubit/analyses_cubit.dart';
-import 'cubit/constants_cubit.dart';
 import 'cubit/inventory_cubit.dart';
 import 'cubit/lab_cubit.dart';
 import 'cubit/lab_reports_cubit.dart';
 import 'cubit/test_history_cubit.dart';
-import 'inventory_tab.dart';
-import 'lab_reports_tab.dart';
-import 'test_history_tab.dart';
+import 'equipment/equipment_tab.dart';
+import 'inventory/inventory_tab.dart';
+import 'lab_reports/lab_reports_tab.dart';
+import 'test_history/test_history_tab.dart';
 
 class _LabTab {
   final String label;
@@ -56,7 +55,9 @@ class _LazyTab extends StatefulWidget {
 }
 
 class _LazyTabState extends State<_LazyTab> {
-  bool _visited = false;
+  // The initially selected tab must build on the first frame, not after the
+  // first parent rebuild.
+  late bool _visited = widget.active;
 
   @override
   void didUpdateWidget(covariant _LazyTab oldWidget) {
@@ -69,8 +70,8 @@ class _LazyTabState extends State<_LazyTab> {
       _visited ? widget.builder(context) : const SizedBox.shrink();
 }
 
-/// Lab center: inventory, analyses, run test, test history, constants,
-/// activity log and lab reports (port of Web LabView panels).
+/// Lab center: test history (entry), analyses, activity log, lab reports,
+/// equipment and inventory last (port of Web LabView panels).
 class LabScreen extends StatelessWidget {
   const LabScreen({super.key});
 
@@ -83,22 +84,6 @@ class LabScreen extends StatelessWidget {
     final results = getIt<LabResultRepository>();
     final tabs = <_LabTab>[
       _LabTab(
-        AppText.t('المخزون', 'Inventory'),
-        Icons.inventory_2_outlined,
-        (context) => BlocProvider(
-          create: (_) => InventoryCubit(repo: local)..load(),
-          child: const InventoryTab(),
-        ),
-      ),
-      _LabTab(
-        AppText.t('التحليلات', 'Analyses'),
-        Icons.science_outlined,
-        (context) => BlocProvider(
-          create: (_) => AnalysesCubit(repo: config)..load(),
-          child: const AnalysesTab(),
-        ),
-      ),
-      _LabTab(
         AppText.t('سجل الفحوصات', 'Tests'),
         Icons.history,
         (context) => BlocProvider(
@@ -109,11 +94,11 @@ class LabScreen extends StatelessWidget {
         ),
       ),
       _LabTab(
-        AppText.t('الثوابت', 'Constants'),
-        Icons.functions,
+        AppText.t('التحليلات', 'Analyses'),
+        Icons.science_outlined,
         (context) => BlocProvider(
-          create: (_) => ConstantsCubit(repo: local)..load(),
-          child: ConstantsTab(repo: local),
+          create: (_) => AnalysesCubit(repo: config)..load(),
+          child: const AnalysesTab(),
         ),
       ),
       _LabTab(
@@ -130,6 +115,19 @@ class LabScreen extends StatelessWidget {
         (context) => BlocProvider(
           create: (_) => LabReportsCubit(reports: getIt<ReportRepository>()),
           child: const LabReportsTab(),
+        ),
+      ),
+      _LabTab(
+        AppText.t('المعدات', 'Equipment'),
+        Icons.precision_manufacturing_outlined,
+        (context) => const EquipmentTab(),
+      ),
+      _LabTab(
+        AppText.t('المخزون', 'Inventory'),
+        Icons.inventory_2_outlined,
+        (context) => BlocProvider(
+          create: (_) => InventoryCubit(repo: local)..load(),
+          child: const InventoryTab(),
         ),
       ),
     ];
@@ -158,7 +156,7 @@ class LabScreen extends StatelessWidget {
               children: [
                 for (var i = 0; i < tabs.length; i++)
                   Padding(
-                    padding: const EdgeInsets.only(left: AppSpacing.sm),
+                    padding: const EdgeInsetsDirectional.only(start: AppSpacing.sm),
                     child: ChoiceChip(
                       label: Text(tabs[i].label),
                       avatar: Icon(tabs[i].icon, size: 18.r),

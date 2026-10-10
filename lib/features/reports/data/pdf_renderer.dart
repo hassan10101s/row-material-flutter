@@ -34,6 +34,8 @@ class PdfRenderer {
   static const _light = PdfColor.fromInt(0xFFF0F7F0);
   static const _red = PdfColor.fromInt(0xFFB71C1C);
   static const _redBg = PdfColor.fromInt(0xFFFDECEA);
+  static const _amber = PdfColor.fromInt(0xFF8A5A00);
+  static const _amberBg = PdfColor.fromInt(0xFFFFF3CD);
 
   static bool _hasArabic(String? s) {
     if (s == null) return false;
@@ -149,6 +151,7 @@ class PdfRenderer {
   }
 
   static List<pw.Widget> _inspectionInfoBlocks(Map<String, dynamic> ctx) {
+    final isProduct = ctx['is_product'] == true;
     final info = _simpleTable(
       ['الخاصية / Field', 'القيمة / Value'],
       [
@@ -165,20 +168,34 @@ class PdfRenderer {
           _txt('${ctx['expiry_date'] ?? '-'}', size: 9),
         ],
         [
-          _txt('اسم الخامة / Material', size: 9, bold: true),
+          _txt(
+              isProduct ? 'اسم المنتج / Product' : 'اسم الخامة / Material',
+              size: 9,
+              bold: true),
           _txt('${ctx['material_name'] ?? '-'}', size: 9),
         ],
         [
           _txt('الكمية / Quantity', size: 9, bold: true),
           _txt('${ctx['quantity'] ?? '-'}', size: 9),
         ],
-        [
-          _txt('المورد / Supplier', size: 9, bold: true),
-          _txt('${ctx['supplier'] ?? '-'}', size: 9),
-        ],
-        [
-          _txt('رقم الشاحنة / Truck No.', size: 9, bold: true),
-          _txt('${ctx['truck_number'] ?? '-'}', size: 9),
+        if (isProduct) ...[
+          [
+            _txt('رقم الفورمولا / Formula No.', size: 9, bold: true),
+            _txt('${ctx['formula_number'] ?? '-'}', size: 9),
+          ],
+          [
+            _txt('رقم التشغيلة / Batch No.', size: 9, bold: true),
+            _txt('${ctx['batch_number'] ?? '-'}', size: 9),
+          ],
+        ] else ...[
+          [
+            _txt('المورد / Supplier', size: 9, bold: true),
+            _txt('${ctx['supplier'] ?? '-'}', size: 9),
+          ],
+          [
+            _txt('رقم الشاحنة / Truck No.', size: 9, bold: true),
+            _txt('${ctx['truck_number'] ?? '-'}', size: 9),
+          ],
         ],
         [
           _txt('أخذ العينة / Sample taken by', size: 9, bold: true),
@@ -199,25 +216,34 @@ const {
       },
     );
     final decision = '${ctx['decision_label'] ?? '-'}';
+    final status = '${ctx['decision_status'] ?? ''}';
+    final isRejected =
+        status == 'FULL_REJECTION' || status == 'PARTIAL_REJECTION';
+    final isConditional =
+        status == 'CONDITIONAL_APPROVAL' || status == 'CONDITIONAL';
+    final verdictBg = isRejected
+        ? _redBg
+        : isConditional
+            ? _amberBg
+            : _light;
+    final verdictColor = isRejected
+        ? _red
+        : isConditional
+            ? _amber
+            : _accent;
     final verdict = pw.Container(
       margin: const pw.EdgeInsets.symmetric(vertical: 8),
       padding: const pw.EdgeInsets.all(8),
       decoration: pw.BoxDecoration(
-        color: ctx['decision_class'] == 'Rejected' || ctx['decision_class'] == 'Partial'
-            ? _redBg
-            : _light,
-        border: pw.Border.all(
-            color: ctx['decision_class'] == 'Rejected' || ctx['decision_class'] == 'Partial'
-                ? _red
-                : _accent,
-            width: 1),
+        color: verdictBg,
+        border: pw.Border.all(color: verdictColor, width: 1),
       ),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
           pw.Row(children: [
             _txt('النتيجة / Decision: ', size: 10, bold: true),
-            _txt(decision, size: 10.5, bold: true, color: _accent),
+            _txt(decision, size: 10.5, bold: true, color: verdictColor),
             _spacer(1),
             _txt('الإصدار ${ctx['decision_version'] ?? 1}', size: 9, color: _muted),
           ]),
@@ -271,7 +297,8 @@ const {
         }
         rows.add(cells);
       }
-      widgets.add(_simpleTable(header, rows, cols, colorHeader: true));
+      widgets.add(
+          _simpleTable(header, rows, cols, colorHeader: true, zebra: true));
     }
 
     if (chemical.isNotEmpty) {
@@ -314,16 +341,21 @@ const {
         }
         rows.add(cells);
       }
-      widgets.add(_simpleTable(header, rows, cols, colorHeader: true));
+      widgets.add(
+          _simpleTable(header, rows, cols, colorHeader: true, zebra: true));
     }
     return widgets;
   }
+
+  static final _zebraA = PdfColor.fromInt(0xFFF7FAF7);
+  static final _zebraB = PdfColor.fromInt(0xFFFFFFFF);
 
   static pw.Widget _simpleTable(
     List<String> header,
     List<List<pw.Widget>> rows,
     Map<int, pw.FlexColumnWidth> cols, {
     bool colorHeader = true,
+    bool zebra = false,
   }) {
     final tr = <pw.TableRow>[];
     tr.add(pw.TableRow(
@@ -336,14 +368,22 @@ const {
           ),
       ],
     ));
-    for (final row in rows) {
-      tr.add(pw.TableRow(children: [
-        for (var ci = 0; ci < header.length; ci++)
-          pw.Container(
-            padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-            child: ci < row.length ? row[ci] : _txt(''),
-          ),
-      ]));
+    for (var ri = 0; ri < rows.length; ri++) {
+      final row = rows[ri];
+      tr.add(pw.TableRow(
+          decoration: zebra
+              ? pw.BoxDecoration(
+                  color: ri.isEven ? _zebraA : _zebraB,
+                )
+              : null,
+          children: [
+            for (var ci = 0; ci < header.length; ci++)
+              pw.Container(
+                padding:
+                    const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                child: ci < row.length ? row[ci] : _txt(''),
+              ),
+          ]));
     }
     return pw.Table(
       columnWidths: cols,
@@ -409,6 +449,7 @@ const {
           2: pw.FlexColumnWidth(2.4),
           3: pw.FlexColumnWidth(1.4),
         },
+        zebra: true,
       ),
     ];
   }
@@ -479,8 +520,13 @@ const {
                   _spacer(1),
                   pw.Wrap(spacing: 6, runSpacing: 1, children: [
                     _txt('كمية: ${ctx['quantity_display']}', size: 7),
-                    _txt('مورد: ${insp['supplier'] ?? ''}', size: 7),
-                    _txt('شاحنة: ${insp['truck_number'] ?? ''}', size: 7),
+                    if ('${insp['inspection_kind'] ?? 'raw'}' == 'product') ...[
+                      _txt('فورمولا: ${insp['formula_number'] ?? ''}', size: 7),
+                      _txt('تشغيلة: ${insp['batch_number'] ?? ''}', size: 7),
+                    ] else ...[
+                      _txt('مورد: ${insp['supplier'] ?? ''}', size: 7),
+                      _txt('شاحنة: ${insp['truck_number'] ?? ''}', size: 7),
+                    ],
                   ]),
                   _spacer(1),
                   pw.Wrap(spacing: 6, runSpacing: 1, children: [
@@ -554,7 +600,11 @@ const {
               _spacer(1),
               _txt('رقم: ${label['entry_code'] ?? ''} | ${label['inspection_date'] ?? ''}', size: 7),
               _spacer(1),
-              _txt('مورد: ${label['supplier'] ?? ''} | شاحنة: ${label['truck_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}', size: 7),
+              _txt(
+                  label['is_product'] == true
+                      ? 'فورمولا: ${label['formula_number'] ?? ''} | تشغيلة: ${label['batch_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}'
+                      : 'مورد: ${label['supplier'] ?? ''} | شاحنة: ${label['truck_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}',
+                  size: 7),
               _spacer(1),
               _txt('أخذ: ${label['sample_taken_by'] ?? ''} | أخصائي: ${label['specialist_name'] ?? ''}', size: 7),
               _spacer(1),

@@ -228,7 +228,11 @@ class _AppAutocompleteState<T extends Object>
                             ) ??
                             ListTile(
                               dense: true,
-                              title: Text(widget.displayString(option)),
+                              title: Text(
+                                widget.displayString(option),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                               onTap: () => onSelected(option),
                             ),
                     ],

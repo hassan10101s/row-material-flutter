@@ -1,13 +1,14 @@
 {
-    "cmake.sourceDirectory": "C:/Users/hassa/PycharmProjects/row material flutter/windows",
-    "chat.tools.terminal.autoApprove": {
-        "/^flutter analyze lib/design_system/widgets/app_status_badge\\.dart lib/features/auth/presentation/setup_screen\\.dart lib/features/dashboard/presentation/dashboard_screen\\.dart$/": {
-            "approve": true,
-            "matchCommandLine": true
-        },
-        "/^flutter analyze lib/features/history/presentation/history_screen\\.dart lib/features/inspections/presentation/inspections_screen\\.dart lib/features/lab/presentation/activity_tab\\.dart$/": {
-            "approve": true,
-            "matchCommandLine": true
-        }
+  "cmake.sourceDirectory": "C:/Users/hassa/PycharmProjects/row material flutter/windows",
+  "chat.tools.terminal.autoApprove": {
+    "/^flutter analyze lib/design_system/widgets/app_status_badge\\.dart lib/features/auth/presentation/setup_screen\\.dart lib/features/dashboard/presentation/dashboard_screen\\.dart$/": {
+      "approve": true,
+      "matchCommandLine": true
+    },
+    "/^flutter analyze lib/features/history/presentation/history_screen\\.dart lib/features/inspections/presentation/inspections_screen\\.dart lib/features/lab/presentation/activity_tab\\.dart$/": {
+      "approve": true,
+      "matchCommandLine": true
     }
+  },
+  "java.compile.nullAnalysis.mode": "automatic"
 }

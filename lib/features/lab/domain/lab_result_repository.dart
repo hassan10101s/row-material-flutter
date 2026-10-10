@@ -25,6 +25,18 @@ abstract interface class LabResultRepository {
 
   Future<Map<String, dynamic>> getSampleTest(int testId);
 
+  /// Updates an existing `lab_sample_tests` row (result text, sample name,
+  /// dynamic field values, entry code). Consumption is NOT recomputed —
+  /// the original stock movement stays as recorded.
+  Future<Map<String, dynamic>> updateSampleTest(
+    int testId, {
+    String? sampleName,
+    String? resultText,
+    Map<String, dynamic>? dynamicValues,
+    String? entryCode,
+    Map<String, dynamic>? user,
+  });
+
   Future<List<Map<String, dynamic>>> listSampleTests({
     String? sourceType,
     int? sourceRefId,
@@ -103,11 +115,15 @@ abstract interface class LabConfigurationRepository {
 
   Future<Map<String, dynamic>> updateAnalysis({
     required int analysisId,
+    String? name,
     String? description,
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String? unit,
     int? parameterId,
+    // Drops a previous reference link (sets `parameter_id` NULL) together
+    // with the manual rename. Used when the editor is unlinked.
+    bool clearParameter = false,
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
   });
@@ -130,6 +146,8 @@ abstract interface class LabConfigurationRepository {
     String category = '',
     String description = '',
     List<Map<String, dynamic>>? ranges,
+    Map<String, dynamic>? physicalReference,
+    Map<String, dynamic>? chemicalReference,
     Map<String, dynamic>? user,
   });
 

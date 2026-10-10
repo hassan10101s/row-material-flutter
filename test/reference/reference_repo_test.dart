@@ -252,11 +252,19 @@ Future<void> _run() async {
     reason: 'physical parameters inherit their reference unit',
   );
 
-  await _repo.upsertUnit('%', name: 'Percent', dimension: 'ratio');
+  // The units registry is pre-seeded with defaults on every open, so the
+  // parity check uses a dedicated symbol and asserts only its own lifecycle.
+  await _repo.upsertUnit('T-UNIT', name: 'Test Unit', dimension: 'test-dim');
   final units = await _repo.listUnits();
-  expect(units.firstWhere((u) => u['symbol'] == '%')['dimension'], 'ratio');
-  await _repo.deleteUnit('%');
-  expect(await _repo.listUnits(), isEmpty);
+  expect(
+    units.firstWhere((u) => u['symbol'] == 'T-UNIT')['dimension'],
+    'test-dim',
+  );
+  await _repo.deleteUnit('T-UNIT');
+  expect(
+    (await _repo.listUnits()).any((u) => u['symbol'] == 'T-UNIT'),
+    isFalse,
+  );
 
   await _repo.deleteParameter('Purity');
   expect(
@@ -264,5 +272,38 @@ Future<void> _run() async {
       parameterType: 'chemical',
     )).any((p) => p['parameter_name'] == 'Purity'),
     isFalse,
+  );
+
+  // ── Device-scoped entry codes (two-device collision guard) ──────────
+  // Without a provider the legacy global-per-day sequence is kept.
+  final legacy =
+      await _repo.generateEntryCode('M-SUGAR-01', '2026-09-01');
+  expect(legacy, 'M-SUGAR-01-20260901-001');
+
+  // With a provider the sequence is scoped per device: two offline devices
+  // mint disjoint code spaces, so their rows can never share a sync
+  // document id (which IS the entry code).
+  final devA = ReferenceRepo(
+    dbHelper: _dbHelper,
+    deviceTagProvider: () async => 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
+  );
+  final devB = ReferenceRepo(
+    dbHelper: _dbHelper,
+    deviceTagProvider: () async => 'ffffffff-ffff-ffff-ffff-ffffffffffff',
+  );
+  final codeA = await devA.generateEntryCode('M-SUGAR-01', '2026-09-01');
+  final codeB = await devB.generateEntryCode('M-SUGAR-01', '2026-09-01');
+  expect(codeA, 'M-SUGAR-01-20260901-A1B2C3-001');
+  expect(codeB, 'M-SUGAR-01-20260901-FFFFFF-001');
+  expect(codeA, isNot(codeB));
+
+  // A failing/empty provider degrades to the legacy format, never throws.
+  final flaky = ReferenceRepo(
+    dbHelper: _dbHelper,
+    deviceTagProvider: () async => throw StateError('no id yet'),
+  );
+  expect(
+    await flaky.generateEntryCode('M-SUGAR-01', '2026-09-01'),
+    'M-SUGAR-01-20260901-001',
   );
 }

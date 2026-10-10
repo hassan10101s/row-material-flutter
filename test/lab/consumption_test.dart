@@ -56,7 +56,8 @@ void main() {
       'current_qty': 100, 'min_qty': 5, 'created_at': ts, 'updated_at': ts,
     });
     catalystId = await db.insert('lab_inventory', {
-      'name': 'Kjeldahl Catalyst Tablet', 'category': 'powder', 'unit': 'pc',
+      // Tablets are counted pieces, not powder.
+      'name': 'Kjeldahl Catalyst Tablet', 'category': 'count', 'unit': 'pc',
       'current_qty': 10, 'min_qty': 2, 'created_at': ts, 'updated_at': ts,
     });
     titerId = await db.insert('lab_inventory', {

@@ -158,6 +158,142 @@ class OfflineFirstLabRepository extends LabRepo
     });
   }
 
+  // ── Equipment (device-local registry, guarded + audited, never synced) ──
+
+  @override
+  Future<Map<String, dynamic>> createEquipment({
+    required String name,
+    String manufacturer = '',
+    String description = '',
+    String lastCalibrationDate = '',
+    DatabaseExecutor? executor,
+  }) async {
+    _check(Permission.labResultsUpdate);
+    final db = await dbHelper.database;
+    return db.transaction((txn) async {
+      final item = await super.createEquipment(
+        name: name,
+        manufacturer: manufacturer,
+        description: description,
+        lastCalibrationDate: lastCalibrationDate,
+        executor: txn,
+      );
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'labEquipment',
+        entityId: 'eq_${item['id']}',
+        details: {'localId': item['id'], 'name': item['name']},
+      );
+      return item;
+    });
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateEquipment(
+    int equipmentId,
+    Map<String, dynamic> fields, [
+    DatabaseExecutor? executor,
+  ]) async {
+    _check(Permission.labResultsUpdate);
+    final db = await dbHelper.database;
+    return db.transaction((txn) async {
+      final item = await super.updateEquipment(equipmentId, fields, txn);
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'labEquipment',
+        entityId: 'eq_$equipmentId',
+        details: {'localId': equipmentId, 'fields': fields.keys.toList()},
+      );
+      return item;
+    });
+  }
+
+  @override
+  Future<void> deleteEquipment(int equipmentId,
+      [DatabaseExecutor? executor]) async {
+    _check(Permission.labResultsUpdate);
+    final db = await dbHelper.database;
+    return db.transaction((txn) async {
+      await super.deleteEquipment(equipmentId, txn);
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'labEquipment',
+        entityId: 'eq_$equipmentId',
+        details: {'localId': equipmentId, 'operation': 'delete'},
+      );
+    });
+  }
+
+  @override
+  Future<Map<String, dynamic>> addEquipmentEvent({
+    required int equipmentId,
+    required String eventType,
+    required String eventDate,
+    String notes = '',
+    DatabaseExecutor? executor,
+  }) async {
+    _check(Permission.labResultsUpdate);
+    final db = await dbHelper.database;
+    return db.transaction((txn) async {
+      final event = await super.addEquipmentEvent(
+        equipmentId: equipmentId,
+        eventType: eventType,
+        eventDate: eventDate,
+        notes: notes,
+        executor: txn,
+      );
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'labEquipmentEvent',
+        entityId: 'eqev_${event['id']}',
+        details: {'localId': event['id'], 'equipmentId': equipmentId},
+      );
+      return event;
+    });
+  }
+
+  @override
+  Future<Map<String, dynamic>> updateEquipmentEvent(
+    int eventId,
+    Map<String, dynamic> fields, [
+    DatabaseExecutor? executor,
+  ]) async {
+    _check(Permission.labResultsUpdate);
+    final db = await dbHelper.database;
+    return db.transaction((txn) async {
+      final event = await super.updateEquipmentEvent(eventId, fields, txn);
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'labEquipmentEvent',
+        entityId: 'eqev_$eventId',
+        details: {'localId': eventId, 'fields': fields.keys.toList()},
+      );
+      return event;
+    });
+  }
+
+  @override
+  Future<void> deleteEquipmentEvent(int eventId,
+      [DatabaseExecutor? executor]) async {
+    _check(Permission.labResultsUpdate);
+    final db = await dbHelper.database;
+    return db.transaction((txn) async {
+      await super.deleteEquipmentEvent(eventId, txn);
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'labEquipmentEvent',
+        entityId: 'eqev_$eventId',
+        details: {'localId': eventId, 'operation': 'delete'},
+      );
+    });
+  }
+
   // ── §9.4 writes: Products ──────────────────────────────────────────
 
   @override
@@ -166,6 +302,8 @@ class OfflineFirstLabRepository extends LabRepo
     String category = '',
     String description = '',
     List<Map<String, dynamic>>? ranges,
+    Map<String, dynamic>? physicalReference,
+    Map<String, dynamic>? chemicalReference,
     Map<String, dynamic>? user,
     DatabaseExecutor? executor,
   }) async {
@@ -178,6 +316,8 @@ class OfflineFirstLabRepository extends LabRepo
         category: category,
         description: description,
         ranges: ranges,
+        physicalReference: physicalReference,
+        chemicalReference: chemicalReference,
         user: user,
         executor: txn,
       );
@@ -196,7 +336,8 @@ class OfflineFirstLabRepository extends LabRepo
             'rangesCount': ranges?.length ?? 0,
           },
         );
-        if (ranges != null && ranges.isNotEmpty) {
+        if ((ranges != null && ranges.isNotEmpty) ||
+            (chemicalReference != null && chemicalReference.isNotEmpty)) {
           await _refreshRangesForProduct(txn, id);
         }
       }
@@ -227,7 +368,8 @@ class OfflineFirstLabRepository extends LabRepo
           'fields': fields.keys.toList(),
         },
       );
-      if (fields.containsKey('ranges')) {
+      if (fields.containsKey('ranges') ||
+          fields.containsKey('chemical_reference')) {
         await _refreshRangesForProduct(txn, productId);
       }
     });
@@ -355,11 +497,13 @@ class OfflineFirstLabRepository extends LabRepo
   @override
   Future<Map<String, dynamic>> updateAnalysis({
     required int analysisId,
+    String? name,
     String? description,
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String? unit,
     int? parameterId,
+    bool clearParameter = false,
     Object? formula,
     List<Map<String, dynamic>>? fieldChemicalLinks,
     DatabaseExecutor? executor,
@@ -369,11 +513,13 @@ class OfflineFirstLabRepository extends LabRepo
     return db.transaction((txn) async {
       final analysis = await super.updateAnalysis(
         analysisId: analysisId,
+        name: name,
         description: description,
         dynamicFields: dynamicFields,
         items: items,
         unit: unit,
         parameterId: parameterId,
+        clearParameter: clearParameter,
         formula: formula,
         fieldChemicalLinks: fieldChemicalLinks,
         executor: txn,
@@ -514,6 +660,45 @@ class OfflineFirstLabRepository extends LabRepo
         exec: txn,
       );
       await _enqueueResult(txn, result['test'] as Map<String, dynamic>?);
+      return result;
+    });
+  }
+
+  /// `lab_results.update` - editing the fillable fields of a saved test.
+  @override
+  Future<Map<String, dynamic>> updateSampleTest(
+    int testId, {
+    String? sampleName,
+    String? resultText,
+    Map<String, dynamic>? dynamicValues,
+    String? entryCode,
+    Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
+  }) async {
+    if (executor != null) {
+      return super.updateSampleTest(
+        testId,
+        sampleName: sampleName,
+        resultText: resultText,
+        dynamicValues: dynamicValues,
+        entryCode: entryCode,
+        user: user,
+        executor: executor,
+      );
+    }
+    _check(Permission.labResultsUpdate);
+    final db = await dbHelper.database;
+    return db.transaction((txn) async {
+      final result = await super.updateSampleTest(
+        testId,
+        sampleName: sampleName,
+        resultText: resultText,
+        dynamicValues: dynamicValues,
+        entryCode: entryCode,
+        user: user,
+        executor: txn,
+      );
+      await _enqueueResult(txn, result);
       return result;
     });
   }

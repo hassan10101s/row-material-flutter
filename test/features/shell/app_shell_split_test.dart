@@ -48,6 +48,9 @@ class _FakeDelivery implements FileDelivery {
   final bool canReveal;
 
   @override
+  bool get canRevealFolder => canReveal;
+
+  @override
   bool get canShare => true;
 
   @override

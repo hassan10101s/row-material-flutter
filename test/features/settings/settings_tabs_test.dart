@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:material_lab/features/settings/presentation/settings_screen.dart';
+import 'package:material_lab/features/settings/presentation/settings/settings_screen.dart';
 
 void main() {
   group('SettingsTab', () {

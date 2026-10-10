@@ -185,6 +185,66 @@ class AppTheme {
         ),
       ),
       iconTheme: IconThemeData(color: palette.textMuted, size: 22.r),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: palette.surface,
+        indicatorColor: palette.primary.withValues(alpha: 0.14),
+        elevation: 0,
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontFamily: AppTextTheme.cairoFontFamily,
+            fontSize: 12.spMax,
+            fontWeight: states.contains(WidgetState.selected)
+                ? AppFontWeights.semiBold
+                : AppFontWeights.medium,
+            color: states.contains(WidgetState.selected)
+                ? palette.primary
+                : palette.textMuted,
+          ),
+        ),
+        iconTheme: WidgetStateProperty.resolveWith(
+          (states) => IconThemeData(
+            size: 22.r,
+            color: states.contains(WidgetState.selected)
+                ? palette.primary
+                : palette.textMuted,
+          ),
+        ),
+      ),
+      drawerTheme: DrawerThemeData(
+        backgroundColor: palette.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 1,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadiusDirectional.horizontal(
+            start: Radius.zero,
+            end: Radius.circular(AppRadii.lg),
+          ),
+        ),
+        width: 320,
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: palette.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 2,
+        showDragHandle: true,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(AppRadii.lg.r),
+          ),
+        ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: palette.surfaceDeep,
+        contentTextStyle: TextStyle(
+          color: Colors.white,
+          fontFamily: AppTextTheme.cairoFontFamily,
+          fontSize: 13.spMax,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
 
       // Interaction feedback. Without these the defaults come from the seed
       // palette and do not match the surfaces they paint over.

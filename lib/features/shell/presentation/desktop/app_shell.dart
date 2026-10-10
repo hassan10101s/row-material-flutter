@@ -70,10 +70,19 @@ class DesktopAppShell extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              width: 280.w,
+              width: 264.w,
               decoration: BoxDecoration(
                 color: AppColors.surface,
-                border: Border(left: BorderSide(color: AppColors.borderMuted)),
+                border: BorderDirectional(
+                  end: BorderSide(color: AppColors.borderMuted),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 16,
+                    offset: const Offset(2, 0),
+                  ),
+                ],
               ),
               child: _Sidebar(
                 user: user,

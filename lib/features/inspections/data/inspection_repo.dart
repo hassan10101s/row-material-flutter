@@ -67,6 +67,36 @@ class InspectionRepo {
     check('Chemical', chemical);
   }
 
+  /// Required-field gate: every reference param flagged مطلوب must have a
+  /// non-empty value in **every** sample, otherwise saving stops with a
+  /// message naming the field (e.g. الرطوبة يجب إدخالها قبل حفظ المحضر).
+  static void validateRequiredResults(
+    Map<String, dynamic> physicalRef,
+    Map<String, dynamic> chemicalRef,
+    Map<String, dynamic> physicalResults,
+    Map<String, dynamic> chemicalResults,
+  ) {
+    void check(Map<String, dynamic> refs, Map<String, dynamic> results) {
+      for (final entry in refs.entries) {
+        if (!isReferenceRequired(entry.value)) continue;
+        final name = '${entry.key}'.trim();
+        if (name.isEmpty) continue;
+        final raw = results[name];
+        final values = raw is List
+            ? [for (final v in raw) '$v'.trim()]
+            : ['${raw ?? ''}'.trim()];
+        final missing =
+            values.isEmpty || values.any((v) => v.isEmpty);
+        if (missing) {
+          throw ValidationError(AppErrors.requiredInspectionField(name));
+        }
+      }
+    }
+
+    check(physicalRef, physicalResults);
+    check(chemicalRef, chemicalResults);
+  }
+
   static String _truncate(dynamic v, int max) {
     final s = '$v';
     if (s.length > max) return s.substring(0, max);
@@ -95,11 +125,14 @@ class InspectionRepo {
       if (value is List) {
         out[key] = [
           for (final item in value)
-            normalizeNonNegativeNumericText('${item ?? ''}', 'Chemical result ($key)')
+            normalizeNonNegativeNumericText('${item ?? ''}',
+                'Chemical result ($key)',
+                allowEmpty: true)
         ];
       } else {
-        out[key] = normalizeNonNegativeNumericText(
-            '${value ?? ''}', 'Chemical result ($key)');
+        out[key] = normalizeNonNegativeNumericText('${value ?? ''}',
+            'Chemical result ($key)',
+            allowEmpty: true);
       }
     });
     return out;
@@ -107,12 +140,34 @@ class InspectionRepo {
 
   // ── Base payload ──────────────────────────────────────────────
 
+  /// Inspection kinds. Raw-material rows (`raw`) are the legacy shape
+  /// (supplier/truck); product rows (`product`) are production batches
+  /// (product/formula/batch, no supplier or vehicle).
+  static const String kindRaw = 'raw';
+  static const String kindProduct = 'product';
+
+  static String normalizeKind(dynamic value) {
+    final kind = '$value'.trim().toLowerCase();
+    if (kind == kindProduct || kind == 'products' || kind == 'منتج') {
+      return kindProduct;
+    }
+    return kindRaw;
+  }
+
+  static bool isProductRow(Map<String, dynamic> row) =>
+      normalizeKind(row['inspection_kind']) == kindProduct;
+
   Future<Map<String, dynamic>> buildBasePayload(
     Map<String, dynamic> payload,
     UserContext user, {
     bool validateDecision = true,
     DatabaseExecutor? exec,
   }) async {
+    final kind = normalizeKind(payload['inspection_kind']);
+    if (kind == kindProduct) {
+      return _buildProductBasePayload(payload, user,
+          validateDecision: validateDecision, exec: exec);
+    }
     final materialId = int.tryParse('${payload['material_id'] ?? 0}') ?? 0;
     if (materialId == 0) throw ValidationError(AppErrors.materialSelectionRequired);
     final material = await referenceRepo.getMaterial(materialId,
@@ -136,7 +191,8 @@ class InspectionRepo {
         _asStringMap(payload['chemical_results']), chemicalRef);
     final sampleNames = normalizeSampleNames(payload['sample_names']);
     validateResultArrays(physicalResults, chemicalResults, sampleNames.length);
-
+    // الحقول الأساسية وقت الفحص مطلوبة دائماً عند الحفظ، ثم الحقول
+    // الفيزيائية/الكيميائية المعلَّمة مطلوب.
     final sampleTakenBy =
         '${payload['sample_taken_by'] ?? payload['specialist_name'] ?? ''}'.trim();
     if (sampleTakenBy.length < 3) {
@@ -146,6 +202,8 @@ class InspectionRepo {
     if (supplier.length < 3) {
       throw ValidationError(AppErrors.supplierMin3);
     }
+    validateRequiredResults(
+        physicalRef, chemicalRef, physicalResults, chemicalResults);
     final quantity = normalizeNonNegativeNumericText('${payload['quantity'] ?? ''}',
         'Quantity', allowEmpty: true);
     final rejectedQty = normalizeNonNegativeNumericText(
@@ -157,6 +215,10 @@ class InspectionRepo {
     final followUpNote = truncateText('${payload['follow_up_note'] ?? ''}', 250);
 
     final base = <String, dynamic>{
+      'inspection_kind': kindRaw,
+      'product_id': null,
+      'formula_number': '',
+      'batch_number': '',
       'material_id': material['id'],
       'material_name': material['material_name'],
       'material_code': material['material_code'],
@@ -165,6 +227,105 @@ class InspectionRepo {
       'entry_code': entryCode,
       'supplier': supplier,
       'truck_number': truckNumber,
+      'quantity': quantity,
+      'sample_taken_by': sampleTakenBy,
+      'specialist_name': user.fullName,
+      'physical_reference': physicalRef,
+      'chemical_reference': chemicalRef,
+      'physical_results': physicalResults,
+      'chemical_results': chemicalResults,
+      'decision_status': '${payload['decision_status'] ?? 'APPROVED'}',
+      'decision_reason': decisionReason,
+      'follow_up_note': followUpNote,
+      'rejected_quantity': rejectedQty,
+      'sample_names': sampleNames,
+      'created_by': user.id,
+      'created_by_name': user.fullName,
+    };
+    final normalized = normalizeDecisionFields(base);
+    base.addAll(normalized);
+    if (validateDecision) validateDecisionFields(base);
+    return base;
+  }
+
+  /// Product-inspection variant of [buildBasePayload]: one row per production
+  /// batch (product + formula number + batch number). The result/decision
+  /// shape is identical to raw materials; only the header differs (no
+  /// supplier/vehicle) and the reference comes from the product's analysis
+  /// ranges instead of the material catalog.
+  Future<Map<String, dynamic>> _buildProductBasePayload(
+    Map<String, dynamic> payload,
+    UserContext user, {
+    bool validateDecision = true,
+    DatabaseExecutor? exec,
+  }) async {
+    final productId = int.tryParse('${payload['product_id'] ?? 0}') ?? 0;
+    if (productId == 0) {
+      throw ValidationError(AppErrors.materialSelectionRequired);
+    }
+    final product = await referenceRepo.getProductForInspection(productId,
+        inspectionDate: '${payload['inspection_date'] ?? todayIso()}',
+        exec: exec);
+    final inspectionDate = '${payload['inspection_date'] ?? todayIso()}';
+    final entryCode =
+        '${payload['entry_code'] ?? ''}'.trim().isNotEmpty
+            ? '${payload['entry_code']}'.trim()
+            : '${product['next_entry_code']}';
+
+    final physicalRef =
+        Map<String, dynamic>.from(product['physical_reference'] ?? {});
+    final chemicalRef =
+        Map<String, dynamic>.from(product['chemical_reference'] ?? {});
+
+    final physicalResults = normalizePhysicalResults(
+        _asStringMap(payload['physical_results']), physicalRef);
+    final chemicalResults = normalizeChemicalResults(
+        _asStringMap(payload['chemical_results']), chemicalRef);
+    final sampleNames = normalizeSampleNames(payload['sample_names']);
+    validateResultArrays(physicalResults, chemicalResults, sampleNames.length);
+
+    final sampleTakenBy =
+        '${payload['sample_taken_by'] ?? payload['specialist_name'] ?? ''}'.trim();
+    if (sampleTakenBy.length < 3) {
+      throw ValidationError(AppErrors.sampleTakerMin3);
+    }
+    final formulaNumber =
+        truncateText('${payload['formula_number'] ?? ''}'.trim(), 50);
+    if (formulaNumber.isEmpty) {
+      throw ValidationError(AppErrors.fieldValueRequired('Formula number'));
+    }
+    final batchNumber =
+        truncateText('${payload['batch_number'] ?? ''}'.trim(), 50);
+    if (batchNumber.isEmpty) {
+      throw ValidationError(AppErrors.fieldValueRequired('Batch number'));
+    }
+    validateRequiredResults(
+        physicalRef, chemicalRef, physicalResults, chemicalResults);
+    final quantity = normalizeNonNegativeNumericText(
+        '${payload['quantity'] ?? ''}', 'Quantity',
+        allowEmpty: true);
+    final rejectedQty = normalizeNonNegativeNumericText(
+        '${payload['rejected_quantity'] ?? ''}', 'Rejected quantity',
+        allowEmpty: true);
+    final decisionReason = truncateText('${payload['decision_reason'] ?? ''}', 250);
+    final followUpNote = truncateText('${payload['follow_up_note'] ?? ''}', 250);
+
+    final db = exec ?? await _db;
+    final sentinelId = await dbHelper.ensureProductSentinelMaterialId(db);
+
+    final base = <String, dynamic>{
+      'inspection_kind': kindProduct,
+      'product_id': product['id'],
+      'formula_number': formulaNumber,
+      'batch_number': batchNumber,
+      'material_id': sentinelId,
+      'material_name': product['product_name'],
+      'material_code': product['product_code'],
+      'inspection_date': inspectionDate,
+      'expiry_date': '${payload['expiry_date'] ?? ''}'.trim(),
+      'entry_code': entryCode,
+      'supplier': '',
+      'truck_number': '',
       'quantity': quantity,
       'sample_taken_by': sampleTakenBy,
       'specialist_name': user.fullName,
@@ -212,6 +373,10 @@ class InspectionRepo {
 
     final id = await db.insert('inspections', {
       'entry_code': base['entry_code'],
+      'inspection_kind': base['inspection_kind'],
+      'product_id': base['product_id'],
+      'formula_number': base['formula_number'],
+      'batch_number': base['batch_number'],
       'material_id': base['material_id'],
       'material_name': base['material_name'],
       'material_code': base['material_code'],
@@ -294,6 +459,10 @@ class InspectionRepo {
   }
 
   String _buildSnapshot(Map<String, dynamic> b) => jsonDumps({
+        'inspection_kind': b['inspection_kind'],
+        'product_id': b['product_id'],
+        'formula_number': b['formula_number'],
+        'batch_number': b['batch_number'],
         'material_id': b['material_id'],
         'material_name': b['material_name'],
         'material_code': b['material_code'],
@@ -317,6 +486,10 @@ class InspectionRepo {
   static const List<String> ledgerColumns = [
     'id',
     'entry_code',
+    'inspection_kind',
+    'product_id',
+    'formula_number',
+    'batch_number',
     'material_id',
     'material_name',
     'material_code',
@@ -339,6 +512,9 @@ class InspectionRepo {
     'deleted_at',
   ];
 
+  /// [kind] filters by inspection kind (`raw` / `product`); empty means both.
+  /// The raw register passes `raw` so production batches never leak into it,
+  /// and the product register passes `product`.
   Future<List<Map<String, dynamic>>> list({
     String query = '',
     String status = '',
@@ -346,6 +522,7 @@ class InspectionRepo {
     int offset = 0,
     String orderBy = 'id DESC',
     bool includeDeleted = false,
+    String kind = '',
   }) async {
     final db = await _db;
     // Tombstoned rows (V2 `delete`) stay on disk so the deletion can replicate
@@ -354,12 +531,17 @@ class InspectionRepo {
     final conditions = <String>[];
     final args = <Object?>[];
     if (alive.isNotEmpty) conditions.add(alive);
+    final kindFilter = normalizeKindFilter(kind);
+    if (kindFilter.isNotEmpty) {
+      conditions.add('inspection_kind = ?');
+      args.add(kindFilter);
+    }
     final trimmed = query.trim();
     if (trimmed.isNotEmpty) {
       final like = '%$trimmed%';
       conditions.add(
-          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)');
-      args.addAll([like, like, like, like]);
+          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ? OR formula_number LIKE ? OR batch_number LIKE ?)');
+      args.addAll([like, like, like, like, like, like]);
     }
     if (status.trim().isNotEmpty) {
       conditions.add('decision_status = ?');
@@ -381,19 +563,115 @@ class InspectionRepo {
   /// Rows a user may still see; a tombstone hides the row from every list.
   static const String aliveFilter = 'deleted_at IS NULL';
 
+  // ── History autocomplete (Vue parity) ────────────────────────────
+
+  /// Distinct values of a free-text column (`supplier` / `sample_taken_by`)
+  /// for the form's autocomplete: most recent first, de-duplicated
+  /// case-insensitively so `Acme` and `ACME` collapse into one entry.
+  ///
+  /// Display casing: most-used variant wins, then a capitalised one, then
+  /// the most recent — the log keeps every original spelling, only the
+  /// suggestion shows one.
+  Future<List<Map<String, dynamic>>> _distinctHistory(
+    String column, {
+    int? materialId,
+    int limit = 30,
+  }) async {
+    assert(column == 'supplier' || column == 'sample_taken_by');
+    final db = await _db;
+    final args = <Object?>[];
+    var where = "deleted_at IS NULL AND TRIM(COALESCE($column, '')) <> ''";
+    if (materialId != null) {
+      where += ' AND material_id = ?';
+      args.add(materialId);
+    }
+    final rows = await db.rawQuery(
+      'SELECT TRIM($column) AS name, '
+      'COALESCE(created_at, inspection_date, \'\') AS stamp '
+      'FROM inspections WHERE $where '
+      'ORDER BY stamp DESC, id DESC LIMIT 500',
+      args,
+    );
+    // Per lowercase key, in first-seen (most recent) order.
+    final order = <String>[];
+    final lastDate = <String, String>{};
+    final total = <String, int>{};
+    final variants = <String, Map<String, int>>{};
+    for (final r in rows) {
+      final name = '${r['name'] ?? ''}'.trim();
+      if (name.isEmpty) continue;
+      final key = name.toLowerCase();
+      if (!variants.containsKey(key)) {
+        variants[key] = {};
+        order.add(key);
+        lastDate[key] = '${r['stamp'] ?? ''}';
+      }
+      variants[key]![name] = (variants[key]![name] ?? 0) + 1;
+      total[key] = (total[key] ?? 0) + 1;
+    }
+    bool startsUpper(String s) =>
+        s.isNotEmpty && s[0] == s[0].toUpperCase() && s[0] != s[0].toLowerCase();
+    final out = <Map<String, dynamic>>[];
+    for (final key in order) {
+      var best = '';
+      var bestCount = -1;
+      var bestUpper = false;
+      variants[key]!.forEach((variant, count) {
+        final upper = startsUpper(variant);
+        if (count > bestCount || (count == bestCount && upper && !bestUpper)) {
+          best = variant;
+          bestCount = count;
+          bestUpper = upper;
+        }
+      });
+      out.add({'name': best, 'lastDate': lastDate[key], 'uses': total[key]});
+      if (out.length >= limit) break;
+    }
+    return out;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listSupplierHistory({
+    int? materialId,
+    int limit = 30,
+  }) =>
+      _distinctHistory('supplier',
+          materialId: materialId, limit: limit.clamp(1, 100));
+
+  @override
+  Future<List<Map<String, dynamic>>> listSampleTakerHistory({
+    int limit = 30,
+  }) =>
+      _distinctHistory('sample_taken_by', limit: limit.clamp(1, 100));
+
+  /// Empty [kind] matches both kinds; otherwise `inspection_kind = ?`.
+  static String normalizeKindFilter(String kind) {
+    final trimmed = kind.trim().toLowerCase();
+    if (trimmed == kindRaw || trimmed == kindProduct) return trimmed;
+    return '';
+  }
+
   Future<int> count(
-      {String query = '', String status = '', bool includeDeleted = false}) async {
+      {String query = '',
+      String status = '',
+      bool includeDeleted = false,
+      String kind = ''}) async {
     final db = await _db;
     final alive = includeDeleted ? '' : aliveFilter;
     final conditions = <String>[];
     final args = <Object?>[];
     if (alive.isNotEmpty) conditions.add(alive);
+    final kindFilter = normalizeKindFilter(kind);
+    if (kindFilter.isNotEmpty) {
+      conditions.add('inspection_kind = ?');
+      args.add(kindFilter);
+    }
     final trimmed = query.trim();
     if (trimmed.isNotEmpty) {
       final like = '%$trimmed%';
       conditions.add(
-          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ?)');
-      args.addAll([like, like, like, like]);
+          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ? OR formula_number LIKE ? OR batch_number LIKE ?)');
+      args.addAll([like, like, like, like, like, like]);
     }
     if (status.trim().isNotEmpty) {
       conditions.add('decision_status = ?');
@@ -554,10 +832,36 @@ class InspectionRepo {
         payload['sample_names'] ?? existing['sample_names']);
     validateResultArrays(physical, chemical, sampleNames.length);
 
-    final supplier =
-        '${payload['supplier'] ?? existing['supplier'] ?? ''}'.trim();
-    if (supplier.length < 3) {
-      throw ValidationError(AppErrors.supplierMin3);
+    final isProduct = isProductRow(existing);
+    final headerUpdates = <String, Object?>{};
+    String supplier = '';
+    String truckNumber = '';
+    if (isProduct) {
+      // Product rows carry formula/batch instead of supplier/vehicle.
+      final formulaNumber = truncateText(
+          '${payload['formula_number'] ?? existing['formula_number'] ?? ''}'
+              .trim(),
+          50);
+      if (formulaNumber.isEmpty) {
+        throw ValidationError(AppErrors.fieldValueRequired('Formula number'));
+      }
+      final batchNumber = truncateText(
+          '${payload['batch_number'] ?? existing['batch_number'] ?? ''}'.trim(),
+          50);
+      if (batchNumber.isEmpty) {
+        throw ValidationError(AppErrors.fieldValueRequired('Batch number'));
+      }
+      headerUpdates['formula_number'] = formulaNumber;
+      headerUpdates['batch_number'] = batchNumber;
+    } else {
+      supplier = '${payload['supplier'] ?? existing['supplier'] ?? ''}'.trim();
+      if (supplier.length < 3) {
+        throw ValidationError(AppErrors.supplierMin3);
+      }
+      truckNumber = truncateText(
+          '${payload['truck_number'] ?? existing['truck_number'] ?? ''}', 10);
+      headerUpdates['supplier'] = supplier;
+      headerUpdates['truck_number'] = truckNumber;
     }
     final sampleTakenBy =
         '${payload['sample_taken_by'] ?? existing['sample_taken_by'] ?? ''}'.trim();
@@ -568,12 +872,14 @@ class InspectionRepo {
     final quantity = normalizeNonNegativeNumericText(
         '${payload['quantity'] ?? existing['quantity'] ?? ''}', 'Quantity',
         allowEmpty: true);
-    final truckNumber = truncateText(
-        '${payload['truck_number'] ?? existing['truck_number'] ?? ''}', 10);
     final timestamp = nowIso();
     // Rebuild the snapshot with the refreshed results/samples so the stored
     // copy never drifts from the live columns (parity inspection.py:843-852).
     final snapshot = _buildSnapshot({
+      'inspection_kind': existing['inspection_kind'],
+      'product_id': existing['product_id'],
+      'formula_number': existing['formula_number'],
+      'batch_number': existing['batch_number'],
       'material_id': existing['material_id'],
       'material_name': existing['material_name'],
       'material_code': existing['material_code'],
@@ -587,8 +893,7 @@ class InspectionRepo {
     await db.update(
       'inspections',
       {
-        'supplier': supplier,
-        'truck_number': truckNumber,
+        ...headerUpdates,
         'quantity': quantity,
         'sample_taken_by': sampleTakenBy,
         'physical_results_json': jsonDumps(physical),

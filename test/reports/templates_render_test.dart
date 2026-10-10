@@ -1,6 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_lab/features/qc_manager/data/ncr_export_service.dart';
+import 'package:material_lab/features/qc_manager/domain/ncr_filters.dart';
+import 'package:material_lab/features/qc_manager/domain/ncr_kpis.dart';
+import 'package:material_lab/features/qc_manager/domain/ncr_report_row.dart';
 import 'package:material_lab/features/reports/data/report_builder.dart';
 import 'package:material_lab/features/reports/data/tiny_jinja.dart';
 
@@ -96,6 +100,40 @@ void main() {
       );
       final out = tinyJinjaRender(_tpl('lab_report_template.html'), ctx);
       expect(out, contains('Total Tests'));
+      expect(out, isNot(contains(r'{{')));
+    });
+
+    test('ncr_report_template.html', () {
+      final ctx = buildNcrReportContext(
+        NcrExportBundle(
+          filters: const NcrFilters(statuses: {'Open'}),
+          kpis: const NcrKpis(total: 3, open: 2, overdue: 1, critical: 1),
+          rows: const [
+            NcrReportRow(
+              findingId: 1,
+              inspectionId: 1,
+              code: 'NC-1',
+              severity: 'Critical',
+              description: 'crack on surface',
+              status: 'Open',
+              dueDate: '2026-01-01',
+              assignedToName: 'Ali',
+              createdAt: '2025-12-01 09:00:00',
+            ),
+          ],
+          aging: const [NcrAgingBucket.d0to7(1)],
+          topDefects: const [
+            NcrTopDefect(code: 'D-CRACK', category: 'Surface', count: 2),
+          ],
+          generatedBy: 'Hassan',
+          generatedAt: DateTime(2026, 3, 4, 5, 6),
+        ),
+      );
+      final out = tinyJinjaRender(_tpl('ncr_report_template.html'), ctx);
+      expect(out, contains('Non-Conformance Report'));
+      expect(out, contains('NC-1'));
+      expect(out, contains('D-CRACK'));
+      expect(out, contains('0-7 days'));
       expect(out, isNot(contains(r'{{')));
     });
 

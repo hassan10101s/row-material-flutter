@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Modify this file to customize your launch splash screen -->
+<!-- Legacy launch splash (below Android 12): black base to match the logo,
+     image scaled to ~48% and centered, mirroring the morattab reference. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/white" />
+    <item android:drawable="@android:color/black" />
 
-    <!-- You can insert your own image assets here -->
-    <!-- <item>
-        <bitmap
-            android:gravity="center"
-            android:src="@mipmap/launch_image" />
-    </item> -->
+    <item android:gravity="center">
+        <scale
+            android:drawable="@drawable/launch_image"
+            android:scaleGravity="center"
+            android:scaleWidth="48%"
+            android:scaleHeight="48%" />
+    </item>
 </layer-list>

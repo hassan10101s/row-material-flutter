@@ -62,16 +62,17 @@ dependencies:
   uuid: ^4.6.0
   google_sign_in: 6.3.0
   google_sign_in_dartio: 0.3.0
+  # Mobile-only QR reader (inspection reports and labels). CameraX/ML Kit on
+  # Android; never constructed on desktop (see QrScanScreen). Camera
+  # permission goes through the app's own Android channel
+  # (core/platform/camera_permission.dart): the permission plugin ships a
+  # Windows implementation that downloads a NuGet package at build time and
+  # breaks `flutter run` on Windows.
+  mobile_scanner: ^7.4.2
   open_filex: ^4.7.0
   share_plus: ^12.0.2
   image_picker: ^1.2.3
   workmanager: ^0.10.10
-
-  # `device_info_plus` was dropped on purpose: the device registry only needs
-  # `Platform.operatingSystemVersion` (dart:io), and the plugin's `web: ^1.1.0`
-  # constraint is incompatible with the sqlite3 2.x line required by
-  # `sqflite_common_ffi`.
-
 dependency_overrides:
   # FirebaseAuth's Android ID-token listener can run on a Firebase worker
   # thread; use the local copy that posts those events to Android's main thread.

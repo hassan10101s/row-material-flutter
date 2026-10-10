@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import '../../../core/constants/app_errors.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
 
@@ -10,9 +11,51 @@ import '../../../core/utils/app_format.dart';
 
 // ── Units ────────────────────────────────────────────────────────────────
 
-const List<String> inventoryCategories = ['liquid', 'powder'];
+const List<String> inventoryCategories = ['liquid', 'powder', 'count'];
 const List<String> inventoryUnits = ['L', 'mL', 'kg', 'g', 'pc'];
 const List<String> sourceTypes = ['raw_material', 'product'];
+
+/// Units an inventory category accepts. Liquids take volume, powders mass,
+/// and counted items take pieces only.
+const Map<String, List<String>> categoryUnits = {
+  'liquid': ['L', 'mL'],
+  'powder': ['kg', 'g'],
+  'count': ['pc'],
+};
+
+/// Default unit when the category changes in an editor.
+const Map<String, String> defaultUnitForCategory = {
+  'liquid': 'mL',
+  'powder': 'g',
+  'count': 'pc',
+};
+
+/// Bilingual label for an inventory category, for errors and pickers.
+String inventoryCategoryLabel(Object? category) {
+  switch ('$category'.trim().toLowerCase()) {
+    case 'liquid':
+      return AppText.t('سائل', 'Liquid');
+    case 'powder':
+      return AppText.t('مسحوق', 'Powder');
+    case 'count':
+      return AppText.t('عدد', 'Count');
+    default:
+      return '$category';
+  }
+}
+
+/// Whether [unit] may be stored on an item of [category]: volume units for
+/// liquids, mass units for powders, and strictly `pc` for counted items.
+bool unitAllowedForCategory(Object? unit, Object? category) {
+  final u = '$unit'.trim();
+  final c = '$category'.trim().toLowerCase();
+  if (u.isEmpty) return false;
+  if (c == 'count') return u.toLowerCase() == 'pc';
+  final dim = unitDimOf(u);
+  if (c == 'liquid') return dim == 'volume';
+  if (c == 'powder') return dim == 'mass';
+  return false;
+}
 
 const Map<String, double> _unitFactors = {
   'l': 1000.0, // → base mL

@@ -6,6 +6,10 @@ import 'package:equatable/equatable.dart';
 /// `rows`/`visible` are the current page (server already applied query+status);
 /// keeping both preserves the existing screen/export call sites while the
 /// source of truth moved from in-memory filtering to SQLite LIMIT/OFFSET.
+///
+/// `selectedIds` holds inspection ids for bulk export (the Vue register's
+/// checkbox column). Ids — not indices — so the selection survives paging
+/// and filter changes exactly like the legacy app.
 @immutable
 class InspectionsState extends Equatable {
   final List<Map<String, dynamic>> rows;
@@ -18,6 +22,7 @@ class InspectionsState extends Equatable {
   final int page;
   final int pageSize;
   final int total;
+  final Set<int> selectedIds;
 
   const InspectionsState({
     this.rows = const [],
@@ -30,6 +35,7 @@ class InspectionsState extends Equatable {
     this.page = 0,
     this.pageSize = 50,
     this.total = 0,
+    this.selectedIds = const {},
   });
 
   InspectionsState copyWith({
@@ -43,6 +49,7 @@ class InspectionsState extends Equatable {
     int? page,
     int? pageSize,
     int? total,
+    Set<int>? selectedIds,
   }) =>
       InspectionsState(
         rows: rows ?? this.rows,
@@ -55,9 +62,21 @@ class InspectionsState extends Equatable {
         page: page ?? this.page,
         pageSize: pageSize ?? this.pageSize,
         total: total ?? this.total,
+        selectedIds: selectedIds ?? this.selectedIds,
       );
 
   @override
-  List<Object?> get props =>
-      [rows, visible, query, status, loading, exporting, error, page, pageSize, total];
+  List<Object?> get props => [
+        rows,
+        visible,
+        query,
+        status,
+        loading,
+        exporting,
+        error,
+        page,
+        pageSize,
+        total,
+        selectedIds,
+      ];
 }

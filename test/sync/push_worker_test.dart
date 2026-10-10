@@ -193,32 +193,73 @@ void main() {
     expect(await metadata.lastError(), isEmpty);
   });
 
-  test('an update with a stale baseVersion becomes a conflict, not a clobber',
-      () async {
+  test('an update with a stale baseVersion auto-rebases, never parks', () async {
     await createLocalSample('P-5');
     await worker().runOnce(); // the remote sample is now at version 1
     final localId = await editLocalSample('P-5', baseVersion: 0);
 
     final report = await worker().runOnce();
 
-    expect(report.conflicts, 1);
-    expect(report.pushed, 0);
-    final row = await queueRow('sample', 'P-5');
-    expect(row['status'], 'conflict');
-    expect('${row['last_error']}', contains('Version conflict'));
-    final parked = (await queue.listConflicts()).single;
-    expect(parked['direction'], 'push_rejected');
-    expect('${parked['remote_payload']}', contains('"version":1'),
-        reason: 'the parked remote payload is the document we lost to');
+    // A version race resolves itself: no manual conflict row, no tap.
+    expect(report.conflicts, 0);
+    expect(report.pushed, 1);
+    // The audit outbox row for the automatic decision stays queued by
+    // design; the sample itself must be drained.
+    final remaining = (await queue.listQueue())
+        .where((r) => r['entity_type'] == 'sample');
+    expect(remaining, isEmpty);
+    // The local edit (September) is newer than the pushed document (January
+    // test clock), so the local content wins — through version+1 with the
+    // full payload, never a blind clobber.
+    expect(remote.documents[docKey('P-5')]!['version'], 2);
+    expect(remote.documents[docKey('P-5')]!['decisionStatus'], 'APPROVED');
     final local =
         (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [localId])).single;
-    expect(local['sync_state'], 'conflict');
-    // The remote document is untouched - no last-writer-wins clobber.
-    expect(remote.documents[docKey('P-5')]!['version'], 1);
-    // And the conflict is auditable.
-    final conflicts = await fixture.db
-        .query('audit_logs', where: 'action = ?', whereArgs: [AuditAction.syncConflict]);
-    expect(conflicts, isNotEmpty);
+    expect(local['sync_state'], 'synced');
+    expect(local['remote_version'], 2);
+    // And the automatic decision is audited like a manual one.
+    final auto = await fixture.db.query('audit_logs',
+        where: 'action = ?', whereArgs: [AuditAction.syncConflict]);
+    expect(auto, isNotEmpty);
+  });
+
+  test('a stale baseVersion against a newer remote applies the remote', () async {
+    final localId = await createLocalSample('P-9');
+    await worker().runOnce(); // remote at version 1
+    // Another device moved the document on (v5, January 2027) while this
+    // device edited from v1 (September 2026): the remote is newer.
+    remote.seed(
+      orgId,
+      SyncCollection.samples,
+      'P-9',
+      {
+        'entryCode': 'P-9',
+        'organizationId': orgId,
+        'decisionStatus': 'REJECTED',
+        'updatedBy': 'uid_admin',
+        'deviceId': 'dev_2',
+      },
+      version: 5,
+      updatedAt: '2027-01-01T00:00:00.000Z',
+    );
+    await editLocalSample('P-9', baseVersion: 0);
+
+    final report = await worker().runOnce();
+
+    expect(report.conflicts, 0, reason: 'no tap for a version race');
+    expect(report.pushed, 1);
+    final leftover = (await queue.listQueue())
+        .where((r) => r['entity_type'] == 'sample');
+    expect(leftover, isEmpty);
+    final local =
+        (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [localId])).single;
+    expect(local['decision_status'], 'REJECTED');
+    expect(local['remote_version'], 5);
+    expect(local['sync_state'], 'synced');
+    // The local edit is preserved nowhere silently: the loss is audited.
+    final auto = await fixture.db.query('audit_logs',
+        where: 'action = ?', whereArgs: [AuditAction.syncConflict]);
+    expect(auto, isNotEmpty);
   });
 
   test('an update with the right baseVersion bumps the remote version', () async {
@@ -341,23 +382,25 @@ void main() {
     expect((await queue.listConflicts()).single['entity_type'], 'mystery');
   });
 
-  test('a batch continues past a failing entry and reports honest totals',
+  test('a batch continues past a racing entry and reports honest totals',
       () async {
     await createLocalSample('P-11');
     await createLocalSample('P-12');
     // The remote already moved past P-12 (another device wrote it), so the
-    // local create can no longer win.
+    // local create rebases onto it instead of parking a manual conflict.
     remote.documents[docKey('P-12')] = <String, dynamic>{'version': 7, 'entryCode': 'P-12'};
 
     final report = await worker().runOnce();
 
-    expect(report.pushed, 1);
-    expect(report.conflicts, 1);
+    expect(report.pushed, 2);
+    expect(report.conflicts, 0, reason: 'the race rebases without a tap');
     expect(remote.documents[docKey('P-11')]!['version'], 1);
-    expect(remote.documents[docKey('P-12')]!['version'], 7, reason: 'not clobbered');
-    expect((await queueRow('sample', 'P-12'))['status'], 'conflict');
-    // One entry reached the server, so the cycle is not an error state; the
-    // per-entry error still has to be visible on its own row.
+    // Rebased onto v7, not clobbered: the version chain is unbroken.
+    expect(remote.documents[docKey('P-12')]!['version'], 8);
+    final leftover = (await queue.listQueue())
+        .where((r) => r['entity_type'] == 'sample');
+    expect(leftover, isEmpty);
+    // Entries reached the server, so the cycle is not an error state.
     expect(await metadata.lastError(), isEmpty);
   });
 }
@@ -463,6 +506,13 @@ class _FlakyRemote implements RemoteDataSource {
   @override
   Future<RemoteDocument> readHeartbeat(String organizationId) =>
       inner.readHeartbeat(organizationId);
+
+  @override
+  Future<void> writeHeartbeat({
+    required String organizationId,
+    required Map<String, dynamic> data,
+  }) =>
+      inner.writeHeartbeat(organizationId: organizationId, data: data);
 
   @override
   Future<void> registerDevice({
