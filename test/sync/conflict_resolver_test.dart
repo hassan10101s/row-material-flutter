@@ -153,7 +153,8 @@ void main() {
   test('keep_remote replaces the local row with the remote document', () async {
     final parked = await parkConflict(entryCode: 'C-4', remoteVersion: 9);
 
-    await resolver.keepRemote(parked.conflictId, organizationId: orgId);
+    await resolver.keepRemote(parked.conflictId,
+        organizationId: orgId, session: _Session());
 
     final local =
         (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [parked.localId])).single;
@@ -168,7 +169,8 @@ void main() {
   test('keep_remote keeps only the columns the local table has', () async {
     final parked = await parkConflict(entryCode: 'C-5', remoteVersion: 3);
 
-    await resolver.keepRemote(parked.conflictId, organizationId: orgId);
+    await resolver.keepRemote(parked.conflictId,
+        organizationId: orgId, session: _Session());
 
     // `organizationId`/`deviceId` have no local column (D3): the update must
     // succeed instead of aborting the transaction.
@@ -182,8 +184,83 @@ void main() {
   });
 
   test('an unknown conflict id is a no-op, not a crash', () async {
-    await resolver.keepRemote(4242, organizationId: orgId);
+    await resolver.keepRemote(4242, organizationId: orgId, session: _Session());
     await resolver.keepLocal(4242, organizationId: orgId, session: _Session());
+    expect(await queue.listConflicts(), isEmpty);
+  });
+
+  test(
+      'keep_remote maps foreign ids: natural key locate + FK-safe remap, '
+      'never id = origin localId', () async {
+    // Local row C-9 (id 1) + a decoy row: the remote document below was
+    // written on another device, so its localId/materialId/createdBy are
+    // meaningless here. The old code ran UPDATE ... WHERE id = localId with
+    // raw ids: it either touched the decoy/nothing and closed the conflict
+    // (silent loss), or died on FK (`created_by: local_9`).
+    final localId = await fixture.db.insert(
+      'inspections',
+      sampleRow(entryCode: 'C-9', decisionStatus: 'APPROVED'),
+    );
+    final decoyId = await fixture.db.insert(
+      'inspections',
+      sampleRow(entryCode: 'DECOY', decisionStatus: 'APPROVED'),
+    );
+    await fixture.transaction((txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'C-9',
+          localRef: localId,
+          operation: 'update',
+          payload: <String, dynamic>{
+            'entryCode': 'C-9',
+            'localId': localId,
+            'organizationId': orgId,
+            'version': 2,
+            'updatedBy': 'uid_admin',
+            'deviceId': 'dev_1',
+            'decisionStatus': 'APPROVED',
+          },
+          baseVersion: 1,
+        ));
+    final remoteDoc = <String, dynamic>{
+      'entryCode': 'C-9',
+      'localId': 9999,
+      'materialId': 999,
+      'materialCode': 'M-CEM-01',
+      'materialName': 'Cement',
+      'organizationId': orgId,
+      'version': 9,
+      'createdBy': 'local_9',
+      'updatedBy': 'uid_other',
+      'deviceId': 'dev_2',
+      'decisionStatus': 'PENDING',
+      'updatedAt': '2026-09-05T10:00:00.000',
+    };
+    await queue.markConflict((await queue.claim()).single,
+        direction: 'push_rejected',
+        remotePayload: jsonEncode(remoteDoc));
+    final conflictId =
+        ((await queue.listConflicts()).single['id'] as num).toInt();
+
+    await resolver.keepRemote(conflictId,
+        organizationId: orgId, session: _Session());
+
+    final local = (await fixture.db.query('inspections',
+            where: 'id = ?', whereArgs: [localId]))
+        .single;
+    expect(local['decision_status'], 'PENDING', reason: 'remote won on C-9');
+    expect(local['version'], 9);
+    expect(local['sync_state'], 'synced');
+    expect(local['created_by'], isA<int>(),
+        reason: 'origin author placeholder must be remapped to a local id');
+    expect(local['material_id'], 1,
+        reason: 'material resolved by code to the local row');
+    final decoy = (await fixture.db.query('inspections',
+            where: 'id = ?', whereArgs: [decoyId]))
+        .single;
+    expect(decoy['decision_status'], 'APPROVED',
+        reason: 'unrelated local rows are never touched');
+    expect(await queue.listQueue(), isEmpty);
     expect(await queue.listConflicts(), isEmpty);
   });
 }

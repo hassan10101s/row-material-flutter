@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/constants/app_errors.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/domain/rules.dart';
 import '../../../core/utils/app_dates.dart';
@@ -22,6 +23,14 @@ class ReferenceRepo implements ReferenceRepository {
   /// device (`CODE-DATE-TAG-SEQ`) makes collisions structurally impossible.
   /// Null (tests, pre-registration) keeps the legacy `CODE-DATE-SEQ` format.
   final Future<String> Function()? deviceTagProvider;
+  String? _cachedDeviceTag;
+
+  /// Loads the device tag before a caller starts a write transaction.
+  /// This prevents the tag provider from opening the root database connection
+  /// while a transaction is holding the database lock.
+  Future<void> warmDeviceTag() async {
+    await _deviceTag();
+  }
 
   ReferenceRepo({required this.dbHelper, this.deviceTagProvider});
 
@@ -32,9 +41,11 @@ class ReferenceRepo implements ReferenceRepository {
   @override
   Future<List<Map<String, dynamic>>> listMaterials() async {
     final db = await _db;
-    final rows = await db.query('reference_materials',
-        where: 'active = 1',
-        orderBy: 'material_name COLLATE NOCASE ASC');
+    final rows = await db.query(
+      'reference_materials',
+      where: 'active = 1',
+      orderBy: 'material_name COLLATE NOCASE ASC',
+    );
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
@@ -43,27 +54,179 @@ class ReferenceRepo implements ReferenceRepository {
     final db = await _db;
     // The `__PRODUCT_SENTINEL__` row is storage plumbing for product
     // inspections, never a catalog entry.
-    final rows = await db.query('reference_materials',
+    final rows = await db.query(
+      'reference_materials',
+      where: 'material_name != ?',
+      whereArgs: [DatabaseHelper.productSentinelMaterialName],
+      orderBy: 'active DESC, material_name COLLATE NOCASE ASC',
+    );
+    return [for (final r in rows) Map<String, dynamic>.from(r)];
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listMaterialsPaged({
+    String query = '',
+    int limit = 25,
+    int offset = 0,
+  }) async {
+    final db = await _db;
+    final q = query.trim();
+    if (q.isEmpty) {
+      final rows = await db.query(
+        'reference_materials',
         where: 'material_name != ?',
         whereArgs: [DatabaseHelper.productSentinelMaterialName],
-        orderBy: 'active DESC, material_name COLLATE NOCASE ASC');
+        orderBy: 'active DESC, material_name COLLATE NOCASE ASC',
+        limit: limit,
+        offset: offset,
+      );
+      return [for (final r in rows) Map<String, dynamic>.from(r)];
+    }
+    final like = '%$q%';
+    final rows = await db.query(
+      'reference_materials',
+      where: 'material_name != ? AND (material_name LIKE ? OR material_code LIKE ?)',
+      whereArgs: [DatabaseHelper.productSentinelMaterialName, like, like],
+      orderBy: 'active DESC, material_name COLLATE NOCASE ASC',
+      limit: limit,
+      offset: offset,
+    );
     return [for (final r in rows) Map<String, dynamic>.from(r)];
+  }
+
+  @override
+  Future<int> countMaterials({String query = ''}) async {
+    final db = await _db;
+    final q = query.trim();
+    final rows = q.isEmpty
+        ? await db.rawQuery(
+            'SELECT COUNT(*) AS c FROM reference_materials WHERE material_name != ?',
+            [DatabaseHelper.productSentinelMaterialName],
+          )
+        : await db.rawQuery(
+            'SELECT COUNT(*) AS c FROM reference_materials WHERE material_name != ? '
+            'AND (material_name LIKE ? OR material_code LIKE ?)',
+            [DatabaseHelper.productSentinelMaterialName, '%$q%', '%$q%'],
+          );
+    return ((rows.first['c'] as num?)?.toInt() ?? 0);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listParametersPaged({
+    String query = '',
+    String? parameterType,
+    int limit = 25,
+    int offset = 0,
+  }) async {
+    final db = await _db;
+    final q = query.trim();
+    final where = <String>[];
+    final args = <Object?>[];
+    if (parameterType != null && parameterType.isNotEmpty) {
+      where.add('parameter_type = ?');
+      args.add(parameterType);
+    }
+    if (q.isNotEmpty) {
+      where.add('(parameter_name LIKE ? OR unit LIKE ?)');
+      args.addAll(['%$q%', '%$q%']);
+    }
+    final whereSql = where.isEmpty ? null : where.join(' AND ');
+    final rows = await db.query(
+      'parameters',
+      where: whereSql,
+      whereArgs: where.isEmpty ? null : args,
+      orderBy: 'parameter_name COLLATE NOCASE ASC',
+      limit: limit,
+      offset: offset,
+    );
+    return [for (final r in rows) Map<String, dynamic>.from(r)];
+  }
+
+  @override
+  Future<int> countParameters({String query = '', String? parameterType}) async {
+    final db = await _db;
+    final q = query.trim();
+    final where = <String>[];
+    final args = <Object?>[];
+    if (parameterType != null && parameterType.isNotEmpty) {
+      where.add('parameter_type = ?');
+      args.add(parameterType);
+    }
+    if (q.isNotEmpty) {
+      where.add('(parameter_name LIKE ? OR unit LIKE ?)');
+      args.addAll(['%$q%', '%$q%']);
+    }
+    final whereSql = where.isEmpty ? '' : ' WHERE ${where.join(' AND ')}';
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM parameters$whereSql',
+      args,
+    );
+    return ((rows.first['c'] as num?)?.toInt() ?? 0);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> listUnitsPaged({
+    String query = '',
+    int limit = 25,
+    int offset = 0,
+  }) async {
+    final db = await _db;
+    final q = query.trim();
+    final rows = q.isEmpty
+        ? await db.query(
+            'lab_units',
+            orderBy: 'symbol COLLATE NOCASE ASC',
+            limit: limit,
+            offset: offset,
+          )
+        : await db.query(
+            'lab_units',
+            where: 'symbol LIKE ? OR name LIKE ?',
+            whereArgs: ['%$q%', '%$q%'],
+            orderBy: 'symbol COLLATE NOCASE ASC',
+            limit: limit,
+            offset: offset,
+          );
+    return [for (final r in rows) Map<String, dynamic>.from(r)];
+  }
+
+  @override
+  Future<int> countUnits({String query = ''}) async {
+    final db = await _db;
+    final q = query.trim();
+    final rows = q.isEmpty
+        ? await db.rawQuery('SELECT COUNT(*) AS c FROM lab_units')
+        : await db.rawQuery(
+            'SELECT COUNT(*) AS c FROM lab_units WHERE symbol LIKE ? OR name LIKE ?',
+            ['%$q%', '%$q%'],
+          );
+    return ((rows.first['c'] as num?)?.toInt() ?? 0);
   }
 
   /// The optional [exec] lets a caller that already owns a transaction (P7.3)
   /// reuse it: opening a second connection while the transaction holds the
   /// write lock would deadlock.
   @override
-  Future<Map<String, dynamic>?> getMaterialRaw(int id, {DatabaseExecutor? exec}) async {
+  Future<Map<String, dynamic>?> getMaterialRaw(
+    int id, {
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
-    final rows = await db.query('reference_materials', where: 'id = ?', whereArgs: [id]);
+    final rows = await db.query(
+      'reference_materials',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
     if (rows.isEmpty) return null;
     return Map<String, dynamic>.from(rows.first);
   }
 
   @override
   Future<Map<String, dynamic>> getMaterial(
-      int id, {String? inspectionDate, DatabaseExecutor? exec}) async {
+    int id, {
+    String? inspectionDate,
+    DatabaseExecutor? exec,
+  }) async {
     final rows = await _params(exec: exec);
     final raw = await getMaterialRaw(id, exec: exec);
     if (raw == null) throw NotFoundError(AppErrors.materialNotFound);
@@ -84,17 +247,24 @@ class ReferenceRepo implements ReferenceRepository {
       'physical_reference': enrichedPhysical,
       'chemical_reference': enrichedChemical,
       'active': raw['active'],
-      'next_entry_code':
-          await generateEntryCode('${raw['material_code']}',
-              inspectionDate ?? todayIso(), exec: exec),
+      'next_entry_code': await generateEntryCode(
+        '${raw['material_code']}',
+        inspectionDate ?? todayIso(),
+        exec: exec,
+      ),
     };
     return material;
   }
 
   Future<Map<String, String>> _params({DatabaseExecutor? exec}) async {
     final db = exec ?? await _db;
-    final rows = await db.query('parameters', columns: ['parameter_name', 'unit']);
-    return {for (final r in rows) '${r['parameter_name']}': '${r['unit'] ?? ''}'};
+    final rows = await db.query(
+      'parameters',
+      columns: ['parameter_name', 'unit'],
+    );
+    return {
+      for (final r in rows) '${r['parameter_name']}': '${r['unit'] ?? ''}',
+    };
   }
 
   @override
@@ -106,13 +276,22 @@ class ReferenceRepo implements ReferenceRepository {
     Map<String, dynamic> units = const {},
     DatabaseExecutor? exec,
   }) async {
-    if (materialName.trim().isEmpty) throw ValidationError(AppErrors.referenceMaterialNameRequired);
-    if (materialCode.trim().isEmpty) throw ValidationError(AppErrors.referenceMaterialCodeRequired);
+    if (materialName.trim().isEmpty) {
+      throw ValidationError(AppErrors.referenceMaterialNameRequired);
+    }
+    if (materialCode.trim().isEmpty) {
+      throw ValidationError(AppErrors.referenceMaterialCodeRequired);
+    }
     final db = exec ?? await _db;
-    final existing = await db.query('reference_materials',
-        where: 'material_name = ?', whereArgs: [materialName.trim()]);
+    final existing = await db.query(
+      'reference_materials',
+      where: 'material_name = ?',
+      whereArgs: [materialName.trim()],
+    );
     if (existing.isNotEmpty) {
-      throw ValidationError(AppErrors.referenceMaterialExists(materialName.trim()));
+      throw ValidationError(
+        AppErrors.referenceMaterialExists(materialName.trim()),
+      );
     }
     final id = await db.insert('reference_materials', {
       'material_name': materialName.trim(),
@@ -146,31 +325,51 @@ class ReferenceRepo implements ReferenceRepository {
     if (existing == null) throw NotFoundError(AppErrors.materialNotFound);
     final cleanName = materialName.trim();
     final cleanCode = materialCode.trim();
-    final dup = await db.query('reference_materials',
-        where: 'material_name = ? AND id != ?',
-        whereArgs: [cleanName.isEmpty ? '${existing['material_name']}' : cleanName, id]);
+    final dup = await db.query(
+      'reference_materials',
+      where: 'material_name = ? AND id != ?',
+      whereArgs: [
+        cleanName.isEmpty ? '${existing['material_name']}' : cleanName,
+        id,
+      ],
+    );
     if (dup.isNotEmpty) {
       throw ValidationError(AppErrors.referenceMaterialExists(cleanName));
     }
-    final physicalRef = physicalReference ??
+    final physicalRef =
+        physicalReference ??
         jsonLoads('${existing['physical_reference_json']}');
-    final chemicalRef = chemicalReference ??
+    final chemicalRef =
+        chemicalReference ??
         jsonLoads('${existing['chemical_reference_json']}');
-    await db.update('reference_materials', {
-      'material_name': cleanName.isEmpty ? '${existing['material_name']}' : cleanName,
-      'material_code': cleanCode.isEmpty ? '${existing['material_code']}' : cleanCode,
-      'physical_reference_json': jsonDumps(physicalRef),
-      'chemical_reference_json': jsonDumps(chemicalRef),
-      'active': 1,
-    }, where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'reference_materials',
+      {
+        'material_name': cleanName.isEmpty
+            ? '${existing['material_name']}'
+            : cleanName,
+        'material_code': cleanCode.isEmpty
+            ? '${existing['material_code']}'
+            : cleanCode,
+        'physical_reference_json': jsonDumps(physicalRef),
+        'chemical_reference_json': jsonDumps(chemicalRef),
+        'active': 1,
+      },
+      where: 'id = ?',
+      whereArgs: [id],
+    );
     await _upsertMaterialParameters(physicalRef, chemicalRef, units, db);
   }
 
   @override
   Future<void> deleteMaterial(int id, [DatabaseExecutor? exec]) async {
     final db = exec ?? await _db;
-    await db.update('reference_materials', {'active': 0},
-        where: 'id = ?', whereArgs: [id]);
+    await db.update(
+      'reference_materials',
+      {'active': 0},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
   }
 
   Future<void> _upsertMaterialParameters(
@@ -180,41 +379,58 @@ class ReferenceRepo implements ReferenceRepository {
     DatabaseExecutor db,
   ) async {
     final fields = <(String, String, Object?)>[
-      for (final entry in physical.entries) ('physical', entry.key, entry.value),
-      for (final entry in chemical.entries) ('chemical', entry.key, entry.value),
+      for (final entry in physical.entries)
+        ('physical', entry.key, entry.value),
+      for (final entry in chemical.entries)
+        ('chemical', entry.key, entry.value),
     ];
+    // Load the parameter dictionary once. The old implementation queried the
+    // same table once per reference field, which became a visible N+1 on
+    // phones when a material had many chemical/physical fields.
+    final existingRows = await db.query(
+      'parameters',
+      columns: ['id', 'parameter_name', 'parameter_type', 'unit'],
+    );
+    final byName = <String, Map<String, dynamic>>{
+      for (final row in existingRows)
+        '${row['parameter_name']}'.trim().toLowerCase():
+            Map<String, dynamic>.from(row),
+    };
     for (final (type, rawName, value) in fields) {
       final name = rawName.trim();
       if (name.isEmpty) continue;
       final requestedUnit = units.containsKey(name)
           ? '${units[name] ?? ''}'.trim()
           : referenceUnitText(value);
-      final existing = await db.query(
-        'parameters',
-        where: 'parameter_name = ? COLLATE NOCASE',
-        whereArgs: [name],
-        limit: 1,
-      );
-      if (existing.isNotEmpty) {
-        if ('${existing.first['parameter_type'] ?? ''}' != type) {
+      final key = name.toLowerCase();
+      final existing = byName[key];
+      if (existing != null) {
+        if ('${existing['parameter_type'] ?? ''}' != type) {
           throw ValidationError(AppErrors.parameterTypeInvalid);
         }
         final unit = requestedUnit.isNotEmpty || units.containsKey(name)
             ? requestedUnit
-            : '${existing.first['unit'] ?? ''}';
+            : '${existing['unit'] ?? ''}';
         await db.update(
           'parameters',
           {'unit': unit},
           where: 'id = ?',
-          whereArgs: [existing.first['id']],
+          whereArgs: [existing['id']],
         );
+        existing['unit'] = unit;
       } else {
-        await db.insert('parameters', {
+        final id = await db.insert('parameters', {
           'parameter_name': name,
           'unit': requestedUnit,
           'parameter_type': type,
           'imported_at': nowIso(),
         });
+        byName[key] = {
+          'id': id,
+          'parameter_name': name,
+          'parameter_type': type,
+          'unit': requestedUnit,
+        };
       }
     }
   }
@@ -253,7 +469,8 @@ class ReferenceRepo implements ReferenceRepository {
         {
           ...Map<String, dynamic>.from(p),
           'product_code': productCodeFor('${p['name'] ?? ''}'),
-          'ranges': byProduct[(p['id'] as num?)?.toInt() ?? 0] ??
+          'ranges':
+              byProduct[(p['id'] as num?)?.toInt() ?? 0] ??
               const <Map<String, dynamic>>[],
         },
     ];
@@ -283,23 +500,20 @@ class ReferenceRepo implements ReferenceRepository {
     final product = Map<String, dynamic>.from(rows.first);
     if ((product['active'] as num?) != 1) {
       throw const ValidationError(
-          'Selected product is inactive (archived) and cannot be used in a new inspection.');
+        'Selected product is inactive (archived) and cannot be used in a new inspection.',
+      );
     }
     final paramUnits = await _params(exec: exec);
     Map<String, dynamic> physical = {};
     Map<String, dynamic> chemical = {};
-    final physJson =
-        jsonLoads('${product['physical_reference_json'] ?? ''}');
-    final chemJson =
-        jsonLoads('${product['chemical_reference_json'] ?? ''}');
+    final physJson = jsonLoads('${product['physical_reference_json'] ?? ''}');
+    final chemJson = jsonLoads('${product['chemical_reference_json'] ?? ''}');
     if (physJson.isNotEmpty || chemJson.isNotEmpty) {
       for (final e in physJson.entries) {
-        physical[e.key] =
-            withReferenceUnit(e.value, paramUnits[e.key] ?? '');
+        physical[e.key] = withReferenceUnit(e.value, paramUnits[e.key] ?? '');
       }
       for (final e in chemJson.entries) {
-        chemical[e.key] =
-            withReferenceUnit(e.value, paramUnits[e.key] ?? '');
+        chemical[e.key] = withReferenceUnit(e.value, paramUnits[e.key] ?? '');
       }
     } else {
       final ranges = await db.rawQuery(
@@ -320,14 +534,14 @@ class ReferenceRepo implements ReferenceRepository {
       for (final r in ranges) {
         final name = '${r['analysis_name'] ?? ''}'.trim();
         if (name.isEmpty) continue;
-        final required =
-            r['is_required'] == 1 || r['is_required'] == true;
+        final required = r['is_required'] == 1 || r['is_required'] == true;
         final withUnit = withReferenceUnit(
           _productRangeText(r['min_value'], r['max_value']),
           '${r['unit'] ?? ''}',
         );
-        chemical[name] =
-            required ? withReferenceRequired(withUnit, true) : withUnit;
+        chemical[name] = required
+            ? withReferenceRequired(withUnit, true)
+            : withUnit;
       }
     }
     final code = productCodeFor('${product['name'] ?? ''}');
@@ -350,8 +564,7 @@ class ReferenceRepo implements ReferenceRepository {
   /// (`P` + up to 3 latin alphanumerics, else `PRD`): entry codes stay
   /// readable (`PPRO-20260101-001`) while the date+sequence keeps them unique.
   static String productCodeFor(String name) {
-    final stripped =
-        name.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+    final stripped = name.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
     final core = stripped.isEmpty
         ? 'PRD'
         : stripped.substring(0, stripped.length.clamp(0, 3));
@@ -365,8 +578,8 @@ class ReferenceRepo implements ReferenceRepository {
       if (lo == hi) return lo;
       return '$lo-$hi';
     }
-    if (lo.isNotEmpty) return 'min $lo';
-    if (hi.isNotEmpty) return 'max $hi';
+    if (lo.isNotEmpty) return AppText.t('الحد $lo', 'min $lo');
+    if (hi.isNotEmpty) return AppText.t('الأقصى $hi', 'max $hi');
     return '';
   }
 
@@ -379,11 +592,14 @@ class ReferenceRepo implements ReferenceRepository {
   /// a sync document id. Without a tag the legacy global-per-day sequence is
   /// kept (single-device history and every existing test).
   @override
-  Future<String> generateEntryCode(String materialCode, String inspectionDate,
-      {DatabaseExecutor? exec}) async {
+  Future<String> generateEntryCode(
+    String materialCode,
+    String inspectionDate, {
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
     final dateFragment = inspectionDate.replaceAll('-', '');
-    final tag = await _deviceTag();
+    final tag = exec != null ? (_cachedDeviceTag ?? '') : await _deviceTag();
     final prefix = tag.isEmpty
         ? '$materialCode-$dateFragment-'
         : '$materialCode-$dateFragment-$tag-';
@@ -407,7 +623,9 @@ class ReferenceRepo implements ReferenceRepository {
       final raw = await provider();
       final clean = raw.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
       if (clean.isEmpty) return '';
-      return clean.length <= 6 ? clean : clean.substring(0, 6);
+      final tag = clean.length <= 6 ? clean : clean.substring(0, 6);
+      _cachedDeviceTag = tag;
+      return tag;
     } on Object {
       return '';
     }
@@ -416,21 +634,31 @@ class ReferenceRepo implements ReferenceRepository {
   // ── Parameters ────────────────────────────────────────────────
 
   @override
-  Future<List<Map<String, dynamic>>> listParameters({String? parameterType}) async {
+  Future<List<Map<String, dynamic>>> listParameters({
+    String? parameterType,
+  }) async {
     final db = await _db;
     final rows = parameterType == null
-        ? await db.query('parameters',
-            orderBy: 'parameter_name COLLATE NOCASE ASC')
-        : await db.query('parameters',
+        ? await db.query(
+            'parameters',
+            orderBy: 'parameter_name COLLATE NOCASE ASC',
+          )
+        : await db.query(
+            'parameters',
             where: 'parameter_type = ?',
             whereArgs: [parameterType],
-            orderBy: 'parameter_name COLLATE NOCASE ASC');
+            orderBy: 'parameter_name COLLATE NOCASE ASC',
+          );
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
   @override
-  Future<void> upsertParameter(String name, String unit,
-      {String parameterType = 'chemical', DatabaseExecutor? exec}) async {
+  Future<void> upsertParameter(
+    String name,
+    String unit, {
+    String parameterType = 'chemical',
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
     final trimmed = name.trim();
     if (trimmed.isEmpty) throw ValidationError(AppErrors.parameterNameRequired);
@@ -471,16 +699,31 @@ class ReferenceRepo implements ReferenceRepository {
     final db = exec ?? await _db;
     // Bounds rows and analysis links inherit the NAME from this origin; clear
     // them so a reference parameter can be removed without FK violations.
-    final rows = await db.query('parameters',
-        columns: ['id'], where: 'parameter_name = ?', whereArgs: [name]);
+    final rows = await db.query(
+      'parameters',
+      columns: ['id'],
+      where: 'parameter_name = ?',
+      whereArgs: [name],
+    );
     final pid = rows.isEmpty ? null : rows.first['id'];
     if (pid != null) {
-      await db.delete('material_parameter_bounds',
-          where: 'parameter_id = ?', whereArgs: [pid]);
-      await db.update('lab_analyses', <String, Object?>{'parameter_id': null},
-          where: 'parameter_id = ?', whereArgs: [pid]);
+      await db.delete(
+        'material_parameter_bounds',
+        where: 'parameter_id = ?',
+        whereArgs: [pid],
+      );
+      await db.update(
+        'lab_analyses',
+        <String, Object?>{'parameter_id': null},
+        where: 'parameter_id = ?',
+        whereArgs: [pid],
+      );
     }
-    await db.delete('parameters', where: 'parameter_name = ?', whereArgs: [name]);
+    await db.delete(
+      'parameters',
+      where: 'parameter_name = ?',
+      whereArgs: [name],
+    );
   }
 
   // ── Lab units ─────────────────────────────────────────────────
@@ -488,34 +731,35 @@ class ReferenceRepo implements ReferenceRepository {
   @override
   Future<List<Map<String, dynamic>>> listUnits() async {
     final db = await _db;
-    final rows = await db.query('lab_units',
-        orderBy: 'symbol COLLATE NOCASE ASC');
+    final rows = await db.query(
+      'lab_units',
+      orderBy: 'symbol COLLATE NOCASE ASC',
+    );
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
   @override
-  Future<void> upsertUnit(String symbol,
-      {String name = '', String dimension = '', DatabaseExecutor? exec}) async {
+  Future<void> upsertUnit(
+    String symbol, {
+    String name = '',
+    String dimension = '',
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
     final trimmed = symbol.trim();
     if (trimmed.isEmpty) throw ValidationError(AppErrors.unitSymbolRequired);
-    await db.insert(
-      'lab_units',
-      {
-        'symbol': trimmed,
-        'name': name.trim(),
-        'dimension': dimension.trim(),
-        'is_active': 1,
-        'created_at': nowIso(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('lab_units', {
+      'symbol': trimmed,
+      'name': name.trim(),
+      'dimension': dimension.trim(),
+      'is_active': 1,
+      'created_at': nowIso(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// Batch/transaction-safe registry write. Static (not virtual) so saves
   /// running inside a transaction never re-enter through an override.
-  static Future<void> registerUnit(
-      DatabaseExecutor db, String symbol) async {
+  static Future<void> registerUnit(DatabaseExecutor db, String symbol) async {
     final trimmed = symbol.trim();
     if (trimmed.isEmpty) return;
     try {
@@ -594,9 +838,15 @@ class ReferenceRepo implements ReferenceRepository {
   // ── Enrichment ────────────────────────────────────────────────
 
   static Map<String, dynamic> decisionMetaOfRow(
-      String status, Map<String, dynamic> row) {
+    String status,
+    Map<String, dynamic> row,
+  ) {
     final meta = decisionMeta(status);
-    return {...row, 'decision_label_ar': meta['ar'], 'decision_label_en': meta['en']};
+    return {
+      ...row,
+      'decision_label_ar': meta['ar'],
+      'decision_label_en': meta['en'],
+    };
   }
 }
 
@@ -614,18 +864,28 @@ Map<String, dynamic> serializeInspectionRow(Map<String, dynamic> row) {
       }
     }
   }
-  out['physical_results'] = jsonLoads('${out['physical_results_json'] ?? out['physical_results']}');
-  out['chemical_results'] = jsonLoads('${out['chemical_results_json'] ?? out['chemical_results']}');
-  out['physical_reference'] = jsonLoads('${out['physical_reference_json'] ?? out['physical_reference']}');
-  out['chemical_reference'] = jsonLoads('${out['chemical_reference_json'] ?? out['chemical_reference']}');
+  out['physical_results'] = jsonLoads(
+    '${out['physical_results_json'] ?? out['physical_results']}',
+  );
+  out['chemical_results'] = jsonLoads(
+    '${out['chemical_results_json'] ?? out['chemical_results']}',
+  );
+  out['physical_reference'] = jsonLoads(
+    '${out['physical_reference_json'] ?? out['physical_reference']}',
+  );
+  out['chemical_reference'] = jsonLoads(
+    '${out['chemical_reference_json'] ?? out['chemical_reference']}',
+  );
   out['snapshot'] = jsonLoads('${out['snapshot_json'] ?? out['snapshot']}');
-  out['sample_names'] = jsonLoadsList('${out['sample_names_json'] ?? out['sample_names']}');
+  out['sample_names'] = jsonLoadsList(
+    '${out['sample_names_json'] ?? out['sample_names']}',
+  );
   out['decision_label_ar'] =
       decisionLabels['${out['decision_status']}']?['ar'] ??
-          '${out['decision_status']}';
+      '${out['decision_status']}';
   out['decision_label_en'] =
       decisionLabels['${out['decision_status']}']?['en'] ??
-          '${out['decision_status']}';
+      '${out['decision_status']}';
   return out;
 }
 

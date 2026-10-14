@@ -37,17 +37,17 @@ class QueueEntry {
   SyncEntity? get entity => SyncEntity.byType(entityType);
 
   static QueueEntry fromRow(Map<String, Object?> row) => QueueEntry(
-        id: (row['id'] as num).toInt(),
-        entityType: '${row['entity_type']}',
-        entityId: '${row['entity_id']}',
-        operation: '${row['operation']}',
-        payload: jsonDecode('${row['payload']}') as Map<String, dynamic>,
-        baseVersion: (row['base_version'] as num?)?.toInt() ?? 0,
-        retryCount: (row['retry_count'] as num?)?.toInt() ?? 0,
-        status: '${row['status']}',
-        localRef: (row['local_ref'] as num?)?.toInt(),
-        lastError: row['last_error'] as String?,
-      );
+    id: (row['id'] as num).toInt(),
+    entityType: '${row['entity_type']}',
+    entityId: '${row['entity_id']}',
+    operation: '${row['operation']}',
+    payload: jsonDecode('${row['payload']}') as Map<String, dynamic>,
+    baseVersion: (row['base_version'] as num?)?.toInt() ?? 0,
+    retryCount: (row['retry_count'] as num?)?.toInt() ?? 0,
+    status: '${row['status']}',
+    localRef: (row['local_ref'] as num?)?.toInt(),
+    lastError: row['last_error'] as String?,
+  );
 }
 
 /// What should happen to a queue row once its push attempt is done.
@@ -57,24 +57,24 @@ enum QueueOutcome { done, retry, conflict }
 /// shares a single transaction.
 class QueueSettlement {
   const QueueSettlement.done(this.entry, {required this.remoteVersion})
-      : kind = QueueOutcome.done,
-        error = null,
-        direction = null,
-        remotePayload = null;
+    : kind = QueueOutcome.done,
+      error = null,
+      direction = null,
+      remotePayload = null;
 
   const QueueSettlement.retry(this.entry, this.error)
-      : kind = QueueOutcome.retry,
-        remoteVersion = null,
-        direction = null,
-        remotePayload = null;
+    : kind = QueueOutcome.retry,
+      remoteVersion = null,
+      direction = null,
+      remotePayload = null;
 
   const QueueSettlement.conflict(
     this.entry, {
     this.direction = 'push_rejected',
     this.remotePayload,
     this.error,
-  })  : kind = QueueOutcome.conflict,
-        remoteVersion = null;
+  }) : kind = QueueOutcome.conflict,
+       remoteVersion = null;
 
   final QueueEntry entry;
   final QueueOutcome kind;
@@ -137,7 +137,10 @@ class SyncQueue {
   /// Dropping the memo and retrying once on a *fresh* connection turns that
   /// race into a slightly later, correct read. Any other error propagates
   /// untouched, so a genuine failure is never masked.
-  Future<T> _withDb<T>(String label, Future<T> Function(Database db) action) async {
+  Future<T> _withDb<T>(
+    String label,
+    Future<T> Function(Database db) action,
+  ) async {
     try {
       final db = await _db;
       return await DbTrace.run(label, () => action(db));
@@ -165,7 +168,8 @@ class SyncQueue {
   }) async {
     final existing = await txn.query(
       'sync_queue',
-      where: "entity_type = ? AND entity_id = ? AND status IN ('pending','in_flight','blocked')",
+      where:
+          "entity_type = ? AND entity_id = ? AND status IN ('pending','in_flight','blocked')",
       whereArgs: [entityType, entityId],
       limit: 1,
     );
@@ -198,7 +202,10 @@ class SyncQueue {
       {
         'operation': mergedOperation,
         'payload': encoded,
-        'base_version': maxOf(baseVersion, (row['base_version'] as num?)?.toInt() ?? 0),
+        'base_version': maxOf(
+          baseVersion,
+          (row['base_version'] as num?)?.toInt() ?? 0,
+        ),
         'local_ref': localRef ?? row['local_ref'],
         'updated_at': now,
         'status': 'pending',
@@ -225,11 +232,13 @@ class SyncQueue {
   Future<List<QueueEntry>> claim({int limit = 400}) async {
     return _withDb(
       'queue.claim',
-      (db) => tracedTransaction<List<QueueEntry>>(
-          db, 'queue.claim', (txn) async {
+      (db) => tracedTransaction<List<QueueEntry>>(db, 'queue.claim', (
+        txn,
+      ) async {
         final rows = await txn.query(
           'sync_queue',
-          where: "status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
+          where:
+              "status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
           whereArgs: [nowIso()],
           orderBy: 'id ASC',
           limit: limit,
@@ -239,10 +248,7 @@ class SyncQueue {
           final id = (row['id'] as num).toInt();
           final updated = await txn.update(
             'sync_queue',
-            {
-              'status': 'in_flight',
-              'updated_at': nowIso(),
-            },
+            {'status': 'in_flight', 'updated_at': nowIso()},
             where: "id = ? AND status = 'pending'",
             whereArgs: [id],
           );
@@ -292,8 +298,9 @@ class SyncQueue {
             'sync_queue',
             {
               'status': 'pending',
-              'next_attempt_at':
-                  nowIsoAt(DateTime.now().add(backoffDelay(attempts))),
+              'next_attempt_at': nowIsoAt(
+                DateTime.now().add(backoffDelay(attempts)),
+              ),
               'last_error': 'interrupted mid-push',
               'updated_at': now,
             },
@@ -307,12 +314,14 @@ class SyncQueue {
     });
   }
 
-
   /// Push succeeded: the row is deleted and the local row is marked `synced`
   /// with the new remote version.
   Future<void> markDone(QueueEntry entry, {required int remoteVersion}) async {
     await tracedTransaction(
-        await _db, 'queue.markDone', (txn) => _markDone(txn, entry, remoteVersion));
+      await _db,
+      'queue.markDone',
+      (txn) => _markDone(txn, entry, remoteVersion),
+    );
   }
 
   /// [markDone] on an existing transaction.
@@ -379,7 +388,10 @@ class SyncQueue {
   /// it, and `retryBlocked`/`retryRow` still drain it.
   Future<void> markRetry(QueueEntry entry, String error) async {
     await tracedTransaction(
-        await _db, 'queue.markRetry', (txn) => _markRetry(txn, entry, error));
+      await _db,
+      'queue.markRetry',
+      (txn) => _markRetry(txn, entry, error),
+    );
   }
 
   /// [markRetry] on an existing transaction.
@@ -394,8 +406,9 @@ class SyncQueue {
       {
         'status': 'pending',
         'retry_count': attempts,
-        'next_attempt_at':
-            nowIsoAt(DateTime.now().add(backoffDelay(attempts - 1))),
+        'next_attempt_at': nowIsoAt(
+          DateTime.now().add(backoffDelay(attempts - 1)),
+        ),
         'last_error': error,
         'updated_at': nowIso(),
       },
@@ -430,9 +443,17 @@ class SyncQueue {
     String? remotePayload,
     String? error,
   }) async {
-    await tracedTransaction(await _db, 'queue.markConflict',
-        (txn) => _markConflict(txn, entry,
-            direction: direction, remotePayload: remotePayload, error: error));
+    await tracedTransaction(
+      await _db,
+      'queue.markConflict',
+      (txn) => _markConflict(
+        txn,
+        entry,
+        direction: direction,
+        remotePayload: remotePayload,
+        error: error,
+      ),
+    );
   }
 
   /// [markConflict] on an existing transaction.
@@ -491,7 +512,8 @@ class SyncQueue {
     int conflictId, {
     required String resolution,
     required Future<void> Function(Map<String, Object?> conflict) onKeepLocal,
-    Future<void> Function(Map<String, Object?> conflict, String remoteJson)? onKeepRemote,
+    Future<void> Function(Map<String, Object?> conflict, String remoteJson)?
+    onKeepRemote,
   }) async {
     if (resolution != 'keep_local' && resolution != 'keep_remote') {
       throw ArgumentError.value(resolution, 'resolution');
@@ -523,10 +545,7 @@ class SyncQueue {
     );
     await db.update(
       'sync_conflicts',
-      {
-        'resolution': resolution,
-        'resolved_at': nowIso(),
-      },
+      {'resolution': resolution, 'resolved_at': nowIso()},
       where: 'id = ?',
       whereArgs: [conflictId],
     );
@@ -544,25 +563,18 @@ class SyncQueue {
   /// from the current schema, so dismissed state self-heals on next write.
   /// Returns how many conflicts were dismissed.
   Future<int> dismissAllConflicts() => _withDb(
-        'queue.dismissAll',
-        (db) => tracedTransaction<int>(db, 'queue.dismissAll', (txn) async {
-          final dismissed = await txn.update(
-            'sync_conflicts',
-            {
-              'resolution': 'ignored',
-              'resolved_at': nowIso(),
-            },
-            where: 'resolution IS NULL',
-          );
-          if (dismissed > 0) {
-            await txn.delete(
-              'sync_queue',
-              where: "status = 'conflict'",
-            );
-          }
-          return dismissed;
-        }),
-      );
+    'queue.dismissAll',
+    (db) => tracedTransaction<int>(db, 'queue.dismissAll', (txn) async {
+      final dismissed = await txn.update('sync_conflicts', {
+        'resolution': 'ignored',
+        'resolved_at': nowIso(),
+      }, where: 'resolution IS NULL');
+      if (dismissed > 0) {
+        await txn.delete('sync_queue', where: "status = 'conflict'");
+      }
+      return dismissed;
+    }),
+  );
 
   /// Manual retry from the Sync screen: `failed`/`conflict` → `pending`.
   Future<int> retryBlocked({String? entityType}) async {
@@ -597,28 +609,44 @@ class SyncQueue {
   /// Drop queue rows whose local row disappeared (e.g. a restore that did not
   /// contain it). Tombstones are never purged: they must reach the server.
   Future<int> purgeSolved() async {
-    final rows = await (await _db).query(
+    final db = await _db;
+    final rows = await db.query(
       'sync_queue',
-      where: "status IN ('pending','in_flight') AND local_ref IS NOT NULL AND operation != 'tombstone'",
+      columns: ['id', 'entity_type'],
+      where:
+          "status IN ('pending','in_flight') AND local_ref IS NOT NULL AND operation != 'tombstone'",
     );
-    var removed = 0;
+    final idsByEntity = <String, List<int>>{};
     for (final row in rows) {
       final entity = SyncEntity.byType('${row['entity_type']}');
       if (entity == null) continue;
-      final local = await (await _db).query(
-        entity.localTable,
-        where: 'id = ?',
-        whereArgs: [row['local_ref']],
-        limit: 1,
+      idsByEntity
+          .putIfAbsent(entity.type, () => <int>[])
+          .add((row['id'] as num).toInt());
+    }
+    var removed = 0;
+    for (final entry in idsByEntity.entries) {
+      final entity = SyncEntity.byType(entry.key);
+      if (entity == null) continue;
+      final orphaned = await db.rawQuery('''
+        SELECT q.id
+        FROM sync_queue q
+        LEFT JOIN ${entity.localTable} local ON local.id = q.local_ref
+        WHERE q.id IN (${List.filled(entry.value.length, '?').join(',')})
+          AND local.id IS NULL
+      ''', entry.value);
+      if (orphaned.isEmpty) continue;
+      removed += await db.delete(
+        'sync_queue',
+        where: 'id IN (${List.filled(orphaned.length, '?').join(',')})',
+        whereArgs: [for (final row in orphaned) row['id']],
       );
-      if (local.isEmpty) {
-        removed += await (await _db).delete('sync_queue', where: 'id = ?', whereArgs: [row['id']]);
-      }
     }
     return removed;
   }
 
-  Future<int> countPending() async => _count("status IN ('pending','in_flight')");
+  Future<int> countPending() async =>
+      _count("status IN ('pending','in_flight')");
 
   Future<int> countBlocked() async => _count("status IN ('failed','conflict')");
 
@@ -631,8 +659,9 @@ class SyncQueue {
   /// while it waits - so a badge that was three cheap reads became three
   /// opportunities to sit in that queue. The conflict count was the worst of
   /// them: it loaded whole rows just to call `.length`.
-  Future<SyncQueueCounts> countBadge() => _withDb('queue.countBadge', (db) async {
-        // One statement, three scalar subqueries: a single message to the shared
+  Future<SyncQueueCounts> countBadge() =>
+      _withDb('queue.countBadge', (db) async {
+        // One statement, four scalar subqueries: a single message to the shared
         // background isolate instead of four, and nothing left holding the
         // connection lock in between.
         final rows = await db.rawQuery('''
@@ -641,6 +670,8 @@ class SyncQueue {
               WHERE status IN ('pending','in_flight')) AS pending,
             (SELECT COUNT(*) FROM sync_queue
               WHERE status IN ('failed','conflict')) AS blocked,
+            (SELECT COUNT(*) FROM sync_queue
+              WHERE status = 'failed') AS failed,
             (SELECT COUNT(*) FROM sync_conflicts
               WHERE resolution IS NULL
                  OR resolution NOT IN ('keep_local','keep_remote','ignored')) AS conflicts
@@ -649,37 +680,43 @@ class SyncQueue {
         return SyncQueueCounts(
           pending: (row['pending'] as num?)?.toInt() ?? 0,
           blocked: (row['blocked'] as num?)?.toInt() ?? 0,
+          failed: (row['failed'] as num?)?.toInt() ?? 0,
           conflicts: (row['conflicts'] as num?)?.toInt() ?? 0,
         );
       });
 
   Future<int> _count(String where) async => _withDb('queue.count', (db) async {
-        final rows = await db.rawQuery('SELECT COUNT(*) AS c FROM sync_queue WHERE $where');
-        return (rows.first['c'] as num).toInt();
-      });
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM sync_queue WHERE $where',
+    );
+    return (rows.first['c'] as num).toInt();
+  });
 
   /// Unresolved conflicts, counted in SQL.
   ///
   /// Replaces `listConflicts(limit: 1000).length`, which pulled a thousand full
   /// conflict rows across the isolate boundary to produce an integer.
   Future<int> countConflicts() => _withDb('queue.countConflicts', (db) async {
-        final rows = await db.rawQuery(
-          "SELECT COUNT(*) AS c FROM sync_conflicts WHERE resolution IS NULL "
-          "OR resolution NOT IN ('keep_local','keep_remote','ignored')",
-        );
-        return (rows.first['c'] as num).toInt();
-      });
+    final rows = await db.rawQuery(
+      "SELECT COUNT(*) AS c FROM sync_conflicts WHERE resolution IS NULL "
+      "OR resolution NOT IN ('keep_local','keep_remote','ignored')",
+    );
+    return (rows.first['c'] as num).toInt();
+  });
 
   /// The live queue for the Sync screen: blocked rows first, then the pending
   /// ones. [onlyBlocked] is the "needs attention" view.
-  Future<List<Map<String, Object?>>> listQueue({int limit = 200, bool onlyBlocked = false}) async =>
-      (await _db).query(
-        'sync_queue',
-        where: onlyBlocked ? "status IN ('failed','conflict')" : null,
-        orderBy: "CASE status WHEN 'failed' THEN 0 WHEN 'conflict' THEN 1 "
-            "WHEN 'pending' THEN 2 WHEN 'in_flight' THEN 3 ELSE 4 END, id ASC",
-        limit: limit,
-      );
+  Future<List<Map<String, Object?>>> listQueue({
+    int limit = 200,
+    bool onlyBlocked = false,
+  }) async => (await _db).query(
+    'sync_queue',
+    where: onlyBlocked ? "status IN ('failed','conflict')" : null,
+    orderBy:
+        "CASE status WHEN 'failed' THEN 0 WHEN 'conflict' THEN 1 "
+        "WHEN 'pending' THEN 2 WHEN 'in_flight' THEN 3 ELSE 4 END, id ASC",
+    limit: limit,
+  );
 }
 
 /// The three numbers the sync badge shows, read in one round trip.
@@ -688,13 +725,16 @@ class SyncQueueCounts {
     required this.pending,
     required this.blocked,
     required this.conflicts,
+    this.failed = 0,
   });
 
   final int pending;
   final int blocked;
   final int conflicts;
+  final int failed;
 
   @override
-  String toString() => 'SyncQueueCounts(pending: $pending, blocked: $blocked, '
-      'conflicts: $conflicts)';
+  String toString() =>
+      'SyncQueueCounts(pending: $pending, blocked: $blocked, '
+      'failed: $failed, conflicts: $conflicts)';
 }

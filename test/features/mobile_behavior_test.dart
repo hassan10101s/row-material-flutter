@@ -98,30 +98,48 @@ void main() {
     getIt.registerSingleton<AuthGate>(gate);
 
     when(() => local.listUnitSymbols()).thenAnswer((_) async => <String>[]);
-    when(() => local.listInventory()).thenAnswer(
-      (_) async => <Map<String, dynamic>>[
-        {
-          'id': 1,
-          'name': 'Sugar',
-          'category': 'powder',
-          'unit': 'kg',
-          'current_qty': 10,
-          'min_qty': 2,
-        },
-      ],
-    );
-    when(() => labConfig.listAnalyses()).thenAnswer(
-      (_) async => <Map<String, dynamic>>[
-        {
-          'id': 1,
-          'name': 'Moisture',
-          'unit': '%',
-          'dynamic_fields': ['Sample Name'],
-          'formula': {'expression': ''},
-          'items': [],
-        },
-      ],
-    );
+    final inventoryRows = <Map<String, dynamic>>[
+      {
+        'id': 1,
+        'name': 'Sugar',
+        'category': 'powder',
+        'unit': 'kg',
+        'current_qty': 10,
+        'min_qty': 2,
+      },
+    ];
+    when(() => local.listInventory()).thenAnswer((_) async => inventoryRows);
+    when(
+      () => local.listInventoryPaged(
+        query: any(named: 'query'),
+        limit: any(named: 'limit'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer((_) async => inventoryRows);
+    when(
+      () => local.countInventory(query: any(named: 'query')),
+    ).thenAnswer((_) async => inventoryRows.length);
+    final analysesRows = <Map<String, dynamic>>[
+      {
+        'id': 1,
+        'name': 'Moisture',
+        'unit': '%',
+        'dynamic_fields': ['Sample Name'],
+        'formula': {'expression': ''},
+        'items': [],
+      },
+    ];
+    when(() => labConfig.listAnalyses()).thenAnswer((_) async => analysesRows);
+    when(
+      () => labConfig.listAnalysesPaged(
+        query: any(named: 'query'),
+        limit: any(named: 'limit'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer((_) async => analysesRows);
+    when(
+      () => labConfig.countAnalyses(query: any(named: 'query')),
+    ).thenAnswer((_) async => analysesRows.length);
     // Tested-at is "now": the history tab defaults to the last-24h
     // filter, so a fixed old date would be filtered out of the cards.
     final nowIso = DateTime.now().toIso8601String();
@@ -138,33 +156,65 @@ void main() {
         },
       ],
     );
-    when(() => local.listConsumptionLog()).thenAnswer(
-      (_) async => <Map<String, dynamic>>[],
-    );
-    when(() => labConfig.listProducts()).thenAnswer(
-      (_) async => <Map<String, dynamic>>[
-        {
-          'id': 1,
-          'name': 'Gel',
-          'category': 'Food',
-          'description': 'Test gel',
-          'ranges': [
-            {
-              'analysis_name': 'Moisture',
-              'min_value': '10',
-              'max_value': '14',
-              'unit': '%',
-            },
-          ],
-        },
-      ],
-    );
-    when(() => reference.listParameters()).thenAnswer(
-      (_) async => <Map<String, dynamic>>[],
-    );
-    when(() => reference.listUnits()).thenAnswer(
-      (_) async => <Map<String, dynamic>>[],
-    );
+    when(
+      () => local.listConsumptionLog(),
+    ).thenAnswer((_) async => <Map<String, dynamic>>[]);
+    final productRows = <Map<String, dynamic>>[
+      {
+        'id': 1,
+        'name': 'Gel',
+        'category': 'Food',
+        'description': 'Test gel',
+        'ranges': [
+          {
+            'analysis_name': 'Moisture',
+            'min_value': '10',
+            'max_value': '14',
+            'unit': '%',
+          },
+        ],
+      },
+    ];
+    when(() => labConfig.listProducts()).thenAnswer((_) async => productRows);
+    when(
+      () => labConfig.listProductsPaged(
+        query: any(named: 'query'),
+        limit: any(named: 'limit'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer((_) async => productRows);
+    when(
+      () => labConfig.countProducts(query: any(named: 'query')),
+    ).thenAnswer((_) async => productRows.length);
+    when(
+      () => reference.listParameters(),
+    ).thenAnswer((_) async => <Map<String, dynamic>>[]);
+    when(
+      () => reference.listParametersPaged(
+        query: any(named: 'query'),
+        limit: any(named: 'limit'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer((_) async => <Map<String, dynamic>>[]);
+    when(
+      () => reference.countParameters(
+        query: any(named: 'query'),
+        parameterType: any(named: 'parameterType'),
+      ),
+    ).thenAnswer((_) async => 0);
+    when(
+      () => reference.listUnits(),
+    ).thenAnswer((_) async => <Map<String, dynamic>>[]);
+    when(
+      () => reference.listUnitsPaged(
+        query: any(named: 'query'),
+        limit: any(named: 'limit'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer((_) async => <Map<String, dynamic>>[]);
+    when(
+      () => reference.countUnits(query: any(named: 'query')),
+    ).thenAnswer((_) async => 0);
     when(() => reference.listMaterials()).thenAnswer(
       (_) async => <Map<String, dynamic>>[
         {'id': 1, 'material_name': 'Sugar', 'material_code': 'SUG'},
@@ -214,7 +264,9 @@ void main() {
 
       expect(find.byType(DataTable), findsNothing);
       expect(find.text('Sugar'), findsOneWidget);
-      expect(find.text('Add item'), findsOneWidget);
+      // Add floats like the raw-material register, no top button.
+      expect(find.byType(FloatingActionButton), findsOneWidget);
+      expect(find.text('Add item'), findsNothing);
     });
 
     testWidgets('analyses host shows cards on a phone grid', (tester) async {
@@ -240,10 +292,7 @@ void main() {
       await pumpAs(
         tester,
         AppFormFactor.mobile,
-        BlocProvider.value(
-          value: cubit,
-          child: const MobileProductsTab(),
-        ),
+        BlocProvider.value(value: cubit, child: const MobileProductsTab()),
       );
 
       expect(find.byType(DataTable), findsNothing);
@@ -251,8 +300,9 @@ void main() {
       expect(find.textContaining('Moisture'), findsOneWidget);
     });
 
-    testWidgets('test history host shows cards on a phone grid',
-        (tester) async {
+    testWidgets('test history host shows cards on a phone grid', (
+      tester,
+    ) async {
       final cubit = TestHistoryCubit(
         results: labResults,
         local: local,
@@ -272,8 +322,9 @@ void main() {
 
     testWidgets('NCR list shows cards plus the total line', (tester) async {
       final repo = _NcrRepoMock();
-      when(() => repo.kpis(any()))
-          .thenAnswer((_) async => const NcrKpis(total: 1));
+      when(
+        () => repo.kpis(any()),
+      ).thenAnswer((_) async => const NcrKpis(total: 1));
       when(
         () => repo.list(
           any(),
@@ -318,11 +369,7 @@ void main() {
       addTearDown(cubit.close);
       await cubit.load();
 
-      await pumpAs(
-        tester,
-        AppFormFactor.mobile,
-        QcNcrListScreen(cubit: cubit),
-      );
+      await pumpAs(tester, AppFormFactor.mobile, QcNcrListScreen(cubit: cubit));
 
       expect(find.byType(DataTable), findsNothing);
       expect(find.byType(AppAdaptiveDataView), findsOneWidget);
@@ -330,11 +377,13 @@ void main() {
       expect(find.text('1'), findsOneWidget);
     });
 
-    testWidgets('NCR list shows the same cards on a desktop grid',
-        (tester) async {
+    testWidgets('NCR list shows the same cards on a desktop grid', (
+      tester,
+    ) async {
       final repo = _NcrRepoMock();
-      when(() => repo.kpis(any()))
-          .thenAnswer((_) async => const NcrKpis(total: 1));
+      when(
+        () => repo.kpis(any()),
+      ).thenAnswer((_) async => const NcrKpis(total: 1));
       when(
         () => repo.list(
           any(),
@@ -392,8 +441,9 @@ void main() {
       expect(find.text('1'), findsOneWidget);
     });
 
-    testWidgets('inspections ledger shows cards on a phone grid',
-        (tester) async {
+    testWidgets('inspections ledger shows cards on a phone grid', (
+      tester,
+    ) async {
       when(
         () => inspections.list(
           query: any(named: 'query'),
@@ -402,6 +452,8 @@ void main() {
           offset: any(named: 'offset'),
           orderBy: any(named: 'orderBy'),
           kind: any(named: 'kind'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
         ),
       ).thenAnswer(
         (_) async => <Map<String, dynamic>>[
@@ -421,6 +473,8 @@ void main() {
           query: any(named: 'query'),
           status: any(named: 'status'),
           kind: any(named: 'kind'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
         ),
       ).thenAnswer((_) async => 1);
       final cubit = InspectionsCubit(repo: inspections, reports: reports);
@@ -454,10 +508,10 @@ void main() {
         BlocProvider.value(value: cubit, child: const InventoryTab()),
       );
 
-      await tester.tap(find.text('Add item'));
+      await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
 
-      expect(find.byType(Scaffold), findsOneWidget);
+      expect(find.byType(Scaffold), findsWidgets);
       expect(find.byType(AppBar), findsOneWidget);
       expect(find.byType(AppWindow), findsNothing);
       expect(find.byType(Dialog), findsNothing);
@@ -474,7 +528,7 @@ void main() {
         BlocProvider.value(value: cubit, child: const AnalysesTab()),
       );
 
-      await tester.tap(find.text('Add analysis'));
+      await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
 
       expect(find.byType(Scaffold), findsOneWidget);
@@ -490,13 +544,10 @@ void main() {
       await pumpAs(
         tester,
         AppFormFactor.mobile,
-        BlocProvider.value(
-          value: cubit,
-          child: const MobileProductsTab(),
-        ),
+        BlocProvider.value(value: cubit, child: const MobileProductsTab()),
       );
 
-      await tester.tap(find.text('New Product'));
+      await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
 
       expect(find.byType(Scaffold), findsOneWidget);
@@ -504,8 +555,9 @@ void main() {
       expect(find.byType(AppWindow), findsNothing);
     });
 
-    testWidgets('overlay renders a bottom sheet on narrow widths',
-        (tester) async {
+    testWidgets('overlay renders a bottom sheet on narrow widths', (
+      tester,
+    ) async {
       await pumpAs(
         tester,
         AppFormFactor.mobile,
@@ -530,10 +582,13 @@ void main() {
   });
 
   group('mobile inspection form is a stepped wizard', () {
-    testWidgets('wizard steps through sections and holds step 1',
-        (tester) async {
-      final cubit =
-          InspectionFormCubit(repo: inspections, reference: reference);
+    testWidgets('wizard steps through sections and holds step 1', (
+      tester,
+    ) async {
+      final cubit = InspectionFormCubit(
+        repo: inspections,
+        reference: reference,
+      );
       addTearDown(cubit.close);
       await cubit.loadMaterials();
 
@@ -562,8 +617,10 @@ void main() {
     });
 
     testWidgets('wizard holds step 1 without a material', (tester) async {
-      final cubit =
-          InspectionFormCubit(repo: inspections, reference: reference);
+      final cubit = InspectionFormCubit(
+        repo: inspections,
+        reference: reference,
+      );
       addTearDown(cubit.close);
       await cubit.loadMaterials();
 
@@ -584,8 +641,9 @@ void main() {
   });
 
   group('mobile inspection detail uses cards, desktop keeps tables', () {
-    testWidgets('detail renders parameter cards on a phone grid',
-        (tester) async {
+    testWidgets('detail renders parameter cards on a phone grid', (
+      tester,
+    ) async {
       final cubit = InspectionDetailCubit(
         inspectionId: 1,
         repo: inspections,
@@ -630,8 +688,9 @@ void main() {
   });
 
   group('desktop pixels do not move', () {
-    testWidgets('inventory host still renders the table dialog',
-        (tester) async {
+    testWidgets('inventory host still renders the table dialog', (
+      tester,
+    ) async {
       final cubit = InventoryCubit(repo: local);
       addTearDown(cubit.close);
       await cubit.load();
@@ -642,7 +701,7 @@ void main() {
         BlocProvider.value(value: cubit, child: const InventoryTab()),
       );
 
-      expect(find.byType(DataTable), findsOneWidget);
+      expect(find.byType(AppPaginatedTable), findsOneWidget);
 
       await tester.tap(find.text('Add item'));
       await tester.pumpAndSettle();

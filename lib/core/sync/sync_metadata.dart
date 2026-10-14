@@ -60,6 +60,12 @@ class SyncMetadata {
   static String lastFullSyncAtKey = 'last_full_sync_at';
   static String syncEnabledKey = 'sync_enabled';
 
+  /// Mobile-only notification watermarks: highest seen row per table.
+  /// Id-based (not timestamps) because pulled rows are inserted with fresh
+  /// local ids and `lab_sample_tests` predates `created_at`.
+  static String notifSeenInspectionIdKey = 'notif_seen_inspection_id';
+  static String notifSeenLabIdKey = 'notif_seen_lab_id';
+
   static String cursorKey(String entityType) => 'pull_cursor_$entityType';
 
   Future<String> get(String key) async {
@@ -131,6 +137,28 @@ class SyncMetadata {
 
   Future<void> setCursor(String entityType, PullCursor cursor) =>
       set(cursorKey(entityType), jsonEncode(cursor.toJson()));
+
+  /// Forget every pull cursor (`pull_cursor_*`), forcing the next pull to walk
+  /// each collection from the beginning.
+  ///
+  /// Recovery for cursors poisoned by old code that advanced past documents it
+  /// failed to apply (FK rejections, schema mismatches): those rows sit behind
+  /// the cursor forever, so no normal pull will ever fetch them again — and a
+  /// reinstall does NOT clear them (APK reinstall preserves app data). Already
+  /// applied rows re-fetch and skip cheaply (`remoteVersion == syncedVersion`),
+  /// and locally queued edits are untouched, so this is strictly safer than
+  /// wiping app data (which would destroy unpushed local rows).
+  Future<void> clearCursors() async {
+    final db = await _db;
+    await DbTrace.run(
+      'metadata.clearCursors',
+      () => db.delete(
+        'sync_metadata',
+        where: 'key LIKE ?',
+        whereArgs: ['pull_cursor_%'],
+      ),
+    );
+  }
 
   Future<DateTime?> lastPullAt() => _date(lastPullAtKey);
 

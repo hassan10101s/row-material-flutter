@@ -1,5 +1,22 @@
 import 'package:sqflite/sqflite.dart';
 
+/// Canonical values used by the equipment event log. Kept in the domain
+/// contract so presentation does not depend on the concrete SQL repository.
+abstract final class EquipmentEventType {
+  static const calibration = 'calibration';
+  static const maintenance = 'maintenance';
+  static const repair = 'repair';
+
+  static const values = <String>[calibration, maintenance, repair];
+
+  static String normalize(Object? value) {
+    final text = '$value'.trim().toLowerCase();
+    if (text == maintenance || text == 'صيانة') return maintenance;
+    if (text == repair || text == 'إصلاح' || text == 'اصلاح') return repair;
+    return calibration;
+  }
+}
+
 /// The lab concerns that stay **on the device**.
 ///
 /// ## Why a third contract
@@ -23,6 +40,16 @@ abstract interface class LabLocalRepository {
   // ── Inventory ──────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> listInventory({String? category});
+
+  /// Paged inventory for mobile infinite lists (server-side search).
+  Future<List<Map<String, dynamic>>> listInventoryPaged({
+    String query = '',
+    String? category,
+    int limit = 25,
+    int offset = 0,
+  });
+
+  Future<int> countInventory({String query = '', String? category});
 
   Future<Map<String, dynamic>> getInventoryItem(int itemId);
 

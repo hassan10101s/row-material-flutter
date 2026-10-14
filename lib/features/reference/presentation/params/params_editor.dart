@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../design_system/widgets/app_field.dart';
 import '../../domain/parameter_type.dart';
 
 /// Dialog title for the create/edit chrome, shared by both experiences.
@@ -117,33 +119,25 @@ class ParamEditorState extends State<ParamEditor> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        TextField(
+        AppField(
+          label: AppText.t('الاسم', 'Name'),
           controller: _name,
           onChanged: (_) => setState(() => _nameError = null),
-          decoration: InputDecoration(
-            labelText: AppText.t('الاسم', 'Name'),
-            isDense: true,
-            errorText: _nameError,
-          ),
+          error: _nameError,
         ),
         const SizedBox(height: AppSpacing.md),
-        DropdownButtonFormField<String>(
-          initialValue: _unitOptions.contains(_unit.text.trim())
+        AppDropdown<String>(
+          value: _unitOptions.contains(_unit.text.trim())
               ? _unit.text.trim()
               : '',
-          isExpanded: true,
-          decoration: InputDecoration(
-            labelText: AppText.t('الوحدة المرجعية', 'Reference unit'),
-            isDense: true,
-            border: const OutlineInputBorder(),
-          ),
+          labelText: AppText.t('الوحدة المرجعية', 'Reference unit'),
           items: [
-            DropdownMenuItem(
+            AppDropdownItem(
               value: '',
-              child: Text(AppText.t('بلا وحدة', 'No unit')),
+              label: AppText.t('بلا وحدة', 'No unit'),
             ),
             for (final unit in _unitOptions)
-              DropdownMenuItem(value: unit, child: Text(unit)),
+              AppDropdownItem(value: unit, label: unit),
           ],
           onChanged: (value) => setState(() => _unit.text = value ?? ''),
         ),
@@ -167,22 +161,18 @@ class ParamEditorActions extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        TextButton(
+        AppButton(
+          style: AppButtonStyle.secondary,
+          label: AppStrings.cancel,
           onPressed: state.saving
               ? null
               : () => Navigator.of(context).pop(false),
-          child: Text(AppStrings.cancel),
         ),
         const SizedBox(width: AppSpacing.sm),
-        FilledButton(
+        AppButton(
+          label: AppStrings.save,
+          loading: state.saving,
           onPressed: state.saving ? null : state.submit,
-          child: state.saving
-              ? SizedBox(
-                  width: 18.r,
-                  height: 18.r,
-                  child: const CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(AppStrings.save),
         ),
       ],
     );

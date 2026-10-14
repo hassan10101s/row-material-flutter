@@ -236,8 +236,8 @@ class QcTemplatesCubit extends AppCubit<QcTemplatesState> {
     try {
       final id = await repo.duplicateTemplate(
         templateId,
-        newCode.trim(),
         newName.trim(),
+        newCode: newCode.trim(),
       );
       safeEmit(state.copyWith(saving: false));
       await load();
@@ -697,8 +697,8 @@ class QcTemplateDetailCubit extends AppCubit<QcTemplateDetailState> {
     try {
       final id = await repo.duplicateTemplate(
         state.templateId,
-        newCode.trim(),
         name,
+        newCode: newCode.trim(),
       );
       safeEmit(state.copyWith(saving: false));
       await library.refresh();

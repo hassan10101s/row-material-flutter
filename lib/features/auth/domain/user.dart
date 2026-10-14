@@ -53,10 +53,11 @@ class User {
 
   bool get isReadOnly => roleIsReadOnly(role) || readOnlyDevice;
 
-  /// A read-only device offers no write affordance at all. The member status
-  /// stays a session concern (`AppSession.canDo`), as documented for the
-  /// invited-member case.
-  bool get canWriteAnything => !readOnlyDevice;
+  /// A read-only device offers no write affordance at all. Inactive members
+  /// (invited/pending/disabled) also offer none: the server and
+  /// `AppSession.canDo`/`SessionWriteGuard` already refuse them, but the UI
+  /// must not offer the button first.
+  bool get canWriteAnything => !readOnlyDevice && isActiveMember;
 
   // ── Legacy call sites (kept so no widget/cubit had to change) ────────────
   // Read gates stay role-based, write gates also require a writable device.

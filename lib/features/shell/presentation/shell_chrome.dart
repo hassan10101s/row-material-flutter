@@ -23,7 +23,9 @@ import '../../../core/locale/locale_service.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../design_system/widgets/app_support.dart';
 import '../../auth/domain/user.dart';
+import '../../notifications/presentation/notification_bell.dart';
 import '../../sync/presentation/sync_badge.dart';
 import '../../sync/presentation/sync_status_controller.dart';
 
@@ -41,6 +43,7 @@ class ShellTopBar extends StatelessWidget {
     required this.theme,
     required this.syncStatus,
     required this.onOpenSync,
+    this.title,
     this.onMenu,
     this.showRoleChip = true,
   });
@@ -50,6 +53,7 @@ class ShellTopBar extends StatelessWidget {
   final ThemeService theme;
   final SyncStatusController syncStatus;
   final VoidCallback onOpenSync;
+  final String? title;
 
   /// Null on desktop, where the sidebar is always visible and there is nothing
   /// for a menu button to open.
@@ -66,18 +70,16 @@ class ShellTopBar extends StatelessWidget {
   }
 
   Widget _bar(BuildContext context) {
+    // Transparent chrome: no solid strip, no divider — the page background
+    // shows through and the round buttons (language, theme, support) plus
+    // the bell and sync badge read as floating pills.
     return Material(
-      color: AppColors.surface,
+      color: Colors.transparent,
       elevation: 0,
       child: Container(
         height: 60.h,
         padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          border: Border(
-            bottom: BorderSide(color: AppColors.borderMuted),
-          ),
-        ),
+        decoration: const BoxDecoration(color: Colors.transparent),
         child: Row(
           children: [
             if (onMenu != null) ...[
@@ -85,15 +87,31 @@ class ShellTopBar extends StatelessWidget {
                 tooltip: AppText.t('القائمة', 'Menu'),
                 onPressed: onMenu,
                 style: IconButton.styleFrom(
-                  backgroundColor:
-                      AppColors.primary.withValues(alpha: 0.08),
+                  backgroundColor: AppColors.primary.withValues(alpha: 0.08),
                   foregroundColor: AppColors.primary,
                 ),
                 icon: const Icon(Icons.menu),
               ),
               const SizedBox(width: 8),
             ],
-            const Spacer(),
+            if (title != null && title!.trim().isNotEmpty)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsetsDirectional.only(start: 4),
+                  child: Text(
+                    title!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 16.spMax,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.textStrong,
+                    ),
+                  ),
+                ),
+              )
+            else
+              const Spacer(),
             ShellFloatingRound(
               tooltip: AppStrings.toggleLanguage,
               onPressed: () => locale.toggle(),
@@ -118,6 +136,18 @@ class ShellTopBar extends StatelessWidget {
                 color: AppColors.primary,
               ),
             ),
+            const SizedBox(width: 8),
+            // Company support, same round style: opens the contact sheet
+            // (dialog on desktop, bottom sheet on phones).
+            ShellFloatingRound(
+              tooltip: AppText.t('الدعم والتواصل', 'Support & contact'),
+              onPressed: () => openSupportSheet(context),
+              child: Icon(
+                Icons.support_agent_outlined,
+                size: 20.r,
+                color: AppColors.primary,
+              ),
+            ),
             if (showRoleChip && user.isReadOnly) ...[
               const SizedBox(width: 12),
               Container(
@@ -136,6 +166,9 @@ class ShellTopBar extends StatelessWidget {
               ),
             ],
             const SizedBox(width: 10),
+            // Mobile-only new-item bell (inspections + lab results).
+            const NotificationBell(),
+            const SizedBox(width: 6),
             // The badge is the visible proof of the offline-first state:
             // connection, work waiting, last exchange.
             SyncBadge(status: syncStatus.status, onTap: onOpenSync),
@@ -210,9 +243,7 @@ class ShellNavItem extends StatelessWidget {
     final isRtl = Directionality.of(context) == TextDirection.rtl;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12.r),
-      ),
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12.r)),
       clipBehavior: Clip.antiAlias,
       child: Stack(
         children: [
@@ -223,8 +254,10 @@ class ShellNavItem extends StatelessWidget {
             child: InkWell(
               onTap: onTap,
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 child: Row(
                   children: [
                     Container(
@@ -244,9 +277,7 @@ class ShellNavItem extends StatelessWidget {
                       child: Icon(
                         icon,
                         size: 18.r,
-                        color: active
-                            ? AppColors.primary
-                            : AppColors.textMuted,
+                        color: active ? AppColors.primary : AppColors.textMuted,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -256,8 +287,9 @@ class ShellNavItem extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 14.spMax,
-                          fontWeight:
-                              active ? FontWeight.w700 : FontWeight.w500,
+                          fontWeight: active
+                              ? FontWeight.w700
+                              : FontWeight.w500,
                           color: active
                               ? AppColors.primary
                               : AppColors.textStrong,
@@ -371,7 +403,9 @@ class ShellIdentityCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                          color: AppColors.textMuted, fontSize: 11.spMax),
+                        color: AppColors.textMuted,
+                        fontSize: 11.spMax,
+                      ),
                     ),
                   ],
                 ),
@@ -386,60 +420,91 @@ class ShellIdentityCard extends StatelessWidget {
               border: Border.all(color: AppColors.borderMuted),
             ),
             padding: EdgeInsetsDirectional.only(
-                start: 10.w, end: 4.w, top: 8.h, bottom: 8.h),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 18.r,
-                  backgroundColor: AppColors.primary,
-                  child: Text(
-                    initial,
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 15.spMax,
-                        fontWeight: FontWeight.w700),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        user.fullName,
-                        overflow: TextOverflow.ellipsis,
+              start: 10.w,
+              end: 4.w,
+              top: 8.h,
+              bottom: 8.h,
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // The rail can be collapsed to roughly 90px. In that state
+                // the avatar is the useful identity affordance; forcing the
+                // name and two logout buttons into the same row causes a
+                // horizontal RenderFlex overflow. The slim 224dp sidebar
+                // leaves ~178dp here, so the cutoff sits just below that.
+                if (constraints.maxWidth < 168) {
+                  return Align(
+                    alignment: AlignmentDirectional.center,
+                    child: CircleAvatar(
+                      radius: 18.r,
+                      backgroundColor: AppColors.primary,
+                      child: Text(
+                        initial,
                         style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15.spMax,
                           fontWeight: FontWeight.w700,
-                          fontSize: 13.spMax,
                         ),
                       ),
-                      Text(
-                        '${user.username} — ${user.role}',
-                        overflow: TextOverflow.ellipsis,
+                    ),
+                  );
+                }
+                return Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18.r,
+                      backgroundColor: AppColors.primary,
+                      child: Text(
+                        initial,
                         style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 11.spMax,
+                          color: Colors.white,
+                          fontSize: 15.spMax,
+                          fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  tooltip: AppText.t(
-                    'تسجيل الخروج من هذا الجهاز فقط',
-                    'Sign out of this device only',
-                  ),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: onLogoutThisDevice,
-                  icon: Icon(Icons.phone_iphone, size: 18.r),
-                ),
-                IconButton(
-                  tooltip: AppText.t('تسجيل الخروج', 'Logout'),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: onLogout,
-                  icon: Icon(Icons.logout, size: 18.r),
-                ),
-              ],
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            user.fullName,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 13.spMax,
+                            ),
+                          ),
+                          Text(
+                            '${user.username} — ${user.role}',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 11.spMax,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: AppText.t(
+                        'تسجيل الخروج من هذا الجهاز فقط',
+                        'Sign out of this device only',
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onLogoutThisDevice,
+                      icon: Icon(Icons.phone_iphone, size: 18.r),
+                    ),
+                    IconButton(
+                      tooltip: AppText.t('تسجيل الخروج', 'Logout'),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: onLogout,
+                      icon: Icon(Icons.logout, size: 18.r),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ],

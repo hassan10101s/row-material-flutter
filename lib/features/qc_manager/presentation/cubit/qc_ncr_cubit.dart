@@ -151,7 +151,7 @@ class QcNcrState extends Equatable {
 /// "3 critical" above a table of 40 unrelated rows while two of the five
 /// parallel queries are still in flight.
 class QcNcrCubit extends AppCubit<QcNcrState> {
-  QcNcrCubit(this.repo, {this.pageSize = 50}) : super(const QcNcrState());
+  QcNcrCubit(this.repo, {this._pageSize = 200}) : super(const QcNcrState());
 
   /// The domain contract, not a local seam.
   ///
@@ -161,7 +161,10 @@ class QcNcrCubit extends AppCubit<QcNcrState> {
   /// be passed in, meaning the seam was only ever satisfied by test doubles
   /// and production wiring would have failed to compile.
   final QcNcReportRepository repo;
-  final int pageSize;
+
+  int _pageSize;
+
+  int get pageSize => _pageSize;
 
   /// Guards against an older load overwriting a newer one.
   ///
@@ -309,6 +312,15 @@ class QcNcrCubit extends AppCubit<QcNcrState> {
     if (!state.hasPrevious) return;
     final offset = (state.filters.offset - pageSize).clamp(0, 1 << 31);
     safeEmit(state.copyWith(filters: state.filters.copyWith(offset: offset)));
+    await load(resetPaging: false);
+  }
+
+  Future<void> setPageSize(int size) async {
+    if (size <= 0 || size == _pageSize) return;
+    _pageSize = size;
+    safeEmit(
+      state.copyWith(filters: state.filters.copyWith(offset: 0, limit: size)),
+    );
     await load(resetPaging: false);
   }
 

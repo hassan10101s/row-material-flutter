@@ -61,6 +61,84 @@ class RunTestCubit extends AppCubit<RunTestState> {
     safeEmit(state.copyWith(analysisId: id));
   }
 
+  /// `copyWith` cannot null a field (`?? this.x`), so clears build the state
+  /// explicitly. Without these, the autocomplete pickers lock on their first
+  /// committed value (read-only + no clear button) and the user can never
+  /// pick another analysis/material/record for the next test.
+  void clearAnalysis() {
+    if (state.analysisId == null) return;
+    safeEmit(
+      RunTestState(
+        loading: state.loading,
+        error: state.error,
+        analyses: state.analyses,
+        products: state.products,
+        rawMaterials: state.rawMaterials,
+        inspections: state.inspections,
+        sourceType: state.sourceType,
+        sourceName: state.sourceName,
+        rawMaterialId: state.rawMaterialId,
+        selectedInspection: state.selectedInspection,
+        selectedSampleName: state.selectedSampleName,
+        productId: state.productId,
+        loadingInspections: state.loadingInspections,
+        running: state.running,
+      ),
+    );
+  }
+
+  void clearRawMaterial() {
+    if (state.rawMaterialId == null) return;
+    safeEmit(
+      RunTestState(
+        loading: state.loading,
+        error: state.error,
+        analyses: state.analyses,
+        products: state.products,
+        rawMaterials: state.rawMaterials,
+        sourceType: state.sourceType,
+        sourceName: '',
+        selectedSampleName: '',
+        productId: state.productId,
+        analysisId: state.analysisId,
+        loadingInspections: state.loadingInspections,
+        running: state.running,
+      ),
+    );
+  }
+
+  void clearProduct() {
+    if (state.productId == null) return;
+    safeEmit(
+      RunTestState(
+        loading: state.loading,
+        error: state.error,
+        analyses: state.analyses,
+        products: state.products,
+        rawMaterials: state.rawMaterials,
+        sourceType: state.sourceType,
+        sourceName: '',
+        rawMaterialId: state.rawMaterialId,
+        selectedSampleName: '',
+        analysisId: state.analysisId,
+        loadingInspections: state.loadingInspections,
+        running: state.running,
+      ),
+    );
+  }
+
+  void clearInspection() {
+    if (state.selectedInspection.isEmpty) return;
+    safeEmit(
+      state.copyWith(selectedInspection: const {}, selectedSampleName: ''),
+    );
+  }
+
+  void clearInspectionSample() {
+    if (state.selectedSampleName.isEmpty) return;
+    safeEmit(state.copyWith(selectedSampleName: ''));
+  }
+
   void setSourceType(String type) {
     if (type == state.sourceType) return;
     safeEmit(state.copyWith(sourceType: type));

@@ -10,10 +10,10 @@ class AppText {
 
 /// Central bilingual strings.
 class AppStrings {
-  static String get appTitle => AppText.t('مختبر المواد', 'Material Lab');
+  static String get appTitle => 'Material Lab';
   static String get tagline => AppText.t(
-    'نظام فحص ومراقبة جودة المواد الخام',
-    'Raw Material Inspection & QC System',
+    'برنامج إدارة الجودة والمعمل',
+    'Quality and Laboratory Management Program',
   );
 
   static String get dashboard => AppText.t('لوحة التحكم', 'Dashboard');

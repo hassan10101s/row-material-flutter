@@ -3,7 +3,10 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/responsive/form_factor.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_page_size.dart'
+    show kMobileMaxPageSize;
 import '../../../../di/service_locator.dart';
 import '../../../reports/domain/report_repository.dart';
 import '../../domain/inspection_repository.dart';
@@ -22,9 +25,18 @@ import '../../../reports/presentation/report/reports_screen.dart';
 /// the same screens, cubits and sync pipeline — only the kind filter and the
 /// header fields differ.
 class InspectionCenterScreen extends StatefulWidget {
-  const InspectionCenterScreen({super.key, this.initialReportsTab = false});
+  const InspectionCenterScreen({
+    super.key,
+    this.initialReportsTab = false,
+    this.highlightId,
+  });
 
   final bool initialReportsTab;
+
+  /// Local row id from a notification deep-link (`?highlight=<id>`).
+  /// Shown as a banner; the registers already sort newest-first so the new
+  /// row surfaces at the top after the cubit's `load()`.
+  final String? highlightId;
 
   @override
   State<InspectionCenterScreen> createState() => _InspectionCenterScreenState();
@@ -41,6 +53,8 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
     repo: getIt<InspectionRepository>(),
     reports: getIt<ReportRepository>(),
     kind: 'product',
+    // Same mobile cap as the router-provided raw cubit.
+    initialPageSize: FormFactor.current.isMobile ? kMobileMaxPageSize : 200,
   );
   bool _productVisited = false;
 
@@ -66,23 +80,50 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
     }
   }
 
+  // The main title lives in the shell topbar (both experiences); repeating
+  // it here duplicated it at the top of the screen and above the register.
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.page,
-          AppSpacing.page,
-          AppSpacing.page,
-          0,
+      const SizedBox(height: AppSpacing.page),
+      if (widget.highlightId != null && widget.highlightId!.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.page,
+            0,
+            AppSpacing.page,
+            AppSpacing.sm,
+          ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.notifications_active_outlined,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    AppText.t(
+                      'عنصر جديد من الإشعارات (رقم ${widget.highlightId}) — الأحدث في الأعلى',
+                      'New item from notifications (#${widget.highlightId}) — newest first',
+                    ),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-        child: Text(
-          AppText.t('فحص الخامات والمنتجات', 'Material & product inspections'),
-          style: Theme.of(context).textTheme.headlineSmall,
-        ),
-      ),
-      const SizedBox(height: AppSpacing.sm),
       SizedBox(
         height: 46.h,
         child: SingleChildScrollView(
@@ -93,7 +134,7 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
               _tab(
                 context,
                 index: 0,
-                label: AppText.t('سجل الفحوصات', 'Inspection register'),
+                label: AppText.t('فحص الخامات', 'Raw-material inspections'),
                 icon: Icons.fact_check_outlined,
               ),
               _tab(
@@ -105,7 +146,7 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
               _tab(
                 context,
                 index: 2,
-                label: AppText.t('تقارير الخامات', 'Material reports'),
+                label: AppText.t('تقارير الفحص', 'Inspection reports'),
                 icon: Icons.description_outlined,
               ),
             ],

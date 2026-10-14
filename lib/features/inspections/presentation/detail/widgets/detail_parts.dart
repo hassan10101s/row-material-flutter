@@ -7,6 +7,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../../app/auth_gate.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_exceptions.dart';
+import '../../../../../core/utils/reference_range.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -44,12 +45,67 @@ List<dynamic> jsonList(dynamic value) {
 List<String> sampleLabels(Map<String, dynamic> inspection) {
   final names = jsonList(inspection['sample_names']);
   final labels = names.isEmpty
-      ? <String>['Result']
+      ? <String>[AppText.t('النتيجة', 'Result')]
       : [for (final n in names) '$n'];
   while (labels.length < 3) {
-    labels.add('Sample #${labels.length + 1}');
+    labels.add(
+      AppText.t('عينة ${labels.length + 1}', 'Sample #${labels.length + 1}'),
+    );
   }
   return labels;
+}
+
+/// Reference bound rendered professionally: formatted range plus a unit chip
+/// (`0.5 – 2 %`) instead of the raw stored text.
+class ReferenceRangeView extends StatelessWidget {
+  const ReferenceRangeView({
+    super.key,
+    required this.raw,
+    this.alignStart = true,
+  });
+
+  final Object? raw;
+  final bool alignStart;
+
+  @override
+  Widget build(BuildContext context) {
+    final range = formatReferenceRange(raw);
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: alignStart ? WrapAlignment.start : WrapAlignment.center,
+      children: [
+        Text(
+          range.display,
+          style: TextStyle(
+            fontSize: 13.spMax,
+            color: AppColors.textMuted,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        if (range.unit.isNotEmpty)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.25),
+              ),
+            ),
+            child: Text(
+              range.unit,
+              style: TextStyle(
+                fontSize: 11.spMax,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// Title + decision badge + PDF/label actions. Stacks below the medium
@@ -73,7 +129,9 @@ class DetailHeader extends StatelessWidget {
       subtitle: '${inspection['entry_code']} — ${inspection['material_code']}',
       icon: Icons.fact_check_outlined,
       actions: [
-        AppStatusBadge('${inspection['decision_status']}'),
+        // Products carry no header quality decision (per-sample only).
+        if ('${inspection['inspection_kind'] ?? 'raw'}' != 'product')
+          AppStatusBadge('${inspection['decision_status']}'),
         AppButton(
           style: AppButtonStyle.pdf,
           label: AppStrings.exportPdf,
@@ -156,13 +214,17 @@ class DetailInfo extends StatelessWidget {
             ),
           ],
         ),
-        if ('${inspection['decision_reason'] ?? ''}'.trim().isNotEmpty) ...[
+        // Header decision lines are raw-only; products decide per sample.
+        // (Legacy product rows keep their stored values — only hidden.)
+        if (!isProduct &&
+            '${inspection['decision_reason'] ?? ''}'.trim().isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
           Text(
             '${AppText.t('سبب القرار', 'Reason')}: ${inspection['decision_reason']}',
           ),
         ],
-        if ('${inspection['follow_up_note'] ?? ''}'.trim().isNotEmpty) ...[
+        if (!isProduct &&
+            '${inspection['follow_up_note'] ?? ''}'.trim().isNotEmpty) ...[
           const SizedBox(height: AppSpacing.xs),
           Text(
             '${AppText.t('ملاحظة المتابعة', 'Follow-up')}: ${inspection['follow_up_note']}',
@@ -173,7 +235,8 @@ class DetailInfo extends StatelessWidget {
   }
 }
 
-/// Bottom edit + update-decision + delete actions.
+/// Bottom edit + update-decision + delete actions. The update-decision
+/// button is raw-only: products carry no header quality decision.
 class DetailFooterActions extends StatelessWidget {
   const DetailFooterActions({
     super.key,
@@ -181,12 +244,14 @@ class DetailFooterActions extends StatelessWidget {
     required this.onEdit,
     required this.onUpdateDecision,
     required this.onDelete,
+    this.isProduct = false,
   });
 
   final InspectionDetailState state;
   final VoidCallback onEdit;
   final VoidCallback onUpdateDecision;
   final VoidCallback onDelete;
+  final bool isProduct;
 
   @override
   Widget build(BuildContext context) {
@@ -202,12 +267,13 @@ class DetailFooterActions extends StatelessWidget {
           icon: Icon(Icons.edit_outlined, size: 18.r),
           onPressed: canEdit ? onEdit : null,
         ),
-        AppButton(
-          style: AppButtonStyle.accent,
-          label: AppText.t('تحديث القرار', 'Update decision'),
-          icon: Icon(Icons.gavel, size: 18.r),
-          onPressed: canEdit ? onUpdateDecision : null,
-        ),
+        if (!isProduct)
+          AppButton(
+            style: AppButtonStyle.accent,
+            label: AppText.t('تحديث القرار', 'Update decision'),
+            icon: Icon(Icons.gavel, size: 18.r),
+            onPressed: canEdit ? onUpdateDecision : null,
+          ),
         if (user?.canEditUsers ?? false)
           AppButton(
             style: AppButtonStyle.danger,
@@ -308,7 +374,8 @@ class HistoryCard extends StatelessWidget {
                         children: [
                           AppStatusBadge('${row['new_status']}'),
                           Text(
-                            '${AppText.t('النسخة', 'v')} ${row['version']} by '
+                            '${AppText.t('النسخة', 'v')} ${row['version']} '
+                            '${AppText.t('بواسطة', 'by')} '
                             '${row['changed_by_name']} — ${row['changed_at']}',
                             style: TextStyle(
                               color: AppColors.textMuted,
@@ -317,14 +384,14 @@ class HistoryCard extends StatelessWidget {
                           ),
                           if ('${row['change_reason'] ?? ''}'.trim().isNotEmpty)
                             Text(
-                              'سبب: ${row['change_reason']}',
+                              '${AppText.t('سبب', 'Reason')}: ${row['change_reason']}',
                               style: TextStyle(fontSize: 12.spMax),
                             ),
                           if ('${row['follow_up_note'] ?? ''}'
                               .trim()
                               .isNotEmpty)
                             Text(
-                              'متابعة: ${row['follow_up_note']}',
+                              '${AppText.t('متابعة', 'Follow-up')}: ${row['follow_up_note']}',
                               style: TextStyle(fontSize: 12.spMax),
                             ),
                         ],
@@ -353,11 +420,7 @@ Widget resultStatusIcon(String ref, List<dynamic> values, bool numeric) {
   if (anyFail) {
     return Icon(Icons.close, size: 16.r, color: AppColors.danger);
   }
-  return Icon(
-    Icons.check_circle_outline,
-    size: 16.r,
-    color: AppColors.success,
-  );
+  return Icon(Icons.check_circle_outline, size: 16.r, color: AppColors.success);
 }
 
 List<dynamic> resultValues(Map<String, dynamic> results, String param) {
@@ -418,18 +481,9 @@ class ResultsTable extends StatelessWidget {
               children: [
                 TableRow(
                   children: [
-                    cell(
-                      AppText.t('الخاصية', 'Parameter'),
-                      strong: true,
-                    ),
-                    cell(
-                      AppText.t('المرجعية', 'Reference'),
-                      strong: true,
-                    ),
-                    cell(
-                      AppText.t('النتيجة', 'Result'),
-                      strong: true,
-                    ),
+                    cell(AppText.t('الخاصية', 'Parameter'), strong: true),
+                    cell(AppText.t('المرجعية', 'Reference'), strong: true),
+                    cell(AppText.t('النتيجة', 'Result'), strong: true),
                     const SizedBox(),
                   ],
                 ),
@@ -437,9 +491,9 @@ class ResultsTable extends StatelessWidget {
                   TableRow(
                     children: [
                       cell(param),
-                      cell(
-                        '${reference[param] ?? ''}',
-                        color: AppColors.textMuted,
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 6),
+                        child: ReferenceRangeView(raw: reference[param]),
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6),
@@ -475,10 +529,7 @@ class ResultsTable extends StatelessWidget {
     if (values.isEmpty) {
       return Text(
         '—',
-        style: TextStyle(
-          color: AppColors.textMuted,
-          fontSize: 13.spMax,
-        ),
+        style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
       );
     }
     return Wrap(
@@ -496,10 +547,7 @@ class ResultsTable extends StatelessWidget {
                     fontSize: 12.spMax,
                   ),
                 ),
-              Text(
-                '${values[i]}',
-                style: TextStyle(fontSize: 13.spMax),
-              ),
+              Text('${values[i]}', style: TextStyle(fontSize: 13.spMax)),
             ],
           ),
       ],
@@ -589,21 +637,20 @@ class _ParamCard extends StatelessWidget {
             resultStatusIcon(ref, values, numeric),
           ],
         ),
-        Text(
-          '${AppText.t('المرجعية', 'Reference')}: $ref',
-          style: TextStyle(
-            fontSize: 12.spMax,
-            color: AppColors.textMuted,
-          ),
+        Row(
+          children: [
+            Text(
+              '${AppText.t('النطاق', 'Range')}: ',
+              style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
+            ),
+            Expanded(child: ReferenceRangeView(raw: ref)),
+          ],
         ),
         const SizedBox(height: 4),
         if (values.isEmpty)
           Text(
             '—',
-            style: TextStyle(
-              fontSize: 13.spMax,
-              color: AppColors.textMuted,
-            ),
+            style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
           )
         else
           for (var i = 0; i < values.length; i++)

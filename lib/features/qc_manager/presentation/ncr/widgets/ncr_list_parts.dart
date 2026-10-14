@@ -7,6 +7,7 @@ import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_adaptive_list.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../domain/ncr_filters.dart';
 import '../../../domain/ncr_report_row.dart';
@@ -30,6 +31,32 @@ List<String> ncrHeaders() => [
   AppText.t('الاستحقاق', 'Due'),
   AppText.t('الإجراء التصحيحي', 'CAPA'),
 ];
+
+/// Plain-string export mapping mirroring [ncrCells] (pills become their
+/// labels): feeds the shared HTML table export so the register exports
+/// exactly the table it shows.
+List<List<String>> ncrExportRows(List<NcrReportRow> rows) => [
+      for (final r in rows)
+        [
+          r.reference,
+          r.description,
+          severityLabel(r.severity),
+          r.status,
+          r.inspectionRefId.isEmpty
+              ? (r.inspectorName.isEmpty ? '—' : r.inspectorName)
+              : r.inspectionRefId,
+          r.lotNo.isNotEmpty
+              ? r.lotNo
+              : r.batchNo.isNotEmpty
+                  ? r.batchNo
+                  : '—',
+          r.assignedToName.isEmpty ? '—' : r.assignedToName,
+          r.dueDate.isEmpty ? '—' : r.dueDate,
+          r.capaStatus.isEmpty ? '-' : r.capaStatus,
+        ],
+    ];
+
+String ncrExportTitle() => AppText.t('حالات عدم المطابقة', 'Non-conformances');
 
 /// Cells are widgets, not strings, so severity and status render as the
 /// same pills the detail screen uses.
@@ -163,9 +190,11 @@ class NcrActiveFilterChips extends StatelessWidget {
         runSpacing: AppSpacing.xs,
         children: [
           ...chips,
-          TextButton(
+          AppButton(
+            label: AppText.t('مسح الكل', 'Clear all'),
+            style: AppButtonStyle.ghost,
+            small: true,
             onPressed: cubit.clearFilters,
-            child: Text(AppText.t('مسح الكل', 'Clear all')),
           ),
         ],
       ),
@@ -333,6 +362,7 @@ class _NcrFilterSheetState extends State<NcrFilterSheet> {
         const SizedBox(height: AppSpacing.md),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
+          activeThumbColor: AppColors.primary,
           value: f.onlyOverdue,
           title: Text(AppText.t('المتأخرة فقط', 'Overdue only')),
           subtitle: Text(
@@ -439,18 +469,15 @@ class _TextFilter extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: TextField(
+      child: AppField(
+        label: label,
         controller: controller,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          suffixIcon: IconButton(
-            tooltip: AppText.t('تطبيق', 'Apply'),
-            icon: const Icon(Icons.search),
-            onPressed: () => onApply(controller.text.trim()),
-          ),
+        suffix: IconButton(
+          tooltip: AppText.t('تطبيق', 'Apply'),
+          icon: const Icon(Icons.search),
+          onPressed: () => onApply(controller.text.trim()),
         ),
-        onSubmitted: onApply,
+        onFieldSubmitted: onApply,
       ),
     );
   }

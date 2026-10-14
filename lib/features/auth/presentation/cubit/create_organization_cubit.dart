@@ -1,4 +1,5 @@
 import '../../../../app/auth_gate.dart';
+import '../../../../core/constants/app_strings.dart';
 import '../../../../core/state/app_cubit.dart';
 import '../../domain/auth_repository.dart';
 import '../../../organizations/domain/organization_repository.dart';
@@ -21,7 +22,8 @@ class CreateOrganizationCubit extends AppCubit<CreateOrganizationState> {
 
   void useCreate() => safeEmit(state.copyWith(mode: CreateMode.create));
 
-  void setName(String value) => safeEmit(state.copyWith(name: value, error: null));
+  void setName(String value) =>
+      safeEmit(state.copyWith(name: value, error: null));
 
   void setInviteCode(String value) =>
       safeEmit(state.copyWith(inviteCode: value, error: null));
@@ -29,11 +31,33 @@ class CreateOrganizationCubit extends AppCubit<CreateOrganizationState> {
   Future<bool> submit() async {
     final create = state.mode == CreateMode.create;
     if (create && state.name.trim().isEmpty) {
-      safeEmit(state.copyWith(error: 'اسم المؤسسة مطلوب'));
+      safeEmit(
+        state.copyWith(
+          error: AppText.t('اسم الشركة مطلوب', 'Company name is required.'),
+        ),
+      );
       return false;
     }
     if (!create && state.inviteCode.trim().isEmpty) {
-      safeEmit(state.copyWith(error: 'كود المؤسسة مطلوب'));
+      safeEmit(
+        state.copyWith(
+          error: AppText.t('كود الشركة مطلوب', 'Company code is required.'),
+        ),
+      );
+      return false;
+    }
+    // Single-company policy (§2): never attempt the remote write when the
+    // current session is still bound (invited/pending/active). Sign-out alone
+    // never unblocks this; only leaving does.
+    if (create && auth.session.blocksNewCompany) {
+      safeEmit(
+        state.copyWith(
+          error: AppText.t(
+            'هذا الحساب مرتبط بشركة حالية. غادر الشركة الحالية أولًا لإنشاء شركة جديدة.',
+            'This account is already linked to a company. Leave the current company first to create a new one.',
+          ),
+        ),
+      );
       return false;
     }
     safeEmit(state.copyWith(busy: true, error: null));
@@ -41,7 +65,9 @@ class CreateOrganizationCubit extends AppCubit<CreateOrganizationState> {
       if (create) {
         await organizations.createOrganization(name: state.name);
       } else {
-        await organizations.joinWithInvite(organizationId: state.inviteCode.trim());
+        await organizations.joinWithInvite(
+          organizationId: state.inviteCode.trim(),
+        );
       }
       // `resolveProfile` re-reads `users/{uid}` and binds the organization
       // database; the router then moves on (dashboard or waiting-activation).

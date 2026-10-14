@@ -9,7 +9,7 @@ tests, shared worksheet, consumption log).
 
 ## Highlights
 
-- Local SQLite (`sqflite_common_ffi`) — no server required; legacy
+- Local SQLite (`sqflite_common_ffi`) —
   `app_data/material_lab.db` import supported.
 - Byte-compatible security ports: PBKDF2-HMAC-SHA256 password hashing,
   AES-GCM seal format (`enc1:`), QR payload encoding and the local secret at
@@ -32,6 +32,10 @@ flutter pub get
 flutter run -d windows
 flutter build windows --release
 flutter run -d windows --dart-define-from-file=tool/firebase/dev.json
+flutter build apk --dart-define-from-file=ven/firebase-android.json
+flutter run --dart-define-from-file=ven/firebase-android.json  
+flutter build apk --dart-define-from-file=ven/firebase-android.json --debug 
+adb uninstall com.materiallab
 ```
 
 Assets bundled with the app seed `Reference.xlsx` + `units.xlsx` on first run.

@@ -118,6 +118,10 @@ class AppErrors {
       AppText.t('التحليل غير موجود.', 'Analysis was not found.');
   static String get testNotFound =>
       AppText.t('الاختبار غير موجود.', 'Test was not found.');
+  static String get batchSampleNotFound =>
+      AppText.t('عينة التشغيلة غير موجودة.', 'Batch sample was not found.');
+  static String get batchNotFound =>
+      AppText.t('محضر التشغيلة غير موجود.', 'Product batch was not found.');
 
   // ── Equipment (lab, device-local) ────────────────────────────────────
 
@@ -138,6 +142,10 @@ class AppErrors {
   static String entryCodeNotFound(Object code) => AppText.t(
     'كود الدخول غير موجود في سجل الدخول: $code',
     'Entry code was not found in the inspection log: $code',
+  );
+  static String get entryCodeImmutable => AppText.t(
+    'كود الدخول مفتاح ربط (المحضر ورمز QR والمزامنة) ولا يمكن تغييره بعد الحفظ.',
+    'The entry code is a link key (inspection, QR code and sync) and cannot be changed once saved.',
   );
   static String get sampleAndSourceRequired => AppText.t(
     'اسم العينة واسم المصدر مطلوبان.',
@@ -245,9 +253,9 @@ class AppErrors {
   static String get inspectionNotFound =>
       AppText.t('الفحص غير موجود.', 'Inspection not found.');
   static String requiredInspectionField(String label) => AppText.t(
-        'الحقل "$label" مطلوب: يجب إدخال قيمته قبل حفظ المحضر.',
-        '"$label" is required: must be filled before saving.',
-      );
+    'الحقل "$label" مطلوب: يجب إدخال قيمته قبل حفظ المحضر.',
+    '"$label" is required: must be filled before saving.',
+  );
   static String get noDecisionChange =>
       AppText.t('لا يوجد تغيير في القرار.', 'No decision change detected.');
   static String get decisionStatusRequired =>
@@ -264,13 +272,15 @@ class AppErrors {
     'الكمية المرفوضة لا يمكن أن تتجاوز كمية الشحنة.',
     'Rejected quantity cannot exceed the lot quantity.',
   );
-  static String get followUpNoteRequired => AppText.t(
-    'ملاحظة المتابعة مطلوبة في القبول المبدئي.',
-    'Follow-up note is required for conditional approval.',
-  );
   static String maxDecisionUpdates(Object max) => AppText.t(
     'تم الوصول إلى الحد الأقصى من تحديثات قرار الجودة ($max مرات).',
     'Reached maximum quality decision updates ($max times).',
+  );
+  // Product batches carry no header quality decision (decisions live per
+  // sample); raw-material strings above are untouched.
+  static String get productDecisionNotAllowed => AppText.t(
+    'محضر المنتج بدون قرار جودة: القرار لكل عينة داخل التشغيلة.',
+    'Product records carry no quality decision: decide each sample inside the batch.',
   );
 
   // ── Auth / users ─────────────────────────────────────────────────────────

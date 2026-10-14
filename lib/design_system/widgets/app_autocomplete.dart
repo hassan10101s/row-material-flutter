@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
+import 'app_autocomplete_overlay.dart';
 
 /// A type-to-search picker over an in-memory list, used everywhere the app
 /// lets the user choose an existing entity (materials, products, analyses,
@@ -48,10 +50,10 @@ class AppAutocomplete<T extends Object> extends StatefulWidget {
   final IconData? prefixIcon;
 
   /// Text shown in place of the option list when nothing matches.
-  final String emptyLabel;
+  final String? emptyLabel;
 
   /// Human-readable label for the suffix caret, e.g. a localization string.
-  final String dropdownLabel;
+  final String? dropdownLabel;
 
   /// Injected controller and focus node, mirroring the form-side lifecycle of
   /// the field they replace. Defaults to internally owned instances so the
@@ -72,12 +74,20 @@ class AppAutocomplete<T extends Object> extends StatefulWidget {
     required this.onSelected,
     this.hint,
     this.prefixIcon,
-    this.emptyLabel = 'No matching option',
-    this.dropdownLabel = 'Show options',
+    this.emptyLabel,
+    this.dropdownLabel,
     this.controller,
     this.focusNode,
     this.optionBuilder,
   });
+
+  /// Localized fallback when the caller passes no [emptyLabel].
+  static String defaultEmptyLabel() =>
+      AppText.t('لا توجد نتائج مطابقة', 'No matching option');
+
+  /// Localized fallback when the caller passes no [dropdownLabel].
+  static String defaultDropdownLabel() =>
+      AppText.t('عرض الخيارات', 'Show options');
 
   @override
   State<AppAutocomplete<T>> createState() => _AppAutocompleteState<T>();
@@ -90,6 +100,10 @@ class _AppAutocompleteState<T extends Object>
   late final FocusNode _focusNode = widget.focusNode ?? FocusNode();
   late final bool _ownsController = widget.controller == null;
   late final bool _ownsFocusNode = widget.focusNode == null;
+
+  /// Width of the field itself, measured by the `LayoutBuilder` below so the
+  /// overlay takes the full field width (sample-taker reference look).
+  double _fieldWidth = AppAutocompleteOverlay.fallbackWidth;
 
   @override
   void initState() {
@@ -150,98 +164,92 @@ class _AppAutocompleteState<T extends Object>
             widget.options
                 .where((option) => widget.filter(option, query))
                 .isEmpty;
-        final field = RawAutocomplete<T>(
-          textEditingController: _controller,
-          focusNode: _focusNode,
-          displayStringForOption: widget.displayString,
-          optionsBuilder: (builderValue) {
-            // A committed value is a fact, not a query: typing into it would
-            // silently edit what the user already confirmed.
-            if (committed) return <T>[];
-            final q = builderValue.text.trim().toLowerCase();
-            if (q.isEmpty) {
-              return widget.options;
+        final field = LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth.isFinite) {
+              _fieldWidth = constraints.maxWidth;
             }
-            return widget.options
-                .where((option) => widget.filter(option, q))
-                .toList(growable: false);
-          },
-          fieldViewBuilder: (context, controller, focusNode, _) {
-            return TextField(
-              controller: controller,
-              focusNode: focusNode,
-              readOnly: committed,
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: widget.hint,
-                prefixIcon: widget.prefixIcon != null
-                    ? Icon(widget.prefixIcon, size: 20.r)
-                    : null,
-                suffixIcon: IconButton(
-                  tooltip: widget.dropdownLabel,
-                  onPressed: committed ? null : () => _openOptions(),
-                  icon: Icon(
-                    Icons.arrow_drop_down,
-                    size: 24.r,
-                    color: committed ? AppColors.textMuted : AppColors.primary,
+            return RawAutocomplete<T>(
+              textEditingController: _controller,
+              focusNode: _focusNode,
+              displayStringForOption: widget.displayString,
+              optionsBuilder: (builderValue) {
+                // A committed value is a fact, not a query: typing into it would
+                // silently edit what the user already confirmed.
+                if (committed) return <T>[];
+                final q = builderValue.text.trim().toLowerCase();
+                if (q.isEmpty) {
+                  return widget.options;
+                }
+                return widget.options
+                    .where((option) => widget.filter(option, q))
+                    .toList(growable: false);
+              },
+              fieldViewBuilder: (context, controller, focusNode, _) {
+                return TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  readOnly: committed,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: widget.hint,
+                    prefixIcon: widget.prefixIcon != null
+                        ? Icon(widget.prefixIcon, size: 20.r)
+                        : null,
+                    suffixIcon: IconButton(
+                      tooltip:
+                          widget.dropdownLabel ??
+                          AppAutocomplete.defaultDropdownLabel(),
+                      onPressed: committed ? null : () => _openOptions(),
+                      icon: Icon(
+                        Icons.arrow_drop_down,
+                        size: 24.r,
+                        color: committed
+                            ? AppColors.textMuted
+                            : AppColors.primary,
+                      ),
+                    ),
+                    filled: true,
+                    fillColor: AppColors.surface,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12.w,
+                      vertical: 10.h,
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.sm),
+                      borderSide: BorderSide(color: AppColors.border),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.sm),
+                      borderSide: BorderSide(
+                        color: AppColors.primary,
+                        width: 1.6,
+                      ),
+                    ),
                   ),
-                ),
-                filled: true,
-                fillColor: AppColors.surface,
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12.w,
-                  vertical: 10.h,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  borderSide: BorderSide(color: AppColors.border),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  borderSide: BorderSide(color: AppColors.primary, width: 1.6),
-                ),
-              ),
+                );
+              },
+              optionsViewBuilder: (context, onSelected, options) {
+                // Shared design-system overlay: full field width, one look
+                // everywhere (see app_autocomplete_overlay.dart).
+                final items = options.toList();
+                final custom = widget.optionBuilder;
+                if (custom != null) {
+                  return AppAutocompleteOverlay(
+                    fieldWidth: _fieldWidth,
+                    itemCount: items.length,
+                    itemBuilder: (context, index) =>
+                        custom(context, items[index], onSelected),
+                  );
+                }
+                return autocompleteOverlayView<T>(
+                  fieldWidth: _fieldWidth,
+                  titleOf: widget.displayString,
+                )(context, onSelected, items);
+              },
+              onSelected: widget.onSelected,
             );
           },
-          optionsViewBuilder: (context, onSelected, options) {
-            return Align(
-              alignment: Alignment.topLeft,
-              child: Material(
-                elevation: 6,
-                borderRadius: BorderRadius.circular(AppRadii.sm),
-                clipBehavior: Clip.antiAlias,
-                color: AppColors.surface,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxHeight: 280,
-                    maxWidth: 420,
-                  ),
-                  child: ListView(
-                    shrinkWrap: true,
-                    padding: EdgeInsets.zero,
-                    children: [
-                      for (final option in options)
-                        widget.optionBuilder?.call(
-                              context,
-                              option,
-                              onSelected,
-                            ) ??
-                            ListTile(
-                              dense: true,
-                              title: Text(
-                                widget.displayString(option),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onTap: () => onSelected(option),
-                            ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-          onSelected: widget.onSelected,
         );
 
         if (!noMatch) {
@@ -255,7 +263,7 @@ class _AppAutocompleteState<T extends Object>
             Padding(
               padding: EdgeInsets.only(top: 4.h, left: 4.w),
               child: Text(
-                widget.emptyLabel,
+                widget.emptyLabel ?? AppAutocomplete.defaultEmptyLabel(),
                 style: TextStyle(
                   color: AppColors.textMuted,
                   fontSize: 12.spMax,

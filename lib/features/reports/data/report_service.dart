@@ -5,6 +5,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path/path.dart' as p;
 
 import '../../../core/constants/app_errors.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/utils/app_dates.dart';
@@ -65,10 +66,20 @@ class ReportService implements ReportRepository {
   Future<List<int>> _secretBytes() => secret.load();
 
   /// Full serialized inspection (parity with inspection.refresh_report_html):
-  /// status history + injected lab tests.
+  /// status history + injected lab tests. Product batches additionally
+  /// carry their sample rows (`batch_samples`) with their own results,
+  /// generated on-device from existing data — never synced, never stored
+  /// on the header. Batch samples are independent of lab chemistry: no
+  /// `lab_sample_tests` lookup happens here.
   Future<Map<String, dynamic>> _loadForReport(int inspectionId) async {
     final inspection = await inspectionRepo.getById(inspectionId);
     await labRepo.injectLabTests(inspection);
+    if ('${inspection['inspection_kind'] ?? 'raw'}' == 'product') {
+      final samples = await labRepo.listBatchSamples(inspectionId);
+      inspection['batch_samples'] = [
+        for (final s in samples) Map<String, dynamic>.from(s),
+      ];
+    }
     return inspection;
   }
 
@@ -95,12 +106,17 @@ class ReportService implements ReportRepository {
       'SELECT $reportColumns FROM inspections $whereClause',
       params,
     );
-    return [for (final r in rows) _serializeSummaryRow(Map<String, dynamic>.from(r))];
+    return [
+      for (final r in rows) _serializeSummaryRow(Map<String, dynamic>.from(r)),
+    ];
   }
 
   /// Fetch the 6-month trend window rows for the monthly report
   /// (parity with report.py render_monthly_report).
-  Future<List<Map<String, dynamic>>> _fetchTrendWindow(int month, int year) async {
+  Future<List<Map<String, dynamic>>> _fetchTrendWindow(
+    int month,
+    int year,
+  ) async {
     var startMonth = month - 5;
     var startYear = year;
     while (startMonth <= 0) {
@@ -125,7 +141,9 @@ class ReportService implements ReportRepository {
   /// Render a shipped template with tiny_jinja (autoescape ON, same as
   /// `jinja2.Environment(autoescape=True)`).
   Future<String> _renderHtmlTemplate(
-      String templateName, Map<String, dynamic> context) async {
+    String templateName,
+    Map<String, dynamic> context,
+  ) async {
     final template = await _readAssetText('assets/templates/$templateName');
     return tinyJinjaRender(template, context);
   }
@@ -169,13 +187,16 @@ class ReportService implements ReportRepository {
   /// Attach the QR PNG data-URI (label templates render it via
   /// `{{ qr_image_data_uri }}`).
   Map<String, dynamic> _withQrImageUris(Map<String, dynamic> context) {
-    final uri = generateQrDataUri('${context['qr_payload_text'] ?? ''}').dataUri;
+    final uri = generateQrDataUri(
+      '${context['qr_payload_text'] ?? ''}',
+    ).dataUri;
     context['qr_image_data_uri'] = uri;
     final labels = context['labels'] as List<Map<String, dynamic>>?;
     if (labels != null) {
       for (final label in labels) {
-        label['qr_image_data_uri'] =
-            generateQrDataUri('${label['qr_payload_text'] ?? ''}').dataUri;
+        label['qr_image_data_uri'] = generateQrDataUri(
+          '${label['qr_payload_text'] ?? ''}',
+        ).dataUri;
       }
     }
     return context;
@@ -218,11 +239,13 @@ class ReportService implements ReportRepository {
   Future<ReportDoc> sampleLabelPdf(int inspectionId) async {
     final inspection = await _loadForReport(inspectionId);
     final settings = await _settings();
-    final ctx = _withQrImageUris(buildLabelContext(
-      inspection,
-      settings: settings,
-      encryptionSecret: await _secretBytes(),
-    ));
+    final ctx = _withQrImageUris(
+      buildLabelContext(
+        inspection,
+        settings: settings,
+        encryptionSecret: await _secretBytes(),
+      ),
+    );
     final bytes = await _exportHtmlPdf(
       'label_template.html',
       ctx,
@@ -241,7 +264,8 @@ class ReportService implements ReportRepository {
   @override
   Future<ReportDoc> batchLabelsPdf(List<int> inspectionIds) async {
     final ids = inspectionIds.toSet().toList();
-    if (ids.isEmpty) throw ValidationError(AppErrors.batchLabelsSelectAtLeastOne);
+    if (ids.isEmpty)
+      throw ValidationError(AppErrors.batchLabelsSelectAtLeastOne);
     if (ids.length > 100) {
       throw ValidationError(AppErrors.batchLabelsMax100);
     }
@@ -250,11 +274,13 @@ class ReportService implements ReportRepository {
       inspections.add(await _loadForReport(id));
     }
     final settings = await _settings();
-    final ctx = _withQrImageUris(buildBatchLabelsContext(
-      inspections,
-      settings: settings,
-      encryptionSecret: await _secretBytes(),
-    ));
+    final ctx = _withQrImageUris(
+      buildBatchLabelsContext(
+        inspections,
+        settings: settings,
+        encryptionSecret: await _secretBytes(),
+      ),
+    );
     final bytes = await _exportHtmlPdf(
       'batch_label_template.html',
       ctx,
@@ -279,7 +305,9 @@ class ReportService implements ReportRepository {
       throw ValidationError(AppErrors.dateFormatInvalid);
     }
     final day = dateStr.trim().substring(0, 10);
-    final nextDayIso = _dateOnlyIso(DateTime(parsed.year, parsed.month, parsed.day + 1));
+    final nextDayIso = _dateOnlyIso(
+      DateTime(parsed.year, parsed.month, parsed.day + 1),
+    );
     final inspections = await _querySummaries(
       "WHERE inspection_kind = 'raw' AND inspection_date >= ? AND inspection_date < ? "
       'ORDER BY inspection_date DESC, id DESC',
@@ -300,13 +328,16 @@ class ReportService implements ReportRepository {
     return ReportDoc(
       filename: 'تقرير_اليومي_$day.pdf',
       bytes: bytes,
-      title: 'التقرير اليومي - $day',
+      title: AppText.t('التقرير اليومي - $day', 'Daily report - $day'),
     );
   }
 
   /// Monthly report with 6-month trend section.
   @override
-  Future<ReportDoc> monthlyReport({required int month, required int year}) async {
+  Future<ReportDoc> monthlyReport({
+    required int month,
+    required int year,
+  }) async {
     final monthStart = DateTime(year, month, 1);
     final nextMonthStart = month == 12
         ? DateTime(year + 1, 1, 1)
@@ -330,11 +361,15 @@ class ReportService implements ReportRepository {
       ctx,
       fallback: () => PdfRenderer.renderMonthly(ctx),
     );
-    final period = '${year.toString().padLeft(4, '0')}${month.toString().padLeft(2, '0')}';
+    final period =
+        '${year.toString().padLeft(4, '0')}${month.toString().padLeft(2, '0')}';
     return ReportDoc(
       filename: 'تقرير_الشهري_$period.pdf',
       bytes: bytes,
-      title: 'التقرير الشهري - $month/$year',
+      title: AppText.t(
+        'التقرير الشهري - $month/$year',
+        'Monthly report - $month/$year',
+      ),
     );
   }
 
@@ -358,7 +393,7 @@ class ReportService implements ReportRepository {
     return ReportDoc(
       filename: 'تقرير_السنوي_$year.pdf',
       bytes: bytes,
-      title: 'التقرير السنوي - $year',
+      title: AppText.t('التقرير السنوي - $year', 'Yearly report - $year'),
     );
   }
 
@@ -376,8 +411,9 @@ class ReportService implements ReportRepository {
       'WHERE id IN ($placeholders) ORDER BY inspection_date DESC, id DESC',
       [for (final id in ids) id],
     );
-    final day =
-        (dateStr == null || dateStr.trim().isEmpty) ? todayIso() : dateStr.trim();
+    final day = (dateStr == null || dateStr.trim().isEmpty)
+        ? todayIso()
+        : dateStr.trim();
     final settings = await _settings();
     final ctx = buildFollowUpContext(
       inspections,
@@ -393,7 +429,7 @@ class ReportService implements ReportRepository {
     return ReportDoc(
       filename: 'تقرير_المتابعة_${day}_${fileTimestamp()}.pdf',
       bytes: bytes,
-      title: 'التقرير اليومي - $day',
+      title: AppText.t('التقرير اليومي - $day', 'Daily report - $day'),
     );
   }
 
@@ -424,7 +460,8 @@ class ReportService implements ReportRepository {
       sourceRefId: sourceRefId,
     );
     final tests = <Map<String, dynamic>>[
-      for (final t in (data['tests'] as List)) Map<String, dynamic>.from(t as Map),
+      for (final t in (data['tests'] as List))
+        Map<String, dynamic>.from(t as Map),
     ];
     final settings = await _settings();
     final ctx = buildLabReportContext(
@@ -441,7 +478,8 @@ class ReportService implements ReportRepository {
     var period = dateStr == null ? '' : dateStr.trim();
     if (period.isEmpty) {
       if (type == 'monthly' && month != null && year != null) {
-        period = '${year.toString().padLeft(4, '0')}${month.toString().padLeft(2, '0')}';
+        period =
+            '${year.toString().padLeft(4, '0')}${month.toString().padLeft(2, '0')}';
       } else if (year != null) {
         period = '$year';
       }
@@ -468,12 +506,14 @@ class ReportService implements ReportRepository {
         : await dbHelper.paths.exportsRoot();
     await root.create(recursive: true);
     if (date != null) {
-      root = Directory(p.join(
-        root.path,
-        '${date.year}',
-        date.month.toString().padLeft(2, '0'),
-        date.day.toString().padLeft(2, '0'),
-      ));
+      root = Directory(
+        p.join(
+          root.path,
+          '${date.year}',
+          date.month.toString().padLeft(2, '0'),
+          date.day.toString().padLeft(2, '0'),
+        ),
+      );
       await root.create(recursive: true);
     }
     if (asLabel) {
@@ -483,13 +523,30 @@ class ReportService implements ReportRepository {
     return root;
   }
 
-  /// Write [doc] to the export directory tree and return the written file.
+  /// Write [doc] to disk and return the written file.
+  ///
+  /// Platform split (storage best-practice):
+  /// - Desktop (Windows MSIX/EXE, Linux, macOS): persistent export tree
+  ///   (`exports/[/yyyy/MM/dd][/labels]`) — the user can browse it in Explorer.
+  /// - Mobile (Android/iOS): ephemeral OS-cache staging (`shareCacheDir`) —
+  ///   the sandbox is unreachable by file managers, so a permanent copy would
+  ///   only eat storage. The share/open sheet deletes it after use; stale
+  ///   files are pruned here (24 h) along with legacy stranded exports (7 d).
   @override
   Future<File> saveReport(
     ReportDoc doc, {
     DateTime? date,
     bool asLabel = false,
   }) async {
+    if (Platform.isAndroid || Platform.isIOS) {
+      // Hygiene first (best effort, never blocks the export).
+      await dbHelper.paths.pruneShareCache();
+      await dbHelper.paths.pruneLegacyMobileExports();
+      final dir = await dbHelper.paths.shareCacheDir();
+      final file = File(p.join(dir.path, doc.filename));
+      await file.writeAsBytes(doc.bytes, flush: true);
+      return file;
+    }
     final dir = await resolveExportDir(date: date, asLabel: asLabel);
     final file = File(p.join(dir.path, doc.filename));
     await file.writeAsBytes(doc.bytes, flush: true);

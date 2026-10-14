@@ -21,6 +21,8 @@ abstract interface class LabResultRepository {
     Map<String, dynamic>? user,
     String entryCode = '',
     bool manualResult = false,
+    // Product batch samples only: keep the caller's `sourceRefId`.
+    bool keepSourceRefId = false,
   });
 
   Future<Map<String, dynamic>> getSampleTest(int testId);
@@ -46,6 +48,9 @@ abstract interface class LabResultRepository {
     String entryCode,
   );
 
+  /// Removes a saved result and replicates the deletion as a tombstone.
+  Future<void> deleteSampleTest(int testId, {Map<String, dynamic>? user});
+
   /// Files a batch of worksheet rows.
   Future<Map<String, dynamic>> saveWorksheet(
     List<Map<String, dynamic>> rows,
@@ -63,7 +68,7 @@ abstract interface class LabResultRepository {
   /// Inventory movement behind a test/worksheet run. Runs inside the caller's
   /// transaction on purpose - the consumption and the result must not diverge.
   Future<(List<Map<String, dynamic>>, List<Map<String, dynamic>>)>
-      applyConsumptionDelta(
+  applyConsumptionDelta(
     DatabaseExecutor txn,
     int sampleTestId,
     Map<int, double> oldMap,
@@ -97,6 +102,23 @@ abstract interface class LabResultRepository {
 /// logs, worksheets and settings stay device-local on purpose (plan §6.3, D7).
 abstract interface class LabConfigurationRepository {
   Future<List<Map<String, dynamic>>> listAnalyses();
+
+  /// Paged configuration reads for mobile infinite lists.
+  Future<List<Map<String, dynamic>>> listAnalysesPaged({
+    String query = '',
+    int limit = 25,
+    int offset = 0,
+  });
+
+  Future<int> countAnalyses({String query = ''});
+
+  Future<List<Map<String, dynamic>>> listProductsPaged({
+    String query = '',
+    int limit = 25,
+    int offset = 0,
+  });
+
+  Future<int> countProducts({String query = ''});
 
   Future<Map<String, dynamic>> getAnalysis(int analysisId);
 

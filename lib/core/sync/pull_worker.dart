@@ -55,7 +55,7 @@ class PullWorker {
     this.quietPermissionErrors = false,
     this.marksPullTimestamp = true,
   }) : source = source ?? SessionSource.empty(),
-       entities = entities ?? syncEntities;
+       entities = _dependenciesFirst(entities ?? syncEntities);
   final SyncQueue queue;
   final SyncMetadata metadata;
   final RemoteDataSource remote;
@@ -78,6 +78,31 @@ class PullWorker {
   /// dedicated audit pass must not move the "last synced" marker.
   final bool marksPullTimestamp;
 
+  /// Reference rows must land before the rows that point at them.
+  ///
+  /// `inspections.material_id` is a per-device autoincrement id resolved by
+  /// code at apply time (see `_localRow`), but the referenced material still
+  /// has to exist locally first — otherwise every sample of a fresh install
+  /// fails its foreign key while the material sits later in the same cycle.
+  /// Ranked explicitly (stable: original index breaks ties) so `sample` never
+  /// walks before `users` / `referenceMaterials` / `labConfig`.
+  static List<SyncEntity> _dependenciesFirst(List<SyncEntity> input) {
+    int rank(SyncEntity e) {
+      if (e.localTable == 'users') return 0;
+      if (e.collection == SyncCollection.referenceMaterials) return 1;
+      if (e.collection == SyncCollection.labConfig) return 2;
+      if (e.type == 'sample') return 3;
+      return 4;
+    }
+    final indexed = [for (var i = 0; i < input.length; i++) (i, input[i])];
+    indexed.sort((a, b) {
+      final byRank = rank(a.$2).compareTo(rank(b.$2));
+      if (byRank != 0) return byRank;
+      return a.$1.compareTo(b.$1);
+    });
+    return [for (final e in indexed) e.$2];
+  }
+
   /// Read live: the session changes on sign-in, sign-out and org switch.
   AppSession get _session => source.session;
   final int pageSize;
@@ -96,6 +121,11 @@ class PullWorker {
     var failed = 0;
     var hasMore = false;
     String? error;
+
+    // Documents refused this pass (usually a foreign key to a reference row
+    // that lands later in the same cycle). Retried verbatim at the end of
+    // the cycle instead of being dropped by the advancing cursor.
+    final failedDocs = <({SyncEntity entity, RemoteDocument doc})>[];
 
     for (final entity in entities) {
       for (var page = 0; page < maxPagesPerCycle; page++) {
@@ -131,8 +161,8 @@ class PullWorker {
           'pull.applyPage(${entity.type})',
           (txn) => _applyPage(txn, entity, result.documents, organizationId),
         );
-        for (final outcome in outcomes) {
-          switch (outcome) {
+        for (var i = 0; i < outcomes.length; i++) {
+          switch (outcomes[i]) {
             case _ApplyOutcome.applied:
               applied++;
             case _ApplyOutcome.skipped:
@@ -141,20 +171,53 @@ class PullWorker {
               pushedBack++;
             case _ApplyOutcome.failed:
               failed++;
+              failedDocs.add((entity: entity, doc: result.documents[i]));
           }
         }
-        final last = result.documents.last;
-        await metadata.setCursor(
-          entity.type,
-          PullCursor(last.updatedAt ?? '', last.id),
-        );
+        // Advance the cursor only past the contiguous successful prefix.
+        // Advancing past a failed document would skip it forever (until its
+        // version bumps): the retry below re-fetches verbatim, but if the
+        // retry also fails the cursor must still point before it so the next
+        // cycle re-attempts it.
+        final firstFailed = outcomes.indexWhere((o) => o == _ApplyOutcome.failed);
+        if (firstFailed == -1) {
+          final last = result.documents.last;
+          await metadata.setCursor(
+            entity.type,
+            PullCursor(last.updatedAt ?? '', last.id),
+          );
+        } else if (firstFailed > 0) {
+          final lastGood = result.documents[firstFailed - 1];
+          await metadata.setCursor(
+            entity.type,
+            PullCursor(lastGood.updatedAt ?? '', lastGood.id),
+          );
+        }
         if (!result.hasMore) break;
         hasMore = true;
       }
     }
 
+    if (failedDocs.isNotEmpty) {
+      // Dependencies pulled later in this same cycle (materials, products,
+      // members) unblock the failures above: re-fetch each verbatim and
+      // re-apply. Bounded (200) so a poisoned batch cannot stall the cycle.
+      final retried = await _retryFailedDocs(organizationId, failedDocs);
+      applied += retried.applied;
+      failed -= retried.resolved;
+    }
+
     if (marksPullTimestamp) await metadata.markPull(DateTime.now());
-    if (error != null) await metadata.markError(error);
+    if (error != null) {
+      await metadata.markError(error);
+    } else if (failed > 0) {
+      // Per-document schema failures used to stay inside PullReport only: the
+      // badge kept saying "Synced" while remote rows were skipped every cycle.
+      await metadata.markError(
+        'Pull skipped $failed document(s): local schema refused them. '
+        'See "[sync] pull skipped" logs.',
+      );
+    }
     return PullReport(
       applied: applied,
       skipped: skipped,
@@ -163,6 +226,55 @@ class PullWorker {
       failed: failed,
       error: error,
     );
+  }
+
+  /// Re-applies documents that failed mid-cycle, one verbatim re-fetch each.
+  ///
+  /// Runs after every entity walked, so a sample that failed on a missing
+  /// material succeeds once the material entity landed. Returns how many were
+  /// applied vs stopped failing (skipped/pushed-back also count as resolved:
+  /// the row is now coherent with the server).
+  Future<({int applied, int resolved})> _retryFailedDocs(
+    String organizationId,
+    List<({SyncEntity entity, RemoteDocument doc})> docs,
+  ) async {
+    var applied = 0;
+    var resolved = 0;
+    final db = await queue.dbHelper.database;
+    for (final entry in docs.take(200)) {
+      RemoteDocument current;
+      try {
+        current = await remote.getDocument(
+          organizationId: organizationId,
+          collection: entry.entity.collection,
+          documentId: entry.doc.id,
+        );
+      } on Object {
+        continue;
+      }
+      if (!current.exists) continue;
+      try {
+        final outcome = await tracedTransaction(
+          db,
+          'pull.retry(${entry.entity.type})',
+          (txn) => _applyDocument(txn, entry.entity, current, organizationId),
+        );
+        switch (outcome) {
+          case _ApplyOutcome.applied:
+            applied++;
+            resolved++;
+          case _ApplyOutcome.skipped:
+          case _ApplyOutcome.pushedBack:
+            resolved++;
+          case _ApplyOutcome.failed:
+            break;
+        }
+      } on Object catch (e) {
+        // ignore: avoid_print
+        print('[sync] pull retry skipped ${entry.entity.type}/${entry.doc.id}: $e');
+      }
+    }
+    return (applied: applied, resolved: resolved);
   }
 
   /// Applies a whole page inside [txn], returning the outcome per document in
@@ -215,12 +327,14 @@ class PullWorker {
       // `localId` first, then the natural key: a document written on another
       // device carries an id that means nothing in this database. Our own
       // device id lets the lookup tell the two cases apart (see findLocalRef).
+      final available = await _availableColumns(txn, entity);
       final localRef = await findLocalRef(
         txn,
         entity,
         document.id,
         document.data,
         localDeviceId: _session.deviceId,
+        columns: available,
       );
       final existing = localRef == null
           ? const <Map<String, Object?>>[]
@@ -231,6 +345,41 @@ class PullWorker {
               limit: 1,
             );
       final remoteVersion = document.version;
+
+      // A tombstone is intentionally a partial remote document. It must not
+      // go through the normal INSERT/UPDATE mapper: tables have required
+      // business columns while a tombstone carries only deletion and sync
+      // metadata. All tables soft-delete via `deleted_at` so a later update
+      // can never resurrect a hard-deleted row (lab_sample_tests used to
+      // hard-DELETE here, which re-push resurrection exploited).
+      final deletedAt =
+          document.data['deletedAt'] ?? document.data['deleted_at'];
+      if (deletedAt != null) {
+        if (existing.isNotEmpty) {
+          final localId = existing.first['id'];
+          final patch = <String, Object?>{
+            'deleted_at': '$deletedAt',
+            'sync_state': 'synced',
+            'remote_synced_at': nowIso(),
+          };
+          final cols = await _availableColumns(txn, entity);
+          patch.removeWhere((k, _) => !cols.contains(k));
+          final remoteVersion = document.version;
+          if (cols.contains('version')) {
+            patch['version'] = remoteVersion;
+          }
+          if (cols.contains('remote_version')) {
+            patch['remote_version'] = remoteVersion;
+          }
+          await txn.update(
+            entity.localTable,
+            patch,
+            where: 'id = ?',
+            whereArgs: [localId],
+          );
+        }
+        return _ApplyOutcome.applied;
+      }
 
       if (existing.isEmpty) {
         final row = await _localRow(
@@ -256,6 +405,7 @@ class PullWorker {
           _withDefaults(entity, row, await _availableColumns(txn, entity)),
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
+        await _repointAfterMaterialApply(txn, entity, document);
         return _ApplyOutcome.applied;
       }
 
@@ -313,6 +463,7 @@ class PullWorker {
         where: 'id = ?',
         whereArgs: [local['id']],
       );
+      await _repointAfterMaterialApply(txn, entity, document);
       return _ApplyOutcome.applied;
     }
   }
@@ -341,11 +492,65 @@ class PullWorker {
       for (final entry in row.entries)
         if (available.contains(entry.key)) entry.key: entry.value,
     };
-    for (final column in _userRefColumns) {
-      final value = resolved[column];
-      if (value is String) resolved[column] = await _localUserId(txn, value);
-    }
+    // One shared mapper for every remote-apply path (pull, keep-remote,
+    // auto-rebase): origin-device ids are remapped here, never written raw.
+    // The per-cycle user cache is passed in so hundreds of docs do not pay
+    // one `users` lookup each.
+    await resolveRemoteRowRefs(
+      txn,
+      entity,
+      resolved,
+      row,
+      ensureProductSentinel:
+          (exec) => queue.dbHelper.ensureProductSentinelMaterialId(exec),
+      userIdFor: (uid) => _localUserId(txn, uid),
+    );
     return resolved;
+  }
+
+  /// Re-link inspections after a catalog row lands (no-op for other tables).
+  Future<void> _repointAfterMaterialApply(
+    DatabaseExecutor txn,
+    SyncEntity entity,
+    RemoteDocument document,
+  ) async {
+    if (entity.localTable != 'reference_materials') return;
+    final code =
+        '${document.data['materialCode'] ?? document.data['material_code'] ?? ''}';
+    await _repointInspectionsToMaterial(txn, code);
+  }
+
+  /// Point inspections at a freshly arrived catalog row and drop placeholders
+  /// left behind by reference resolution (see `resolveMaterialIdByCodeOrName`).
+  ///
+  /// Runs after every successful `reference_materials` apply: rows whose code
+  /// matches but whose `material_id` points nowhere (or at a placeholder) are
+  /// re-linked, then placeholder rows no inspection references are removed.
+  Future<void> _repointInspectionsToMaterial(
+    DatabaseExecutor txn,
+    String code,
+  ) async {
+    if (code.isEmpty) return;
+    final target = await txn.query(
+      'reference_materials',
+      columns: ['id'],
+      where: 'material_code = ?',
+      whereArgs: [code],
+      limit: 1,
+    );
+    if (target.isEmpty) return;
+    final targetId = (target.first['id'] as num).toInt();
+    await txn.rawUpdate(
+      'UPDATE inspections SET material_id = ? '
+      'WHERE material_code = ? AND material_id <> ? '
+      'AND material_id NOT IN (SELECT id FROM reference_materials)',
+      [targetId, code, targetId],
+    );
+    await txn.rawDelete(
+      'DELETE FROM reference_materials WHERE material_code = ? AND id <> ? '
+      'AND id NOT IN (SELECT material_id FROM inspections)',
+      [code, targetId],
+    );
   }
 
   /// Real columns of [entity].localTable, cached for the length of the cycle.
@@ -371,8 +576,6 @@ class PullWorker {
     });
     return byUid;
   }
-
-  static const Set<String> _userRefColumns = {'created_by', 'changed_by'};
 
   final Map<String, Future<Set<String>>> _columnCache = {};
   final Map<String, Future<int>> _userIds = {};

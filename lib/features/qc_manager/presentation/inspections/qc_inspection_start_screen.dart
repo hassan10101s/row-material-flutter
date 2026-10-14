@@ -11,6 +11,7 @@ import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../di/service_locator.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_entity_autocomplete.dart';
 import '../../../../../design_system/widgets/app_field.dart';
@@ -149,11 +150,12 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
                     'انشر قائمة فحص أولاً لبدء فحص',
                     'Publish a checklist before starting an inspection',
                   ),
-                  action: FilledButton.tonal(
+                  action: AppButton(
+                    label: AppText.t('إعادة المحاولة', 'Retry'),
+                    style: AppButtonStyle.secondary,
                     onPressed: () => context
                         .read<QcInspectionsCubit>()
                         .loadStartOptions(),
-                    child: Text(AppText.t('إعادة المحاولة', 'Retry')),
                   ),
                 )
               : ListView(
@@ -223,28 +225,12 @@ class _QcInspectionStartScreenState extends State<QcInspectionStartScreen> {
                     const SizedBox(height: AppSpacing.xl),
 
                     // ── Start button ─────────────────────────────────────────
-                    FilledButton.icon(
-                      onPressed: state.saving
-                          ? null
-                          : () => _start(context, templates),
-                      style: FilledButton.styleFrom(
-                        minimumSize: const Size.fromHeight(52),
-                        textStyle: TextStyle(
-                          fontSize: 16.spMax,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      icon: state.saving
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.play_arrow_rounded, size: 22),
-                      label: Text(AppText.t('ابدأ الفحص', 'Start inspection')),
+                    AppButton(
+                      label: AppText.t('ابدأ الفحص', 'Start inspection'),
+                      icon: const Icon(Icons.play_arrow_rounded, size: 22),
+                      expanded: true,
+                      loading: state.saving,
+                      onPressed: () => _start(context, templates),
                     ),
                   ],
                 ),

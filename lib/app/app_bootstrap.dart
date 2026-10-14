@@ -1,8 +1,17 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart' show debugPrint;
 
 import '../core/firebase/firebase_bootstrap.dart';
 import '../core/sync/sync_engine.dart';
+import '../core/sync/sync_queue.dart';
 import '../di/service_locator.dart';
+import '../features/notifications/data/fcm_push_service.dart';
+import '../features/notifications/data/notification_service.dart';
+import '../features/notifications/presentation/notification_controller.dart';
+import 'headless.dart';
+import 'notif_poll_task.dart';
 import 'auth_gate.dart';
 import '../features/auth/domain/auth_repository.dart';
 
@@ -37,6 +46,67 @@ Future<void> appBootstrap() async {
 
   if (state == AuthState.ready) {
     startSyncEngine();
+    // Notifications are deliberately NOT awaited here: plugin init plus the
+    // bell scans would hold up the first frame behind the FFI lock. `main()`
+    // runs [startNotifications] after the first frame; headless background
+    // isolates drive the service directly and never call it.
+  }
+}
+
+/// Mobile-only: OS plugin init + first scan + pull/local hooks.
+/// No-op on desktop so Windows builds never touch the plugin, and no-op in
+/// the headless background isolate (the dispatcher drives the scan + show
+/// directly; timers and re-scheduling belong to the foreground process).
+Future<void> startNotifications() async {
+  if (!Platform.isAndroid && !Platform.isIOS) return;
+  if (isHeadlessBackground) return;
+  try {
+    final service = getIt<NotificationService>();
+    await service.initOs();
+    final controller = getIt<NotificationController>();
+    final engine = getIt<SyncEngine>();
+    // Remote rows (other devices) -> bell + OS notification after every pull
+    // with applied rows. showOs must be true here: with false (the old code)
+    // foreground pulls only updated the in-app bell and the system tray
+    // stayed silent until the 15-min background poll ran.
+    engine.onPullApplied = () => controller.refresh(showOs: true);
+    // Own saves -> bell within seconds. Chains the engine's debounced push
+    // (buildSyncEngine sets onEnqueued to scheduleSync).
+    final queue = getIt<SyncQueue>();
+    final prev = queue.onEnqueued;
+    queue.onEnqueued = () {
+      prev?.call();
+      unawaited(controller.refresh());
+    };
+    // One pass, not two: `refresh` already loads `recent` + `unread` when the
+    // bell starts empty, so the extra `load()` was two duplicate DB trips on
+    // every mobile start.
+    await controller.refresh();
+    // The 30 s tick also surfaces OS notifications: own saves are already
+    // watermarked silently by the onEnqueued hook above, so only rows from
+    // other devices reach showOs here.
+    controller.startAutoRefresh(showOs: true);
+    // Killed-app push (FCM topic `org_<orgId>`): delivered by Play services
+    // even when the app is swiped away / force-stopped, where Workmanager
+    // polls cannot run. Foreground pushes render through the same channel;
+    // background/killed pushes render via the system tray + background
+    // handler in fcm_push_service.dart. Never throws (push is best-effort).
+    try {
+      final fcm = getIt<FcmPushService>();
+      await fcm.init();
+      final orgId = getIt<AuthRepository>().session.organizationId;
+      await fcm.setOrganization(orgId.isEmpty ? null : orgId);
+    } on Object catch (e) {
+      debugPrint('[bootstrap] fcm skipped: $e');
+    }
+    // Background poll so closed-app arrivals surface as OS notifications.
+    try {
+      await const AndroidNotifPollScheduler().schedule();
+    } on Object catch (e) {
+      debugPrint('[bootstrap] notif poll schedule skipped: $e');
+    }
+  } on Object catch (e) {
+    debugPrint('[bootstrap] notifications skipped: $e');
   }
 }
 

@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_errors.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../organizations/data/member_write_guard.dart';
@@ -136,9 +137,14 @@ class _QcWrite {
   }
 
   /// A missing row is a caller bug, not a silent no-op: `saveSop(999)` that
-  /// quietly does nothing looks exactly like a save that worked.
+  /// quietly does nothing looks exactly like a save that worked. The technical
+  /// detail (`what`) is kept for debugging inside a bilingual frame.
   Future<void> requireRow(Map<String, dynamic>? row, String what) async {
-    if (row == null) throw NotFoundError(what);
+    if (row == null) {
+      throw NotFoundError(
+        AppText.t('السجل غير موجود ($what)', 'Record not found ($what)'),
+      );
+    }
   }
 }
 
@@ -264,7 +270,12 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
   @override
   Future<int> createSop(QcSop sop) async {
     if (sop.code.trim().isEmpty) {
-      throw const ValidationError('An SOP needs a code before it can be filed');
+      throw ValidationError(
+        AppText.t(
+          'يحتاج إجراء التشغيل القياسي إلى كود قبل حفظه',
+          'An SOP needs a code before it can be filed',
+        ),
+      );
     }
     _w.check(Permission.qcWrite);
     return _w.transaction((txn) async {
@@ -286,7 +297,12 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
     _w.check(Permission.qcWrite);
     final id = sop.sopId;
     if (id == null) {
-      throw const ValidationError('Cannot update an SOP with no id');
+      throw ValidationError(
+        AppText.t(
+          'لا يمكن تحديث إجراء بلا معرّف',
+          'Cannot update an SOP with no id',
+        ),
+      );
     }
     return _w.transaction((txn) async {
       final before = await _w.snapshot(txn, 'qc_sops', 'sop_id', id);
@@ -447,7 +463,12 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
   @override
   Future<int> createTemplate(QcTemplate template) async {
     if (template.name.trim().isEmpty) {
-      throw const ValidationError('A checklist needs a name');
+      throw ValidationError(
+        AppText.t(
+          'قائمة الفحص تحتاج إلى اسم',
+          'A checklist needs a name',
+        ),
+      );
     }
     _w.check(Permission.qcWrite);
     return _w.transaction((txn) async {
@@ -623,8 +644,8 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
   @override
   Future<int> duplicateTemplate(
     int templateId,
-    String newCode,
     String newName,
+    {String newCode = ''}
   ) async {
     _w.check(Permission.qcWrite);
     if (newCode.trim().isEmpty && newName.trim().isEmpty) {
@@ -746,7 +767,12 @@ class OfflineFirstQcInspectionRepository implements QcInspectionRepository {
     _w.check(Permission.qcWrite);
     final id = inspection.inspectionId;
     if (id == null) {
-      throw const ValidationError('Cannot save an inspection with no id');
+      throw ValidationError(
+        AppText.t(
+          'لا يمكن حفظ فحص بلا معرّف',
+          'Cannot save an inspection with no id',
+        ),
+      );
     }
     return _w.transaction((txn) async {
       final before = await _w.snapshot(
@@ -1117,7 +1143,9 @@ class OfflineFirstQcGoalRepository implements QcGoalRepository {
   Future<int> createGoal(QcGoal goal) async {
     _w.check(Permission.qcWrite);
     if (goal.title.trim().isEmpty) {
-      throw const ValidationError('A goal needs a title');
+      throw ValidationError(
+        AppText.t('الهدف يحتاج إلى عنوان', 'A goal needs a title'),
+      );
     }
     return _w.transaction((txn) async {
       final id = await localRepo.createGoal(goal, exec: txn);

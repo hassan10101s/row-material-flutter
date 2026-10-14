@@ -6,9 +6,12 @@ import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dialogs.dart';
+import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_window.dart';
+import '../../../../../design_system/export/table_html_export.dart';
 import '../analysis_editor.dart';
 import '../../cubit/analyses_cubit.dart';
 import '../../cubit/analyses_state.dart';
@@ -24,24 +27,26 @@ class DesktopAnalysesTab extends StatelessWidget {
   ]) async {
     final cubit = context.read<AnalysesCubit>();
     final key = GlobalKey<AnalysisEditorState>();
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AppWindow(
-        title: analysis == null ? 'إضافة تحليل' : 'تعديل تحليل',
-        icon: Icons.biotech_outlined,
-        maxWidth: 720,
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: Text(AppStrings.cancel),
-          ),
-          FilledButton(
-            onPressed: () => key.currentState?.save(),
-            child: Text(AppStrings.save),
-          ),
-        ],
-        child: AnalysisEditor(key: key, analysis: analysis),
-      ),
+    final saved = await showAppWindow<bool>(
+      context,
+      title: analysis == null
+          ? AppText.t('إضافة تحليل', 'Add analysis')
+          : AppText.t('تعديل تحليل', 'Edit analysis'),
+      icon: Icons.biotech_outlined,
+      size: AppWindowSize.md,
+      maxWidth: 720,
+      actions: [
+        AppButton(
+          label: AppStrings.cancel,
+          style: AppButtonStyle.secondary,
+          onPressed: () => Navigator.of(context).pop(false),
+        ),
+        AppButton(
+          label: AppStrings.save,
+          onPressed: () => key.currentState?.save(),
+        ),
+      ],
+      child: AnalysisEditor(key: key, analysis: analysis),
     );
     if (saved == true) await cubit.load();
   }
@@ -80,7 +85,17 @@ class DesktopAnalysesTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AnalysesHeader(onAdd: () => _openEditor(context)),
+          AnalysesHeader(
+            onAdd: () => _openEditor(context),
+            canExport: state.rows.isNotEmpty,
+            onExportTable: () => TableHtmlExport.export(
+              context,
+              filePrefix: 'analyses',
+              title: AnalysesTable.exportTitle(),
+              headers: AnalysesTable.exportHeaders(),
+              rows: AnalysesTable.exportRows(state.rows),
+            ),
+          ),
           const SizedBox(height: AppSpacing.md),
           if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
           Expanded(
@@ -88,10 +103,27 @@ class DesktopAnalysesTab extends StatelessWidget {
                 ? const AppSkeletonList(rows: 6, lines: 3, height: 380)
                 : state.rows.isEmpty
                 ? Text(AppText.t('لا توجد تحليلات', 'No analyses'))
-                : AnalysesTable(
-                    rows: state.rows,
-                    onEdit: (r) => _openEditor(context, r),
-                    onDelete: (r) => _delete(context, r),
+                : Column(
+                    children: [
+                      Expanded(
+                        child: AnalysesTable(
+                          rows: state.rows,
+                          onEdit: (r) => _openEditor(context, r),
+                          onDelete: (r) => _delete(context, r),
+                        ),
+                      ),
+                      AppDesktopLoadMore(
+                        loaded: state.rows.length,
+                        total: state.total,
+                        hasMore: state.hasMore,
+                        loadingMore: state.loadingMore,
+                        errorMore: state.errorMore,
+                        onLoadMore: () =>
+                            context.read<AnalysesCubit>().loadMore(),
+                        onRetry: () =>
+                            context.read<AnalysesCubit>().loadMore(),
+                      ),
+                    ],
                   ),
           ),
         ],

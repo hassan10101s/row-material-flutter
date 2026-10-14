@@ -8,9 +8,15 @@ import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_unit_field.dart';
 import '../../../../../design_system/widgets/app_window.dart';
@@ -107,7 +113,7 @@ class QcTemplateEditorScreen extends StatelessWidget {
             ],
           ),
           body: state.loading && template == null
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList(rows: 4, height: 320)
               : template == null
               ? AppEmptyState(
                   icon: Icons.search_off,
@@ -174,10 +180,11 @@ class _Tree extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
         ],
         if (!state.isFrozen)
-          OutlinedButton.icon(
-            onPressed: () => _addSection(context),
+          AppButton(
+            label: AppText.t('إضافة قسم', 'Add section'),
             icon: const Icon(Icons.add, size: 18),
-            label: Text(AppText.t('إضافة قسم', 'Add section')),
+            style: AppButtonStyle.secondary,
+            onPressed: () => _addSection(context),
           ),
         if (state.liveSections.isEmpty && !state.isFrozen) ...[
           const SizedBox(height: AppSpacing.sm),
@@ -384,12 +391,12 @@ class _PublishGate extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           if (frozen)
-            OutlinedButton.icon(
-              onPressed: state.saving ? null : () => _duplicate(context),
+            AppButton(
+              label: AppText.t('إنشاء نسخة مسودة', 'Create a draft version'),
               icon: const Icon(Icons.copy_all_outlined, size: 18),
-              label: Text(
-                AppText.t('إنشاء نسخة مسودة', 'Create a draft version'),
-              ),
+              style: AppButtonStyle.secondary,
+              loading: state.saving,
+              onPressed: state.saving ? null : () => _duplicate(context),
             )
           else ...[
             for (final problem in blockers)
@@ -421,20 +428,28 @@ class _PublishGate extends StatelessWidget {
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
               children: [
-                FilledButton(
+                AppButton(
+                  small: true,
+                  label: AppText.t('نشر', 'Publish'),
+                  loading: state.saving,
                   onPressed: state.canPublish && !state.dirty && !state.saving
                       ? () => _publish(context)
                       : null,
-                  child: Text(AppText.t('نشر', 'Publish')),
                 ),
-                OutlinedButton(
+                AppButton(
+                  small: true,
+                  style: AppButtonStyle.secondary,
+                  label: AppText.t('حفظ', 'Save'),
+                  loading: state.saving,
                   onPressed: state.dirty && !state.saving ? cubit.save : null,
-                  child: Text(AppText.t('حفظ', 'Save')),
                 ),
-                OutlinedButton(
+                AppButton(
+                  small: true,
+                  style: AppButtonStyle.secondary,
+                  label: AppText.t('أرشفة', 'Archive'),
                   onPressed: state.saving ? null : cubit.archive,
-                  child: Text(AppText.t('أرشفة', 'Archive')),
                 ),
+                _DeleteTemplateButton(template: template),
               ],
             ),
             if (state.dirty)
@@ -481,33 +496,81 @@ class _PublishGate extends StatelessWidget {
       icon: Icons.content_copy_outlined,
       size: AppWindowSize.sm,
       actions: [
-        TextButton(
+        AppButton(
+          small: true,
+          style: AppButtonStyle.secondary,
+          label: AppText.t('إلغاء', 'Cancel'),
           onPressed: () => Navigator.of(context).pop(),
-          child: Text(AppText.t('إلغاء', 'Cancel')),
         ),
-        FilledButton(
+        AppButton(
+          small: true,
+          label: AppText.t('نسخ', 'Duplicate'),
           onPressed: () => Navigator.of(
             context,
           ).pop(_DuplicateRequest(name.text.trim(), code.text.trim())),
-          child: Text(AppText.t('نسخ', 'Duplicate')),
         ),
       ],
       builder: (context, close) => Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          TextField(
-            controller: name,
-            decoration: InputDecoration(labelText: AppText.t('الاسم', 'Name')),
-          ),
-          TextField(
-            controller: code,
-            decoration: InputDecoration(labelText: AppText.t('الرمز', 'Code')),
-          ),
+          AppField(label: AppText.t('الاسم', 'Name'), controller: name),
+          const SizedBox(height: AppSpacing.sm),
+          AppField(label: AppText.t('الرمز', 'Code'), controller: code),
         ],
       ),
     );
     if (ok == null) return;
     await cubit.duplicate(newCode: ok.code, newName: ok.name);
+  }
+}
+
+/// DS delete for one checklist, `qcWrite`-gated.
+class _DeleteTemplateButton extends StatelessWidget {
+  const _DeleteTemplateButton({required this.template});
+
+  final QcTemplate template;
+
+  static bool get canWrite {
+    try {
+      return getIt<AuthGate>().canWrite(Permission.qcWrite);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final confirmed = await AppDeleteConfirmDialog.show(
+      context,
+      title: AppText.t('حذف قائمة الفحص', 'Delete checklist'),
+      name: template.name.isNotEmpty ? template.name : template.code,
+    );
+    if (!confirmed || !context.mounted) return;
+    final library = context.read<QcTemplatesCubit>();
+    await library.deleteTemplate(template.templateId ?? 0);
+    if (!context.mounted) return;
+    final error = library.state.error;
+    if (error != null && error.isNotEmpty) {
+      AppFeedback.error(context, error);
+      library.clearError();
+    } else {
+      AppFeedback.success(
+        context,
+        AppText.t('تم حذف القائمة', 'Checklist deleted'),
+      );
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!canWrite) return const SizedBox.shrink();
+    return AppButton(
+      small: true,
+      style: AppButtonStyle.danger,
+      icon: const Icon(Icons.delete_outline, size: 16),
+      label: AppText.t('حذف', 'Delete'),
+      onPressed: () => _delete(context),
+    );
   }
 }
 
@@ -766,10 +829,7 @@ class _ItemSheetState extends State<_ItemSheet> {
           onChanged: (v) => setState(() => _type = v ?? _type),
         ),
         const SizedBox(height: AppSpacing.sm),
-        AppUnitField(
-          controller: _unit,
-          symbols: _unitSymbols,
-        ),
+        AppUnitField(controller: _unit, symbols: _unitSymbols),
         if (wantsOptions) ...[
           const SizedBox(height: AppSpacing.sm),
           TextField(
@@ -816,53 +876,53 @@ class _ItemSheetState extends State<_ItemSheet> {
           ),
           onChanged: (v) => setState(() => _evidenceIfFail = v),
         ),
-            // Three buttons never fit one 376dp footer row: a Wrap folds
-            // them instead of overflowing (the unified footer stays a Row
-            // for the usual one/two-button case).
-            Wrap(
-              alignment: WrapAlignment.end,
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: [
-                TextButton(
-                  onPressed: () {
-                    widget.onDelete();
-                    Navigator.of(context).pop();
-                  },
-                  child: Text(
-                    AppText.t('حذف البند', 'Delete item'),
-                    style: TextStyle(color: AppColors.danger),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text(AppText.t('إلغاء', 'Cancel')),
-                ),
-                FilledButton(
-                  onPressed: () {
-                    final options = _options.text
-                        .split(',')
-                        .map((o) => o.trim())
-                        .where((o) => o.isNotEmpty)
-                        .toList();
-                    widget.onSave(
-                      widget.item.copyWith(
-                        label: _label.text.trim(),
-                        itemType: _type,
-                        unit: _unit.text.trim(),
-                        optionsJson: options.join(', '),
-                        required: _required,
-                        allowNa: _allowNa,
-                        isCritical: _critical,
-                        requireEvidenceIfFail: _evidenceIfFail,
-                      ),
-                    );
-                    Navigator.of(context).pop();
-                  },
-                  child: Text(AppText.t('حفظ', 'Save')),
-                ),
-              ],
+        // Three buttons never fit one 376dp footer row: a Wrap folds
+        // them instead of overflowing (the unified footer stays a Row
+        // for the usual one/two-button case).
+        Wrap(
+          alignment: WrapAlignment.end,
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            TextButton(
+              onPressed: () {
+                widget.onDelete();
+                Navigator.of(context).pop();
+              },
+              child: Text(
+                AppText.t('حذف البند', 'Delete item'),
+                style: TextStyle(color: AppColors.danger),
+              ),
             ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(AppText.t('إلغاء', 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () {
+                final options = _options.text
+                    .split(',')
+                    .map((o) => o.trim())
+                    .where((o) => o.isNotEmpty)
+                    .toList();
+                widget.onSave(
+                  widget.item.copyWith(
+                    label: _label.text.trim(),
+                    itemType: _type,
+                    unit: _unit.text.trim(),
+                    optionsJson: options.join(', '),
+                    required: _required,
+                    allowNa: _allowNa,
+                    isCritical: _critical,
+                    requireEvidenceIfFail: _evidenceIfFail,
+                  ),
+                );
+                Navigator.of(context).pop();
+              },
+              child: Text(AppText.t('حفظ', 'Save')),
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -983,6 +1043,7 @@ class _NewTemplateFormState extends State<_NewTemplateForm> {
             DropdownButtonFormField<String>(
               initialValue: _type,
               isExpanded: true,
+              menuMaxHeight: 320,
               decoration: InputDecoration(
                 labelText: AppText.t('النوع', 'Type'),
                 border: const OutlineInputBorder(),
@@ -1006,6 +1067,7 @@ class _NewTemplateFormState extends State<_NewTemplateForm> {
             DropdownButtonFormField<String>(
               initialValue: _recurrence,
               isExpanded: true,
+              menuMaxHeight: 320,
               decoration: InputDecoration(
                 labelText: AppText.t('طبيعة القائمة', 'List kind'),
                 border: const OutlineInputBorder(),

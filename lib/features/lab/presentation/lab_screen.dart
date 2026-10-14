@@ -73,7 +73,10 @@ class _LazyTabState extends State<_LazyTab> {
 /// Lab center: test history (entry), analyses, activity log, lab reports,
 /// equipment and inventory last (port of Web LabView panels).
 class LabScreen extends StatelessWidget {
-  const LabScreen({super.key});
+  const LabScreen({super.key, this.highlightId});
+
+  /// Local row id from a notification deep-link (`/lab?tab=0&highlight=<id>`).
+  final String? highlightId;
 
   @override
   Widget build(BuildContext context) {
@@ -131,22 +134,49 @@ class LabScreen extends StatelessWidget {
         ),
       ),
     ];
+    // Title lives in the shell topbar (both experiences); the tab chips
+    // below already say where you are.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.page,
-            AppSpacing.page,
-            AppSpacing.page,
-            0,
+        const SizedBox(height: AppSpacing.page),
+        if (highlightId != null && highlightId!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.page,
+              0,
+              AppSpacing.page,
+              AppSpacing.sm,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.notifications_active_outlined,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      AppText.t(
+                        'نتيجة جديدة من الإشعارات (رقم $highlightId) — الأحدث في الأعلى',
+                        'New result from notifications (#$highlightId) — newest first',
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          child: Text(
-            AppStrings.lab,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
         SizedBox(
           height: 46.h,
           child: SingleChildScrollView(
@@ -156,7 +186,9 @@ class LabScreen extends StatelessWidget {
               children: [
                 for (var i = 0; i < tabs.length; i++)
                   Padding(
-                    padding: const EdgeInsetsDirectional.only(start: AppSpacing.sm),
+                    padding: const EdgeInsetsDirectional.only(
+                      start: AppSpacing.sm,
+                    ),
                     child: ChoiceChip(
                       label: Text(tabs[i].label),
                       avatar: Icon(tabs[i].icon, size: 18.r),

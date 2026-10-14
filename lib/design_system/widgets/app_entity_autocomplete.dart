@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
 import 'app_autocomplete.dart';
@@ -46,7 +47,7 @@ class AppEntityAutocomplete extends StatelessWidget {
   final String? hint;
   final String? helperText;
   final String? errorText;
-  final String emptyLabel;
+  final String? emptyLabel;
   final IconData? prefixIcon;
   final bool enabled;
 
@@ -64,7 +65,7 @@ class AppEntityAutocomplete extends StatelessWidget {
     this.hint,
     this.helperText,
     this.errorText,
-    this.emptyLabel = 'لا توجد نتائج مطابقة',
+    this.emptyLabel,
     this.prefixIcon,
     this.enabled = true,
   });
@@ -107,7 +108,12 @@ class AppEntityAutocomplete extends StatelessWidget {
                     selected: selected,
                     displayString: displayOf,
                     filter: filter,
-                    emptyLabel: emptyLabel,
+                    emptyLabel:
+                        emptyLabel ??
+                        AppText.t(
+                          'لا توجد نتائج مطابقة',
+                          'No matching results',
+                        ),
                     hint: hint,
                     prefixIcon: prefixIcon,
                     onSelected: (row) {
@@ -143,7 +149,7 @@ class AppEntityAutocomplete extends StatelessWidget {
             if (selected != null && onCleared != null) ...[
               const SizedBox(width: AppSpacing.xs),
               IconButton(
-                tooltip: 'مسح الاختيار',
+                tooltip: AppText.t('مسح الاختيار', 'Clear selection'),
                 icon: const Icon(Icons.clear),
                 visualDensity: VisualDensity.compact,
                 onPressed: enabled ? onCleared : null,

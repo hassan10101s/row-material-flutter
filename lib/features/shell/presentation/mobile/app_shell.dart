@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
@@ -6,6 +7,9 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../core/locale/locale_service.dart';
 import '../../../../core/theme/theme_service.dart';
 import '../../../../design_system/tokens/app_colors.dart';
+import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../../../auth/domain/user.dart';
 import '../../../sync/presentation/sync_status_controller.dart';
 import '../shell_chrome.dart';
@@ -87,6 +91,7 @@ class _MobileAppShellState extends State<MobileAppShell> {
   }
 
   void _selectSlot(int index) {
+    HapticFeedback.selectionClick();
     final slot = _slots[index];
     if (slot.isMore) {
       _scaffoldKey.currentState?.openDrawer();
@@ -113,77 +118,61 @@ class _MobileAppShellState extends State<MobileAppShell> {
       currentPath = null;
     }
 
-    final chosen = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Text(
-                AppText.t('انتقل إلى', 'Jump to'),
-                style: Theme.of(sheetContext).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
+    final chosen = await showAppOverlay<String>(
+      context,
+      title: AppText.t('انتقل إلى', 'Jump to'),
+      builder: (sheetContext, close) => ListView(
+        shrinkWrap: true,
+        padding: EdgeInsets.zero,
+        children: [
+          for (final path in paths)
+            Builder(
+              builder: (context) {
+                final selected = currentPath == path;
+                return ListTile(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.md),
+                  ),
+                  tileColor: selected
+                      ? AppColors.primary.withValues(alpha: 0.1)
+                      : null,
+                  leading: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(
+                        alpha: selected ? 0.16 : 0.07,
+                      ),
+                      borderRadius: BorderRadius.circular(AppRadii.sm),
                     ),
-              ),
+                    child: Icon(
+                      icons[path],
+                      size: 19,
+                      color: selected
+                          ? AppColors.primary
+                          : AppColors.textMuted,
+                    ),
+                  ),
+                  title: Text(
+                    labels[path] ?? path,
+                    style: TextStyle(
+                      fontWeight: selected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                    ),
+                  ),
+                  trailing: selected
+                      ? Icon(
+                          Icons.check_circle,
+                          color: AppColors.primary,
+                          size: 20,
+                        )
+                      : null,
+                  onTap: () => close(path),
+                );
+              },
             ),
-            for (final path in paths)
-              Builder(
-                builder: (context) {
-                  final selected = currentPath == path;
-                  return ListTile(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    tileColor: selected
-                        ? Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: 0.1)
-                        : null,
-                    leading: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: selected ? 0.16 : 0.07),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(
-                        icons[path],
-                        size: 19,
-                        color: selected
-                            ? Theme.of(context).colorScheme.primary
-                            : Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    title: Text(
-                      labels[path] ?? path,
-                      style: TextStyle(
-                        fontWeight: selected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                    ),
-                    trailing: selected
-                        ? Icon(
-                            Icons.check_circle,
-                            color:
-                                Theme.of(context).colorScheme.primary,
-                            size: 20,
-                          )
-                        : null,
-                    onTap: () => Navigator.of(sheetContext).pop(path),
-                  );
-                },
-              ),
-          ],
-        ),
+        ],
       ),
     );
     if (chosen != null && mounted) _navigate(chosen);
@@ -235,45 +224,114 @@ class _MobileAppShellState extends State<MobileAppShell> {
         ),
         body: Column(
           children: [
-            ShellTopBar(
+            SafeArea(
+              top: true,
+              bottom: false,
+              left: false,
+              right: false,
+              child: ShellTopBar(
               user: widget.user,
               locale: widget.locale,
               theme: widget.theme,
               syncStatus: widget.syncStatus,
+              title: _currentDestinationLabel(currentPath),
               onOpenSync: () => widget.onNavigate('/settings?tab=sync'),
               onMenu: () => _scaffoldKey.currentState?.openDrawer(),
               // The identity card states the role, so the chip would only
               // duplicate it and cost bar width the phone does not have.
               showRoleChip: false,
+              ),
             ),
             Expanded(child: widget.child),
           ],
         ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: selected,
-          onDestinationSelected: _selectSlot,
-          destinations: [
-            for (final slot in slots)
-              NavigationDestination(
-                // `NavigationDestination` has no `onLongPress`, so the long
-                // press is a gesture recognizer on the icon - the deepest
-                // recognizer on the pointer's hit path, and therefore the one
-                // that wins the arena over the destination's own `InkResponse`
-                // tap and the bar's tooltip. Verified: a long press fires the
-                // handler and does *not* also select the destination.
-                icon: slot.isMore
-                    ? Icon(slot.icon)
-                    : GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onLongPress: () => _showJumpList(),
-                        child: Icon(slot.icon),
-                      ),
-                label: slot.label,
+        // Floating rounded bar: same slots, labels and gestures as before
+        // (the split tests pin them), dressed as a surface card with a soft
+        // shadow instead of a full-bleed strip. The More slot carries a
+        // sync-attention dot while anything is pending/blocked, so unsynced
+        // work is visible without opening the drawer.
+        bottomNavigationBar: ListenableBuilder(
+          listenable: widget.syncStatus,
+          builder: (context, _) {
+            final attention = widget.syncStatus.status.pending +
+                widget.syncStatus.status.blocked;
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                0,
+                AppSpacing.md,
+                AppSpacing.sm,
               ),
-          ],
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(22),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.10),
+                      blurRadius: 16,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(22),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      border: Border.all(color: AppColors.borderMuted),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    child: NavigationBar(
+                      height: 72,
+                      elevation: 0,
+                      backgroundColor: Colors.transparent,
+                      indicatorColor:
+                          AppColors.primary.withValues(alpha: 0.14),
+                      labelBehavior:
+                          NavigationDestinationLabelBehavior.alwaysShow,
+                      selectedIndex: selected,
+                      onDestinationSelected: _selectSlot,
+                      destinations: [
+                        for (final slot in slots)
+                          NavigationDestination(
+                            // `NavigationDestination` has no `onLongPress`, so the long
+                            // press is a gesture recognizer on the icon - the deepest
+                            // recognizer on the pointer's hit path, and therefore the one
+                            // that wins the arena over the destination's own `InkResponse`
+                            // tap and the bar's tooltip. Verified: a long press fires the
+                            // handler and does *not* also select the destination.
+                            icon: slot.isMore
+                                ? (attention > 0
+                                      ? Badge(
+                                          smallSize: 9,
+                                          backgroundColor: AppColors.danger,
+                                          child: Icon(slot.icon),
+                                        )
+                                      : Icon(slot.icon))
+                                : GestureDetector(
+                                    behavior: HitTestBehavior.translucent,
+                                    onLongPress: () => _showJumpList(),
+                                    child: Icon(slot.icon),
+                                  ),
+                            label: slot.label,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
         ),
       ),
     );
+  }
+
+  String? _currentDestinationLabel(String path) {
+    for (final entry in widget.entries) {
+      if (entry.path == path) return entry.label;
+    }
+    return null;
   }
 }
 
@@ -333,16 +391,12 @@ class _ShellDrawer extends StatelessWidget {
             if (canOpenPdfFolder) ...[
               const Divider(height: 1),
               Padding(
-                padding: const EdgeInsets.all(12),
-                child: OutlinedButton.icon(
-                  onPressed: onOpenPdfFolder,
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: AppButton(
+                  label: AppStrings.openPdfFolder,
                   icon: Icon(Icons.folder_open, size: 18.r),
-                  label: Text(AppStrings.openPdfFolder),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.primary,
-                    backgroundColor: AppColors.surface,
-                    side: BorderSide(color: AppColors.border),
-                  ),
+                  onPressed: onOpenPdfFolder,
+                  style: AppButtonStyle.secondary,
                 ),
               ),
             ],

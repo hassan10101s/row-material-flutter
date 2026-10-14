@@ -63,7 +63,9 @@ class _AppSummaryCardState extends State<AppSummaryCard> {
                 ),
                 borderRadius: BorderRadius.circular(AppRadii.md),
                 border: Border.all(
-                  color: widget.color.withValues(alpha: _isHovered ? 0.4 : 0.16),
+                  color: widget.color.withValues(
+                    alpha: _isHovered ? 0.4 : 0.16,
+                  ),
                 ),
               ),
               child: AnimatedScale(
@@ -77,35 +79,48 @@ class _AppSummaryCardState extends State<AppSummaryCard> {
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    widget.value,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 20.spMax,
-                      fontWeight: FontWeight.w700,
-                      height: 1.2,
-                      color: widget.color,
+                  // Long values (grouped thousands) shrink instead of
+                  // clipping: a clipped number reads as a wrong number.
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text(
+                      widget.value,
+                      maxLines: 1,
+                      style: TextStyle(
+                        fontSize: 20.spMax,
+                        fontWeight: FontWeight.w700,
+                        height: 1.2,
+                        color: widget.color,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 2),
+                  // Labels wrap to two lines on narrow tiles (400dp grid)
+                  // instead of cutting Arabic words mid-read.
                   Text(
                     widget.label,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 12.spMax,
+                      height: 1.35,
                     ),
                   ),
                   if (widget.hint != null) ...[
                     const SizedBox(height: 2),
                     Text(
                       widget.hint!,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 11.spMax,
                         fontWeight: FontWeight.w400,
+                        height: 1.35,
                       ),
                     ),
                   ],
@@ -117,4 +132,4 @@ class _AppSummaryCardState extends State<AppSummaryCard> {
       ),
     );
   }
-}
+}

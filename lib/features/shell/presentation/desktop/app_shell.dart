@@ -6,6 +6,8 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../core/locale/locale_service.dart';
 import '../../../../core/theme/theme_service.dart';
 import '../../../../design_system/tokens/app_colors.dart';
+import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_button.dart';
 import '../../../auth/domain/user.dart';
 import '../../../sync/presentation/sync_status_controller.dart';
 import '../shell_chrome.dart';
@@ -61,55 +63,71 @@ class DesktopAppShell extends StatelessWidget {
   Widget build(BuildContext context) {
     final currentPath = GoRouterState.of(context).uri.path;
 
+    // Desktop best-practices: ordered focus traversal (predictable Tab order
+    // in RTL + LTR), single CallbackShortcuts host for Ctrl+1..9, semantic
+    // sidebar so Narrator/NVDA announces destinations.
     return CallbackShortcuts(
       bindings: shellShortcutBindings(entries, onNavigate),
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        // Sidebar on the right (first child in an RTL Row).
-        body: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Container(
-              width: 264.w,
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                border: BorderDirectional(
-                  end: BorderSide(color: AppColors.borderMuted),
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
-                    blurRadius: 16,
-                    offset: const Offset(2, 0),
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Semantics(
+          label: 'Application navigation',
+          child: Scaffold(
+            backgroundColor: AppColors.background,
+            // Sidebar on the right (first child in an RTL Row).
+            body: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Slim rail on purpose: every dp here is a dp the page
+                // tables lose, so the sidebar stays just wide enough for
+                // the identity card + labeled destinations.
+                Container(
+                  width: 224.w,
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    border: BorderDirectional(
+                      end: BorderSide(color: AppColors.borderMuted),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.03),
+                        blurRadius: 16,
+                        offset: const Offset(2, 0),
+                      ),
+                    ],
                   ),
-                ],
-              ),
-              child: _Sidebar(
-                user: user,
-                entries: entries,
-                currentPath: currentPath,
-                onSelect: onNavigate,
-                onLogout: onLogout,
-                onLogoutThisDevice: onLogoutThisDevice,
-                onOpenPdfFolder: onOpenPdfFolder,
-                canOpenPdfFolder: canOpenPdfFolder,
-              ),
-            ),
-            Expanded(
-              child: Column(
-                children: [
-                  ShellTopBar(
+                  child: _Sidebar(
                     user: user,
-                    locale: locale,
-                    theme: theme,
-                    syncStatus: syncStatus,
-                    onOpenSync: () => onNavigate('/settings?tab=sync'),
+                    entries: entries,
+                    currentPath: currentPath,
+                    onSelect: onNavigate,
+                    onLogout: onLogout,
+                    onLogoutThisDevice: onLogoutThisDevice,
+                    onOpenPdfFolder: onOpenPdfFolder,
+                    canOpenPdfFolder: canOpenPdfFolder,
                   ),
-                  Expanded(child: child),
-                ],
-              ),
+                ),
+                Expanded(
+                  child: Column(
+                    children: [
+                      ShellTopBar(
+                        user: user,
+                        locale: locale,
+                        theme: theme,
+                        syncStatus: syncStatus,
+                        // Page titles live here on desktop, outside the page
+                        // scope, so the tables below gain the vertical space
+                        // the in-page headers used to take.
+                        title: shellPageTitle(currentPath, entries),
+                        onOpenSync: () => onNavigate('/settings?tab=sync'),
+                      ),
+                      Expanded(child: child),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -155,7 +173,7 @@ class _Sidebar extends StatelessWidget {
                 const Divider(height: 1),
                 // Nav list.
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -179,16 +197,12 @@ class _Sidebar extends StatelessWidget {
         if (canOpenPdfFolder) const Divider(height: 1),
         if (canOpenPdfFolder)
           Padding(
-            padding: const EdgeInsets.all(12),
-            child: OutlinedButton.icon(
-              onPressed: onOpenPdfFolder,
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: AppButton(
+              label: AppStrings.openPdfFolder,
               icon: Icon(Icons.folder_open, size: 18.r),
-              label: Text(AppStrings.openPdfFolder),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.primary,
-                backgroundColor: AppColors.surface,
-                side: BorderSide(color: AppColors.border),
-              ),
+              onPressed: onOpenPdfFolder,
+              style: AppButtonStyle.secondary,
             ),
           ),
       ],

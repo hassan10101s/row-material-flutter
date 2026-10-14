@@ -167,8 +167,11 @@ class FirestoreDataSource implements RemoteDataSource {
         docs.map(_toRemote).toList(),
         hasMore: snapshot.docs.length > limit,
       );
-    } on FirebaseException catch (e) {
-      if (_isPermissionDenied(e)) return const RemotePage([], hasMore: false);
+    } on FirebaseException {
+      // Do NOT swallow auth failures as an empty page: that made the badge
+      // report "Synced" while the device saw zero remote documents (wrong org,
+      // inactive member, missing samples.read). PullWorker records the error
+      // into last_error (audit worker opts out via quietPermissionErrors).
       rethrow;
     }
   }

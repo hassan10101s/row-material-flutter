@@ -7,7 +7,10 @@ import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_quantity_field.dart';
 import '../../../../../design_system/widgets/app_unit_field.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
@@ -102,22 +105,14 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        TextField(
-          controller: _name,
-          decoration: InputDecoration(
-            labelText: AppText.t('الاسم', 'Name'),
-            isDense: true,
-          ),
-        ),
+        AppField(label: AppText.t('الاسم', 'Name'), controller: _name),
+        const SizedBox(height: AppSpacing.md),
         AppDropdown<String>(
           value: _category,
           labelText: AppText.t('النوع', 'Type'),
           items: [
             for (final c in inventoryCategories)
-              AppDropdownItem(
-                value: c,
-                label: inventoryCategoryLabel(c),
-              ),
+              AppDropdownItem(value: c, label: inventoryCategoryLabel(c)),
           ],
           onChanged: (v) {
             if (v == null) return;
@@ -130,6 +125,7 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
             });
           },
         ),
+        const SizedBox(height: AppSpacing.md),
         AppUnitField(
           controller: _unit,
           symbols: _unitSymbols,
@@ -137,28 +133,23 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
           // Counted items are pieces, full stop — no picker needed.
           enabled: _category != 'count',
         ),
-        if (widget.item == null)
-          TextField(
+        if (widget.item == null) ...[
+          const SizedBox(height: AppSpacing.md),
+          AppQuantityField(
+            label: AppText.t('الكمية', 'Quantity'),
             controller: _qty,
-            decoration: InputDecoration(
-              labelText: AppText.t('الكمية', 'Quantity'),
-              isDense: true,
-            ),
           ),
-        TextField(
+        ],
+        const SizedBox(height: AppSpacing.md),
+        AppQuantityField(
+          label: AppText.t('الحد الأدنى', 'Minimum'),
           controller: _min,
-          decoration: InputDecoration(
-            labelText: AppText.t('الحد الأدنى', 'Minimum'),
-            isDense: true,
-          ),
         ),
-        TextField(
+        const SizedBox(height: AppSpacing.md),
+        AppField(
+          label: AppText.t('الوصف', 'Description'),
           controller: _description,
           maxLines: 2,
-          decoration: InputDecoration(
-            labelText: AppText.t('الوصف', 'Description'),
-            isDense: true,
-          ),
         ),
       ],
     );
@@ -173,19 +164,15 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
       icon: Icons.inventory_2_outlined,
       size: AppWindowSize.sm,
       actions: [
-        TextButton(
+        AppButton(
+          label: AppStrings.cancel,
+          style: AppButtonStyle.secondary,
           onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-          child: Text(AppStrings.cancel),
         ),
-        FilledButton(
+        AppButton(
+          label: AppStrings.save,
+          loading: _saving,
           onPressed: _saving ? null : save,
-          child: _saving
-              ? SizedBox(
-                  width: 18.r,
-                  height: 18.r,
-                  child: const CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(AppStrings.save),
         ),
       ],
       child: buildFields(),
@@ -282,22 +269,14 @@ class InventoryItemFormState extends State<InventoryItemForm> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        TextField(
-          controller: _name,
-          decoration: InputDecoration(
-            labelText: AppText.t('الاسم', 'Name'),
-            isDense: true,
-          ),
-        ),
+        AppField(label: AppText.t('الاسم', 'Name'), controller: _name),
+        const SizedBox(height: AppSpacing.md),
         AppDropdown<String>(
           value: _category,
           labelText: AppText.t('النوع', 'Type'),
           items: [
             for (final c in inventoryCategories)
-              AppDropdownItem(
-                value: c,
-                label: inventoryCategoryLabel(c),
-              ),
+              AppDropdownItem(value: c, label: inventoryCategoryLabel(c)),
           ],
           onChanged: (v) {
             if (v == null) return;
@@ -310,6 +289,7 @@ class InventoryItemFormState extends State<InventoryItemForm> {
             });
           },
         ),
+        const SizedBox(height: AppSpacing.md),
         AppUnitField(
           controller: _unit,
           symbols: _unitSymbols,
@@ -317,28 +297,23 @@ class InventoryItemFormState extends State<InventoryItemForm> {
           // Counted items are pieces, full stop — no picker needed.
           enabled: _category != 'count',
         ),
-        if (widget.item == null)
-          TextField(
+        if (widget.item == null) ...[
+          const SizedBox(height: AppSpacing.md),
+          AppQuantityField(
+            label: AppText.t('الكمية', 'Quantity'),
             controller: _qty,
-            decoration: InputDecoration(
-              labelText: AppText.t('الكمية', 'Quantity'),
-              isDense: true,
-            ),
           ),
-        TextField(
+        ],
+        const SizedBox(height: AppSpacing.md),
+        AppQuantityField(
+          label: AppText.t('الحد الأدنى', 'Minimum'),
           controller: _min,
-          decoration: InputDecoration(
-            labelText: AppText.t('الحد الأدنى', 'Minimum'),
-            isDense: true,
-          ),
         ),
-        TextField(
+        const SizedBox(height: AppSpacing.md),
+        AppField(
+          label: AppText.t('الوصف', 'Description'),
           controller: _description,
           maxLines: 2,
-          decoration: InputDecoration(
-            labelText: AppText.t('الوصف', 'Description'),
-            isDense: true,
-          ),
         ),
         if (_saving)
           const Padding(
@@ -409,25 +384,19 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '${widget.item['name']} — الحالية: $current ${widget.item['unit']}',
+          AppText.t(
+            '${widget.item['name']} — الحالية: $current ${widget.item['unit']}',
+            '${widget.item['name']} — current: $current ${widget.item['unit']}',
+          ),
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
+        AppQuantityField(
+          label: AppText.t('الكمية الجديدة', 'New quantity'),
           controller: _delta,
-          decoration: InputDecoration(
-            labelText: AppText.t('الكمية الجديدة', 'New quantity'),
-            isDense: true,
-          ),
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
-          controller: _reason,
-          decoration: InputDecoration(
-            labelText: AppText.t('السبب', 'Reason'),
-            isDense: true,
-          ),
-        ),
+        AppField(label: AppText.t('السبب', 'Reason'), controller: _reason),
       ],
     );
   }
@@ -439,19 +408,15 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
       icon: Icons.balance_outlined,
       size: AppWindowSize.sm,
       actions: [
-        TextButton(
+        AppButton(
+          label: AppStrings.cancel,
+          style: AppButtonStyle.secondary,
           onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-          child: Text(AppStrings.cancel),
         ),
-        FilledButton(
+        AppButton(
+          label: AppStrings.save,
+          loading: _saving,
           onPressed: _saving ? null : save,
-          child: _saving
-              ? SizedBox(
-                  width: 18.r,
-                  height: 18.r,
-                  child: const CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(AppStrings.save),
         ),
       ],
       child: buildFields(),
@@ -523,36 +488,20 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
-        TextField(
+        AppQuantityField(
+          label: AppText.t('الكمية الجديدة', 'New quantity'),
           controller: _delta,
-          decoration: InputDecoration(
-            labelText: AppText.t('الكمية الجديدة', 'New quantity'),
-            isDense: true,
-          ),
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
-          controller: _reason,
-          decoration: InputDecoration(
-            labelText: AppText.t('السبب', 'Reason'),
-            isDense: true,
-          ),
-        ),
+        AppField(label: AppText.t('السبب', 'Reason'), controller: _reason),
         const SizedBox(height: AppSpacing.lg),
         SizedBox(
           height: AppSpacing.mobileCtaHeight.h,
-          child: FilledButton(
+          child: AppButton(
+            label: AppText.t('حفظ', 'Save'),
+            expanded: true,
+            loading: _saving,
             onPressed: _saving ? null : _save,
-            child: _saving
-                ? SizedBox(
-                    width: 18.r,
-                    height: 18.r,
-                    child: const CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : Text(AppText.t('حفظ', 'Save')),
           ),
         ),
       ],

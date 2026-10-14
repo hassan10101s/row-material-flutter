@@ -3,6 +3,8 @@
 /// The identical lists live in `firestore.rules`
 /// (`function rolePermissions(role)`); `test/security/permissions_parity_test.dart`
 /// fails if the two ever drift apart.
+library;
+
 import '../constants/app_strings.dart';
 
 enum Permission {
@@ -94,14 +96,32 @@ bool permissionRequiresFreshSession(Permission permission, {String? role}) {
   return privilegedPermissions.contains(permission);
 }
 
-/// The four organization roles (V1).
+/// The organization roles.
+///
+/// `trial_owner` is the founder of a trial company (plan: single-company
+/// policy §4): a single-user company with limited permissions. It can view
+/// screens, create demo data and try checks/analytics/inventory/quality, but
+/// it cannot manage other companies, touch another company's data, approve
+/// global permissions or change sensitive member rules. A trial company is
+/// promoted to `active` / `admin` later by a system admin or an internal
+/// approval action.
 abstract final class AppRoles {
   static const String admin = 'admin';
   static const String qualityManager = 'quality_manager';
   static const String lab = 'lab';
   static const String viewer = 'viewer';
+  static const String trialOwner = 'trial_owner';
 
-  static const List<String> all = [admin, qualityManager, lab, viewer];
+  static const List<String> all = [
+    admin,
+    qualityManager,
+    lab,
+    viewer,
+    trialOwner,
+  ];
+
+  /// Roles that own/manage a company (full or trial).
+  static const List<String> owners = [admin, trialOwner];
 
   static bool isValid(String? role) => role != null && all.contains(role);
 
@@ -113,17 +133,47 @@ abstract final class AppRoles {
     qualityManager => AppText.t('مدير الجودة', 'Quality manager'),
     lab => AppText.t('اخصائي جودة', 'Quality specialist'),
     viewer => AppText.t('اطّلاع فقط', 'Viewer'),
+    trialOwner => AppText.t('مالك تجريبي', 'Trial owner'),
     _ => role,
   };
 }
 
-/// Member states.
-abstract final class MemberStatus {
-  static const String invited = 'invited';
+/// Organization lifecycle states (plan: single-company policy §4).
+abstract final class OrgStatus {
+  static const String trial = 'trial';
   static const String active = 'active';
   static const String disabled = 'disabled';
 
-  static const List<String> all = [invited, active, disabled];
+  static const List<String> all = [trial, active, disabled];
+}
+
+/// Member states.
+///
+/// Flow: `invited` (manager sent the invite) → member signs in with a password
+/// or Google → `pending_activation` → manager activates → `active`.
+/// `disabled` is terminal (kept as audit history, never hard-deleted).
+/// `no_company` is not stored: it is the absence of `organizationId`.
+abstract final class MemberStatus {
+  static const String invited = 'invited';
+  static const String pendingActivation = 'pending_activation';
+  static const String active = 'active';
+  static const String disabled = 'disabled';
+
+  static const List<String> all = [
+    invited,
+    pendingActivation,
+    active,
+    disabled,
+  ];
+
+  /// Blocks creating a new company while bound to a current one (plan §2):
+  /// `invited`, `pending_activation` or `active` with a non-null
+  /// `organizationId`. Sign-out alone never clears this; only leaving does.
+  static bool blocksNewCompany(String? status) =>
+      status == invited || status == pendingActivation || status == active;
+
+  /// May enter the company dashboard / open the company database / sync.
+  static bool mayEnter(String? status) => status == active;
 }
 
 /// Explicit permission list per role — no wildcard entries (plan §7.1).
@@ -169,6 +219,7 @@ const Map<String, Set<Permission>> _rolePermissions = {
     Permission.reportsRead,
     Permission.reportsCreate,
     Permission.reportsExport,
+    Permission.devicesRegister,
     Permission.auditRead,
   },
   AppRoles.lab: {
@@ -188,6 +239,23 @@ const Map<String, Set<Permission>> _rolePermissions = {
     Permission.labResultsRead,
     Permission.qcRead,
     Permission.reportsRead,
+    Permission.devicesRegister,
+  },
+  // Trial owner (plan §4): demo data + checks/analytics + inventory/quality,
+  // but none of the sensitive operations (no users.*, no org.update, no
+  // qc.approve/reject, no reports.export, no audit.read, no devices.update).
+  AppRoles.trialOwner: {
+    Permission.orgRead,
+    Permission.samplesRead,
+    Permission.samplesCreate,
+    Permission.samplesUpdate,
+    Permission.labResultsRead,
+    Permission.labResultsCreate,
+    Permission.labResultsUpdate,
+    Permission.qcRead,
+    Permission.qcWrite,
+    Permission.reportsRead,
+    Permission.reportsCreate,
     Permission.devicesRegister,
   },
 };
@@ -221,10 +289,25 @@ String normalizeRole(String? role) => switch (role) {
   _ => AppRoles.viewer,
 };
 
-/// Same idea for `status`; anything unknown is treated as `invited` (never
-/// active), which keeps a damaged row from unlocking the UI.
+/// Same idea for `status`; anything unknown or missing on an account that is
+/// bound to an organization is treated as `pending_activation` (never active),
+/// so a legacy row without a status waits for activation instead of entering
+/// the dashboard automatically (plan §9). `AppSession.fromJson` still degrades
+/// a corrupt local cache to `invited` via [normalizeCachedStatus].
 String normalizeMemberStatus(String? status) => switch (status) {
+      MemberStatus.active => MemberStatus.active,
+      MemberStatus.disabled => MemberStatus.disabled,
+      MemberStatus.pendingActivation => MemberStatus.pendingActivation,
+      MemberStatus.invited => MemberStatus.invited,
+      // Legacy: empty/missing status on a bound account ⇒ pending activation.
+      _ => MemberStatus.pendingActivation,
+    };
+
+/// Corrupt local cache variant: degrades to `invited` (never active).
+String normalizeCachedStatus(String? status) => switch (status) {
   MemberStatus.active => MemberStatus.active,
   MemberStatus.disabled => MemberStatus.disabled,
+  MemberStatus.pendingActivation => MemberStatus.pendingActivation,
+  MemberStatus.invited => MemberStatus.invited,
   _ => MemberStatus.invited,
 };

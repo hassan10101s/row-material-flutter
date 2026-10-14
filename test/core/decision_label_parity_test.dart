@@ -303,28 +303,25 @@ void main() {
       expect(grouped['Wheat']![1]['supplier'], 'S3');
     });
 
-    // RULE (documented defect): a row with no material_name is bucketed under
-    // the literal string "Unknown", and a row with a material name that is the
-    // empty string is bucketed under "" — the two are NOT merged, so one report
-    // section shows an "Unknown" bucket next to an invisible empty-titled one.
-    // SILENT-WRONG VALUE PREVENTED: unique_materials over-counts by treating
-    // missing and blank as two different materials.
-    test('missing and blank material names become distinct buckets', () {
+    // RULE (fixed): rows with no usable material_name — null, empty or
+    // whitespace-only — share one localized "unknown" bucket instead of
+    // splitting into "Unknown" + invisible blank buckets that over-count
+    // unique_materials.
+    test('missing and blank material names share one unknown bucket', () {
       final grouped = agg.groupByMaterial([
         row(null, 'S1'),
         row('', 'S2'),
         row('   ', 'S3'),
         row('Wheat', 'S4'),
       ]);
-      expect(grouped.keys.toSet(), {'Unknown', '', '   ', 'Wheat'},
-          reason: 'PINNED DEFECT: null -> "Unknown" but blank stays blank');
+      expect(grouped.keys.toSet(), {'غير معروف', 'Wheat'});
       expect(agg.groupByMaterial([row(null, 'S1')]).length, 1);
       final totals = agg.aggregateTotals([
         row(null, 'S1'),
         row('', 'S2'),
       ]);
-      expect(totals['unique_materials'], 2,
-          reason: 'PINNED DEFECT: 2 materials for 2 rows that name none');
+      expect(totals['unique_materials'], 1,
+          reason: 'nameless rows count as one unknown material');
     });
 
     // RULE: suppliers are counted as a SET of trimmed names; blank and

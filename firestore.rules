@@ -55,12 +55,18 @@ service cloud.firestore {
         'qc.read','qc.write','qc.approve','qc.reject',
         'reports.read','reports.create','reports.export',
         'devices.read','devices.register','devices.update','audit.read'
+      ] : role == 'trial_owner' ? [
+        'org.read',
+        'samples.read','samples.create','samples.update',
+        'lab_results.read','lab_results.create','lab_results.update',
+        'qc.read','qc.write',
+        'reports.read','reports.create','devices.register'
       ] : role == 'quality_manager' ? [
         'org.read','users.read',
         'samples.read','samples.create','samples.update',
         'lab_results.read','lab_results.create','lab_results.update',
         'qc.read','qc.write','qc.approve','qc.reject',
-        'reports.read','reports.create','reports.export','audit.read'
+        'reports.read','reports.create','reports.export','devices.register','audit.read'
       ] : role == 'lab' ? [
         'org.read',
         'samples.read','samples.create','samples.update',
@@ -88,6 +94,33 @@ service cloud.firestore {
     function canManage(uid) {
       return userDoc(uid) != null
         && can(userDoc(uid).data.organizationId, 'users.update');
+    }
+
+    function hasNoCompany(uid) {
+      return userDoc(uid) == null
+        || !userDoc(uid).data.keys().hasAll(['organizationId']);
+    }
+
+    function blocksNewCompany(uid) {
+      return userDoc(uid) != null
+        && userDoc(uid).data.keys().hasAll(['organizationId'])
+        && userDoc(uid).data.status in ['invited','pending_activation','active'];
+    }
+
+    // Audit actions the clients may ever write. Anything else (e.g. a forged
+    // `MEMBER_ACTIVATED`) is rejected: the log is append-only *and*
+    // allow-listed, otherwise any active member could fake an activation entry.
+    function validAuditAction(action) {
+      return action in [
+        'ORGANIZATION_CREATED','ORG_UPDATED',
+        'MEMBER_INVITED','MEMBER_INVITE_RESENT','MEMBER_ROLE_CHANGED',
+        'MEMBER_ACTIVATED','MEMBER_DISABLED','MEMBER_REMOVED','MEMBER_LEFT',
+        'INVITE_CLAIMED',
+        'DENIED_ENTRY',
+        'SAMPLE_CREATED','SAMPLE_UPDATED','SAMPLE_DELETED',
+        'QC_APPROVED','QC_REJECTED',
+        'LAB_RESULT_SAVED','SYNC_CONFLICT','BACKUP_RESTORED',
+        'SETTINGS_UPDATED','DEVICE_REGISTERED'];
     }
 
     // ── sync envelope invariants (plan §6.1) ─────────────────────────────
@@ -149,17 +182,20 @@ service cloud.firestore {
             && request.resource.data.email.lower() == request.auth.token.email.lower()
             && request.resource.data.organizationId is string
             && request.resource.data.organizationId.size() > 3
-            && request.resource.data.role in ['admin','quality_manager','lab','viewer']
+            && request.resource.data.role in ['admin','quality_manager','lab','viewer','trial_owner']
+            && request.resource.data.status in ['invited','pending_activation','active']
             && request.resource.data.version == 1;
       }
 
       // (a) claimed invitation: the invite document decides the organization,
-      // the role and the member id - the client cannot choose them.
+      // the role and the member id - the client cannot choose them. The member
+      // signed in (password or Google) and now waits for manager activation,
+      // so the profile lands in `pending_activation`, never `active`.
       function claimedInvite() {
         let orgId = request.resource.data.organizationId;
         let invite = get(/databases/$(database)/documents/organizations/$(orgId)
                           /invites/$(request.resource.data.inviteKey));
-        return request.resource.data.status == 'invited'
+        return request.resource.data.status == 'pending_activation'
           && invite != null
           && invite.data.email.lower() == request.auth.token.email.lower()
           && invite.data.role == request.resource.data.role
@@ -169,13 +205,19 @@ service cloud.firestore {
       // (b) organization founder: the only way to become `active` is to own an
       // organization that already exists and lists this uid as `ownerUid`.
       // `get()` returns null for a missing document, so a self-declared
-      // organization that does not exist yet fails here.
+      // organization that does not exist yet fails here. A trial company
+      // (`status == 'trial'`) yields `trial_owner`; a full company yields
+      // `admin`. A later approval action promotes trial → active / owner.
       function foundedOrganization() {
         let orgId = request.resource.data.organizationId;
+        let org = get(/databases/$(database)/documents/organizations/$(orgId));
         return request.resource.data.status == 'active'
-          && request.resource.data.role == 'admin'
-          && get(/databases/$(database)/documents/organizations/$(orgId))
-               .data.ownerUid == request.auth.uid;
+          && org != null
+          && org.data.ownerUid == request.auth.uid
+          && ((org.data.status == 'trial'
+                && request.resource.data.role == 'trial_owner')
+              || (org.data.status == 'active'
+                && request.resource.data.role == 'admin'));
       }
 
       allow get: if signedIn() && request.auth.uid == uid;
@@ -195,30 +237,52 @@ service cloud.firestore {
               && request.resource.data.status == resource.data.status
               && request.resource.data.memberId == resource.data.memberId
               && request.resource.data.email == resource.data.email)
-         || (canManage(uid)
-              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                   'role','status','displayName','activatedAt','organizationId',
-                   'updatedBy','updatedAt','version'])
-              && request.resource.data.email == resource.data.email
-              && request.resource.data.memberId == resource.data.memberId
-              && request.resource.data.version == resource.data.version + 1
-              // The organization binding may only be dropped (disabling a
-              // member), never swapped for another organization.
-              && (!request.resource.data.keys().hasAll(['organizationId'])
-                    || request.resource.data.organizationId == resource.data.organizationId)))
-         || ( // Self-service departure: the member drops their own organization
-              // binding. `organizationId` may only disappear, never change.
-              request.auth.uid == uid
-              && resource.data.status in ['invited','active']
-              && request.resource.data.status == 'disabled'
-              && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                   'status','organizationId','updatedBy','updatedAt','version'])
-              && !request.resource.data.keys().hasAll(['organizationId'])
-              && request.resource.data.role == resource.data.role
-              && request.resource.data.email == resource.data.email
-              && request.resource.data.memberId == resource.data.memberId
-              && request.resource.data.updatedBy == request.auth.uid
-              && request.resource.data.version == resource.data.version + 1));
+          || (canManage(uid)
+               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                    'role','status','displayName','activatedAt','activatedBy',
+                    'organizationId','updatedBy','updatedAt','version'])
+               && request.resource.data.email == resource.data.email
+               && request.resource.data.memberId == resource.data.memberId
+               && request.resource.data.version == resource.data.version + 1
+               // Activation only moves invited/pending_activation → active, and
+               // only the manager path (users.update) may do it: the self
+               // branch below can only ever go to `disabled`.
+               && (request.resource.data.status == resource.data.status
+                   || (resource.data.status in ['invited','pending_activation']
+                       && request.resource.data.status == 'active'))
+               // The organization binding may only be dropped (disabling a
+               // member), never swapped for another organization.
+               && (!request.resource.data.keys().hasAll(['organizationId'])
+                     || request.resource.data.organizationId == resource.data.organizationId))
+          || ( // Manager disable: an active/pending/invited profile moves to
+               // `disabled` and drops the organization binding so the account
+               // returns to `no_company`. Gated on `users.disable` (not the
+               // `canManage`/users.update gate above), same tombstone shape
+               // as the self-leave branch.
+               can(userDoc(uid).data.organizationId, 'users.disable')
+               && resource.data.status in ['invited','pending_activation','active']
+               && request.resource.data.status == 'disabled'
+               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                    'role','status','displayName','activatedAt','activatedBy',
+                    'organizationId','memberId','updatedBy','updatedAt','version'])
+               && request.resource.data.email == resource.data.email
+               && request.resource.data.role == resource.data.role
+               && !request.resource.data.keys().hasAll(['organizationId'])
+               && !request.resource.data.keys().hasAll(['memberId'])
+               && request.resource.data.version == resource.data.version + 1)
+          || ( // Self-service departure: the member drops their own organization
+               // binding. `organizationId` may only disappear, never change.
+               request.auth.uid == uid
+               && resource.data.status in ['invited','pending_activation','active']
+               && request.resource.data.status == 'disabled'
+               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+                    'status','organizationId','memberId','updatedBy','updatedAt','version'])
+               && !request.resource.data.keys().hasAll(['organizationId'])
+               && !request.resource.data.keys().hasAll(['memberId'])
+               && request.resource.data.role == resource.data.role
+               && request.resource.data.email == resource.data.email
+               && request.resource.data.updatedBy == request.auth.uid
+               && request.resource.data.version == resource.data.version + 1));
       allow delete: if false;
     }
 
@@ -227,12 +291,19 @@ service cloud.firestore {
 
       // The organization id is derived from the owner uid, so creation is
       // idempotent; a second attempt hits `update` (owner-only) or is denied.
-      // `activeInOrg`: an invited/disabled member reads nothing.
+      // `activeInOrg`: an invited/pending/disabled member reads nothing.
+      // Single-company policy (§2): a bound account
+      // (invited/pending_activation/active) cannot create a second company —
+      //sign-out alone never unblocks this, only leaving does. New companies
+      // start as `trial` (trial_owner); promotion to `active` is a separate
+      // approval action.
       allow get: if activeInOrg(orgId)
         || (signedIn() && resource.data.ownerUid == request.auth.uid);
       allow list: if false;
       allow create: if signedIn()
+        && verifiedEmail()
         && !exists(/databases/$(database)/documents/organizations/$(orgId))
+        && !blocksNewCompany(request.auth.uid)
         && request.resource.data.keys().hasOnly([
              'name','ownerUid','status','createdAt','createdBy','schemaVersion',
              'updatedBy','updatedAt','version'])
@@ -240,12 +311,30 @@ service cloud.firestore {
         && request.resource.data.name.size() > 1
         && request.resource.data.name.size() <= 120
         && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.status == 'active'
+        && request.resource.data.status in ['trial','active']
         && request.resource.data.version == 1;
-      allow update: if can(orgId, 'org.update')
+      // Trial → active promotion keeps the owner pinned; only the name /
+      // schema / status move, and only an active admin of the org may do it.
+      // A trial founder (`trial_owner`, no `org.update`) can also promote
+      // their *own* trial company once: otherwise a trial company is stuck
+      // forever because nobody holding `org.update` exists yet.
+      allow update: if (can(orgId, 'org.update')
         && request.resource.data.ownerUid == resource.data.ownerUid
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['name','schemaVersion','updatedBy','updatedAt','version']);
+             .hasOnly(['name','status','schemaVersion','updatedBy','updatedAt','version'])
+        && request.resource.data.status in ['trial','active']
+        && (request.resource.data.status == resource.data.status
+            || (resource.data.status == 'trial'
+                && request.resource.data.status == 'active')))
+        || (verifiedEmail()
+        && resource.data.ownerUid == request.auth.uid
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && resource.data.status == 'trial'
+        && request.resource.data.status == 'active'
+        && request.resource.data.name == resource.data.name
+        && request.resource.data.schemaVersion == resource.data.schemaVersion
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status','updatedBy','updatedAt','version']));
       allow delete: if false;
 
       // Heartbeat written by the sync engine.
@@ -266,11 +355,12 @@ service cloud.firestore {
       // Invitations are readable by the invited e-mail only; the admin sees
       // them through `list`.
       //
-      // The e-mail check alone is not a boundary: the document id is
-      // `inviteKey(email)`, which is derived from the e-mail, so *any*
-      // authenticated member of the project could `get()` the invite of any
-      // organization and read its roster-in-progress. Admins of the owning org
-      // are also allowed, since they need to resolve one by key.
+      // The document id is `inviteKey(email)` (derived, guessable), but the
+      // `get` gate still checks the *stored* e-mail against the token e-mail,
+      // and the org id itself (`org_…`) is unguessable — so enumerating
+      // another org's roster would need both its org id and a matching token
+      // e-mail. Cross-org reads stay denied (emulator: invite confidentiality).
+      // Admins of the owning org are also allowed, to resolve one by key.
       match /invites/{inviteKey} {
         allow get: if can(orgId, 'users.read')
           || (verifiedEmail()
@@ -284,7 +374,7 @@ service cloud.firestore {
           && request.resource.data.email is string
           && request.resource.data.email.size() > 3
           && request.resource.data.email == request.resource.data.email.lower()
-          && request.resource.data.role in ['admin','quality_manager','lab','viewer']
+          && request.resource.data.role in ['admin','quality_manager','lab','viewer','trial_owner']
           && request.resource.data.status == 'invited'
           && request.resource.data.memberId is string
           && request.resource.data.memberId.size() > 6
@@ -311,8 +401,8 @@ service cloud.firestore {
           return request.resource.data.keys().hasAll([
                    'uid','email','role','status','version','updatedBy','updatedAt','createdAt'])
               && request.resource.data.email is string
-              && request.resource.data.role in ['admin','quality_manager','lab','viewer']
-              && request.resource.data.status in ['invited','active','disabled']
+              && request.resource.data.role in ['admin','quality_manager','lab','viewer','trial_owner']
+              && request.resource.data.status in ['invited','pending_activation','active','disabled']
               && request.resource.data.version == 1;
         }
 
@@ -323,35 +413,65 @@ service cloud.firestore {
             && request.resource.data.status == 'invited';
         }
 
-        // Organization founder writing its own (active admin) member document.
+        // Organization founder writing its own member document: an active
+        // `admin` for a full company, an active `trial_owner` for a trial.
         function founderMember() {
+          let org = get(/databases/$(database)/documents/organizations/$(orgId));
           return request.resource.data.uid == request.auth.uid
             && request.resource.data.status == 'active'
-            && request.resource.data.role == 'admin'
-            && get(/databases/$(database)/documents/organizations/$(orgId))
-                 .data.ownerUid == request.auth.uid;
+            && org != null
+            && org.data.ownerUid == request.auth.uid
+            && ((org.data.status == 'trial'
+                  && request.resource.data.role == 'trial_owner')
+                || (org.data.status == 'active'
+                  && request.resource.data.role == 'admin'));
         }
 
         allow get, list: if activeInOrg(orgId);
         allow create: if invitedByAdmin() || founderMember();
         allow update: if (
-              // Admin: role / status / display name only, version must bump.
+              // Manager activation (plan §6): role / status / activation audit
+              // only, version bumps by exactly one in the same batch as
+              // `users/{uid}`. Activation only moves invited/pending → active;
+              // a member can never activate itself (see the claim branch: it
+              // cannot touch `status` at all). Refreshing an invite
+              // (resend: version/updated bump while `invited`) is also here.
               can(orgId, 'users.update')
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                   'role','status','displayName','activatedAt','updatedBy','updatedAt',
-                   'version','deletedAt'])
+                   'role','status','displayName','activatedAt','activatedBy',
+                   'updatedBy','updatedAt','version','deletedAt',
+                   'invitedBy','invitedByName','invitedAt'])
               && request.resource.data.email == resource.data.email
               && request.resource.data.version == resource.data.version + 1
+              && (request.resource.data.status == resource.data.status
+                  || (resource.data.status in ['invited','pending_activation']
+                      && request.resource.data.status == 'active'))
             ) || (
-              // Invitee claiming their own member document (status stays
-              // `invited` until an admin activates it).
+              // Manager disable/remove (tombstone, never delete): an
+              // `invited`/`pending_activation`/`active` row moves to
+              // `disabled`. Gated on `users.disable`, never on `users.update`,
+              // so a role with only `users.update` cannot revoke access.
+              can(orgId, 'users.disable')
+              && resource.data.status in ['invited','pending_activation','active']
+              && request.resource.data.status == 'disabled'
+              && request.resource.data.diff(resource.data).affectedKeys()
+                   .hasOnly(['status','deletedAt','updatedBy','updatedAt','version'])
+              && request.resource.data.uid == resource.data.uid
+              && request.resource.data.role == resource.data.role
+              && request.resource.data.email == resource.data.email
+              && request.resource.data.updatedBy == request.auth.uid
+              && request.resource.data.version == resource.data.version + 1)
+            || (
+              // Invitee claiming their own member document: binds the uid, the
+              // status moves invited → pending_activation (waiting for manager
+              // activation) and nothing else changes.
               verifiedEmail()
               && resource.data.status == 'invited'
               && resource.data.email is string
               && resource.data.email.lower() == request.auth.token.email.lower()
               && request.resource.data.diff(resource.data).affectedKeys()
-                   .hasOnly(['uid','updatedBy','updatedAt','version'])
-              && request.resource.data.status == resource.data.status
+                   .hasOnly(['uid','status','updatedBy','updatedAt','version'])
+              && request.resource.data.status == 'pending_activation'
               && request.resource.data.role == resource.data.role
               && request.resource.data.uid == request.auth.uid
               && request.resource.data.updatedBy == request.auth.uid
@@ -364,7 +484,7 @@ service cloud.firestore {
               // role, the e-mail or the member id, so leaving can never be used
               // to escalate.
               verifiedEmail()
-              && resource.data.status in ['invited','active']
+              && resource.data.status in ['invited','pending_activation','active']
               && resource.data.uid == request.auth.uid
               && request.resource.data.status == 'disabled'
               && request.resource.data.diff(resource.data).affectedKeys()
@@ -411,6 +531,75 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Comprehensive sync (plan §7): inventory / ledger / equipment /
+      // worksheets / reference. Same envelope + version-bump contract as
+      // the core collections; append-only ledgers reject update/delete.
+      match /inventoryItems/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /inventoryTransactions/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      match /consumption/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      match /stockAdjustments/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      match /equipment/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /equipmentEvents/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /worksheets/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /referenceMaterials/{docId} {
+        allow read: if can(orgId, 'samples.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      // Product batch samples (محضر التشغيلة rows): source data only.
+      // Same envelope + version-bump contract as labResults; derived
+      // artifacts (PDF/HTML) are never stored here — rebuilt on-device.
+      match /productBatchSamples/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
       // Device inventory: a member may only write its own document, admins may
       // refresh or revoke any of them.
       match /devices/{deviceId} {
@@ -426,8 +615,14 @@ service cloud.firestore {
 
         // `activeInOrg`, not `inOrg`: an invited/disabled member must not be
         // able to list every member's uid, e-mail, platform and role.
-        allow read: if can(orgId, 'devices.read') || activeInOrg(orgId);
+        // `list` needs `devices.read` (admins); `get` additionally allows the
+        // owner to read their own document (heartbeat/register needs it).
+        allow get: if can(orgId, 'devices.read')
+          || (activeInOrg(orgId)
+              && resource.data.uid == request.auth.uid);
+        allow list: if can(orgId, 'devices.read');
         allow create: if activeInOrg(orgId)
+          && can(orgId, 'devices.register')
           && deviceKeysOk()
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.version == 1;
@@ -441,10 +636,23 @@ service cloud.firestore {
         // legitimately changes it.
         allow update: if (resource.data.uid == request.auth.uid
                           && request.resource.data.uid == resource.data.uid
-                          && deviceKeysOk())
+                          && deviceKeysOk()
+                          // Owner heartbeat/register must never change the
+                          // revocation state: self sign-out goes through the
+                          // same branch but only `active → revoked`, never
+                          // `revoked → active` (no self un-revoke).
+                          && (request.resource.data.get('status', 'active')
+                                == resource.data.get('status', 'active')
+                              || (resource.data.get('status', 'active') == 'active'
+                                  && request.resource.data.get('status', 'active') == 'revoked')))
                       || (can(orgId, 'devices.update')
                           && deviceKeysOk()
-                          && request.resource.data.uid in [resource.data.uid, '']);
+                          && request.resource.data.uid in [resource.data.uid, '']
+                          // Admins may revoke but never un-revoke either.
+                          && (request.resource.data.get('status', 'active')
+                                == resource.data.get('status', 'active')
+                              || (resource.data.get('status', 'active') != 'revoked'
+                                  && request.resource.data.get('status', 'active') == 'revoked')));
         allow delete: if false;
       }
 
@@ -457,8 +665,7 @@ service cloud.firestore {
           && request.resource.data.userId == request.auth.uid
           && request.resource.data.organizationId == orgId
           && request.resource.data.action is string
-          && request.resource.data.action.size() > 0
-          && request.resource.data.action.size() <= 64
+          && validAuditAction(request.resource.data.action)
           && request.resource.data.version == 1;
         allow update, delete: if false; // append-only
       }

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
 import '../database/db_trace.dart';
 import 'entity_registry.dart';
 import 'remote/remote_data_source.dart';
@@ -40,6 +42,9 @@ class ConflictResolver {
         localPayload['version'] = remoteVersion + 1;
         localPayload['updatedBy'] = session.uid;
         localPayload['deviceId'] = session.deviceId;
+        // Parked before the derived-artifact exclusion: strip the stored HTML
+        // or a legitimately large row re-trips the oversized guard forever.
+        localPayload.remove('reportHtml');
         final db = await queue.dbHelper.database;
         // `sync_conflicts` has no `local_ref` column (plan §6.4), so the local
         // row is located from the parked payload: its `localId` first, then the
@@ -80,9 +85,16 @@ class ConflictResolver {
   }
 
   /// Replace the local row with the remote document.
+  ///
+  /// The row is located by natural key (never by the document's `localId`,
+  /// which is the origin device's row id), and the remote foreign keys are
+  /// remapped to this device before writing — the old code updated
+  /// `id = localId` with raw ids and died on FK (`created_by: 'local_1'`,
+  /// unknown `material_id`) or overwrote an unrelated local row.
   Future<void> keepRemote(
     int conflictId, {
     required String organizationId,
+    required AppSessionLike session,
   }) async {
     await queue.resolveConflict(
       conflictId,
@@ -100,19 +112,47 @@ class ConflictResolver {
         final db = await queue.dbHelper.database;
         final columns = await availableColumns(db, entity.localTable);
         await tracedTransaction(db, 'conflicts.keepRemote', (txn) async {
-          final localId = document['localId'];
-          if (localId is num) {
-            final row = remoteToLocalRow(entity, document, organizationId: organizationId)
-              ..['sync_state'] = 'synced'
-              ..['remote_version'] = document['version'];
+          final localRef = await findLocalRef(
+            txn,
+            entity,
+            '${conflict['entity_id']}',
+            document,
+            localDeviceId: session.deviceId,
+          );
+          final row = remoteToLocalRow(entity, document, organizationId: organizationId)
+            ..['sync_state'] = 'synced'
+            ..['remote_version'] = document['version'];
+          await resolveRemoteRowRefs(
+            txn,
+            entity,
+            row,
+            document,
+            ensureProductSentinel:
+                (exec) => queue.dbHelper.ensureProductSentinelMaterialId(exec),
+          );
+          if (localRef == null) {
+            // No local row (deleted locally, or never pulled): insert instead
+            // of updating nothing. Fresh id for natural-key tables so the
+            // origin id cannot replace an unrelated row.
+            if (entity.naturalKeyIdentity) row.remove('id');
+            await txn.insert(
+              entity.localTable,
+              {
+                for (final entry in row.entries)
+                  if (columns.contains(entry.key)) entry.key: entry.value,
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          } else {
             await txn.update(
               entity.localTable,
               {
                 for (final entry in row.entries)
-                  if (entry.key != 'id' && columns.contains(entry.key)) entry.key: entry.value,
+                  if (entry.key != 'id' && columns.contains(entry.key))
+                    entry.key: entry.value,
               },
               where: 'id = ?',
-              whereArgs: [localId.toInt()],
+              whereArgs: [localRef],
             );
           }
           await txn.delete(

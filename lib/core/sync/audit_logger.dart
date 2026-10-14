@@ -129,15 +129,28 @@ class AuditLogger {
   }
 
   /// Never write secrets, tokens or password hashes to the audit trail.
+  /// Case-insensitive substring match is applied in [_redact] so
+  /// `passwordHash`, `refreshToken`, `privateKey`, `secretKey`, `mnemonic`,
+  /// `authorization`, `cookie` variants are covered too.
   static const Set<String> _sensitiveKeys = {
     'password',
     'password_hash',
+    'passwordHash',
     'token',
     'id_token',
     'idToken',
+    'refreshToken',
+    'refresh_token',
     'secret',
+    'secretKey',
+    'secret_key',
+    'privateKey',
+    'private_key',
     'apiKey',
     'api_key',
+    'authorization',
+    'cookie',
+    'mnemonic',
   };
 
   /// Deep redact + leave sanitization to [SyncCodec]: nested maps/lists are
@@ -148,7 +161,8 @@ class AuditLogger {
     final out = <String, dynamic>{};
     for (final entry in details.entries) {
       final key = entry.key;
-      if (_sensitiveKeys.contains(key)) {
+      final lower = key.toLowerCase();
+      if (_sensitiveKeys.any((s) => lower.contains(s.toLowerCase()))) {
         out[key] = '***';
         continue;
       }

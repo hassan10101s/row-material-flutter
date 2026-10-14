@@ -9,12 +9,15 @@ import '../../../../di/service_locator.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_card.dart';
+import '../../../members/domain/member_repository.dart';
 
 /// `awaitingActivation` destination of the auth state machine (plan §8.3 step 4).
 ///
-/// The organization database **is** already open here, so the device is ready
-/// for offline work, but `status != active` means every write is refused
-/// locally (`AppSession.canWrite == false`) and remotely (Firestore rules).
+/// The organization database is **not** opened here and the sync cycle never
+/// starts (plan §8): `status != active` means every write is refused locally
+/// (`AppSession.canWrite == false`) and remotely (Firestore rules), and no
+/// company table is readable before the manager activates the account.
 class WaitingActivationScreen extends StatelessWidget {
   const WaitingActivationScreen({super.key});
 
@@ -23,29 +26,43 @@ class WaitingActivationScreen extends StatelessWidget {
     final gate = getIt<AuthGate>();
     final session = gate.session;
     final status = session.isDisabled
-        ? AppText.t('حسابك معطّل من قبل مدير المؤسسة.',
-            'Your account was disabled by the organization admin.')
-        : AppText.t('حسابك في انتظار التفعيل من مدير المؤسسة.',
-            'Your account is waiting for activation by the organization admin.');
+        ? AppText.t(
+            'حسابك معطّل من قبل مدير الشركة.',
+            'Your account was disabled by the company admin.',
+          )
+        : session.isPendingActivation
+            ? AppText.t(
+                'سجّلت دخولك بنجاح. حسابك في انتظار التفعيل من مدير الشركة.',
+                'You signed in successfully. Your account is waiting for activation by the company admin.',
+              )
+            : AppText.t(
+                'حسابك في انتظار التفعيل من مدير الشركة.',
+                'Your account is waiting for activation by the company admin.',
+              );
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(AppSpacing.page),
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: 460.w),
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(28),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Icon(Icons.hourglass_top, size: 44.r, color: AppColors.warning),
+            child: AppCard(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                    Icon(
+                      Icons.hourglass_top,
+                      size: 44.r,
+                      color: AppColors.warning,
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     Text(
                       AppText.t(
-                          'الحساب بانتظار التفعيل', 'Account pending activation'),
+                        'الحساب بانتظار التفعيل',
+                        'Account pending activation',
+                      ),
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.headlineSmall,
                     ),
@@ -53,43 +70,54 @@ class WaitingActivationScreen extends StatelessWidget {
                     Text(
                       status,
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 13.spMax,
+                      ),
                     ),
                     const SizedBox(height: AppSpacing.md),
                     Container(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(AppSpacing.md),
                       decoration: BoxDecoration(
                         color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(12.r),
+                        borderRadius: BorderRadius.circular(AppRadii.md),
                       ),
                       child: Column(
                         children: [
                           _Row(
-                              label: AppText.t('البريد', 'Email'),
-                              value: session.email),
+                            label: AppText.t('البريد', 'Email'),
+                            value: session.email,
+                          ),
                           _Row(
-                              label: AppText.t('المؤسسة', 'Organization'),
-                              value: session.organizationId),
+                            label: AppText.t('الشركة', 'Company'),
+                            value: session.organizationId,
+                          ),
                           _Row(
-                              label: AppText.t('الدور', 'Role'),
-                              value: AppRoles.label(session.role)),
+                            label: AppText.t('الدور', 'Role'),
+                            value: AppRoles.label(session.role),
+                          ),
                           _Row(
-                              label: AppText.t('الحالة', 'Status'),
-                              value: session.status),
+                            label: AppText.t('الحالة', 'Status'),
+                            value: session.status,
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(height: AppSpacing.md),
                     Text(
                       AppText.t(
-                          'يمكنك قراءة البيانات المحفوظة على هذا الجهاز. الكتابة تبدأ فور تفعيل الحساب من مدير المؤسسة.',
-                          'You can read the data saved on this device. Writing starts once the organization admin activates the account.'),
+                        'لا يمكنك رؤية بيانات الشركة أو الكتابة فيها قبل التفعيل، ولم تبدأ المزامنة بعد.',
+                        'You cannot see or write company data before activation, and sync has not started.',
+                      ),
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12.spMax,
+                      ),
                     ),
                     const SizedBox(height: AppSpacing.lg),
                     AppButton(
-                      label: 'تحديث الحالة',
+                      label: AppText.t('تحديث الحالة', 'Refresh status'),
                       expanded: true,
                       onPressed: () async {
                         await gate.auth.resolveProfile();
@@ -97,17 +125,41 @@ class WaitingActivationScreen extends StatelessWidget {
                       },
                     ),
                     const SizedBox(height: AppSpacing.sm),
-                    TextButton(
+                    AppButton(
+                      label: AppText.t('تسجيل الخروج', 'Sign out'),
                       onPressed: () async {
                         await gate.auth.signOut();
                         gate.updated();
                         if (context.mounted) context.go('/login');
                       },
-                      child: Text(AppText.t('تسجيل الخروج', 'Sign out')),
+                      style: AppButtonStyle.ghost,
+                      expanded: true,
+                    ),
+                    AppButton(
+                      label: AppText.t(
+                        'مغادرة الشركة والعودة',
+                        'Leave the company',
+                      ),
+                      onPressed: () async {
+                        // Leave the pending company so this account returns to
+                        // `no_company` and may create a trial company or join
+                        // with a new invite (plan §3). Best-effort: a failing
+                        // remote leave still signs out locally below.
+                        try {
+                          await getIt<MemberRepository>().leave();
+                        } on Object {
+                          // Remote leave failed (offline, revoked): the local
+                          // sign-out below must still happen.
+                        }
+                        await gate.auth.signOut();
+                        gate.updated();
+                        if (context.mounted) context.go('/login');
+                      },
+                      style: AppButtonStyle.ghost,
+                      expanded: true,
                     ),
                   ],
                 ),
-              ),
             ),
           ),
         ),
@@ -129,7 +181,10 @@ class _Row extends StatelessWidget {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax)),
+          Text(
+            label,
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+          ),
           Flexible(
             child: Text(
               value,

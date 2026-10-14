@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/constants/app_strings.dart';
@@ -27,7 +29,54 @@ class DashboardRepo implements DashboardRepository {
     }
   }
 
+  /// Overlapping `_filtered` reads with identical filters share one query.
+  ///
+  /// `DashboardCubit.load` fires `summary()` and `dashboardBundle()` together
+  /// and both funnel into `_filtered` with the same filter key: without this,
+  /// every dashboard load transferred the full 12-column filtered row set
+  /// across the single FFI isolate twice. Same pattern as
+  /// `SyncEngine._currentFlight`: concurrent callers share the flight, and the
+  /// entry clears on completion so sequential callers (fresh data after a
+  /// write) always re-query. No TTL, no stale data — only overlapping calls
+  /// coalesce.
+  Future<List<Map<String, dynamic>>>? _filteredFlight;
+  String? _filteredFlightKey;
+
   Future<List<Map<String, dynamic>>> _filtered({
+    required String period,
+    String? materialId,
+    String? supplier,
+    String? status,
+  }) {
+    final key = '$period|$materialId|$supplier|$status';
+    final flight = _filteredFlight;
+    if (flight != null && _filteredFlightKey == key) return flight;
+    final next = _filteredQuery(
+      period: period,
+      materialId: materialId,
+      supplier: supplier,
+      status: status,
+    );
+    _filteredFlightKey = key;
+    _filteredFlight = next;
+    unawaited(next.then<void>(
+      (_) {
+        if (identical(_filteredFlight, next)) {
+          _filteredFlight = null;
+          _filteredFlightKey = null;
+        }
+      },
+      onError: (_) {
+        if (identical(_filteredFlight, next)) {
+          _filteredFlight = null;
+          _filteredFlightKey = null;
+        }
+      },
+    ));
+    return next;
+  }
+
+  Future<List<Map<String, dynamic>>> _filteredQuery({
     required String period,
     String? materialId,
     String? supplier,
@@ -36,7 +85,13 @@ class DashboardRepo implements DashboardRepository {
     final db = await _db;
     // Raw-material analytics only: production batches live in the same table
     // (`inspection_kind = 'product'`) and must not pollute material KPIs.
-    final conditions = <String>["inspection_kind = 'raw'"];
+    // Tombstoned rows (soft-deleted for replication) are excluded everywhere:
+    // the ledger hides them via aliveFilter, the dashboard must do the same
+    // or totals stay wrong after a delete.
+    final conditions = <String>[
+      "inspection_kind = 'raw'",
+      'deleted_at IS NULL'
+    ];
     final args = <Object?>[];
     switch (period) {
       case '7d':
@@ -251,33 +306,33 @@ class DashboardRepo implements DashboardRepository {
   }
 
   /// Today / shift KPIs for the top of the dashboard.
+  ///
+  /// Pure SQL: the old version transferred every matching `decision_status`
+  /// across the isolate boundary to count them in Dart. The `CASE` sets mirror
+  /// `_normalizeStatus` exactly (`CONDITIONAL`→approved bucket,
+  /// `PARTIAL`→rejected bucket), and the day predicate stays an exact string
+  /// match — a legacy timestamped `inspection_date` is invisible here by
+  /// design (pinned in tests), same as before.
   @override
   Future<Map<String, dynamic>> todayKpis() async {
     final db = await _db;
     final today = todayIso();
-    var todayCount = 0, todayApproved = 0, todayRejected = 0;
-    final rows = await db.query('inspections',
-        columns: ['decision_status'], where: "inspection_kind = 'raw' AND inspection_date = ?", whereArgs: [today]);
-    for (final r in rows) {
-      todayCount++;
-      switch (_normalizeStatus('${r['decision_status'] ?? ''}')) {
-        case 'APPROVED':
-        case 'CONDITIONAL_APPROVAL':
-          todayApproved++;
-          break;
-        case 'FULL_REJECTION':
-        case 'PARTIAL_REJECTION':
-          todayRejected++;
-          break;
-      }
-    }
-    final totalCount = Sqflite.firstIntValue(
-            await db.rawQuery("SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw'")) ??
-        0;
+    final settled = await Future.wait([
+      db.rawQuery(
+          'SELECT COUNT(*) AS t, '
+          "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
+          "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
+          "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date = ?",
+          [today]),
+      db.rawQuery(
+          "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL"),
+    ]);
+    final day = settled[0].first;
+    final totalCount = Sqflite.firstIntValue(settled[1]) ?? 0;
     return {
-      'today_count': todayCount,
-      'today_approved': todayApproved,
-      'today_rejected': todayRejected,
+      'today_count': _int(day['t']),
+      'today_approved': _int(day['a']),
+      'today_rejected': _int(day['r']),
       'total_count': totalCount,
     };
   }
@@ -502,7 +557,7 @@ class DashboardRepo implements DashboardRepository {
           where: 'active = 1',
           orderBy: 'material_name ASC'),
       db.rawQuery(
-          "SELECT DISTINCT supplier FROM inspections WHERE inspection_kind = 'raw' AND supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC"),
+          "SELECT DISTINCT supplier FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC"),
     ]);
     final matRows = results[0];
     final supRows = results[1];
@@ -684,37 +739,51 @@ class DashboardRepo implements DashboardRepository {
         if (note.isNotEmpty) followUps++;
       }
     }
+    // Four independent reads, one wait instead of four sequential round trips
+    // on the single FFI isolate. Fallbacks preserve the old sequential
+    // semantics exactly (follow-ups fall back to the in-memory count, total to
+    // the filtered length, week average and today rows to zeros).
     // Follow-up note is not projected by _filtered; count it directly.
-    try {
-      final rows = await db.rawQuery(
-          "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND decision_status IN ('CONDITIONAL_APPROVAL','CONDITIONAL') AND COALESCE(follow_up_note,'') <> ''");
-      followUps = _int(rows.first['c']);
-    } catch (_) {}
-    var weekAvg = 0.0;
-    try {
-      // Single GROUP BY instead of 7 per-day COUNT queries.
-      final cutoff = _day(DateTime.now().subtract(const Duration(days: 6)));
-      final rows = await db.rawQuery(
-          'SELECT substr(inspection_date,1,10) AS d, COUNT(*) AS c FROM inspections '
-          "WHERE inspection_kind = 'raw' AND substr(inspection_date,1,10) >= ? GROUP BY d",
-          [cutoff]);
-      if (rows.isNotEmpty) {
-        var sum = 0;
-        for (final r in rows) {
-          sum += _int(r['c']);
-        }
-        weekAvg = sum / 7.0;
-      }
-    } catch (_) {}
-    var total = 0;
-    try {
-      total = Sqflite.firstIntValue(
-              await db.rawQuery("SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw'")) ??
-          filtered.length;
-    } catch (_) {
-      total = filtered.length;
+    final weekCutoff = _day(DateTime.now().subtract(const Duration(days: 6)));
+    final settled = await Future.wait([
+      db
+          .rawQuery(
+              "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND decision_status IN ('CONDITIONAL_APPROVAL','CONDITIONAL') AND COALESCE(follow_up_note,'') <> ''")
+          .then<Object?>((rows) => rows)
+          .catchError((_) => null),
+      db
+          .rawQuery(
+              'SELECT substr(inspection_date,1,10) AS d, COUNT(*) AS c FROM inspections '
+              "WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY d",
+              [weekCutoff])
+          .then<Object?>((rows) => rows)
+          .catchError((_) => null),
+      db
+          .rawQuery(
+              "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL")
+          .then<Object?>((rows) => rows)
+          .catchError((_) => null),
+      _todayRows(db),
+    ]);
+    final followRows = settled[0] as List<Map<String, Object?>>?;
+    if (followRows != null && followRows.isNotEmpty) {
+      followUps = _int(followRows.first['c']);
     }
-    final todayRows = await _todayRows(db);
+    var weekAvg = 0.0;
+    final weekRows = settled[1] as List<Map<String, Object?>>?;
+    if (weekRows != null && weekRows.isNotEmpty) {
+      var sum = 0;
+      for (final r in weekRows) {
+        sum += _int(r['c']);
+      }
+      weekAvg = sum / 7.0;
+    }
+    var total = filtered.length;
+    final totalRows = settled[2] as List<Map<String, Object?>>?;
+    if (totalRows != null && totalRows.isNotEmpty) {
+      total = Sqflite.firstIntValue(totalRows) ?? filtered.length;
+    }
+    final todayRows = settled[3] as List<int>;
     return VolumeKpis(
       today: todayRows[0],
       todayApproved: todayRows[1],
@@ -729,13 +798,18 @@ class DashboardRepo implements DashboardRepository {
   Future<List<int>> _todayRows(Database db) async {
     try {
       final today = _today();
+      // Day range on the plain column instead of `substr(...)=?`: sargable, so
+      // `idx_inspections_kind*` applies, and it matches both `YYYY-MM-DD` and
+      // `YYYY-MM-DDTHH:MM:SS` storage (lexicographic ISO comparison).
+      final tomorrow = _day(
+          DateTime.now().add(const Duration(days: 1)));
       // Single aggregation instead of fetching every row + Dart loop.
       final row = (await db.rawQuery(
           'SELECT COUNT(*) AS t, '
           "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
           "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
-          "FROM inspections WHERE inspection_kind = 'raw' AND substr(inspection_date,1,10) = ?",
-          [today])).first;
+          "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? AND inspection_date < ?",
+          [today, tomorrow])).first;
       return [_int(row['t']), _int(row['a']), _int(row['r'])];
     } catch (_) {
       return [0, 0, 0];
@@ -818,8 +892,9 @@ class DashboardRepo implements DashboardRepository {
     if (!await _hasTable(db, 'lab_sample_tests')) return const LabKpis();
     try {
       final cutoff = _cutoffFor(period);
-      final where =
-          cutoff == null ? null : 'substr(tested_at,1,10) >= ?';
+      // Plain-column range (ISO lexicographic): the old `substr(...)>=?`
+      // defeated `idx_sample_tests_tested` on every dashboard bundle load.
+      final where = cutoff == null ? null : 'tested_at >= ?';
       final args = cutoff == null ? null : [cutoff];
       // Parallel: total + evaluated + low-stock are independent.
       final hasInventory = await _hasTable(db, 'lab_inventory');
@@ -863,10 +938,17 @@ class DashboardRepo implements DashboardRepository {
     if (!await _hasTable(db, 'qc_inspections')) return const QcCheckKpis();
     try {
       final cutoff = _cutoffFor(period);
-      final where =
-          cutoff == null ? "deleted_at IS NULL" : "deleted_at IS NULL AND substr(COALESCE(inspection_date,created_at,''),1,10) >= '$cutoff'";
+      // Bound args (was string-interpolated) + sargable plain-column range:
+      // `substr(COALESCE(...))` defeated `idx_qc_insps_date` and forced a full
+      // scan of every QC inspection on each bundle load.
+      List<Object?> qcArgs = const [];
+      final where = cutoff == null
+          ? "deleted_at IS NULL"
+          : "deleted_at IS NULL AND (inspection_date >= ? OR created_at >= ?)";
+      if (cutoff != null) qcArgs = [cutoff, cutoff];
       final rows = await db.rawQuery(
-          'SELECT result_overall, score_pct, has_nc, critical_nc_count, major_nc_count, minor_nc_count FROM qc_inspections WHERE $where');
+          'SELECT result_overall, score_pct, has_nc, critical_nc_count, major_nc_count, minor_nc_count FROM qc_inspections WHERE $where',
+          qcArgs);
       var pass = 0, cond = 0, fail = 0, pending = 0, hasNc = 0;
       var crit = 0, maj = 0, min = 0, scoreSum = 0.0, scored = 0;
       for (final r in rows) {
@@ -1153,8 +1235,8 @@ FROM lab_inventory''')).first;
       final grouped = await db.rawQuery(
           "SELECT substr(inspection_date,1,7) AS m, COUNT(*) AS t, "
           "SUM(CASE WHEN decision_status='APPROVED' THEN 1 ELSE 0 END) AS a "
-          "FROM inspections WHERE inspection_kind = 'raw' AND substr(inspection_date,1,7) >= ? GROUP BY m",
-          [firstKey]);
+          "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY m",
+          ['$firstKey-01']);
       final byMonth = <String, Map<String, int>>{
         for (final r in grouped)
           '${r['m']}': {

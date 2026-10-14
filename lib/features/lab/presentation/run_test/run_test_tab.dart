@@ -12,9 +12,12 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
+import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_entity_autocomplete.dart';
+import '../../../../design_system/widgets/app_field.dart';
 import '../../../../di/service_locator.dart';
 import '../../core/formula_engine.dart';
+import '../../core/lab_result_format.dart';
 import '../cubit/run_test_cubit.dart';
 import '../cubit/run_test_state.dart';
 
@@ -29,6 +32,7 @@ class RunTestTab extends StatefulWidget {
 
 class _RunTestTabState extends State<RunTestTab> {
   final _resultText = TextEditingController();
+  final _standaloneSample = TextEditingController();
   bool _formulaAuto = true;
 
   Map<String, dynamic>? get _currentUserMap {
@@ -44,6 +48,7 @@ class _RunTestTabState extends State<RunTestTab> {
   @override
   void dispose() {
     _resultText.dispose();
+    _standaloneSample.dispose();
     for (final c in _dynamicControllers.values) {
       c.dispose();
     }
@@ -60,28 +65,27 @@ class _RunTestTabState extends State<RunTestTab> {
       );
       return;
     }
+    final sampleName = state.selectedInspection.isEmpty
+        ? _standaloneSample.text.trim()
+        : state.selectedSampleName;
     if (state.sourceType == 'product' &&
-        (state.productId == null ||
-            state.selectedInspection['id'] == null ||
-            state.selectedSampleName.isEmpty)) {
+        (state.productId == null || sampleName.isEmpty)) {
       AppFeedback.error(
         context,
         AppText.t(
-          'اختر المنتج ومحضر الفحص والعينة أولاً',
-          'Select a product, inspection record and sample first.',
+          'اختر المنتج وأدخل اسم العينة أولاً',
+          'Select a product and enter a sample name first.',
         ),
       );
       return;
     }
     if (state.sourceType == 'raw_material' &&
-        (state.rawMaterialId == null ||
-            state.selectedInspection['id'] == null ||
-            state.selectedSampleName.isEmpty)) {
+        (state.rawMaterialId == null || sampleName.isEmpty)) {
       AppFeedback.error(
         context,
         AppText.t(
-          'اختر الخام ومحضر الفحص والعينة أولاً',
-          'Select a raw material, inspection record and sample first.',
+          'اختر الخامة وأدخل اسم العينة أولاً',
+          'Select a raw material and enter a sample name first.',
         ),
       );
       return;
@@ -110,7 +114,7 @@ class _RunTestTabState extends State<RunTestTab> {
       final result = await context.read<RunTestCubit>().run(
         // Both paths are record-driven: the record's selected sample is
         // used (the caller may still pass an explicit override).
-        sampleName: '',
+        sampleName: sampleName,
         resultText: resultText,
         dynamicValues: dynamicValues,
         manualResult: formulaEnabled && !autoOk,
@@ -137,7 +141,7 @@ class _RunTestTabState extends State<RunTestTab> {
 
     final lines = <String>[
       '${AppText.t('تم حفظ الاختبار', 'Test saved')} — '
-          '${test['result_text'] ?? '-'} $unit',
+          '${formatLabResult(test['result_text'])} $unit',
       '${AppText.t('العينة', 'Sample')}: ${test['sample_name'] ?? ''}'
           ' — ${test['source_name'] ?? ''}',
       if (consumption.isNotEmpty)
@@ -199,7 +203,10 @@ class _RunTestTabState extends State<RunTestTab> {
         'missing': missing,
         'error': missing.isEmpty
             ? null
-            : 'دلائل المعادلة ناقصة: ${missing.join(', ')}',
+            : AppText.t(
+                'دلائل المعادلة ناقصة: ${missing.join(', ')}',
+                'Formula variables are missing: ${missing.join(', ')}',
+              ),
       };
     } on ValidationError catch (e) {
       return {
@@ -220,6 +227,19 @@ class _RunTestTabState extends State<RunTestTab> {
 
   final Map<String, TextEditingController> _dynamicControllers = {};
   final Map<String, String> _listSelections = {};
+
+  /// Clears per-analysis UI state (formula mode, list picks, dynamic inputs)
+  /// so switching — or clearing — the analysis never leaks stale values.
+  void _resetDynamicInputs() {
+    setState(() {
+      _formulaAuto = true;
+      _listSelections.clear();
+      for (final c in _dynamicControllers.values) {
+        c.dispose();
+      }
+      _dynamicControllers.clear();
+    });
+  }
 
   TextEditingController _controllerFor(String field) {
     // Prune controllers for fields that no longer exist (analysis switch):
@@ -376,6 +396,7 @@ class _RunTestTabState extends State<RunTestTab> {
         key: ValueKey('list-${state.analysisId}-$field'),
         initialValue: selected,
         isExpanded: true,
+        menuMaxHeight: 320,
         decoration: InputDecoration(
           labelText: AppText.t('اختر من القائمة', 'Choose from list'),
           isDense: true,
@@ -401,8 +422,10 @@ class _RunTestTabState extends State<RunTestTab> {
       input = TextField(
         controller: _controllerFor(field),
         onChanged: (_) => setState(() {}),
-        keyboardType:
-            const TextInputType.numberWithOptions(decimal: true, signed: true),
+        keyboardType: const TextInputType.numberWithOptions(
+          decimal: true,
+          signed: true,
+        ),
         textInputAction: TextInputAction.next,
         decoration: InputDecoration(
           labelText: AppText.t(field, 'Dynamic value: $field'),
@@ -431,10 +454,7 @@ class _RunTestTabState extends State<RunTestTab> {
           ),
           const SizedBox(height: 4),
           Container(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 6,
-              vertical: 2,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(5),
@@ -459,10 +479,7 @@ class _RunTestTabState extends State<RunTestTab> {
           const SizedBox(height: 4),
           Text(
             hint,
-            style: TextStyle(
-              fontSize: 11.spMax,
-              color: AppColors.textMuted,
-            ),
+            style: TextStyle(fontSize: 11.spMax, color: AppColors.textMuted),
           ),
         ],
       ],
@@ -521,10 +538,7 @@ class _RunTestTabState extends State<RunTestTab> {
               label,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 15.spMax,
-              ),
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15.spMax),
             ),
           ),
         ],
@@ -544,8 +558,7 @@ class _RunTestTabState extends State<RunTestTab> {
           child: Icon(icon, size: 15.r, color: AppColors.primary),
         ),
         TextSpan(
-          text:
-              ' $label: ${'${value ?? ''}'.trim().isEmpty ? '—' : value}',
+          text: ' $label: ${'${value ?? ''}'.trim().isEmpty ? '—' : value}',
         ),
       ],
     ),
@@ -687,27 +700,20 @@ class _RunTestTabState extends State<RunTestTab> {
                     options: state.analyses,
                     selectedId: state.analysisId,
                     label: AppText.t('التحليل', 'Analysis'),
-                    hint: AppText.t(
-                      'ابحث باسم التحليل…',
-                      'Search analyses…',
-                    ),
+                    hint: AppText.t('ابحث باسم التحليل…', 'Search analyses…'),
                     prefixIcon: Icons.science_outlined,
-                    displayOf: (a) =>
-                        '${a['name']} (${a['unit'] ?? '%'})',
+                    displayOf: (a) => '${a['name']} (${a['unit'] ?? '%'})',
                     filter: (a, q) => entityMatches(a, q, [
                       (r) => '${r['name'] ?? ''}',
                       (r) => '${r['unit'] ?? ''}',
                     ]),
                     onSelected: (v) {
-                      setState(() {
-                        _formulaAuto = true;
-                        _listSelections.clear();
-                        for (final c in _dynamicControllers.values) {
-                          c.dispose();
-                        }
-                        _dynamicControllers.clear();
-                      });
+                      _resetDynamicInputs();
                       cubit.selectAnalysis((v as num).toInt());
+                    },
+                    onCleared: () {
+                      _resetDynamicInputs();
+                      cubit.clearAnalysis();
                     },
                   ),
                   const SizedBox(height: AppSpacing.md),
@@ -721,6 +727,7 @@ class _RunTestTabState extends State<RunTestTab> {
                         child: DropdownButtonFormField<String>(
                           initialValue: state.sourceType,
                           isExpanded: true,
+                          menuMaxHeight: 320,
                           decoration: InputDecoration(
                             labelText: AppText.t('المصدر', 'Source'),
                             isDense: true,
@@ -742,6 +749,42 @@ class _RunTestTabState extends State<RunTestTab> {
                           },
                         ),
                       ),
+                      SwitchListTile.adaptive(
+                        contentPadding: EdgeInsets.zero,
+                        value: state.selectedInspection.isNotEmpty,
+                        title: Text(
+                          AppText.t(
+                            'ربط التحليل بمحضر فحص',
+                            'Link to inspection record',
+                          ),
+                        ),
+                        subtitle: Text(
+                          AppText.t(
+                            'اختياري — يمكنك إجراء التحليل مباشرة على المنتج أو الخامة.',
+                            'Optional — run the analysis directly against the product or raw material.',
+                          ),
+                        ),
+                        onChanged: (linked) {
+                          if (!linked) {
+                            cubit.clearInspection();
+                          }
+                        },
+                      ),
+                      if (state.selectedInspection.isEmpty)
+                        SizedBox(
+                          width: 280.w,
+                          child: TextField(
+                            controller: _standaloneSample,
+                            decoration: InputDecoration(
+                              labelText: AppText.t('اسم العينة', 'Sample name'),
+                              hintText: AppText.t(
+                                'مثال: عينة تشغيلية',
+                                'e.g. production sample',
+                              ),
+                              prefixIcon: const Icon(Icons.science_outlined),
+                            ),
+                          ),
+                        ),
                       if (state.sourceType == 'raw_material') ...[
                         SizedBox(
                           width: 300.w,
@@ -765,7 +808,7 @@ class _RunTestTabState extends State<RunTestTab> {
                                 cubit.selectRawMaterial((id as num).toInt());
                               }
                             },
-                            onCleared: null,
+                            onCleared: cubit.clearRawMaterial,
                           ),
                         ),
                         SizedBox(
@@ -807,6 +850,7 @@ class _RunTestTabState extends State<RunTestTab> {
                                 cubit.selectInspection((id as num).toInt());
                               }
                             },
+                            onCleared: cubit.clearInspection,
                           ),
                         ),
                         if (state.rawMaterialId != null &&
@@ -841,12 +885,14 @@ class _RunTestTabState extends State<RunTestTab> {
                               child: AppEntityAutocomplete(
                                 options: [
                                   for (final name
-                                      in (state.selectedInspection[
-                                                  'sample_names']
+                                      in (state.selectedInspection['sample_names']
                                               as List? ??
                                           const []))
                                     if ('$name'.trim().isNotEmpty)
-                                      {'id': '$name'.trim(), 'name': '$name'.trim()},
+                                      {
+                                        'id': '$name'.trim(),
+                                        'name': '$name'.trim(),
+                                      },
                                 ],
                                 selectedId: state.selectedSampleName,
                                 label: AppText.t(
@@ -864,6 +910,7 @@ class _RunTestTabState extends State<RunTestTab> {
                                 onSelected: (name) {
                                   cubit.selectInspectionSample('$name');
                                 },
+                                onCleared: cubit.clearInspectionSample,
                               ),
                             ),
                         ],
@@ -888,6 +935,7 @@ class _RunTestTabState extends State<RunTestTab> {
                                 cubit.selectProduct((v as num).toInt());
                               }
                             },
+                            onCleared: cubit.clearProduct,
                           ),
                         ),
                         SizedBox(
@@ -929,6 +977,7 @@ class _RunTestTabState extends State<RunTestTab> {
                                 cubit.selectInspection((id as num).toInt());
                               }
                             },
+                            onCleared: cubit.clearInspection,
                           ),
                         ),
                         if (state.productId != null &&
@@ -945,9 +994,7 @@ class _RunTestTabState extends State<RunTestTab> {
                             ),
                           ),
                         if (state.selectedInspection.isNotEmpty) ...[
-                          _productInspectionTraceCard(
-                            state.selectedInspection,
-                          ),
+                          _productInspectionTraceCard(state.selectedInspection),
                           if (state.selectedSampleName.isEmpty)
                             Text(
                               AppText.t(
@@ -965,12 +1012,14 @@ class _RunTestTabState extends State<RunTestTab> {
                               child: AppEntityAutocomplete(
                                 options: [
                                   for (final name
-                                      in (state.selectedInspection[
-                                                  'sample_names']
+                                      in (state.selectedInspection['sample_names']
                                               as List? ??
                                           const []))
                                     if ('$name'.trim().isNotEmpty)
-                                      {'id': '$name'.trim(), 'name': '$name'.trim()},
+                                      {
+                                        'id': '$name'.trim(),
+                                        'name': '$name'.trim(),
+                                      },
                                 ],
                                 selectedId: state.selectedSampleName,
                                 label: AppText.t(
@@ -988,6 +1037,7 @@ class _RunTestTabState extends State<RunTestTab> {
                                 onSelected: (name) {
                                   cubit.selectInspectionSample('$name');
                                 },
+                                onCleared: cubit.clearInspectionSample,
                               ),
                             ),
                         ],
@@ -1077,8 +1127,9 @@ class _RunTestTabState extends State<RunTestTab> {
                   else ...[
                     TextField(
                       controller: _resultText,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       textInputAction: TextInputAction.done,
                       onSubmitted: (_) => _run(),
                       decoration: InputDecoration(

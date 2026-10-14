@@ -7,14 +7,36 @@ import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_paginated_table.dart';
+import '../../../../../design_system/widgets/app_selection.dart';
+import '../../../../../design_system/export/table_html_export.dart';
 
 /// Small list widgets for the products tab, composed by both variants.
 
 class ProductsHeader extends StatelessWidget {
-  const ProductsHeader({super.key, required this.onAdd, this.compact = false});
+  const ProductsHeader({
+    super.key,
+    required this.onAdd,
+    this.compact = false,
+    this.onExportTable,
+    this.canExport = false,
+    this.subtitle,
+    this.showAdd = true,
+  });
 
   final VoidCallback onAdd;
   final bool compact;
+
+  /// Mobile hides the inline add button: adding floats (FAB) like the
+  /// raw-material register instead of blocking the top of the screen.
+  final bool showAdd;
+
+  /// Mobile-only count line under the title (desktop keeps title-only).
+  final String? subtitle;
+
+  /// Export-all action (HTML table file). Shown when [canExport] is true.
+  final VoidCallback? onExportTable;
+  final bool canExport;
 
   @override
   Widget build(BuildContext context) {
@@ -22,11 +44,20 @@ class ProductsHeader extends StatelessWidget {
       AppText.t('المنتجات', 'Products'),
       style: Theme.of(context).textTheme.titleLarge,
     );
+    final exportButton = canExport
+        ? IconButton(
+            tooltip: AppText.t('تصدير جدول', 'Export table'),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            onPressed: onExportTable,
+            icon: Icon(Icons.table_view_outlined, size: 20.r),
+          )
+        : const SizedBox.shrink();
     if (!compact) {
+      // Desktop title lives in the shell topbar; only actions stay.
       return Row(
         children: [
-          title,
           const Spacer(),
+          exportButton,
           AppButton(
             small: true,
             icon: Icon(Icons.add, size: 16.r),
@@ -39,23 +70,49 @@ class ProductsHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        title,
-        const SizedBox(height: AppSpacing.sm),
-        SizedBox(
-          width: double.infinity,
-          child: FilledButton.icon(
-            onPressed: onAdd,
-            icon: Icon(Icons.add, size: 20.r),
-            label: Text(AppText.t('منتج جديد', 'New Product')),
-          ),
+        Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  title,
+                  if (subtitle != null && subtitle!.isNotEmpty)
+                    Text(
+                      subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12.spMax,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            exportButton,
+          ],
         ),
+        if (showAdd) ...[
+          const SizedBox(height: AppSpacing.sm),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton.icon(
+              onPressed: onAdd,
+              icon: Icon(Icons.add, size: 20.r),
+              label: Text(AppText.t('منتج جديد', 'New Product')),
+            ),
+          ),
+        ],
       ],
     );
   }
 }
 
-/// Desktop: the pre-split table + the ranges card beneath it, verbatim.
-class ProductsTable extends StatelessWidget {
+/// Desktop: one reference table, matching the raw-material register. Ranges
+/// live in the same row as the product instead of a second detached card.
+class ProductsTable extends StatefulWidget {
   const ProductsTable({
     super.key,
     required this.rows,
@@ -67,130 +124,137 @@ class ProductsTable extends StatelessWidget {
   final void Function(Map<String, dynamic> row) onEdit;
   final void Function(Map<String, dynamic> row) onDelete;
 
+  /// Export mapping shared by the desktop table and the mobile cards.
+  static List<String> exportHeaders() => [
+    AppText.t('المنتج', 'Product'),
+    AppText.t('النوع', 'Category'),
+    AppText.t('الوصف', 'Description'),
+  ];
+
+  static List<List<String>> exportRows(List<Map<String, dynamic>> rows) => [
+    for (final p in rows)
+      [
+        '${p['name'] ?? ''}',
+        '${p['category'] ?? '-'}',
+        '${p['description'] ?? '-'}',
+      ],
+  ];
+
+  static String exportTitle() => AppText.t('المنتجات', 'Products');
+
+  @override
+  State<ProductsTable> createState() => _ProductsTableState();
+}
+
+class _ProductsTableState extends State<ProductsTable> {
+  /// Table indices picked with the checkbox column (same idea every table).
+  final Set<int> _selected = <int>{};
+
+  Future<void> _exportSelected() async {
+    final picked = [
+      for (var i = 0; i < widget.rows.length; i++)
+        if (_selected.contains(i)) widget.rows[i],
+    ];
+    await TableHtmlExport.export(
+      context,
+      filePrefix: 'products',
+      title: ProductsTable.exportTitle(),
+      headers: ProductsTable.exportHeaders(),
+      rows: ProductsTable.exportRows(picked),
+    );
+    if (mounted && picked.isNotEmpty) {
+      setState(_selected.clear);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        children: [
-          Flexible(
-            flex: 5,
-            child: AppCard(
-              padding: EdgeInsets.zero,
-              child: SizedBox(
-                width: double.infinity,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: DataTable(
-                      columns: [
-                        DataColumn(
-                          label: Text(AppText.t('المنتج', 'Product')),
-                        ),
-                        DataColumn(
-                          label: Text(AppText.t('النوع', 'Category')),
-                        ),
-                        DataColumn(
-                          label: Text(AppText.t('الوصف', 'Description')),
-                        ),
-                        DataColumn(
-                          label: Text(AppText.t('الإجراءات', 'Actions')),
-                        ),
-                      ],
-                      rows: [
-                        for (final p in rows)
-                          DataRow(
-                            cells: [
-                              DataCell(
-                                Text(
-                                  '${p['name'] ?? ''}',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                              DataCell(Text('${p['category'] ?? '-'}')),
-                              DataCell(Text('${p['description'] ?? '-'}')),
-                              DataCell(
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      tooltip: AppStrings.edit,
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: () => onEdit(p),
-                                      icon: Icon(
-                                        Icons.edit_outlined,
-                                        size: 18.r,
-                                      ),
-                                    ),
-                                    IconButton(
-                                      tooltip: AppStrings.delete,
-                                      visualDensity: VisualDensity.compact,
-                                      onPressed: () => onDelete(p),
-                                      icon: Icon(
-                                        Icons.delete_outline,
-                                        size: 18.r,
-                                        color: AppColors.danger,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
+    final rows = widget.rows;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_selected.isNotEmpty) ...[
+          TableSelectionBar(
+            selectedCount: _selected.length,
+            onExportTable: _exportSelected,
+            onClear: () => setState(_selected.clear),
           ),
-          const SizedBox(height: AppSpacing.md),
-          if (rows.isNotEmpty)
-            Flexible(
-              flex: 3,
-              child: AppCard(
-                child: SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: AppSpacing.sm),
+        ],
+        Expanded(
+          child: AppPaginatedTable(
+            // The parent supplies a loose Flexible constraint; a concrete height
+            // keeps the table's internal body Expanded bounded.
+            height: 520,
+            minTableWidth: 920,
+            columnFlex: const [1.1, 0.8, 1.1, 2.2, 1.0],
+            headers: [
+              ...ProductsTable.exportHeaders(),
+              AppText.t('النطاقات', 'Ranges'),
+              AppText.t('الإجراءات', 'Actions'),
+            ],
+            rows: [
+              for (final p in rows)
+                [
+                  Text(
+                    '${p['name'] ?? ''}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '${p['category'] ?? '-'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '${p['description'] ?? '-'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  ProductRefChips(p, compact: true),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(
-                        AppText.t('النطاقات', 'Ranges'),
-                        style: TextStyle(
-                          fontSize: 14.spMax,
-                          fontWeight: FontWeight.w700,
+                      IconButton(
+                        tooltip: AppStrings.edit,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => widget.onEdit(p),
+                        icon: Icon(Icons.edit_outlined, size: 18.r),
+                      ),
+                      IconButton(
+                        tooltip: AppStrings.delete,
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => widget.onDelete(p),
+                        icon: Icon(
+                          Icons.delete_outline,
+                          size: 18.r,
+                          color: AppColors.danger,
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.sm),
-                      for (final p in rows)
-                        Padding(
-                          padding: const EdgeInsets.only(
-                            bottom: AppSpacing.sm,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '${p['name'] ?? ''}',
-                                style: TextStyle(
-                                  fontSize: 13.spMax,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.primary,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              RangesChips(p['ranges'] as List? ?? []),
-                            ],
-                          ),
-                        ),
                     ],
                   ),
-                ),
-              ),
-            ),
-        ],
-      ),
+                ],
+            ],
+            selectedIndices: _selected,
+            selectHidden: true,
+            onToggleIndex: (i) => setState(() {
+              if (!_selected.remove(i)) _selected.add(i);
+            }),
+            selectAllValue: _selected.isEmpty
+                ? false
+                : _selected.length >= rows.length
+                ? true
+                : null,
+            onToggleAll: (_) => setState(() {
+              if (_selected.length >= rows.length) {
+                _selected.clear();
+              } else {
+                _selected.addAll(List.generate(rows.length, (i) => i));
+              }
+            }),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -232,9 +296,10 @@ class RangesChips extends StatelessWidget {
 /// reference maps (مطلوب entries get a check), falling back to the legacy
 /// ranges table for products saved before the reference editor.
 class ProductRefChips extends StatelessWidget {
-  const ProductRefChips(this.product, {super.key});
+  const ProductRefChips(this.product, {super.key, this.compact = false});
 
   final Map<String, dynamic> product;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -247,17 +312,66 @@ class ProductRefChips extends StatelessWidget {
     if (physical.isEmpty && chemical.isEmpty) {
       return RangesChips(product['ranges'] as List? ?? []);
     }
+    if (compact) {
+      return SizedBox(
+        height: 40,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              if (physical.isNotEmpty)
+                _compactSection(AppText.t('ف', 'P'), physical),
+              if (physical.isNotEmpty && chemical.isNotEmpty)
+                const SizedBox(width: 8),
+              if (chemical.isNotEmpty)
+                _compactSection(AppText.t('ك', 'C'), chemical),
+            ],
+          ),
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _refSection(
-          AppText.t('الفحص الظاهري', 'Physical'),
-          physical,
+        _refSection(AppText.t('الفحص الظاهري', 'Physical'), physical),
+        _refSection(AppText.t('التحليل الكيميائي', 'Chemical'), chemical),
+      ],
+    );
+  }
+
+  Widget _compactSection(String title, Map<String, dynamic> map) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '$title: ',
+          style: TextStyle(
+            fontSize: 11.spMax,
+            color: AppColors.textMuted,
+            fontWeight: FontWeight.w600,
+          ),
         ),
-        _refSection(
-          AppText.t('التحليل الكيميائي', 'Chemical'),
-          chemical,
-        ),
+        for (final e in map.entries) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+            decoration: BoxDecoration(
+              color: isReferenceRequired(e.value)
+                  ? AppColors.primary.withValues(alpha: 0.10)
+                  : AppColors.surfaceSoft,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(
+                color: isReferenceRequired(e.value)
+                    ? AppColors.primary.withValues(alpha: 0.4)
+                    : AppColors.borderMuted,
+              ),
+            ),
+            child: Text(
+              '${isReferenceRequired(e.value) ? '✓ ' : ''}${e.key}: ${referenceValueText(e.value)}',
+              style: TextStyle(fontSize: 11.spMax),
+            ),
+          ),
+          const SizedBox(width: 4),
+        ],
       ],
     );
   }
@@ -282,10 +396,7 @@ class ProductRefChips extends StatelessWidget {
           children: [
             for (final e in map.entries)
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: isReferenceRequired(e.value)
                       ? AppColors.primary.withValues(alpha: 0.10)
@@ -403,19 +514,13 @@ class ProductCard extends StatelessWidget {
               ),
               IconButton(
                 tooltip: AppStrings.edit,
-                constraints: const BoxConstraints(
-                  minWidth: 48,
-                  minHeight: 48,
-                ),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 onPressed: onEdit,
                 icon: Icon(Icons.edit_outlined, size: 20.r),
               ),
               IconButton(
                 tooltip: AppStrings.delete,
-                constraints: const BoxConstraints(
-                  minWidth: 48,
-                  minHeight: 48,
-                ),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 onPressed: onDelete,
                 icon: Icon(
                   Icons.delete_outline,

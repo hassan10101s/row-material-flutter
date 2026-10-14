@@ -46,10 +46,12 @@ class OfflineFirstInspectionRepository extends InspectionRepo
   final SyncQueue queue;
   final AuditLogger audit;
 
-  static final SyncEntity _sample =
-      syncEntities.firstWhere((e) => e.type == 'sample');
-  static final SyncEntity _qualityCheck =
-      syncEntities.firstWhere((e) => e.type == 'qualityCheck');
+  static final SyncEntity _sample = syncEntities.firstWhere(
+    (e) => e.type == 'sample',
+  );
+  static final SyncEntity _qualityCheck = syncEntities.firstWhere(
+    (e) => e.type == 'qualityCheck',
+  );
 
   // ── §9.4 writes ──────────────────────────────────────────────────────────
 
@@ -62,6 +64,10 @@ class OfflineFirstInspectionRepository extends InspectionRepo
   }) async {
     if (exec != null) return super.create(payload, user, exec: exec);
     _check(Permission.samplesCreate);
+    // The entry-code generator needs the device tag. Warm it before opening
+    // the write transaction so metadata cannot be read through a second
+    // connection while this transaction owns the database lock.
+    await referenceRepo.warmDeviceTag();
     final row = await _inTransaction((txn) async {
       final row = await super.create(payload, user, exec: txn);
       await _enqueueSample(
@@ -89,7 +95,9 @@ class OfflineFirstInspectionRepository extends InspectionRepo
     UserContext user, {
     DatabaseExecutor? exec,
   }) async {
-    if (exec != null) return super.update(inspectionId, payload, user, exec: exec);
+    if (exec != null) {
+      return super.update(inspectionId, payload, user, exec: exec);
+    }
     _check(Permission.samplesUpdate);
     final updated = await _inTransaction((txn) async {
       final row = await super.update(inspectionId, payload, user, exec: txn);
@@ -119,12 +127,19 @@ class OfflineFirstInspectionRepository extends InspectionRepo
     UserContext user, {
     DatabaseExecutor? exec,
   }) async {
-    if (exec != null) return super.updateStatus(inspectionId, payload, user, exec: exec);
+    if (exec != null) {
+      return super.updateStatus(inspectionId, payload, user, exec: exec);
+    }
     final status = '${payload['decision_status'] ?? ''}'.toLowerCase();
     final rejected = status.contains('reject') || status.contains('رفض');
     _check(rejected ? Permission.qcReject : Permission.qcApprove);
     final decided = await _inTransaction((txn) async {
-      final row = await super.updateStatus(inspectionId, payload, user, exec: txn);
+      final row = await super.updateStatus(
+        inspectionId,
+        payload,
+        user,
+        exec: txn,
+      );
       await _enqueueSample(
         txn,
         row,
@@ -152,8 +167,12 @@ class OfflineFirstInspectionRepository extends InspectionRepo
     _check(Permission.samplesUpdate);
     await _inTransaction<void>((txn) async {
       await super.delete(inspectionId, exec: txn);
-      final rows = await txn.query('inspections',
-          where: 'id = ?', whereArgs: [inspectionId], limit: 1);
+      final rows = await txn.query(
+        'inspections',
+        where: 'id = ?',
+        whereArgs: [inspectionId],
+        limit: 1,
+      );
       if (rows.isEmpty) return;
       final row = Map<String, dynamic>.from(rows.first);
       await _enqueueSample(
@@ -169,7 +188,9 @@ class OfflineFirstInspectionRepository extends InspectionRepo
 
   // ── Transaction plumbing ─────────────────────────────────────────────────
 
-  Future<T> _inTransaction<T>(Future<T> Function(DatabaseExecutor txn) body) async {
+  Future<T> _inTransaction<T>(
+    Future<T> Function(DatabaseExecutor txn) body,
+  ) async {
     final db = await dbHelper.database;
     return db.transaction<T>(body);
   }
@@ -199,8 +220,12 @@ class OfflineFirstInspectionRepository extends InspectionRepo
   }) async {
     final id = (row['id'] as num?)?.toInt();
     if (id == null) return;
-    final current = await txn.query('inspections',
-        where: 'id = ?', whereArgs: [id], limit: 1);
+    final current = await txn.query(
+      'inspections',
+      where: 'id = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
     if (current.isEmpty) return;
     final fresh = Map<String, dynamic>.from(current.first);
     // Optimistic sync version (plan §9.2): a row the remote has never seen is
@@ -213,10 +238,12 @@ class OfflineFirstInspectionRepository extends InspectionRepo
     final nextVersion = isFirstPush
         ? 1
         : (localVersion > remoteVersion ? localVersion : remoteVersion) + 1;
-    await txn.update('inspections', {
-      'version': nextVersion,
-      'sync_state': 'queued',
-    }, where: 'id = ?', whereArgs: [id]);
+    await txn.update(
+      'inspections',
+      {'version': nextVersion, 'sync_state': 'queued'},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
 
     final snapshot = Map<String, dynamic>.from(fresh)
       ..['version'] = nextVersion
@@ -235,7 +262,12 @@ class OfflineFirstInspectionRepository extends InspectionRepo
       entityId: docId,
       localRef: id,
       operation: operation,
-      payload: buildRemotePayload(_sample, snapshot, ctx, asCreate: isFirstPush),
+      payload: buildRemotePayload(
+        _sample,
+        snapshot,
+        ctx,
+        asCreate: isFirstPush,
+      ),
       baseVersion: remoteVersion,
     );
     await audit.log(
@@ -257,14 +289,18 @@ class OfflineFirstInspectionRepository extends InspectionRepo
   /// (`qc_{inspectionId}_{version}`); it is queued in the same transaction as
   /// the decision itself so the two can never diverge.
   Future<void> _enqueueDecisionHistory(
-      DatabaseExecutor txn, Map<String, dynamic> row) async {
+    DatabaseExecutor txn,
+    Map<String, dynamic> row,
+  ) async {
     final inspectionId = (row['id'] as num?)?.toInt();
     if (inspectionId == null) return;
-    final history = await txn.query('inspection_status_history',
-        where: 'inspection_id = ?',
-        whereArgs: [inspectionId],
-        orderBy: 'version DESC, id DESC',
-        limit: 1);
+    final history = await txn.query(
+      'inspection_status_history',
+      where: 'inspection_id = ?',
+      whereArgs: [inspectionId],
+      orderBy: 'version DESC, id DESC',
+      limit: 1,
+    );
     if (history.isEmpty) return;
     final entry = Map<String, dynamic>.from(history.first);
     final version = (entry['version'] as num?)?.toInt() ?? 1;

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_audit.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_goal.dart';
@@ -29,6 +30,11 @@ void main() {
   );
 
   group('goal completion rules', () {
+    // Blocker messages are bilingual: pin the English wording with the
+    // locale fixed, then restore Arabic for the rest of the file.
+    setUp(() => AppText.useLanguage('en'));
+    tearDown(() => AppText.useLanguage('ar'));
+
     test('accepts a completed goal with a named finisher and date', () {
       expect(completedGoal().completionBlocker, isEmpty);
     });
@@ -62,6 +68,18 @@ void main() {
         contains('open state'),
       );
     });
+
+    test('blockers are bilingual', () {
+      AppText.useLanguage('ar');
+      expect(
+        completedGoal(finisherId: '').completionBlocker,
+        contains('معرّف'),
+      );
+      expect(
+        completedGoal(status: QcGoalStatus.cancelled).completionBlocker,
+        contains('مفتوحة'),
+      );
+    });
   });
 
   group('bundle completion rules', () {
@@ -91,6 +109,10 @@ void main() {
           ),
         ],
       );
+      // Bilingual blocker: Arabic by default, English with the locale fixed.
+      expect(bundle.completionBlocker, contains('تكليفات'));
+      AppText.useLanguage('en');
+      addTearDown(() => AppText.useLanguage('ar'));
       expect(bundle.completionBlocker, contains('assignment(s)'));
     });
 

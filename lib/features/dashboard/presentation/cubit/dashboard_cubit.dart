@@ -1,3 +1,4 @@
+import '../../domain/dashboard_kpis.dart';
 import '../../domain/dashboard_repository.dart';
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
@@ -20,6 +21,13 @@ class DashboardCubit extends AppCubit<DashboardState> {
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));
     try {
+      // All four sections together: `summary` and `dashboardBundle` share the
+      // same filter key, so their `_filtered` reads overlap in time and the
+      // repo serves both from one query (single-flight) instead of
+      // transferring the full filtered row set across the isolate twice.
+      // The bundle stays best-effort via `_safeBundle` — an old mock (or a
+      // device missing QC tables) resolves to null and the core load still
+      // succeeds, exactly as before.
       final results = await Future.wait([
         repo.summary(
           period: state.period,
@@ -29,21 +37,11 @@ class DashboardCubit extends AppCubit<DashboardState> {
         ),
         repo.todayKpis(),
         repo.filterOptions(),
+        _safeBundle(),
       ]);
       kpis.hydrate(results[1] as Map<String, dynamic>);
-      // Bundle is best-effort and fetched separately so an old mock (or a
-      // device missing QC tables) can never fail the core dashboard load.
-      try {
-        final bundle = await repo.dashboardBundle(
-          period: state.period,
-          materialId: state.selectedMaterial,
-          supplier: state.selectedSupplier,
-          status: state.selectedStatus,
-        );
-        kpis.hydrateBundle(bundle);
-      } catch (_) {
-        // Legacy cards already hydrated above; analyst sections stay zeroed.
-      }
+      final bundle = results[3] as DashboardBundle?;
+      if (bundle != null) kpis.hydrateBundle(bundle);
       safeEmit(state.copyWith(
         loading: false,
         summary: results[0] as Map<String, dynamic>,
@@ -53,6 +51,22 @@ class DashboardCubit extends AppCubit<DashboardState> {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: '$e'));
+    }
+  }
+
+  /// Best-effort bundle fetch: never throws (sync or async), so a legacy mock
+  /// or a device missing QC tables yields null and the analyst sections stay
+  /// zeroed — the core dashboard load is unaffected.
+  Future<DashboardBundle?> _safeBundle() async {
+    try {
+      return await repo.dashboardBundle(
+        period: state.period,
+        materialId: state.selectedMaterial,
+        supplier: state.selectedSupplier,
+        status: state.selectedStatus,
+      );
+    } catch (_) {
+      return null;
     }
   }
 

@@ -47,7 +47,9 @@ class _InspectionFormWizardState extends State<InspectionFormWizard> {
         title: AppText.t('البيانات', 'Basics'),
         body: sections.basicCard(context),
       ),
-      if (sections.physical.isNotEmpty)
+      // Product reports are batch-traceability records: no header result
+      // steps — samples are added later, inside the record.
+      if (!sections.isProduct && sections.physical.isNotEmpty)
         (
           title: AppText.t('الفيزيائي', 'Physical'),
           body: Column(
@@ -59,7 +61,7 @@ class _InspectionFormWizardState extends State<InspectionFormWizard> {
             ],
           ),
         ),
-      if (sections.chemical.isNotEmpty)
+      if (!sections.isProduct && sections.chemical.isNotEmpty)
         (
           title: AppText.t('الكيميائي', 'Chemical'),
           body: Column(
@@ -73,10 +75,14 @@ class _InspectionFormWizardState extends State<InspectionFormWizard> {
             ],
           ),
         ),
-      (
-        title: AppText.t('القرار', 'Decision'),
-        body: sections.decisionCard(context),
-      ),
+      // Products carry no header quality decision (per-sample only), so
+      // the product wizard is just the basics step — samples are added
+      // later, inside the record.
+      if (!sections.isProduct)
+        (
+          title: AppText.t('القرار', 'Decision'),
+          body: sections.decisionCard(context),
+        ),
     ];
     final step = _step.clamp(0, steps.length - 1);
     final last = step == steps.length - 1;
@@ -91,7 +97,10 @@ class _InspectionFormWizardState extends State<InspectionFormWizard> {
           context,
           sections.isProduct
               ? AppText.t('يجب اختيار المنتج', 'Product selection is required.')
-              : AppText.t('يجب اختيار المادة', 'Material selection is required.'),
+              : AppText.t(
+                  'يجب اختيار المادة',
+                  'Material selection is required.',
+                ),
         );
         return;
       }

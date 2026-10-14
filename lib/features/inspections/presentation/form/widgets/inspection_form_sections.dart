@@ -7,6 +7,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_format.dart';
+import '../../../../../core/utils/reference_range.dart';
 import '../../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -14,8 +15,10 @@ import '../../../../../design_system/widgets/app_autocomplete.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_date_field.dart';
+import '../../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_history_autocomplete.dart';
+import '../../../../../design_system/widgets/app_quantity_field.dart';
 import '../../../../../design_system/widgets/app_required_toggle.dart';
 import '../../../../lab/core/formula_engine.dart';
 import '../../cubit/inspection_form_cubit.dart';
@@ -229,11 +232,11 @@ String _chemPlaceholder(ChemCell cell) {
   final max = cell.maxNumeric;
   if (min != null && max != null) {
     if (min == max) return '= ${cell.minText}';
-    return '${cell.minText} - ${cell.maxText}';
+    return '${cell.minText} – ${cell.maxText}';
   }
-  if (min != null) return 'min ${cell.minText}';
-  if (max != null) return 'max ${cell.maxText}';
-  return 'Result';
+  if (min != null) return '≥ ${cell.minText}';
+  if (max != null) return '≤ ${cell.maxText}';
+  return AppText.t('أدخل النتيجة', 'Enter result');
 }
 
 InputDecoration _inputDec(bool out, {required String hint}) {
@@ -245,7 +248,7 @@ InputDecoration _inputDec(bool out, {required String hint}) {
         ? AppColors.danger.withValues(alpha: 0.10)
         : AppColors.surface,
     border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadii.sm),
       borderSide: BorderSide(
         color: out ? AppColors.danger : AppColors.border,
         width: out ? 1.4 : 1,
@@ -269,7 +272,11 @@ String _addMonths(String iso, int months) {
 class FormSectionCard extends StatelessWidget {
   final String title;
   final List<Widget> children;
-  const FormSectionCard({super.key, required this.title, required this.children});
+  const FormSectionCard({
+    super.key,
+    required this.title,
+    required this.children,
+  });
   @override
   Widget build(BuildContext context) {
     return AppCard(
@@ -373,43 +380,23 @@ class InspectionFormSections {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   AppDateField(
-                    label: AppText.t(
-                      'تاريخ الانتهاء',
-                      'Expiry (YYYY-MM-DD)',
-                    ),
+                    label: AppText.t('تاريخ الانتهاء', 'Expiry (YYYY-MM-DD)'),
                     controller: expiry,
                   ),
                   const SizedBox(height: 6),
                   Wrap(
                     spacing: 6,
                     children: [
-                      for (final m in const [
-                        (3, '3M'),
-                        (6, '6M'),
-                        (9, '9M'),
-                      ])
-                        OutlinedButton(
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(44, 26),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                            ),
-                            tapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                            side: BorderSide(color: AppColors.border),
-                          ),
+                      for (final m in const [(3, '3M'), (6, '6M'), (9, '9M')])
+                        AppButton(
+                          small: true,
+                          style: AppButtonStyle.secondary,
+                          label: m.$2,
                           onPressed: () => expiry.text = _addMonths(
                             date.text.trim().isEmpty
                                 ? todayIso()
                                 : date.text.trim(),
                             m.$1,
-                          ),
-                          child: Text(
-                            m.$2,
-                            style: TextStyle(
-                              fontSize: 12.spMax,
-                              color: AppColors.primary,
-                            ),
                           ),
                         ),
                     ],
@@ -458,51 +445,69 @@ class InspectionFormSections {
             ],
             const SizedBox(width: AppSpacing.lg),
             Expanded(
-              child: AppField(
+              child: AppQuantityField(
                 label: AppText.t('الكمية', 'Quantity'),
+                hint: AppText.t('بالطن', 'In tons'),
                 controller: qty,
-                keyboardType: TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
               ),
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        Row(
-          children: [
-            Expanded(
-              child: AppHistoryAutocomplete(
-                label: AppText.t('آخذ العينة', 'Sample taker'),
-                controller: sampleTaker,
-                options: state.sampleTakerOptions,
-                hint: AppText.t(
-                  'اكتب للبحث في سجل الفنيين…',
-                  'Type to search the technicians log…',
+        // Product reports are batch-traceability records: no header-level
+        // taker — samples carry their own taker, added inside the record.
+        if (!isProduct)
+          Row(
+            children: [
+              Expanded(
+                child: AppHistoryAutocomplete(
+                  label: AppText.t('آخذ العينة', 'Sample taker'),
+                  controller: sampleTaker,
+                  options: state.sampleTakerOptions,
+                  hint: AppText.t(
+                    'اكتب للبحث في سجل الفنيين…',
+                    'Type to search the technicians log…',
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: AppSpacing.lg),
-            Expanded(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: AppField(
-                      label: AppText.t('رقم القيد', 'Entry code'),
-                      controller: entryCode,
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: AppField(
+                        label: AppText.t('رقم القيد', 'Entry code'),
+                        controller: entryCode,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  IconButton(
-                    tooltip: AppText.t('إعادة توليد', 'Regenerate'),
-                    onPressed: onRegenerateEntry,
-                    icon: Icon(Icons.refresh, size: 20.r),
-                  ),
-                ],
+                    const SizedBox(width: AppSpacing.sm),
+                    IconButton(
+                      tooltip: AppText.t('إعادة توليد', 'Regenerate'),
+                      onPressed: onRegenerateEntry,
+                      icon: Icon(Icons.refresh, size: 20.r),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
+            ],
+          )
+        else
+          Row(
+            children: [
+              Expanded(
+                child: AppField(
+                  label: AppText.t('رقم القيد', 'Entry code'),
+                  controller: entryCode,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              IconButton(
+                tooltip: AppText.t('إعادة توليد', 'Regenerate'),
+                onPressed: onRegenerateEntry,
+                icon: Icon(Icons.refresh, size: 20.r),
+              ),
+            ],
+          ),
       ],
     );
   }
@@ -513,8 +518,13 @@ class InspectionFormSections {
     return FormSectionCard(
       title: AppText.t('النتائج الفيزيائية', 'Physical results'),
       children: [
-        _scrollableGrid(
-          _physicalGrid(physical, state.physicalReference),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final grid = _physicalGrid(physical, state.physicalReference);
+            // Stacked cards need no horizontal scroll on phones.
+            if (constraints.maxWidth < AppBreakpoints.medium) return grid;
+            return _scrollableGrid(grid);
+          },
         ),
       ],
     );
@@ -526,8 +536,12 @@ class InspectionFormSections {
     return FormSectionCard(
       title: AppText.t('النتائج الكيميائية', 'Chemical results'),
       children: [
-        _scrollableGrid(
-          _chemicalGrid(chemical, state.chemicalReference),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final grid = _chemicalGrid(chemical, state.chemicalReference);
+            if (constraints.maxWidth < AppBreakpoints.medium) return grid;
+            return _scrollableGrid(grid);
+          },
         ),
       ],
     );
@@ -553,29 +567,25 @@ class InspectionFormSections {
     return FormSectionCard(
       title: AppText.t('قرار الجودة', 'Decision'),
       children: [
-        DropdownButtonFormField<String>(
-          initialValue: state.decision,
-          isExpanded: true,
-          decoration: InputDecoration(
-            labelText: AppText.t('القرار', 'Decision'),
-            isDense: true,
-          ),
+        AppDropdown<String>(
+          value: state.decision,
+          labelText: AppText.t('القرار', 'Decision'),
           items: [
-            DropdownMenuItem(
+            AppDropdownItem(
               value: 'APPROVED',
-              child: Text(AppText.t('قبول نهائي', 'Approved')),
+              label: AppText.t('قبول نهائي', 'Approved'),
             ),
-            DropdownMenuItem(
+            AppDropdownItem(
               value: 'CONDITIONAL_APPROVAL',
-              child: Text(AppText.t('قبول مشروط', 'Conditional')),
+              label: AppText.t('قبول مشروط', 'Conditional'),
             ),
-            DropdownMenuItem(
+            AppDropdownItem(
               value: 'PARTIAL_REJECTION',
-              child: Text(AppText.t('رفض جزئي', 'Partial rejection')),
+              label: AppText.t('رفض جزئي', 'Partial rejection'),
             ),
-            DropdownMenuItem(
+            AppDropdownItem(
               value: 'FULL_REJECTION',
-              child: Text(AppText.t('رفض كامل', 'Full rejection')),
+              label: AppText.t('رفض كامل', 'Full rejection'),
             ),
           ],
           onChanged: (value) {
@@ -588,18 +598,16 @@ class InspectionFormSections {
         if (state.decision == 'CONDITIONAL_APPROVAL') ...[
           AppField(
             label: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
+            hint: AppText.t('اختياري', 'Optional'),
             controller: followUp,
             maxLines: 3,
           ),
           const SizedBox(height: AppSpacing.md),
         ],
         if (state.decision == 'PARTIAL_REJECTION') ...[
-          AppField(
+          AppQuantityField(
             label: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
             controller: rejectedQty,
-            keyboardType: TextInputType.numberWithOptions(
-              decimal: true,
-            ),
           ),
           const SizedBox(height: AppSpacing.md),
         ],
@@ -646,12 +654,10 @@ class InspectionFormSections {
                 filter: (id, query) {
                   final m = _materialById(materials, id);
                   if (m == null) return false;
-                  return '${m['material_name']}'
-                          .toLowerCase()
-                          .contains(query) ||
-                      '${m['material_code']}'
-                          .toLowerCase()
-                          .contains(query);
+                  return '${m['material_name']}'.toLowerCase().contains(
+                        query,
+                      ) ||
+                      '${m['material_code']}'.toLowerCase().contains(query);
                 },
                 onSelected: onSelectMaterial,
                 controller: materialController,
@@ -664,16 +670,9 @@ class InspectionFormSections {
                     ? Icons.factory_outlined
                     : Icons.inventory_2_outlined,
                 emptyLabel: isProduct
-                    ? AppText.t(
-                        'لا يوجد منتج مطابق',
-                        'No matching product',
-                      )
-                    : AppText.t(
-                        'لا توجد خامة مطابقة',
-                        'No matching material',
-                      ),
-                dropdownLabel:
-                    AppText.t('عرض القائمة', 'Show the list'),
+                    ? AppText.t('لا يوجد منتج مطابق', 'No matching product')
+                    : AppText.t('لا توجد خامة مطابقة', 'No matching material'),
+                dropdownLabel: AppText.t('عرض القائمة', 'Show the list'),
                 optionBuilder: (context, id, onSelected) =>
                     _materialOption(materials, id, onSelected),
               ),
@@ -755,29 +754,57 @@ class InspectionFormSections {
     Map<String, List<TextEditingController>> source,
     Map<String, dynamic> refs,
   ) {
-    return Column(
-      children: [
-        Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Phones: stacked cards instead of a squeezed table.
+        if (constraints.maxWidth < AppBreakpoints.medium) {
+          return Column(
+            children: [
+              for (final param in source.keys)
+                _physicalParamCard(param, source[param]!, refs[param]),
+            ],
+          );
+        }
+        return Column(
           children: [
-            const Expanded(flex: 2, child: SizedBox()),
-            for (var i = 0; i < sampleCount; i++) _sampleHeader(i),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        for (final param in source.keys)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            Row(
               children: [
                 Expanded(
                   flex: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Wrap(
+                  child: Text(
+                    AppText.t('البارامتر', 'Parameter'),
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12.spMax,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    AppText.t('النطاق', 'Range'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12.spMax,
+                    ),
+                  ),
+                ),
+                for (var i = 0; i < sampleCount; i++) _sampleHeader(i),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            for (final param in source.keys)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.sm),
+                        child: Wrap(
                           spacing: 6,
                           runSpacing: 4,
                           crossAxisAlignment: WrapCrossAlignment.center,
@@ -793,33 +820,79 @@ class InspectionFormSections {
                               const RequiredBadge(),
                           ],
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${refs[param] == null ? '' : referenceValueText(refs[param])}',
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 11.spMax,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
-                        ),
-                      ],
+                      ),
                     ),
+                    Expanded(flex: 2, child: _rangeCell(refs[param])),
+                    for (var i = 0; i < sampleCount; i++)
+                      Expanded(
+                        flex: 3,
+                        child: _physicalInput(
+                          param,
+                          source[param]![i],
+                          '${refs[param] ?? ''}',
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// One physical parameter as a stacked card (phones).
+  Widget _physicalParamCard(
+    String param,
+    List<TextEditingController> ctrls,
+    Object? ref,
+  ) {
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      color: AppColors.surfaceSoft,
+      enableHover: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                param,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 14.spMax,
+                ),
+              ),
+              if (isReferenceRequired(ref)) const RequiredBadge(),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          _rangeCell(ref, alignCenter: false),
+          const SizedBox(height: AppSpacing.sm),
+          for (var i = 0; i < sampleCount; i++) ...[
+            if (sampleCount > 1)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                child: Text(
+                  sampleNames[i].text.trim().isEmpty
+                      ? AppText.t('عينة ${i + 1}', 'Sample ${i + 1}')
+                      : sampleNames[i].text.trim(),
+                  style: TextStyle(
+                    fontSize: 12.spMax,
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                for (var i = 0; i < sampleCount; i++)
-                  Expanded(
-                    flex: 3,
-                    child: _physicalInput(
-                      param,
-                      source[param]![i],
-                      '${refs[param] ?? ''}',
-                    ),
-                  ),
-              ],
-            ),
-          ),
-      ],
+              ),
+            _physicalInput(param, ctrls[i], '$ref'),
+            if (i < sampleCount - 1) const SizedBox(height: AppSpacing.sm),
+          ],
+        ],
+      ),
     );
   }
 
@@ -840,11 +913,14 @@ class InspectionFormSections {
           children: [
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: AppSpacing.xxs),
                 child: TextField(
                   controller: ctrl,
                   onSubmitted: (_) => normalize(),
-                  decoration: _inputDec(out, hint: 'Result'),
+                  decoration: _inputDec(
+                    out,
+                    hint: AppText.t('أدخل النتيجة', 'Enter result'),
+                  ),
                 ),
               ),
             ),
@@ -878,99 +954,199 @@ class InspectionFormSections {
     Map<String, List<TextEditingController>> source,
     Map<String, dynamic> refs,
   ) {
-    return Column(
-      children: [
-        Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Phones: one stacked card per parameter (range + full-width inputs)
+        // instead of a squeezed multi-column table.
+        if (constraints.maxWidth < AppBreakpoints.medium) {
+          return Column(
+            children: [
+              for (final param in source.keys)
+                _chemicalParamCard(param, source[param]!, refs[param]),
+            ],
+          );
+        }
+        return Column(
           children: [
-            Expanded(
-              flex: 2,
-              child: Text(
-                AppText.t('البارامتر', 'Parameter'),
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.spMax,
-                ),
-              ),
-            ),
-            Expanded(
-              flex: 1,
-              child: Text(
-                'Min',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.spMax,
-                ),
-              ),
-            ),
-            Expanded(
-              flex: 1,
-              child: Text(
-                'Max',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.spMax,
-                ),
-              ),
-            ),
-            for (var i = 0; i < sampleCount; i++) _sampleHeader(i),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        for (final param in source.keys)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            Row(
               children: [
                 Expanded(
                   flex: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          param,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13.spMax,
-                          ),
-                        ),
-                        if (isReferenceRequired(refs[param]))
-                          const RequiredBadge(),
-                      ],
+                  child: Text(
+                    AppText.t('البارامتر', 'Parameter'),
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12.spMax,
                     ),
                   ),
                 ),
-                _boundCell(_chemCell(refs[param]).minText),
-                _boundCell(_chemCell(refs[param]).maxText),
-                for (var i = 0; i < sampleCount; i++)
-                  Expanded(
-                    flex: 3,
-                    child: _chemicalInput(
-                      _chemCell(refs[param]),
-                      source[param]![i],
+                Expanded(
+                  flex: 2,
+                  child: Text(
+                    AppText.t('النطاق', 'Range'),
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12.spMax,
                     ),
                   ),
+                ),
+                for (var i = 0; i < sampleCount; i++) _sampleHeader(i),
               ],
             ),
-          ),
-      ],
+            const SizedBox(height: AppSpacing.xs),
+            for (final param in source.keys)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.sm),
+                        child: Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              param,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13.spMax,
+                              ),
+                            ),
+                            if (isReferenceRequired(refs[param]))
+                              const RequiredBadge(),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Expanded(flex: 2, child: _rangeCell(refs[param])),
+                    for (var i = 0; i < sampleCount; i++)
+                      Expanded(
+                        flex: 3,
+                        child: _chemicalInput(
+                          _chemCell(refs[param]),
+                          source[param]![i],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
     );
   }
 
-  Widget _boundCell(String text) {
-    return Expanded(
-      flex: 1,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 10),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
-        ),
+  /// One parameter as a stacked card (phones): name + range on top,
+  /// full-width result inputs below.
+  Widget _chemicalParamCard(
+    String param,
+    List<TextEditingController> ctrls,
+    Object? ref,
+  ) {
+    return AppCard(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      color: AppColors.surfaceSoft,
+      enableHover: false,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      param,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14.spMax,
+                      ),
+                    ),
+                    if (isReferenceRequired(ref)) const RequiredBadge(),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          _rangeCell(ref, alignCenter: false),
+          const SizedBox(height: AppSpacing.sm),
+          for (var i = 0; i < sampleCount; i++) ...[
+            if (sampleCount > 1)
+              Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                child: Text(
+                  sampleNames[i].text.trim().isEmpty
+                      ? AppText.t('عينة ${i + 1}', 'Sample ${i + 1}')
+                      : sampleNames[i].text.trim(),
+                  style: TextStyle(
+                    fontSize: 12.spMax,
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            _chemicalInput(_chemCell(ref), ctrls[i]),
+            if (i < sampleCount - 1) const SizedBox(height: AppSpacing.sm),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Formatted acceptable range + unit chip (single column replaces the old
+  /// Min/Max pair, whose raw `-`/fragments looked broken).
+  Widget _rangeCell(Object? ref, {bool alignCenter = true}) {
+    final range = formatReferenceRange(ref);
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.sm),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        alignment: alignCenter ? WrapAlignment.center : WrapAlignment.start,
+        children: [
+          Text(
+            range.display,
+            textAlign: alignCenter ? TextAlign.center : TextAlign.start,
+            style: TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 13.spMax,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          if (range.unit.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm,
+                vertical: AppSpacing.xxs,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(AppRadii.xl),
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.25),
+                ),
+              ),
+              child: Text(
+                range.unit,
+                style: TextStyle(
+                  fontSize: 11.spMax,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -980,7 +1156,7 @@ class InspectionFormSections {
       return Expanded(
         flex: 3,
         child: Text(
-          'Result',
+          AppText.t('النتيجة', 'Result'),
           textAlign: TextAlign.center,
           style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
         ),
@@ -1001,8 +1177,8 @@ class InspectionFormSections {
                 filled: true,
                 fillColor: AppColors.surface,
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 8,
+                  horizontal: AppSpacing.sm,
+                  vertical: AppSpacing.sm,
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppRadii.sm),
@@ -1034,7 +1210,7 @@ class InspectionFormSections {
           children: [
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: AppSpacing.xxs),
                 child: TextField(
                   controller: ctrl,
                   onChanged: (_) {},
@@ -1047,15 +1223,18 @@ class InspectionFormSections {
             ),
             if (cell.unit.isNotEmpty)
               Padding(
-                padding: const EdgeInsetsDirectional.only(start: 6, top: 2),
+                padding: const EdgeInsetsDirectional.only(
+                  start: AppSpacing.xs,
+                  top: AppSpacing.xxs,
+                ),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 7,
+                    horizontal: AppSpacing.xs,
+                    vertical: AppSpacing.sm,
                   ),
                   decoration: BoxDecoration(
                     color: AppColors.surfaceSoft,
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
                     border: Border.all(color: AppColors.borderMuted),
                   ),
                   child: Text(

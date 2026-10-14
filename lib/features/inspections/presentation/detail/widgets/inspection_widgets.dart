@@ -6,7 +6,10 @@ import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_quantity_field.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../app/auth_gate.dart';
 import '../../../../../di/service_locator.dart';
@@ -198,35 +201,26 @@ class DecisionFormState extends State<DecisionForm> {
         ),
         if (_status == 'CONDITIONAL_APPROVAL') ...[
           const SizedBox(height: AppSpacing.md),
-          TextField(
+          AppField(
+            label: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
+            hint: AppText.t('اختياري', 'Optional'),
             controller: _followUp,
             maxLines: 3,
-            decoration: InputDecoration(
-              labelText: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
-              isDense: true,
-            ),
           ),
         ],
         if (_status == 'PARTIAL_REJECTION') ...[
           const SizedBox(height: AppSpacing.md),
-          TextField(
+          AppQuantityField(
+            label: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
             controller: _rejected,
-            decoration: InputDecoration(
-              labelText: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
-              isDense: true,
-            ),
           ),
         ],
-        if (_status == 'PARTIAL_REJECTION' ||
-            _status == 'FULL_REJECTION') ...[
+        if (_status == 'PARTIAL_REJECTION' || _status == 'FULL_REJECTION') ...[
           const SizedBox(height: AppSpacing.md),
-          TextField(
+          AppField(
+            label: AppText.t('سبب القرار', 'Decision reason'),
             controller: _reason,
             maxLines: 3,
-            decoration: InputDecoration(
-              labelText: AppText.t('سبب القرار', 'Decision reason'),
-              isDense: true,
-            ),
           ),
         ],
       ],
@@ -242,11 +236,12 @@ class DecisionFormState extends State<DecisionForm> {
               Expanded(
                 child: SizedBox(
                   height: AppSpacing.mobileCtaHeight.h,
-                  child: OutlinedButton(
+                  child: AppButton(
+                    label: AppText.t('إلغاء', 'Cancel'),
+                    style: AppButtonStyle.secondary,
                     onPressed: _saving
                         ? null
                         : () => Navigator.of(context).pop(false),
-                    child: Text(AppText.t('إلغاء', 'Cancel')),
                   ),
                 ),
               ),
@@ -255,18 +250,10 @@ class DecisionFormState extends State<DecisionForm> {
                 flex: 2,
                 child: SizedBox(
                   height: AppSpacing.mobileCtaHeight.h,
-                  child: FilledButton(
+                  child: AppButton(
+                    label: AppStrings.save,
+                    loading: _saving,
                     onPressed: _saving ? null : _save,
-                    child: _saving
-                        ? SizedBox(
-                            width: 18.r,
-                            height: 18.r,
-                            child: const CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : Text(AppStrings.save),
                   ),
                 ),
               ),
@@ -281,19 +268,15 @@ class DecisionFormState extends State<DecisionForm> {
       size: AppWindowSize.sm,
       maxWidth: 460,
       actions: [
-        TextButton(
+        AppButton(
+          label: AppStrings.cancel,
+          style: AppButtonStyle.secondary,
           onPressed: _saving ? null : () => Navigator.of(context).pop(false),
-          child: Text(AppStrings.cancel),
         ),
-        FilledButton(
+        AppButton(
+          label: AppStrings.save,
+          loading: _saving,
           onPressed: _saving ? null : _save,
-          child: _saving
-              ? SizedBox(
-                  width: 18.r,
-                  height: 18.r,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(AppStrings.save),
         ),
       ],
       child: fields,

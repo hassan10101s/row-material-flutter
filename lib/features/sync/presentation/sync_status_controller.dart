@@ -73,15 +73,35 @@ class SyncStatusController extends ChangeNotifier {
 
   StreamSubscription<bool>? _subscription;
   Timer? _timer;
+  Timer? _startTimer;
   SyncBadgeStatus _status;
+
+  /// A refresh already waiting on the connection. Overlapping ticks skip
+  /// instead of queueing duplicate reads behind a long write.
+  bool _refreshing = false;
 
   SyncBadgeStatus get status => _status;
 
   /// Starts the periodic refresh and reads the counters once.
-  void start() {
+  ///
+  /// The first read is delayed past the bootstrap stampede by default:
+  /// `SyncEngine.start()->syncNow` + `DashboardCubit.load` already issue ~8
+  /// concurrent reads on the single FFI isolate at startup, and this badge
+  /// adds two more (`countBadge` + `readAll`). Firing immediately deepened the
+  /// exact 2.8 s stall in the bootstrap log; a short delay lets the engine's
+  /// first emit settle instead of queueing duplicate badge reads behind it.
+  /// Connectivity-triggered refreshes stay immediate.
+  void start({Duration initialDelay = const Duration(milliseconds: 1500)}) {
     if (_timer != null) return;
     _timer = Timer.periodic(refreshInterval, (_) => unawaited(refresh()));
-    unawaited(refresh());
+    if (initialDelay == Duration.zero) {
+      unawaited(refresh());
+    } else {
+      _startTimer = Timer(initialDelay, () {
+        _startTimer = null;
+        if (_timer != null) unawaited(refresh());
+      });
+    }
   }
 
   /// Badge refresh in **two** round trips instead of four.
@@ -91,7 +111,14 @@ class SyncStatusController extends ChangeNotifier {
   /// 20 s timer that collides with `SyncEngine.syncNow` and the dashboard's
   /// own `Future.wait` load at bootstrap. `countBadge` returns pending +
   /// blocked in one statement and `readAll` fetches both timestamps in one.
+  ///
+  /// Overlapping refreshes (timer tick while a previous read still parks
+  /// behind a long write) are skipped instead of piled onto the connection
+  /// lock: the badge keeps its last values for one more tick rather than
+  /// deepening the stall it is trying to report.
   Future<void> refresh() async {
+    if (_refreshing) return;
+    _refreshing = true;
     try {
       final results = await Future.wait([
         queue.countBadge(),
@@ -119,6 +146,8 @@ class SyncStatusController extends ChangeNotifier {
       }
     } on Object {
       // A badge must never break the shell: keep the last known values.
+    } finally {
+      _refreshing = false;
     }
   }
 
@@ -133,6 +162,8 @@ class SyncStatusController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _startTimer?.cancel();
+    _startTimer = null;
     _timer?.cancel();
     _timer = null;
     _subscription?.cancel();

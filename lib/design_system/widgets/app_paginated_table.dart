@@ -9,6 +9,7 @@ import '../animations/app_animations.dart';
 import 'app_card.dart';
 import 'app_empty_state.dart';
 import 'app_icon.dart';
+import 'app_page_size.dart';
 
 /// Data table with a pinned header, vertical scrolling body, optional
 /// horizontal scroll and built-in pagination.
@@ -35,6 +36,12 @@ class AppPaginatedTable extends StatefulWidget {
   final int? page;
   final Future<void> Function(int page)? onPageChanged;
 
+  /// Page-size control in the footer next to the arrows. Server mode forwards
+  /// to [onPageSizeChanged] (owner refetches with the new LIMIT); client mode
+  /// is handled internally.
+  final Future<void> Function(int pageSize)? onPageSizeChanged;
+  final List<int> pageSizeOptions;
+
   /// Fixed body height, or `null` to fill whatever the caller offers. The
   /// default stays `470` so every existing call site keeps its authored
   /// height unchanged.
@@ -47,6 +54,11 @@ class AppPaginatedTable extends StatefulWidget {
   final bool loading;
   final Widget? headerTrailing;
 
+  /// Width reserved for [headerTrailing] inside the header row. Column widths
+  /// shrink by this amount so a trailing action (e.g. an export button) never
+  /// overflows the header when combined with the selection checkbox.
+  final double headerTrailingWidth;
+
   /// Height of one body row. 52 is the desktop authored value; the mobile
   /// variant passes a larger value for a finger-sized target.
   final double rowHeight;
@@ -57,17 +69,23 @@ class AppPaginatedTable extends StatefulWidget {
   /// holds the checked rows, [selectAllValue] drives the tristate header
   /// checkbox (`true` all / `null` some / `false` none), [onToggleAll]
   /// selects or clears the page.
+  ///
+  /// With [selectHidden] the column stays hidden until the user long-presses
+  /// a row (or taps the header select toggle): the same long-press-to-select
+  /// idea as the test-history table. Selection exits automatically once the
+  /// owner clears every index. Boxes are modern circular checkboxes.
   final Set<int>? selectedIndices;
   final ValueChanged<int>? onToggleIndex;
   final bool? selectAllValue;
   final ValueChanged<bool?>? onToggleAll;
+  final bool selectHidden;
 
   const AppPaginatedTable({
     super.key,
     required this.headers,
     required this.rows,
     this.onRowTap,
-    this.rowsPerPage = 10,
+    this.rowsPerPage = kDefaultPageSize,
     this.height = 470,
     this.minTableWidth = 640,
     this.columnFlex,
@@ -79,10 +97,14 @@ class AppPaginatedTable extends StatefulWidget {
     this.total,
     this.page,
     this.onPageChanged,
+    this.onPageSizeChanged,
+    this.pageSizeOptions = kPageSizeOptions,
+    this.headerTrailingWidth = 48,
     this.selectedIndices,
     this.onToggleIndex,
     this.selectAllValue,
     this.onToggleAll,
+    this.selectHidden = false,
   });
 
   /// Fixed width of the selection column (Vue uses 44px).
@@ -100,22 +122,45 @@ class AppPaginatedTable extends StatefulWidget {
 class _AppPaginatedTableState extends State<AppPaginatedTable> {
   int _page = 0;
 
+  /// Client-mode page size (server mode is owned by the caller via
+  /// [AppPaginatedTable.rowsPerPage]).
+  late int _pageSize = widget.rowsPerPage;
+
+  /// Hidden-select mode ([selectHidden]): true once the user long-presses a
+  /// row or taps the header toggle. Exits when the owner clears the
+  /// selection, so the column never lingers on an empty pick.
+  bool _selecting = false;
+
+  /// Whether the checkbox column is currently drawn.
+  bool get _showSelectColumn =>
+      widget.selectable && (!widget.selectHidden || _selecting);
+
   @override
   void didUpdateWidget(covariant AppPaginatedTable oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.rowsPerPage != widget.rowsPerPage) {
+      _pageSize = widget.rowsPerPage;
+      _page = 0;
+    }
     // Client mode: a shorter list (e.g. new filter) must not strand the user
     // on a page past the end. Server mode is owned by the caller via [page].
     if (!_server && oldWidget.rows.length != widget.rows.length) {
       _page = _page.clamp(0, _pageCount - 1);
     }
+    if (_selecting && (widget.selectedIndices?.isEmpty ?? true)) {
+      _selecting = false;
+    }
   }
 
   bool get _server => widget.isServerDriven;
 
+  /// Effective records per page: owner-driven in server mode, local state in
+  /// client mode.
+  int get _per => _server ? widget.rowsPerPage : _pageSize;
+
   int get _pageCount {
     final total = _server ? widget.total! : widget.rows.length;
-    final per = widget.rowsPerPage;
-    return (total / per).ceil().clamp(1, 1 << 31);
+    return (total / _per).ceil().clamp(1, 1 << 31);
   }
 
   int get _effectivePage =>
@@ -130,6 +175,20 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     setState(() => _page = next);
   }
 
+  Future<void> _changePageSize(int size) async {
+    if (_server) {
+      await widget.onPageSizeChanged?.call(size);
+      return;
+    }
+    if (widget.onPageSizeChanged != null) {
+      await widget.onPageSizeChanged!(size);
+    }
+    setState(() {
+      _pageSize = size;
+      _page = 0;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // Server mode: the owner already fetched exactly this page; the widget
@@ -138,16 +197,16 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     final int leftIndex;
     if (_server) {
       leftIndex = 0;
-      pageRows = widget.rows.length <= widget.rowsPerPage
+      pageRows = widget.rows.length <= _per
           ? widget.rows
-          : widget.rows.sublist(0, widget.rowsPerPage);
+          : widget.rows.sublist(0, _per);
     } else {
-      leftIndex = _effectivePage * widget.rowsPerPage;
+      leftIndex = _effectivePage * _per;
       pageRows = leftIndex >= widget.rows.length
           ? const <List<Widget>>[]
           : widget.rows.sublist(
               leftIndex,
-              (leftIndex + widget.rowsPerPage).clamp(0, widget.rows.length),
+              (leftIndex + _per).clamp(0, widget.rows.length),
             );
     }
 
@@ -174,7 +233,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
                       child: widget.loading
                           ? _loadingBody()
                           : pageRows.isEmpty
-                          ? _emptyBody()
+                          ? _emptyBody(context)
                           : ListView.builder(
                               padding: EdgeInsets.zero,
                               itemCount: pageRows.length,
@@ -219,7 +278,14 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
   /// Column widths in logical px for the given total table width.
   List<double> _columnWidths(double totalWidth) {
     var usable = math.max(0.0, totalWidth - 2 * AppSpacing.lg);
+    // The 44px slot is always drawn when selectable: the checkbox column in
+    // select mode, the select toggle otherwise. Reserving it on
+    // `_showSelectColumn` instead overflowed the header by exactly 44px in
+    // hidden mode.
     if (widget.selectable) usable = math.max(0.0, usable - AppPaginatedTable.selectionWidth);
+    if (widget.headerTrailing != null) {
+      usable = math.max(0.0, usable - widget.headerTrailingWidth);
+    }
     final flex = List<double>.filled(widget.headers.length, 1.0);
     if (widget.columnFlex != null) {
       for (
@@ -235,6 +301,25 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     return [for (final f in flex) usable * f / sum];
   }
 
+  /// Modern circular checkbox shared by the header (tristate) and the rows.
+  Widget _selectBox({required bool? value, required ValueChanged<bool?>? onChanged}) {
+    return Checkbox(
+      tristate: value == null,
+      value: value ?? false,
+      shape: const CircleBorder(),
+      side: BorderSide(color: AppColors.borderMuted, width: 1.5),
+      activeColor: AppColors.primary,
+      checkColor: Colors.white,
+      visualDensity: VisualDensity.compact,
+      onChanged: onChanged,
+    );
+  }
+
+  void _enterSelectMode(int index) {
+    setState(() => _selecting = true);
+    widget.onToggleIndex!(index);
+  }
+
   Widget _header(BuildContext context, List<double> widths) {
     return Container(
       height: 46,
@@ -242,16 +327,29 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
       color: AppColors.surfaceSoft,
       child: Row(
         children: [
-          if (widget.selectable)
+          if (_showSelectColumn)
             SizedBox(
               width: AppPaginatedTable.selectionWidth,
               child: widget.onToggleAll == null
                   ? const SizedBox.shrink()
-                  : Checkbox(
-                      tristate: true,
-                      value: widget.selectAllValue ?? false,
+                  : _selectBox(
+                      value: widget.selectAllValue,
                       onChanged: widget.onToggleAll,
                     ),
+            )
+          else if (widget.selectable && widget.selectHidden)
+            SizedBox(
+              width: AppPaginatedTable.selectionWidth,
+              child: IconButton(
+                tooltip: appTextOf(
+                  context,
+                  'تحديد (أو ضغطة مطولة على أي صف)',
+                  'Select (or long-press any row)',
+                ),
+                visualDensity: VisualDensity.compact,
+                onPressed: () => setState(() => _selecting = true),
+                icon: const Icon(Icons.radio_button_unchecked, size: 20),
+              ),
             ),
           for (var i = 0; i < widget.headers.length; i++)
             SizedBox(
@@ -284,37 +382,57 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     List<Widget> row, {
     required int realIndex,
   }) {
-    return InkWell(
-      onTap: widget.onRowTap == null ? null : () => widget.onRowTap!(realIndex),
-      child: SizedBox(
-        height: widget.rowHeight,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-          child: Row(
-            children: [
-              if (widget.selectable)
-                SizedBox(
-                  width: AppPaginatedTable.selectionWidth,
-                  child: Checkbox(
-                    value: widget.selectedIndices?.contains(realIndex) ?? false,
-                    onChanged: (_) => widget.onToggleIndex!(realIndex),
-                  ),
-                ),
-              for (var i = 0; i < row.length; i++)
-                SizedBox(
-                  width: i < widths.length ? widths[i] : 120,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm,
-                      vertical: 4,
+    final inSelectMode = _showSelectColumn;
+    final interactive =
+        (inSelectMode && widget.onToggleIndex != null) ||
+        widget.onRowTap != null ||
+        (!inSelectMode && widget.selectable && widget.selectHidden);
+    return MouseRegion(
+      cursor: interactive
+          ? SystemMouseCursors.click
+          : MouseCursor.defer,
+      child: InkWell(
+        onTap: inSelectMode && widget.onToggleIndex != null
+            ? () => widget.onToggleIndex!(realIndex)
+            : widget.onRowTap == null
+                ? null
+                : () => widget.onRowTap!(realIndex),
+        onLongPress: !inSelectMode && widget.selectable && widget.selectHidden
+            ? () => _enterSelectMode(realIndex)
+            : null,
+        hoverColor: AppColors.primary.withValues(alpha: 0.06),
+        highlightColor: AppColors.primary.withValues(alpha: 0.10),
+        child: SizedBox(
+          height: widget.rowHeight,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+            child: Row(
+              children: [
+                if (_showSelectColumn)
+                  SizedBox(
+                    width: AppPaginatedTable.selectionWidth,
+                    child: _selectBox(
+                      value:
+                          widget.selectedIndices?.contains(realIndex) ?? false,
+                      onChanged: (_) => widget.onToggleIndex!(realIndex),
                     ),
-                    child: Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: row[i],
+                  ),
+                for (var i = 0; i < row.length; i++)
+                  SizedBox(
+                    width: i < widths.length ? widths[i] : 120,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                        vertical: 4,
+                      ),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: row[i],
+                      ),
                     ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -340,11 +458,14 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     );
   }
 
-  Widget _emptyBody() {
+  Widget _emptyBody(BuildContext context) {
     return Center(
       child:
           widget.empty ??
-          AppEmptyState(icon: Icons.inbox_outlined, title: 'لا توجد بيانات'),
+          AppEmptyState(
+            icon: Icons.inbox_outlined,
+            title: appTextOf(context, 'لا توجد بيانات', 'No data'),
+          ),
     );
   }
 
@@ -373,6 +494,12 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              AppPageSizeSelector(
+                value: _per,
+                options: widget.pageSizeOptions,
+                onChanged: _changePageSize,
+              ),
+              SizedBox(width: 8.w),
               IconButton(
                 tooltip: appTextOf(context, 'السابق', 'Previous'),
                 onPressed: _effectivePage > 0 ? () => _changePage(-1) : null,
@@ -402,10 +529,10 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
   }
 
   int get pageRowsLength {
-    if (_server) return widget.rows.length.clamp(0, widget.rowsPerPage);
-    final left = _effectivePage * widget.rowsPerPage;
+    if (_server) return widget.rows.length.clamp(0, _per);
+    final left = _effectivePage * _per;
     if (left >= widget.rows.length) return 0;
-    return (widget.rows.length - left).clamp(0, widget.rowsPerPage);
+    return (widget.rows.length - left).clamp(0, _per);
   }
 }
 

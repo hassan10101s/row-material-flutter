@@ -21,6 +21,7 @@ class SyncStatusSnapshot {
     required this.pending,
     required this.blocked,
     required this.conflicts,
+    this.failed = 0,
     this.lastPushAt,
     this.lastPullAt,
     this.lastError,
@@ -32,6 +33,7 @@ class SyncStatusSnapshot {
   final int pending;
   final int blocked;
   final int conflicts;
+  final int failed;
   final DateTime? lastPushAt;
   final DateTime? lastPullAt;
   final String? lastError;
@@ -39,11 +41,28 @@ class SyncStatusSnapshot {
   /// True when Firebase could not be initialized (offline-first degraded mode).
   final bool degraded;
 
+  /// Fully synced (plan §10): no pending/in-flight/failed/blocked/conflicts
+  /// AND a successful recent pull+push. Never true on errors or offline.
+  bool get fullySynced =>
+      online &&
+      !syncing &&
+      pending == 0 &&
+      blocked == 0 &&
+      conflicts == 0 &&
+      failed == 0 &&
+      lastPushAt != null &&
+      lastPullAt != null &&
+      (lastError == null || lastError!.isEmpty);
+
   String get badge {
     if (!online) return 'Offline';
     if (syncing) return 'Syncing';
+    if (degraded) return 'Degraded';
+    if (failed > 0) return 'Errors $failed';
     if (blocked > 0) return 'Blocked $blocked';
+    if (conflicts > 0) return 'Conflicts $conflicts';
     if (pending > 0) return 'Pending $pending';
+    if (fullySynced) return 'Synced';
     return 'Online';
   }
 }
@@ -144,6 +163,11 @@ class SyncEngine {
   /// Coalescing window for [scheduleSync]: a burst of local writes (an import,
   /// a form save + its history rows) triggers one cycle, not one per row.
   final Duration mutationDelay;
+
+  /// Mobile-only hook: fired after a pull that applied remote rows.
+  /// Wired by the service locator to `NotificationController.refresh`;
+  /// null in tests and on desktop.
+  Future<void> Function()? onPullApplied;
 
   final StreamController<SyncStatusSnapshot> _status =
       StreamController<SyncStatusSnapshot>.broadcast();
@@ -248,6 +272,24 @@ class SyncEngine {
     _dashboardTimer = null;
   }
 
+  /// Stops every timer and the connectivity subscription (plan §3/§8).
+  /// Called on sign-out / leave so no heartbeat, push or pull runs after the
+  /// company database is unbound. The engine is single-flight safe to restart
+  /// via [start] on the next active bind.
+  void stop() {
+    _running = false;
+    _timer?.cancel();
+    _timer = null;
+    _dashboardTimer?.cancel();
+    _dashboardTimer = null;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    _mutationTimer?.cancel();
+    _mutationTimer = null;
+    unawaited(_connectivitySubscription?.cancel());
+    _connectivitySubscription = null;
+  }
+
   /// Push first, then pull: local edits must reach the server before remote
   /// changes are compared against them.
   Future<SyncStatusSnapshot> syncNow({String reason = 'manual', bool pullOnly = false}) async {
@@ -267,9 +309,22 @@ class SyncEngine {
     try {
       await _recoverStalledRows();
       if (!pullOnly) {
-        await pushWorker.runOnce();
+        // One runOnce claims at most 400 rows: an 800-row desktop import left
+        // half the queue pending while the badge already said "Synced".
+        // Drain (bounded) so one manual "Sync now" actually finishes the push.
+        for (var i = 0; i < 5; i++) {
+          final pushReport = await pushWorker.runOnce();
+          if (pushReport.pushed == 0) break;
+        }
       }
-      await pullWorker.runOnce();
+      final pullReport = await pullWorker.runOnce();
+      if (pullReport.applied > 0) {
+        try {
+          await onPullApplied?.call();
+        } on Object catch (e) {
+          debugPrint('[sync] onPullApplied skipped: $e');
+        }
+      }
       // The audit trail and its retention must never fail the data cycle.
       await _auditMaintenance();
     } on Object catch (e) {
@@ -466,7 +521,59 @@ class SyncEngine {
   /// connection's non-reentrant lock for the duration - and the conflicts count
   /// came from `listConflicts(limit: 1000)`, which pulled a thousand whole rows
   /// across the isolate boundary to produce an integer.
-  Future<SyncStatusSnapshot> _current() async {
+  ///
+  /// Single-flight + bounded: overlapping badge refreshes (startup stampede:
+  /// engine emit, shell badge, dashboard load) share one read instead of
+  /// queueing N identical pairs behind real work, and a stuck lock serves the
+  /// last snapshot after [statusReadTimeout] instead of wedging every awaiter.
+  /// The parked read still completes and refreshes the cache for the next
+  /// emit; only the waiting is cut short.
+  Future<SyncStatusSnapshot> _current() {
+    final flight = _currentFlight;
+    if (flight != null) return flight;
+    final next = _readCurrent().then((snapshot) {
+      _lastSnapshot = snapshot;
+      return snapshot;
+    }).timeout(statusReadTimeout, onTimeout: _fallbackSnapshot);
+    _currentFlight = next;
+    // Clearing is observed (not awaited): the derived future must not go
+    // unhandled when the shared read itself fails — every awaiter already
+    // receives the error through `next`.
+    unawaited(next.then<void>(
+      (_) {
+        if (identical(_currentFlight, next)) _currentFlight = null;
+      },
+      onError: (_) {
+        if (identical(_currentFlight, next)) _currentFlight = null;
+      },
+    ));
+    return next;
+  }
+
+  /// In-flight status read shared by overlapping refreshes.
+  Future<SyncStatusSnapshot>? _currentFlight;
+
+  /// Last good snapshot, served when the database does not answer in time.
+  SyncStatusSnapshot? _lastSnapshot;
+
+  /// Budget for one badge read. Past it the UI keeps the last snapshot
+  /// instead of wedging: the parked SQLite call still completes (and updates
+  /// the cache for the next emit), but no awaiter hangs on a stuck lock.
+  /// Kept under sqflite's own 10s lock warning.
+  static const Duration statusReadTimeout = Duration(seconds: 8);
+
+  SyncStatusSnapshot _fallbackSnapshot() =>
+      _lastSnapshot ??
+      SyncStatusSnapshot(
+        online: connectivity.isOnline,
+        syncing: _inFlight,
+        pending: 0,
+        blocked: 0,
+        conflicts: 0,
+        degraded: _degraded,
+      );
+
+  Future<SyncStatusSnapshot> _readCurrent() async {
     // Parallel, not sequential: each of these is a message to the single FFI
     // isolate, and awaiting them one after another doubles the badge latency
     // whenever the connection is busy (bootstrap, dashboard load). Neither
@@ -488,6 +595,7 @@ class SyncEngine {
       pending: badge.pending,
       blocked: badge.blocked,
       conflicts: badge.conflicts,
+      failed: badge.failed,
       lastPushAt: _asDate(keys[SyncMetadata.lastPushAtKey]),
       lastPullAt: _asDate(keys[SyncMetadata.lastPullAtKey]),
       lastError: lastError.isEmpty ? null : lastError,

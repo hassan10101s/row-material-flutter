@@ -10,10 +10,12 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../design_system/widgets/app_paginated_table.dart';
+import '../../../../design_system/widgets/app_selection.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../design_system/export/table_html_export.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../di/service_locator.dart';
-import '../../data/lab_repo.dart';
 import '../../domain/lab_local_repository.dart';
 import 'equipment_dialogs.dart';
 
@@ -91,19 +93,17 @@ class _EquipmentTabState extends State<EquipmentTab> {
     if (saved && mounted) _load();
   }
 
-  void _open(Map<String, dynamic> row, bool wide) {
+  void _open(Map<String, dynamic> row) {
     final id = (row['id'] as num).toInt();
-    if (wide) {
-      setState(() => _selectedId = id);
-      return;
-    }
-    Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => _EquipmentDetailRoute(equipmentId: id),
-      ),
-    ).then((_) {
-      if (mounted) _load();
-    });
+    Navigator.of(context)
+        .push<void>(
+          MaterialPageRoute(
+            builder: (_) => _EquipmentDetailRoute(equipmentId: id),
+          ),
+        )
+        .then((_) {
+          if (mounted) _load();
+        });
   }
 
   @override
@@ -111,9 +111,7 @@ class _EquipmentTabState extends State<EquipmentTab> {
     if (_loading && _rows.isEmpty) {
       return const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          AppSkeletonList(rows: 6, lines: 3, height: 380),
-        ],
+        children: [AppSkeletonList(rows: 6, lines: 3, height: 380)],
       );
     }
     if (_error != null && _rows.isEmpty) {
@@ -135,54 +133,37 @@ class _EquipmentTabState extends State<EquipmentTab> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= AppBreakpoints.medium;
-        final list = _MasterList(
+        final list = EquipmentMasterList(
           rows: _filtered,
           selectedId: _selectedId,
           query: _query,
           onQuery: () => setState(() {}),
           onClearQuery: () => setState(_query.clear),
           onAdd: _add,
-          onOpen: (row) => _open(row, wide),
+          onOpen: _open,
           wide: wide,
         );
-        if (!wide) return list;
-        final selected = _selectedId == null
-            ? null
-            : _rows
-                .where((r) => (r['id'] as num).toInt() == _selectedId)
-                .firstOrNull;
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: list,
-            ),
-            const SizedBox(width: AppSpacing.lg),
-            Expanded(
-              child: selected == null
-                  ? AppEmptyState(
-                      icon: Icons.precision_manufacturing_outlined,
-                      title: AppText.t(
-                        'اختر جهازاً لعرض بياناته وسجله',
-                        'Select equipment to view its details and log',
-                      ),
-                    )
-                  : _EquipmentDetail(
-                      key: ValueKey('equipment-${selected['id']}'),
-                      equipmentId: (selected['id'] as num).toInt(),
-                      onChanged: _load,
-                    ),
-            ),
-          ],
+        // Narrow: add floats like the raw-material register (heroTag null:
+        // sibling lab tabs share one IndexedStack). Wide keeps inline add.
+        if (wide) return list;
+        return Scaffold(
+          floatingActionButton: FloatingActionButton(
+            heroTag: null,
+            tooltip: AppText.t('إضافة جهاز', 'Add equipment'),
+            onPressed: _add,
+            child: Icon(Icons.add, size: 24.r),
+          ),
+          body: list,
         );
       },
     );
   }
 }
 
-/// Master list: title + add + search + cards.
-class _MasterList extends StatelessWidget {
+/// Master list: title + add + search + table on wide screens, cards on phones.
+///
+/// Export mapping lives here so both experiences (and tests) share it.
+class EquipmentMasterList extends StatefulWidget {
   final List<Map<String, dynamic>> rows;
   final int? selectedId;
   final TextEditingController query;
@@ -192,7 +173,8 @@ class _MasterList extends StatelessWidget {
   final ValueChanged<Map<String, dynamic>> onOpen;
   final bool wide;
 
-  const _MasterList({
+  const EquipmentMasterList({
+    super.key,
     required this.rows,
     required this.selectedId,
     required this.query,
@@ -203,89 +185,247 @@ class _MasterList extends StatelessWidget {
     required this.wide,
   });
 
+  /// Export mapping shared by the desktop table and the mobile cards.
+  static List<String> exportHeaders() => [
+    AppText.t('المعدة', 'Equipment'),
+    AppText.t('الكود', 'Code'),
+    AppText.t('الشركة', 'Manufacturer'),
+    AppText.t('آخر معايرة', 'Last calibration'),
+    AppText.t('السجل', 'Log'),
+  ];
+
+  static List<List<String>> exportRows(List<Map<String, dynamic>> rows) => [
+    for (final r in rows)
+      [
+        '${r['name'] ?? '-'}',
+        '${r['code'] ?? '-'}',
+        '${r['manufacturer'] ?? '-'}',
+        '${r['last_calibration_date'] ?? '-'}',
+        '${r['events_count'] ?? 0}',
+      ],
+  ];
+
+  static String exportTitle() => AppText.t('معدات المعمل', 'Lab equipment');
+
+  @override
+  State<EquipmentMasterList> createState() => _MasterListState();
+}
+
+class _MasterListState extends State<EquipmentMasterList> {
+  /// Table indices picked with the checkbox column (same idea every table).
+  final Set<int> _selected = <int>{};
+
+  Future<void> _exportSelected() async {
+    final picked = [
+      for (var i = 0; i < widget.rows.length; i++)
+        if (_selected.contains(i)) widget.rows[i],
+    ];
+    await TableHtmlExport.export(
+      context,
+      filePrefix: 'equipment',
+      title: EquipmentMasterList.exportTitle(),
+      headers: EquipmentMasterList.exportHeaders(),
+      rows: EquipmentMasterList.exportRows(picked),
+    );
+    if (mounted && picked.isNotEmpty) {
+      setState(_selected.clear);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final title = Text(
-      AppText.t('معدات المعمل', 'Lab equipment'),
-      style: Theme.of(context).textTheme.titleLarge,
+    final rows = widget.rows;
+    final query = widget.query;
+    final wide = widget.wide;
+    // Desktop title lives in the shell topbar; the narrow (phone) title stays.
+    final title = wide
+        ? const SizedBox.shrink()
+        : Text(
+            AppText.t('معدات المعمل', 'Lab equipment'),
+            style: Theme.of(context).textTheme.titleLarge,
+          );
+    final search = TextField(
+      controller: query,
+      onChanged: (_) {
+        if (_selected.isNotEmpty) setState(_selected.clear);
+        widget.onQuery();
+      },
+      decoration: InputDecoration(
+        prefixIcon: Icon(Icons.search, size: 20.r),
+        suffixIcon: query.text.isEmpty
+            ? null
+            : IconButton(
+                tooltip: AppText.t('مسح البحث', 'Clear search'),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                icon: Icon(Icons.close, size: 18.r),
+                onPressed: widget.onClearQuery,
+              ),
+        hintText: AppText.t(
+          'بحث بالاسم أو الكود أو الشركة...',
+          'Search by name, code or manufacturer...',
+        ),
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
+    );
+    final exportButton = IconButton(
+      tooltip: AppText.t('تصدير جدول', 'Export table'),
+      visualDensity: VisualDensity.compact,
+      constraints: wide
+          ? null
+          : const BoxConstraints(minWidth: 48, minHeight: 48),
+      onPressed: rows.isEmpty
+          ? null
+          : () => TableHtmlExport.export(
+              context,
+              filePrefix: 'equipment',
+              title: EquipmentMasterList.exportTitle(),
+              headers: EquipmentMasterList.exportHeaders(),
+              rows: EquipmentMasterList.exportRows(rows),
+            ),
+      icon: Icon(Icons.table_view_outlined, size: 18.r),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (wide)
+          // Search and every action share one row; no space wasted.
           Row(
             children: [
-              title,
-              const Spacer(),
+              Expanded(child: search),
+              const SizedBox(width: AppSpacing.sm),
+              exportButton,
               AppButton(
                 small: true,
                 label: AppText.t('إضافة جهاز', 'Add equipment'),
                 icon: Icon(Icons.add, size: 16.r),
-                onPressed: onAdd,
+                onPressed: widget.onAdd,
               ),
             ],
           )
         else ...[
           title,
           const SizedBox(height: AppSpacing.sm),
-          SizedBox(
-            width: double.infinity,
-            child: AppButton(
-              label: AppText.t('إضافة جهاز', 'Add equipment'),
-              icon: Icon(Icons.add, size: 20.r),
-              onPressed: onAdd,
-            ),
+          // Add floats (FAB on the host Scaffold) like the raw-material
+          // register; only the export icon stays inline.
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [exportButton],
           ),
+          const SizedBox(height: AppSpacing.md),
+          search,
         ],
         const SizedBox(height: AppSpacing.md),
-        TextField(
-          controller: query,
-          onChanged: (_) => onQuery(),
-          decoration: InputDecoration(
-            prefixIcon: Icon(Icons.search, size: 20.r),
-            suffixIcon: query.text.isEmpty
-                ? null
-                : IconButton(
-                    tooltip: AppText.t('مسح البحث', 'Clear search'),
-                    icon: Icon(Icons.close, size: 18.r),
-                    onPressed: onClearQuery,
+        // The tab area is bounded (Expanded ← IndexedStack in lab_screen), so
+        // the trailing content must flex instead of sizing naturally — a fixed
+        // table height or a shrink-wrapped list overflows the Column (60px in
+        // the reported RenderFlex overflow).
+        if (_selected.isNotEmpty && wide) ...[
+          TableSelectionBar(
+            selectedCount: _selected.length,
+            onExportTable: _exportSelected,
+            onClear: () => setState(_selected.clear),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+        Expanded(
+          child: rows.isEmpty
+              ? SingleChildScrollView(
+                  child: AppEmptyState(
+                    icon: Icons.precision_manufacturing_outlined,
+                    title: AppText.t('لا توجد معدات بعد', 'No equipment yet'),
+                    subtitle: AppText.t(
+                      'سجّل أول جهاز بزر إضافة جهاز.',
+                      'Register the first device with Add equipment.',
+                    ),
                   ),
-            hintText: AppText.t(
-              'بحث بالاسم أو الكود أو الشركة...',
-              'Search by name, code or manufacturer...',
-            ),
-            border: const OutlineInputBorder(),
-            isDense: true,
-          ),
+                )
+              : wide
+              ? AppPaginatedTable(
+                  // `null` fills the Expanded above instead of a fixed
+                  // height that may exceed the viewport.
+                  height: null,
+                  minTableWidth: 820,
+                  columnFlex: const [1.2, 0.8, 1.2, 1.2, 1.0, 1.0],
+                  headers: [
+                    ...EquipmentMasterList.exportHeaders(),
+                    AppText.t('الإجراءات', 'Actions'),
+                  ],
+                  rows: [
+                    for (final r in rows)
+                      [
+                        Text(
+                          '${r['name'] ?? '-'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '${r['code'] ?? '-'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '${r['manufacturer'] ?? '-'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '${r['last_calibration_date'] ?? '-'}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text('${r['events_count'] ?? 0}'),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: AppText.t(
+                                'فتح سجل التغييرات',
+                                'Open change log',
+                              ),
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () => widget.onOpen(r),
+                              icon: Icon(Icons.history_outlined, size: 18.r),
+                            ),
+                          ],
+                        ),
+                      ],
+                  ],
+                  selectedIndices: _selected,
+                  selectHidden: true,
+                  onToggleIndex: (i) => setState(() {
+                    if (!_selected.remove(i)) _selected.add(i);
+                  }),
+                  selectAllValue: _selected.isEmpty
+                      ? false
+                      : _selected.length >= rows.length
+                      ? true
+                      : null,
+                  onToggleAll: (_) => setState(() {
+                    if (_selected.length >= rows.length) {
+                      _selected.clear();
+                    } else {
+                      _selected.addAll(List.generate(rows.length, (i) => i));
+                    }
+                  }),
+                )
+              : ListView.separated(
+                  // Scrolls in the Expanded space above; the old
+                  // shrink-wrap + never-scrollable combo overflowed the
+                  // Column on short viewports.
+                  itemCount: rows.length,
+                  separatorBuilder: (_, _) =>
+                      const SizedBox(height: AppSpacing.md),
+                  itemBuilder: (context, i) {
+                    final r = rows[i];
+                    return _EquipmentCard(
+                      row: r,
+                      selected: false,
+                      onTap: () => widget.onOpen(r),
+                    );
+                  },
+                ),
         ),
-        const SizedBox(height: AppSpacing.md),
-        if (rows.isEmpty)
-          AppEmptyState(
-            icon: Icons.precision_manufacturing_outlined,
-            title: AppText.t('لا توجد معدات بعد', 'No equipment yet'),
-            subtitle: AppText.t(
-              'سجّل أول جهاز بزر إضافة جهاز.',
-              'Register the first device with Add equipment.',
-            ),
-          )
-        else
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: rows.length,
-            separatorBuilder: (_, _) =>
-                const SizedBox(height: AppSpacing.md),
-            itemBuilder: (context, i) {
-              final r = rows[i];
-              final selected =
-                  selectedId == (r['id'] as num).toInt();
-              return _EquipmentCard(
-                row: r,
-                selected: wide && selected,
-                onTap: () => onOpen(r),
-              );
-            },
-          ),
       ],
     );
   }
@@ -329,10 +469,7 @@ class _EquipmentCard extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.sm),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: AppColors.primary.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(8),
@@ -385,10 +522,7 @@ class _EquipmentCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   calibration.isEmpty
-                      ? AppText.t(
-                          'بلا معايرة مسجلة',
-                          'No calibration recorded',
-                        )
+                      ? AppText.t('بلا معايرة مسجلة', 'No calibration recorded')
                       : '${AppText.t('آخر معايرة', 'Last calibration')}: $calibration',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -400,10 +534,7 @@ class _EquipmentCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 2,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
                   color: AppColors.textMuted.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -417,11 +548,7 @@ class _EquipmentCard extends StatelessWidget {
                   ),
                 ),
               ),
-              Icon(
-                Icons.chevron_left,
-                size: 22.r,
-                color: AppColors.textMuted,
-              ),
+              Icon(Icons.chevron_left, size: 22.r, color: AppColors.textMuted),
             ],
           ),
         ],
@@ -444,10 +571,7 @@ class _EquipmentDetailRoute extends StatelessWidget {
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.pageMobile),
-          child: _EquipmentDetail(
-            equipmentId: equipmentId,
-            pushed: true,
-          ),
+          child: _EquipmentDetail(equipmentId: equipmentId, pushed: true),
         ),
       ),
     );
@@ -461,15 +585,9 @@ class _EquipmentDetailRoute extends StatelessWidget {
 /// would close the whole Lab page.
 class _EquipmentDetail extends StatefulWidget {
   final int equipmentId;
-  final VoidCallback? onChanged;
   final bool pushed;
 
-  const _EquipmentDetail({
-    super.key,
-    required this.equipmentId,
-    this.onChanged,
-    this.pushed = false,
-  });
+  const _EquipmentDetail({required this.equipmentId, this.pushed = false});
 
   @override
   State<_EquipmentDetail> createState() => _EquipmentDetailState();
@@ -507,7 +625,6 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
 
   Future<void> _refresh() async {
     await _load();
-    widget.onChanged?.call();
   }
 
   Future<void> _editEquipment() async {
@@ -538,7 +655,6 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
         context,
         AppText.t('تم حذف الجهاز', 'Equipment deleted.'),
       );
-      widget.onChanged?.call();
       if (widget.pushed && mounted) {
         Navigator.of(context).pop();
       }
@@ -548,8 +664,7 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
   }
 
   Future<void> _addEvent() async {
-    final saved =
-        await showEquipmentEventForm(context, widget.equipmentId);
+    final saved = await showEquipmentEventForm(context, widget.equipmentId);
     if (saved && mounted) _refresh();
   }
 
@@ -577,8 +692,7 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
     );
     if (!confirmed || !mounted) return;
     try {
-      await _repo
-          .deleteEquipmentEvent((event['id'] as num).toInt());
+      await _repo.deleteEquipmentEvent((event['id'] as num).toInt());
       if (mounted) _refresh();
     } catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
@@ -597,8 +711,7 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
         title: AppText.t('الجهاز غير موجود', 'Equipment not found'),
       );
     }
-    final calibration =
-        '${equipment['last_calibration_date'] ?? ''}'.trim();
+    final calibration = '${equipment['last_calibration_date'] ?? ''}'.trim();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -652,9 +765,7 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
                     text: '${equipment['code'] ?? ''}',
                     mono: true,
                   ),
-                  if ('${equipment['manufacturer'] ?? ''}'
-                      .trim()
-                      .isNotEmpty)
+                  if ('${equipment['manufacturer'] ?? ''}'.trim().isNotEmpty)
                     _Chip(
                       icon: Icons.factory_outlined,
                       text: '${equipment['manufacturer']}',
@@ -712,9 +823,7 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
               const SizedBox(height: AppSpacing.sm),
               if (_events.isEmpty)
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: AppSpacing.md,
-                  ),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
                   child: Text(
                     AppText.t(
                       'لا توجد أحداث بعد — سجّل معايرة أو صيانة أو إصلاحاً.',
@@ -749,11 +858,7 @@ class _Chip extends StatelessWidget {
   final String text;
   final bool mono;
 
-  const _Chip({
-    required this.icon,
-    required this.text,
-    this.mono = false,
-  });
+  const _Chip({required this.icon, required this.text, this.mono = false});
 
   @override
   Widget build(BuildContext context) {
@@ -798,10 +903,10 @@ class _EventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final type = LabRepo.normalizeEquipmentEventType(event['event_type']);
+    final type = EquipmentEventType.normalize(event['event_type']);
     final color = switch (type) {
-      LabRepo.equipmentEventRepair => AppColors.danger,
-      LabRepo.equipmentEventMaintenance => AppColors.partial,
+      EquipmentEventType.repair => AppColors.danger,
+      EquipmentEventType.maintenance => AppColors.partial,
       _ => AppColors.success,
     };
     return Row(
@@ -860,11 +965,7 @@ class _EventRow extends StatelessWidget {
           visualDensity: VisualDensity.compact,
           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
           onPressed: onDelete,
-          icon: Icon(
-            Icons.delete_outline,
-            size: 18.r,
-            color: AppColors.danger,
-          ),
+          icon: Icon(Icons.delete_outline, size: 18.r, color: AppColors.danger),
         ),
       ],
     );

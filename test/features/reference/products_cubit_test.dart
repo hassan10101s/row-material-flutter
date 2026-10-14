@@ -14,6 +14,19 @@ class _ProductsRepository implements LabConfigurationRepository {
   }
 
   @override
+  Future<List<Map<String, dynamic>>> listProductsPaged({
+    String query = '',
+    int limit = 25,
+    int offset = 0,
+  }) async {
+    if (loadError case final error?) throw error;
+    return [];
+  }
+
+  @override
+  Future<int> countProducts({String query = ''}) async => 0;
+
+  @override
   Future<List<Map<String, dynamic>>> listAnalyses() async => [];
 
   @override
@@ -22,6 +35,8 @@ class _ProductsRepository implements LabConfigurationRepository {
     String category = '',
     String description = '',
     List<Map<String, dynamic>>? ranges,
+    Map<String, dynamic>? physicalReference,
+    Map<String, dynamic>? chemicalReference,
     Map<String, dynamic>? user,
   }) async {
     if (createError case final error?) throw error;

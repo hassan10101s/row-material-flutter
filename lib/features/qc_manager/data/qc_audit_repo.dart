@@ -4,6 +4,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../../../core/audit/audit_hasher.dart';
 import '../../../core/auth/app_session.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
@@ -119,12 +120,21 @@ class QcAuditRepo implements QcAuditRepository {
   }) async {
     if (!QcAuditEntity.all.contains(entityType)) {
       throw ValidationError(
-        'Unknown QC audit entity type "$entityType". '
-        'Known types: ${QcAuditEntity.all.join(', ')}',
+        AppText.t(
+          'نوع كيان التدقيق غير معروف "$entityType". '
+          'الأنواع المعروفة: ${QcAuditEntity.all.join(', ')}',
+          'Unknown QC audit entity type "$entityType". '
+          'Known types: ${QcAuditEntity.all.join(', ')}',
+        ),
       );
     }
     if (action.trim().isEmpty) {
-      throw const ValidationError('An audit action is required');
+      throw ValidationError(
+        AppText.t(
+          'إجراء التدقيق مطلوب',
+          'An audit action is required',
+        ),
+      );
     }
 
     // Validation is deliberately before the `exec` branch and before any DB

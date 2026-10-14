@@ -28,13 +28,12 @@ const int shellBottomBarSlots = 4;
 /// The destinations this member can reach, in navigation order.
 ///
 /// The permission flags are parameters rather than `getIt` lookups so this can
-/// be asserted with no service locator at all. [canAudit] is passed separately
-/// from the settings flag because the audit destination is gated on the
-/// **session** permissions, which are a narrower set than the role's own once a
-/// device has been switched read-only.
+/// be asserted with no service locator at all.
+///
+/// The audit trail is deliberately NOT a destination: it lives only inside
+/// Settings (`/settings?tab=audit`), so no audit flag exists here.
 List<ShellNavEntry> shellNavEntries({
   required bool canSeeSettings,
-  required bool canAudit,
   bool canReadQc = false,
 }) {
   // Sync and Members are no longer top-level destinations: both live in
@@ -43,7 +42,7 @@ List<ShellNavEntry> shellNavEntries({
     ShellNavEntry('/dashboard', AppStrings.dashboard, Icons.dashboard_outlined),
     ShellNavEntry(
       AppRoutes.inspections,
-      AppText.t('فحص الخامات', 'Material inspections'),
+      AppText.t('الفحص', 'Inspections'),
       Icons.history,
     ),
     ShellNavEntry('/lab', AppStrings.lab, Icons.biotech_outlined),
@@ -66,16 +65,19 @@ List<ShellNavEntry> shellNavEntries({
       ShellNavEntry('/settings', AppStrings.settings, Icons.settings_outlined),
     );
   }
-  if (canAudit) {
-    entries.add(
-      ShellNavEntry(
-        '/audit',
-        AppText.t('سجل التدقيق', 'Audit trail'),
-        Icons.history_toggle_off,
-      ),
-    );
-  }
   return entries;
+}
+
+/// The title the shell topbar shows for [currentPath]: the label of the
+/// owning destination (longest-prefix match, so detail routes and `/reports`
+/// resolve to their section), or null when no destination owns the path.
+///
+/// Desktop pages render their own titles into this slot instead of repeating
+/// them inside the page, which frees vertical space for the tables below.
+String? shellPageTitle(String currentPath, List<ShellNavEntry> entries) {
+  final index = shellSectionIndex(entries, currentPath);
+  if (index < 0) return null;
+  return entries[index].label;
 }
 
 /// The index of the destination that owns [currentPath], or -1.
@@ -91,9 +93,7 @@ int shellSectionIndex(List<ShellNavEntry> entries, String currentPath) {
   }
   if (currentPath.startsWith('/qc-') &&
       entries.any((entry) => entry.path == AppRoutes.qcManagement)) {
-    return entries.indexWhere(
-      (entry) => entry.path == AppRoutes.qcManagement,
-    );
+    return entries.indexWhere((entry) => entry.path == AppRoutes.qcManagement);
   }
   for (var i = 0; i < entries.length; i++) {
     if (entries[i].path == currentPath) return i;

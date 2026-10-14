@@ -14,6 +14,7 @@ import '../domain/inspection_rules.dart';
 class InspectionRepo {
   final DatabaseHelper dbHelper;
   final ReferenceRepo referenceRepo;
+
   /// Optional full HTML renderer (Phase 2). When null (tests), writes fall
   /// back to the minimal preview snippet; when present, `report_html` is
   /// regenerated after create/decision/data changes (refresh_report_html).
@@ -34,7 +35,8 @@ class InspectionRepo {
     if (raw is List) {
       names = [
         for (final n in raw)
-          if ('$n'.trim().isNotEmpty) '$n'.trim().substring(0, '$n'.trim().length.clamp(0, 50)),
+          if ('$n'.trim().isNotEmpty)
+            '$n'.trim().substring(0, '$n'.trim().length.clamp(0, 50)),
       ];
     }
     if (names.length > 3) {
@@ -54,11 +56,13 @@ class InspectionRepo {
         if (value is List) {
           if (value.length != sampleCount) {
             throw ValidationError(
-                '$label result ($key) must provide a value for each of the $sampleCount sample(s).');
+              '$label result ($key) must provide a value for each of the $sampleCount sample(s).',
+            );
           }
         } else if (sampleCount != 1) {
           throw ValidationError(
-              '$label result ($key) must provide one value per sample ($sampleCount).');
+            '$label result ($key) must provide one value per sample ($sampleCount).',
+          );
         }
       });
     }
@@ -85,8 +89,7 @@ class InspectionRepo {
         final values = raw is List
             ? [for (final v in raw) '$v'.trim()]
             : ['${raw ?? ''}'.trim()];
-        final missing =
-            values.isEmpty || values.any((v) => v.isEmpty);
+        final missing = values.isEmpty || values.any((v) => v.isEmpty);
         if (missing) {
           throw ValidationError(AppErrors.requiredInspectionField(name));
         }
@@ -104,7 +107,9 @@ class InspectionRepo {
   }
 
   static Map<String, dynamic> normalizePhysicalResults(
-      Map<String, dynamic>? raw, Map<String, dynamic> reference) {
+    Map<String, dynamic>? raw,
+    Map<String, dynamic> reference,
+  ) {
     final out = <String, dynamic>{};
     (raw ?? {}).forEach((key, value) {
       if (!reference.containsKey(key)) return;
@@ -118,21 +123,27 @@ class InspectionRepo {
   }
 
   static Map<String, dynamic> normalizeChemicalResults(
-      Map<String, dynamic>? raw, Map<String, dynamic> reference) {
+    Map<String, dynamic>? raw,
+    Map<String, dynamic> reference,
+  ) {
     final out = <String, dynamic>{};
     Map<String, dynamic>.from(raw ?? {}).forEach((key, value) {
       if (!reference.containsKey(key)) return;
       if (value is List) {
         out[key] = [
           for (final item in value)
-            normalizeNonNegativeNumericText('${item ?? ''}',
-                'Chemical result ($key)',
-                allowEmpty: true)
+            normalizeNonNegativeNumericText(
+              '${item ?? ''}',
+              'Chemical result ($key)',
+              allowEmpty: true,
+            ),
         ];
       } else {
-        out[key] = normalizeNonNegativeNumericText('${value ?? ''}',
-            'Chemical result ($key)',
-            allowEmpty: true);
+        out[key] = normalizeNonNegativeNumericText(
+          '${value ?? ''}',
+          'Chemical result ($key)',
+          allowEmpty: true,
+        );
       }
     });
     return out;
@@ -165,36 +176,53 @@ class InspectionRepo {
   }) async {
     final kind = normalizeKind(payload['inspection_kind']);
     if (kind == kindProduct) {
-      return _buildProductBasePayload(payload, user,
-          validateDecision: validateDecision, exec: exec);
+      return _buildProductBasePayload(
+        payload,
+        user,
+        validateDecision: validateDecision,
+        exec: exec,
+      );
     }
     final materialId = int.tryParse('${payload['material_id'] ?? 0}') ?? 0;
-    if (materialId == 0) throw ValidationError(AppErrors.materialSelectionRequired);
-    final material = await referenceRepo.getMaterial(materialId,
-        inspectionDate: '${payload['inspection_date'] ?? todayIso()}', exec: exec);
+    if (materialId == 0)
+      throw ValidationError(AppErrors.materialSelectionRequired);
+    final material = await referenceRepo.getMaterial(
+      materialId,
+      inspectionDate: '${payload['inspection_date'] ?? todayIso()}',
+      exec: exec,
+    );
     if ((material['active'] as num?) != 1) {
       throw const ValidationError(
-          'Selected material is inactive (archived) and cannot be used in a new inspection.');
+        'Selected material is inactive (archived) and cannot be used in a new inspection.',
+      );
     }
     final inspectionDate = '${payload['inspection_date'] ?? todayIso()}';
-    final entryCode =
-        '${payload['entry_code'] ?? ''}'.trim().isNotEmpty
-            ? '${payload['entry_code']}'.trim()
-            : '${material['next_entry_code']}';
+    final entryCode = '${payload['entry_code'] ?? ''}'.trim().isNotEmpty
+        ? '${payload['entry_code']}'.trim()
+        : '${material['next_entry_code']}';
 
-    final physicalRef = Map<String, dynamic>.from(material['physical_reference'] ?? {});
-    final chemicalRef = Map<String, dynamic>.from(material['chemical_reference'] ?? {});
+    final physicalRef = Map<String, dynamic>.from(
+      material['physical_reference'] ?? {},
+    );
+    final chemicalRef = Map<String, dynamic>.from(
+      material['chemical_reference'] ?? {},
+    );
 
     final physicalResults = normalizePhysicalResults(
-        _asStringMap(payload['physical_results']), physicalRef);
+      _asStringMap(payload['physical_results']),
+      physicalRef,
+    );
     final chemicalResults = normalizeChemicalResults(
-        _asStringMap(payload['chemical_results']), chemicalRef);
+      _asStringMap(payload['chemical_results']),
+      chemicalRef,
+    );
     final sampleNames = normalizeSampleNames(payload['sample_names']);
     validateResultArrays(physicalResults, chemicalResults, sampleNames.length);
     // الحقول الأساسية وقت الفحص مطلوبة دائماً عند الحفظ، ثم الحقول
     // الفيزيائية/الكيميائية المعلَّمة مطلوب.
     final sampleTakenBy =
-        '${payload['sample_taken_by'] ?? payload['specialist_name'] ?? ''}'.trim();
+        '${payload['sample_taken_by'] ?? payload['specialist_name'] ?? ''}'
+            .trim();
     if (sampleTakenBy.length < 3) {
       throw ValidationError(AppErrors.sampleTakerMin3);
     }
@@ -203,16 +231,30 @@ class InspectionRepo {
       throw ValidationError(AppErrors.supplierMin3);
     }
     validateRequiredResults(
-        physicalRef, chemicalRef, physicalResults, chemicalResults);
-    final quantity = normalizeNonNegativeNumericText('${payload['quantity'] ?? ''}',
-        'Quantity', allowEmpty: true);
+      physicalRef,
+      chemicalRef,
+      physicalResults,
+      chemicalResults,
+    );
+    final quantity = normalizeNonNegativeNumericText(
+      '${payload['quantity'] ?? ''}',
+      'Quantity',
+      allowEmpty: true,
+    );
     final rejectedQty = normalizeNonNegativeNumericText(
-        '${payload['rejected_quantity'] ?? ''}',
-        'Rejected quantity',
-        allowEmpty: true);
+      '${payload['rejected_quantity'] ?? ''}',
+      'Rejected quantity',
+      allowEmpty: true,
+    );
     final truckNumber = truncateText('${payload['truck_number'] ?? ''}', 10);
-    final decisionReason = truncateText('${payload['decision_reason'] ?? ''}', 250);
-    final followUpNote = truncateText('${payload['follow_up_note'] ?? ''}', 250);
+    final decisionReason = truncateText(
+      '${payload['decision_reason'] ?? ''}',
+      250,
+    );
+    final followUpNote = truncateText(
+      '${payload['follow_up_note'] ?? ''}',
+      250,
+    );
 
     final base = <String, dynamic>{
       'inspection_kind': kindRaw,
@@ -249,13 +291,17 @@ class InspectionRepo {
   }
 
   /// Product-inspection variant of [buildBasePayload]: one row per production
-  /// batch (product + formula number + batch number). The result/decision
-  /// shape is identical to raw materials; only the header differs (no
+  /// batch (product + formula number + batch number). The header differs (no
   /// supplier/vehicle) and the reference comes from the product's analysis
-  /// ranges instead of the material catalog.
+  /// ranges instead of the material catalog — and there is deliberately NO
+  /// header quality decision: the record is batch traceability (quantity +
+  /// barcode + per-sample decisions). Legacy rows keep their stored values;
+  /// new rows are always written with empty decision fields.
   Future<Map<String, dynamic>> _buildProductBasePayload(
     Map<String, dynamic> payload,
     UserContext user, {
+    // Kept for signature parity with the raw path; product rows never
+    // validate a header decision.
     bool validateDecision = true,
     DatabaseExecutor? exec,
   }) async {
@@ -263,52 +309,60 @@ class InspectionRepo {
     if (productId == 0) {
       throw ValidationError(AppErrors.materialSelectionRequired);
     }
-    final product = await referenceRepo.getProductForInspection(productId,
-        inspectionDate: '${payload['inspection_date'] ?? todayIso()}',
-        exec: exec);
+    final product = await referenceRepo.getProductForInspection(
+      productId,
+      inspectionDate: '${payload['inspection_date'] ?? todayIso()}',
+      exec: exec,
+    );
     final inspectionDate = '${payload['inspection_date'] ?? todayIso()}';
-    final entryCode =
-        '${payload['entry_code'] ?? ''}'.trim().isNotEmpty
-            ? '${payload['entry_code']}'.trim()
-            : '${product['next_entry_code']}';
+    final entryCode = '${payload['entry_code'] ?? ''}'.trim().isNotEmpty
+        ? '${payload['entry_code']}'.trim()
+        : '${product['next_entry_code']}';
 
-    final physicalRef =
-        Map<String, dynamic>.from(product['physical_reference'] ?? {});
-    final chemicalRef =
-        Map<String, dynamic>.from(product['chemical_reference'] ?? {});
+    final physicalRef = Map<String, dynamic>.from(
+      product['physical_reference'] ?? {},
+    );
+    final chemicalRef = Map<String, dynamic>.from(
+      product['chemical_reference'] ?? {},
+    );
 
     final physicalResults = normalizePhysicalResults(
-        _asStringMap(payload['physical_results']), physicalRef);
+      _asStringMap(payload['physical_results']),
+      physicalRef,
+    );
     final chemicalResults = normalizeChemicalResults(
-        _asStringMap(payload['chemical_results']), chemicalRef);
+      _asStringMap(payload['chemical_results']),
+      chemicalRef,
+    );
     final sampleNames = normalizeSampleNames(payload['sample_names']);
     validateResultArrays(physicalResults, chemicalResults, sampleNames.length);
 
+    // Product reports are batch-traceability records: creation requires
+    // nothing but product + formula/batch numbers — no header-level sample
+    // taker, no physical/chemical values. Samples (with their own taker,
+    // time and results) are added later, inside the record.
     final sampleTakenBy =
-        '${payload['sample_taken_by'] ?? payload['specialist_name'] ?? ''}'.trim();
-    if (sampleTakenBy.length < 3) {
-      throw ValidationError(AppErrors.sampleTakerMin3);
-    }
-    final formulaNumber =
-        truncateText('${payload['formula_number'] ?? ''}'.trim(), 50);
+        '${payload['sample_taken_by'] ?? payload['specialist_name'] ?? ''}'
+            .trim();
+    final formulaNumber = truncateText(
+      '${payload['formula_number'] ?? ''}'.trim(),
+      50,
+    );
     if (formulaNumber.isEmpty) {
       throw ValidationError(AppErrors.fieldValueRequired('Formula number'));
     }
-    final batchNumber =
-        truncateText('${payload['batch_number'] ?? ''}'.trim(), 50);
+    final batchNumber = truncateText(
+      '${payload['batch_number'] ?? ''}'.trim(),
+      50,
+    );
     if (batchNumber.isEmpty) {
       throw ValidationError(AppErrors.fieldValueRequired('Batch number'));
     }
-    validateRequiredResults(
-        physicalRef, chemicalRef, physicalResults, chemicalResults);
     final quantity = normalizeNonNegativeNumericText(
-        '${payload['quantity'] ?? ''}', 'Quantity',
-        allowEmpty: true);
-    final rejectedQty = normalizeNonNegativeNumericText(
-        '${payload['rejected_quantity'] ?? ''}', 'Rejected quantity',
-        allowEmpty: true);
-    final decisionReason = truncateText('${payload['decision_reason'] ?? ''}', 250);
-    final followUpNote = truncateText('${payload['follow_up_note'] ?? ''}', 250);
+      '${payload['quantity'] ?? ''}',
+      'Quantity',
+      allowEmpty: true,
+    );
 
     final db = exec ?? await _db;
     final sentinelId = await dbHelper.ensureProductSentinelMaterialId(db);
@@ -333,17 +387,16 @@ class InspectionRepo {
       'chemical_reference': chemicalRef,
       'physical_results': physicalResults,
       'chemical_results': chemicalResults,
-      'decision_status': '${payload['decision_status'] ?? 'APPROVED'}',
-      'decision_reason': decisionReason,
-      'follow_up_note': followUpNote,
-      'rejected_quantity': rejectedQty,
+      // No header quality decision for products (see doc comment above):
+      // always stored empty; any decision keys in the payload are ignored.
+      'decision_status': '',
+      'decision_reason': '',
+      'follow_up_note': '',
+      'rejected_quantity': '',
       'sample_names': sampleNames,
       'created_by': user.id,
       'created_by_name': user.fullName,
     };
-    final normalized = normalizeDecisionFields(base);
-    base.addAll(normalized);
-    if (validateDecision) validateDecisionFields(base);
     return base;
   }
 
@@ -354,13 +407,19 @@ class InspectionRepo {
 
   // ── Create ────────────────────────────────────────────────────
 
-  Future<Map<String, dynamic>> create(Map<String, dynamic> payload, UserContext user,
-      {DatabaseExecutor? exec}) async {
+  Future<Map<String, dynamic>> create(
+    Map<String, dynamic> payload,
+    UserContext user, {
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
     final base = await buildBasePayload(payload, user, exec: exec);
     base['created_by'] = await resolveAuthorId(db, user);
-    final existing = await db
-        .query('inspections', where: 'entry_code = ?', whereArgs: [base['entry_code']]);
+    final existing = await db.query(
+      'inspections',
+      where: 'entry_code = ?',
+      whereArgs: [base['entry_code']],
+    );
     if (existing.isNotEmpty) {
       throw ValidationError(AppErrors.entryCodeAlreadyExists);
     }
@@ -430,7 +489,10 @@ class InspectionRepo {
   /// that may still roll back - so the mutations below only call this when they
   /// are the outermost operation ([exec] is null). `OfflineFirstInspectionRepository`
   /// owns the transaction and refreshes the report after it commits.
-  Future<void> refreshReportHtml(int inspectionId, {DatabaseExecutor? exec}) async {
+  Future<void> refreshReportHtml(
+    int inspectionId, {
+    DatabaseExecutor? exec,
+  }) async {
     final builder = htmlBuilder;
     if (builder == null) return;
     try {
@@ -444,7 +506,9 @@ class InspectionRepo {
         whereArgs: [inspectionId],
       );
     } catch (e, st) {
-      debugPrint('[inspections] report_html refresh failed for #$inspectionId: $e\n$st');
+      debugPrint(
+        '[inspections] report_html refresh failed for #$inspectionId: $e\n$st',
+      );
     }
   }
 
@@ -459,19 +523,19 @@ class InspectionRepo {
   }
 
   String _buildSnapshot(Map<String, dynamic> b) => jsonDumps({
-        'inspection_kind': b['inspection_kind'],
-        'product_id': b['product_id'],
-        'formula_number': b['formula_number'],
-        'batch_number': b['batch_number'],
-        'material_id': b['material_id'],
-        'material_name': b['material_name'],
-        'material_code': b['material_code'],
-        'physical_reference': b['physical_reference'],
-        'chemical_reference': b['chemical_reference'],
-        'physical_results': b['physical_results'],
-        'chemical_results': b['chemical_results'],
-        'sample_names': b['sample_names'],
-      });
+    'inspection_kind': b['inspection_kind'],
+    'product_id': b['product_id'],
+    'formula_number': b['formula_number'],
+    'batch_number': b['batch_number'],
+    'material_id': b['material_id'],
+    'material_name': b['material_name'],
+    'material_code': b['material_code'],
+    'physical_reference': b['physical_reference'],
+    'chemical_reference': b['chemical_reference'],
+    'physical_results': b['physical_results'],
+    'chemical_results': b['chemical_results'],
+    'sample_names': b['sample_names'],
+  });
 
   static String _simplePreviewHtml(Map<String, dynamic> b) {
     final name = '<b>${b['material_name']}</b> (${b['entry_code']})';
@@ -523,6 +587,10 @@ class InspectionRepo {
     String orderBy = 'id DESC',
     bool includeDeleted = false,
     String kind = '',
+    String dateFrom = '',
+    String dateTo = '',
+    int? materialId,
+    int? productId,
   }) async {
     final db = await _db;
     // Tombstoned rows (V2 `delete`) stay on disk so the deletion can replicate
@@ -540,12 +608,37 @@ class InspectionRepo {
     if (trimmed.isNotEmpty) {
       final like = '%$trimmed%';
       conditions.add(
-          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ? OR formula_number LIKE ? OR batch_number LIKE ?)');
+        '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ? OR formula_number LIKE ? OR batch_number LIKE ?)',
+      );
       args.addAll([like, like, like, like, like, like]);
     }
     if (status.trim().isNotEmpty) {
       conditions.add('decision_status = ?');
       args.add(status.trim());
+    }
+    // Raw register filters by material, product register by product. Both
+    // columns are indexed (`idx_inspections_material_id`,
+    // `idx_inspections_product`), so this stays an index seek.
+    if (materialId != null) {
+      conditions.add('material_id = ?');
+      args.add(materialId);
+    }
+    if (productId != null) {
+      conditions.add('product_id = ?');
+      args.add(productId);
+    }
+    // `inspection_date` is stored as ISO text (`yyyy-MM-dd...`), so a
+    // `substr(...,1,10)` comparison is a chronological comparison. Short or
+    // malformed bounds are ignored instead of throwing on `substring`.
+    final fromDay = _dayBound(dateFrom);
+    if (fromDay != null) {
+      conditions.add('substr(inspection_date, 1, 10) >= ?');
+      args.add(fromDay);
+    }
+    final toDay = _dayBound(dateTo);
+    if (toDay != null) {
+      conditions.add('substr(inspection_date, 1, 10) <= ?');
+      args.add(toDay);
     }
     final where = conditions.isEmpty ? null : conditions.join(' AND ');
     final rows = await db.query(
@@ -557,7 +650,10 @@ class InspectionRepo {
       limit: limit,
       offset: offset,
     );
-    return [for (final r in rows) serializeInspectionRow(Map<String, dynamic>.from(r))];
+    return [
+      for (final r in rows)
+        serializeInspectionRow(Map<String, dynamic>.from(r)),
+    ];
   }
 
   /// Rows a user may still see; a tombstone hides the row from every list.
@@ -610,7 +706,9 @@ class InspectionRepo {
       total[key] = (total[key] ?? 0) + 1;
     }
     bool startsUpper(String s) =>
-        s.isNotEmpty && s[0] == s[0].toUpperCase() && s[0] != s[0].toLowerCase();
+        s.isNotEmpty &&
+        s[0] == s[0].toUpperCase() &&
+        s[0] != s[0].toLowerCase();
     final out = <Map<String, dynamic>>[];
     for (final key in order) {
       var best = '';
@@ -630,19 +728,26 @@ class InspectionRepo {
     return out;
   }
 
-  @override
   Future<List<Map<String, dynamic>>> listSupplierHistory({
     int? materialId,
     int limit = 30,
-  }) =>
-      _distinctHistory('supplier',
-          materialId: materialId, limit: limit.clamp(1, 100));
+  }) => _distinctHistory(
+    'supplier',
+    materialId: materialId,
+    limit: limit.clamp(1, 100),
+  );
 
-  @override
-  Future<List<Map<String, dynamic>>> listSampleTakerHistory({
-    int limit = 30,
-  }) =>
+  Future<List<Map<String, dynamic>>> listSampleTakerHistory({int limit = 30}) =>
       _distinctHistory('sample_taken_by', limit: limit.clamp(1, 100));
+
+  /// Normalizes a date bound to `yyyy-MM-dd`, or null when it is empty or
+  /// too short to be a day (callers then leave the range unbounded instead
+  /// of throwing on `substring`).
+  static String? _dayBound(String value) {
+    final trimmed = value.trim();
+    if (trimmed.length < 10) return null;
+    return trimmed.substring(0, 10);
+  }
 
   /// Empty [kind] matches both kinds; otherwise `inspection_kind = ?`.
   static String normalizeKindFilter(String kind) {
@@ -651,11 +756,16 @@ class InspectionRepo {
     return '';
   }
 
-  Future<int> count(
-      {String query = '',
-      String status = '',
-      bool includeDeleted = false,
-      String kind = ''}) async {
+  Future<int> count({
+    String query = '',
+    String status = '',
+    bool includeDeleted = false,
+    String kind = '',
+    String dateFrom = '',
+    String dateTo = '',
+    int? materialId,
+    int? productId,
+  }) async {
     final db = await _db;
     final alive = includeDeleted ? '' : aliveFilter;
     final conditions = <String>[];
@@ -670,21 +780,49 @@ class InspectionRepo {
     if (trimmed.isNotEmpty) {
       final like = '%$trimmed%';
       conditions.add(
-          '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ? OR formula_number LIKE ? OR batch_number LIKE ?)');
+        '(entry_code LIKE ? OR material_name LIKE ? OR supplier LIKE ? OR truck_number LIKE ? OR formula_number LIKE ? OR batch_number LIKE ?)',
+      );
       args.addAll([like, like, like, like, like, like]);
     }
     if (status.trim().isNotEmpty) {
       conditions.add('decision_status = ?');
       args.add(status.trim());
     }
-    final where = conditions.isEmpty ? '' : ' WHERE ${conditions.join(' AND ')}';
-    return Sqflite.firstIntValue(await db.rawQuery(
+    if (materialId != null) {
+      conditions.add('material_id = ?');
+      args.add(materialId);
+    }
+    if (productId != null) {
+      conditions.add('product_id = ?');
+      args.add(productId);
+    }
+    final fromDay = _dayBound(dateFrom);
+    if (fromDay != null) {
+      conditions.add('substr(inspection_date, 1, 10) >= ?');
+      args.add(fromDay);
+    }
+    final toDay = _dayBound(dateTo);
+    if (toDay != null) {
+      conditions.add('substr(inspection_date, 1, 10) <= ?');
+      args.add(toDay);
+    }
+    final where = conditions.isEmpty
+        ? ''
+        : ' WHERE ${conditions.join(' AND ')}';
+    return Sqflite.firstIntValue(
+          await db.rawQuery(
             'SELECT COUNT(*) AS c FROM inspections$where',
-            where.isEmpty ? null : args)) ??
+            where.isEmpty ? null : args,
+          ),
+        ) ??
         0;
   }
 
-  Future<Map<String, dynamic>> getById(int id, {DatabaseExecutor? exec, bool includeDeleted = true}) async {
+  Future<Map<String, dynamic>> getById(
+    int id, {
+    DatabaseExecutor? exec,
+    bool includeDeleted = true,
+  }) async {
     final db = exec ?? await _db;
     // Parallel: row + history are independent given the same id.
     final settled = await Future.wait([
@@ -698,16 +836,19 @@ class InspectionRepo {
     ]);
     final rows = settled[0];
     if (rows.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
-    final serialized = serializeInspectionRow(Map<String, dynamic>.from(rows.first));
+    final serialized = serializeInspectionRow(
+      Map<String, dynamic>.from(rows.first),
+    );
     serialized['status_history'] = [
-      for (final r in settled[1])
-        Map<String, dynamic>.from(r),
+      for (final r in settled[1]) Map<String, dynamic>.from(r),
     ];
     return serialized;
   }
 
-  Future<List<Map<String, dynamic>>> getStatusHistory(int inspectionId,
-      {DatabaseExecutor? exec}) async {
+  Future<List<Map<String, dynamic>>> getStatusHistory(
+    int inspectionId, {
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
     final rows = await db.query(
       'inspection_status_history',
@@ -718,8 +859,10 @@ class InspectionRepo {
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
-  Future<void> _insertStatusHistory(Map<String, dynamic> h,
-      {DatabaseExecutor? exec}) async {
+  Future<void> _insertStatusHistory(
+    Map<String, dynamic> h, {
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
     await db.insert('inspection_status_history', {
       'inspection_id': h['inspection_id'],
@@ -738,18 +881,34 @@ class InspectionRepo {
   // ── Status update ─────────────────────────────────────────────
 
   Future<Map<String, dynamic>> updateStatus(
-      int inspectionId, Map<String, dynamic> payload, UserContext user,
-      {DatabaseExecutor? exec}) async {
+    int inspectionId,
+    Map<String, dynamic> payload,
+    UserContext user, {
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
-    final existingRaw = await db.query('inspections', where: 'id = ?', whereArgs: [inspectionId]);
+    final existingRaw = await db.query(
+      'inspections',
+      where: 'id = ?',
+      whereArgs: [inspectionId],
+    );
     if (existingRaw.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
-    final existing = serializeInspectionRow(Map<String, dynamic>.from(existingRaw.first));
+    final existing = serializeInspectionRow(
+      Map<String, dynamic>.from(existingRaw.first),
+    );
+
+    // Product batches carry no header quality decision — per-sample only.
+    // The raw-material flow below is untouched.
+    if (isProductRow(existing)) {
+      throw ValidationError(AppErrors.productDecisionNotAllowed);
+    }
 
     ensureWithinMaxVersions(existing['decision_version'] as int? ?? 1);
 
     final updated = <String, dynamic>{
       ...existing,
-      'decision_status': '${payload['decision_status'] ?? existing['decision_status']}',
+      'decision_status':
+          '${payload['decision_status'] ?? existing['decision_status']}',
       'decision_reason': '${payload['decision_reason'] ?? ''}'.trim(),
       'follow_up_note': '${payload['follow_up_note'] ?? ''}'.trim(),
       'rejected_quantity': '${payload['rejected_quantity'] ?? ''}'.trim(),
@@ -759,13 +918,17 @@ class InspectionRepo {
     updated.addAll(normalized);
     validateDecisionFields(updated);
 
-    final unchanged = normalized['decision_status'] == '${existing['decision_status']}' &&
-        normalized['decision_reason'] == '${existing['decision_reason'] ?? ''}' &&
+    final unchanged =
+        normalized['decision_status'] == '${existing['decision_status']}' &&
+        normalized['decision_reason'] ==
+            '${existing['decision_reason'] ?? ''}' &&
         normalized['follow_up_note'] == '${existing['follow_up_note'] ?? ''}' &&
-        normalized['rejected_quantity'] == '${existing['rejected_quantity'] ?? ''}';
+        normalized['rejected_quantity'] ==
+            '${existing['rejected_quantity'] ?? ''}';
     if (unchanged) throw ValidationError(AppErrors.noDecisionChange);
 
-    final statusChanged = normalized['decision_status'] != '${existing['decision_status']}';
+    final statusChanged =
+        normalized['decision_status'] != '${existing['decision_status']}';
     final changedAt = nowIso();
     final version = statusChanged
         ? (existing['decision_version'] as int? ?? 1) + 1
@@ -808,28 +971,48 @@ class InspectionRepo {
   // ── Data update ───────────────────────────────────────────────
 
   Future<Map<String, dynamic>> update(
-      int inspectionId, Map<String, dynamic> payload, UserContext user,
-      {DatabaseExecutor? exec}) async {
+    int inspectionId,
+    Map<String, dynamic> payload,
+    UserContext user, {
+    DatabaseExecutor? exec,
+  }) async {
     final db = exec ?? await _db;
-    final existingRaw = await db.query('inspections', where: 'id = ?', whereArgs: [inspectionId]);
+    final existingRaw = await db.query(
+      'inspections',
+      where: 'id = ?',
+      whereArgs: [inspectionId],
+    );
     if (existingRaw.isEmpty) throw NotFoundError(AppErrors.inspectionNotFound);
-    final existing = serializeInspectionRow(Map<String, dynamic>.from(existingRaw.first));
+    final existing = serializeInspectionRow(
+      Map<String, dynamic>.from(existingRaw.first),
+    );
 
-    final physicalRef = Map<String, dynamic>.from(existing['physical_reference'] ?? {});
-    final chemicalRef = Map<String, dynamic>.from(existing['chemical_reference'] ?? {});
+    final physicalRef = Map<String, dynamic>.from(
+      existing['physical_reference'] ?? {},
+    );
+    final chemicalRef = Map<String, dynamic>.from(
+      existing['chemical_reference'] ?? {},
+    );
 
     final newPhysical = normalizePhysicalResults(
-        _asStringMap(payload['physical_results']), physicalRef);
+      _asStringMap(payload['physical_results']),
+      physicalRef,
+    );
     final newChemical = normalizeChemicalResults(
-        _asStringMap(payload['chemical_results']), chemicalRef);
+      _asStringMap(payload['chemical_results']),
+      chemicalRef,
+    );
 
-    final physical = Map<String, dynamic>.from(existing['physical_results'] ?? {})
-      ..addAll(newPhysical);
-    final chemical = Map<String, dynamic>.from(existing['chemical_results'] ?? {})
-      ..addAll(newChemical);
+    final physical = Map<String, dynamic>.from(
+      existing['physical_results'] ?? {},
+    )..addAll(newPhysical);
+    final chemical = Map<String, dynamic>.from(
+      existing['chemical_results'] ?? {},
+    )..addAll(newChemical);
 
     final sampleNames = normalizeSampleNames(
-        payload['sample_names'] ?? existing['sample_names']);
+      payload['sample_names'] ?? existing['sample_names'],
+    );
     validateResultArrays(physical, chemical, sampleNames.length);
 
     final isProduct = isProductRow(existing);
@@ -839,15 +1022,17 @@ class InspectionRepo {
     if (isProduct) {
       // Product rows carry formula/batch instead of supplier/vehicle.
       final formulaNumber = truncateText(
-          '${payload['formula_number'] ?? existing['formula_number'] ?? ''}'
-              .trim(),
-          50);
+        '${payload['formula_number'] ?? existing['formula_number'] ?? ''}'
+            .trim(),
+        50,
+      );
       if (formulaNumber.isEmpty) {
         throw ValidationError(AppErrors.fieldValueRequired('Formula number'));
       }
       final batchNumber = truncateText(
-          '${payload['batch_number'] ?? existing['batch_number'] ?? ''}'.trim(),
-          50);
+        '${payload['batch_number'] ?? existing['batch_number'] ?? ''}'.trim(),
+        50,
+      );
       if (batchNumber.isEmpty) {
         throw ValidationError(AppErrors.fieldValueRequired('Batch number'));
       }
@@ -859,19 +1044,26 @@ class InspectionRepo {
         throw ValidationError(AppErrors.supplierMin3);
       }
       truckNumber = truncateText(
-          '${payload['truck_number'] ?? existing['truck_number'] ?? ''}', 10);
+        '${payload['truck_number'] ?? existing['truck_number'] ?? ''}',
+        10,
+      );
       headerUpdates['supplier'] = supplier;
       headerUpdates['truck_number'] = truckNumber;
     }
     final sampleTakenBy =
-        '${payload['sample_taken_by'] ?? existing['sample_taken_by'] ?? ''}'.trim();
-    if (sampleTakenBy.length < 3) {
+        '${payload['sample_taken_by'] ?? existing['sample_taken_by'] ?? ''}'
+            .trim();
+    // Header-level taker stays mandatory for raw inspections only; product
+    // batches track the taker per sample instead.
+    if (!isProduct && sampleTakenBy.length < 3) {
       throw ValidationError(AppErrors.sampleTakerMin3);
     }
 
     final quantity = normalizeNonNegativeNumericText(
-        '${payload['quantity'] ?? existing['quantity'] ?? ''}', 'Quantity',
-        allowEmpty: true);
+      '${payload['quantity'] ?? existing['quantity'] ?? ''}',
+      'Quantity',
+      allowEmpty: true,
+    );
     final timestamp = nowIso();
     // Rebuild the snapshot with the refreshed results/samples so the stored
     // copy never drifts from the live columns (parity inspection.py:843-852).
@@ -912,8 +1104,12 @@ class InspectionRepo {
 
   Future<void> markPdfExported(int inspectionId, String pdfPath) async {
     final db = await _db;
-    await db.update('inspections', {'last_pdf_path': pdfPath, 'updated_at': nowIso()},
-        where: 'id = ?', whereArgs: [inspectionId]);
+    await db.update(
+      'inspections',
+      {'last_pdf_path': pdfPath, 'updated_at': nowIso()},
+      where: 'id = ?',
+      whereArgs: [inspectionId],
+    );
   }
 
   /// Tombstone, not a hard delete (plan §5, P7.1): the row stays so the
@@ -963,7 +1159,12 @@ Future<int> resolveAuthorId(DatabaseExecutor exec, UserContext user) async {
   if (user.id != null) return user.id!;
   final uid = user.uid;
   if (uid == null || uid.isEmpty) return 0;
-  final rows = await exec.query('users', where: 'uid = ?', whereArgs: [uid], limit: 1);
+  final rows = await exec.query(
+    'users',
+    where: 'uid = ?',
+    whereArgs: [uid],
+    limit: 1,
+  );
   if (rows.isEmpty) return 0;
   return (rows.first['id'] as num?)?.toInt() ?? 0;
 }

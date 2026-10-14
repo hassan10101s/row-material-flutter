@@ -54,7 +54,27 @@ class AppSession {
 
   bool get isInvited => status == MemberStatus.invited;
 
+  bool get isPendingActivation => status == MemberStatus.pendingActivation;
+
+  /// Waiting for the manager: `invited` or `pending_activation`.
+  bool get isAwaitingActivation => isInvited || isPendingActivation;
+
   bool get isDisabled => status == MemberStatus.disabled;
+
+  /// No company binding (plan §1 `no_company`): may create a trial company or
+  /// join with an invite.
+  bool get hasNoCompany => organizationId.isEmpty;
+
+  /// Blocks creating a new company (plan §2): bound + invited/pending/active.
+  /// Sign-out alone never clears this; only leaving does.
+  bool get blocksNewCompany =>
+      organizationId.isNotEmpty &&
+      MemberStatus.blocksNewCompany(status);
+
+  /// The only state allowed into the dashboard, the company database and the
+  /// sync cycle (plan §5/§8/§12).
+  bool get mayEnterCompany =>
+      organizationId.isNotEmpty && MemberStatus.mayEnter(status);
 
   /// Can this device write anything at all?
   bool get canWrite => isActiveMember && !readOnlyDevice;
@@ -143,12 +163,14 @@ class AppSession {
 
   /// Rebuild a session from the on-disk cache.
   ///
-  /// [role], [status] and [readOnlyDevice] are **not** trusted as written: a
-  /// tampered `ml_session_v2` blob must not be able to talk the UI into admin
-  /// affordances. They are re-derived through the same normalisation the online
-  /// path uses, so an unrecognised value degrades to viewer/invited. This is
-  /// defence in depth, not the authorization boundary — Firestore re-derives
-  /// role/status from `users/{uid}` and fails closed regardless.
+  /// [role], [status] and [readOnlyDevice] are **not** fully trusted: an
+  /// unrecognised value degrades to viewer/invited, but a *valid* cached role
+  /// string is kept so an offline exempt admin still sees their workspace.
+  /// This is defence in depth, not the authorization boundary — member writes
+  /// additionally require live connectivity (`_requireOnline`) and Firestore
+  /// re-derives role/status from `users/{uid}` and fails closed regardless,
+  /// so a tampered cache at most shows buttons that then fail with
+  /// `not_allowed`.
   static AppSession fromJson(Map<String, dynamic> json) {
     final role = normalizeRole(json['role'] as String?);
     return AppSession(
@@ -159,7 +181,7 @@ class AppSession {
       organizationId: '${json['organizationId'] ?? ''}',
       memberId: '${json['memberId'] ?? ''}',
       role: role,
-      status: normalizeMemberStatus(json['status'] as String?),
+      status: normalizeCachedStatus(json['status'] as String?),
       deviceId: '${json['deviceId'] ?? ''}',
       readOnlyDevice: roleIsReadOnly(role),
       signedInAt: _parseDate(json['signedInAt']),

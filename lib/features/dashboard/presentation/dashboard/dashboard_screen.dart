@@ -7,6 +7,7 @@ import 'package:material_lab/core/l10n/app_localizations_x.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/animations/app_animations.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
+import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
@@ -17,18 +18,12 @@ import '../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../design_system/widgets/app_window.dart';
 import '../../../../di/service_locator.dart';
 import '../../../qc_manager/domain/qc_repositories.dart';
-import '../../../inspections/domain/inspection_repository.dart';
-import '../../../reference/domain/reference_repository.dart';
-import '../../../inspections/presentation/cubit/inspection_form_cubit.dart';
-import '../../../inspections/presentation/form/inspection_form_screen.dart';
 import '../cubit/dashboard_cubit.dart';
 import '../cubit/dashboard_kpis_cubit.dart';
 import '../cubit/dashboard_kpis_state.dart';
 import '../cubit/dashboard_state.dart';
 import '../../domain/dashboard_analytics.dart' as analytics;
 import '../../domain/dashboard_kpis.dart';
-import '../../domain/dashboard_repository.dart';
-
 
 /// Dashboard (port of Web DashboardView + dashboard summary analytics).
 class DashboardScreen extends StatefulWidget {
@@ -68,6 +63,97 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  /// Material / supplier / status live in the filter sheet (not inline) to
+  /// save vertical space; the sticky badge shows how many are active.
+  Future<void> _openFilterSheet(BuildContext context) async {
+    final cubit = context.read<DashboardCubit>();
+    final state = cubit.state;
+    final options = state.filterOptions;
+    if (options == null) return;
+    var dMaterial = state.selectedMaterial;
+    var dSupplier = state.selectedSupplier;
+    var dStatus = state.selectedStatus;
+
+    await showAppOverlay<void>(
+      context,
+      title: AppText.t('الفلاتر', 'Filters'),
+      icon: Icons.filter_alt_outlined,
+      builder: (sheetContext, close) {
+        return StatefulBuilder(
+          builder: (context, setDraft) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _FilterDropdown(
+                  label: context.l10n.dashboard_material,
+                  value: dMaterial,
+                  items: options.materials,
+                  onChanged: (v) => setDraft(() => dMaterial = v ?? 'ALL'),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _FilterDropdown(
+                  label: context.l10n.dashboard_supplier,
+                  value: dSupplier,
+                  items: options.suppliers,
+                  onChanged: (v) => setDraft(() => dSupplier = v ?? 'ALL'),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                _FilterDropdown(
+                  label: context.l10n.dashboard_status,
+                  value: dStatus,
+                  items: [
+                    for (final st in options.statuses)
+                      {'id': st, 'name': _statusLabel(st)},
+                  ],
+                  onChanged: (v) => setDraft(() => dStatus = v ?? 'ALL'),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                Row(
+                  children: [
+                    Expanded(
+                      child: SizedBox(
+                        height: AppSpacing.mobileCtaHeight.h,
+                        child: AppButton(
+                          label: AppText.t('مسح', 'Clear'),
+                          style: AppButtonStyle.secondary,
+                          expanded: true,
+                          onPressed: () {
+                            cubit.setMaterial('ALL');
+                            cubit.setSupplier('ALL');
+                            cubit.setStatus('ALL');
+                            close();
+                          },
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      flex: 2,
+                      child: SizedBox(
+                        height: AppSpacing.mobileCtaHeight.h,
+                        child: AppButton(
+                          label: AppText.t('تطبيق', 'Apply'),
+                          expanded: true,
+                          onPressed: () {
+                            cubit.setMaterial(dMaterial);
+                            cubit.setSupplier(dSupplier);
+                            cubit.setStatus(dStatus);
+                            close();
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<DashboardCubit>().state;
@@ -77,234 +163,222 @@ class _DashboardScreenState extends State<DashboardScreen> {
       selector: (s) => s.error,
       child: Stack(
         children: [
-          CustomScrollView(
-            controller: _scroll,
-            physics: const AlwaysScrollableScrollPhysics(),
-            slivers: [
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.page,
-                    AppSpacing.page,
-                    AppSpacing.page,
-                    0,
-                  ),
-                  child: AppEntrance(
-                    child: _HeroBanner(
+          RefreshIndicator(
+            onRefresh: cubit.load,
+            child: CustomScrollView(
+              controller: _scroll,
+              physics: const AlwaysScrollableScrollPhysics(),
+              slivers: [
+                // Sticky toolbar first: months, filter and refresh stay
+                // pinned; the old top header is gone (title lives in the
+                // shell topbar), so no space is wasted above it.
+                if (ready && state.error == null)
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: _StickyNavBar(
+                      onGo: _go,
+                      topPadding: AppSpacing.page,
                       period: state.period,
-                      selectedMaterial: state.selectedMaterial,
-                      selectedSupplier: state.selectedSupplier,
-                      selectedStatus: state.selectedStatus,
-                      filterOptions: state.filterOptions,
                       onPeriodChange: cubit.setPeriod,
-                      onMaterialChange: cubit.setMaterial,
-                      onSupplierChange: cubit.setSupplier,
-                      onStatusChange: cubit.setStatus,
+                      filterCount: _activeFilterCount(state),
+                      onOpenFilter: () => _openFilterSheet(context),
+                      onRefresh: cubit.load,
+                      refreshing: state.loading,
                     ),
                   ),
-                ),
-              ),
-              const SliverToBoxAdapter(child: SizedBox(height: AppSpacing.lg)),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.page,
-                  ),
-                  child: const _QuickActionsBar(),
-                ),
-              ),
-              // Sticky period + quick section navigation (professional scroll).
-              if (ready && state.error == null)
-                SliverPersistentHeader(
-                  pinned: true,
-                  delegate: _StickyNavBar(
-                    period: state.period,
-                    onPeriodChange: cubit.setPeriod,
-                    onGo: _go,
-                    topPadding: AppSpacing.page,
-                  ),
-                ),
-              if (state.loading && state.summary == null)
-                const SliverToBoxAdapter(
-                  child: Padding(
-                    padding: EdgeInsets.all(AppSpacing.page),
-                    child: AppSkeletonList(rows: 4, lines: 3, height: 360),
-                  ),
-                )
-              else if (state.error != null)
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.page),
-                    child: AppErrorState(
-                      title: AppText.t(
-                        'تعذر تحميل اللوحة',
-                        'Failed to load dashboard',
-                      ),
-                      subtitle: state.error,
-                      retryLabel: AppText.t('إعادة المحاولة', 'Retry'),
-                      onRetry: cubit.load,
-                    ),
-                  ),
-                )
-              else ...[
                 SliverToBoxAdapter(
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(
                       AppSpacing.page,
-                      AppSpacing.md,
+                      AppSpacing.sm,
                       AppSpacing.page,
                       0,
                     ),
-                    child: BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
-                      buildWhen: (p, c) => p != c,
-                      builder: (context, kpi) => AppStagger(
-                        interval: const Duration(milliseconds: 40),
-                        children: [
-                          _KpiRow(
-                            todayInspections: kpi.todayInspections,
-                            todayApproved: kpi.todayApproved,
-                            todayRejected: kpi.todayRejected,
-                            totalCount: kpi.totalCount,
-                          ),
-                          // Plan §6: quick quality card + daily tasks card.
-                          _QcQuickCard(kpi: kpi),
-                          const _DailyTasksCard(),
-                        ],
-                      ),
-                    ),
+                    child: _ResultLine(summary: state.summary),
                   ),
                 ),
-                if (state.summary != null) ...[
+                if (state.loading && state.summary == null)
+                  const SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.all(AppSpacing.page),
+                      child: AppSkeletonList(rows: 4, lines: 3, height: 360),
+                    ),
+                  )
+                else if (state.error != null)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.all(AppSpacing.page),
+                      child: AppErrorState(
+                        title: AppText.t(
+                          'تعذر تحميل اللوحة',
+                          'Failed to load dashboard',
+                        ),
+                        subtitle: state.error,
+                        retryLabel: AppText.t('إعادة المحاولة', 'Retry'),
+                        onRetry: cubit.load,
+                      ),
+                    ),
+                  )
+                else ...[
                   SliverToBoxAdapter(
                     child: Padding(
                       padding: const EdgeInsets.fromLTRB(
                         AppSpacing.page,
-                        AppSpacing.lg,
+                        AppSpacing.md,
                         AppSpacing.page,
                         0,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Charts repaint in isolation: scrolling or KPI
-                          // updates elsewhere must not re-rasterize them.
-                          RepaintBoundary(
-                            child: AppEntrance(
-                              child: _DecisionsOverviewCard(
+                      child: BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
+                        buildWhen: (p, c) => p != c,
+                        builder: (context, kpi) => AppStagger(
+                          interval: const Duration(milliseconds: 40),
+                          children: [
+                            _KpiRow(
+                              todayInspections: kpi.todayInspections,
+                              todayApproved: kpi.todayApproved,
+                              todayRejected: kpi.todayRejected,
+                              totalCount: kpi.totalCount,
+                            ),
+                            // Plan §6: quick quality card + daily tasks card.
+                            _QcQuickCard(kpi: kpi),
+                            const _DailyTasksCard(),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (state.summary != null) ...[
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.page,
+                          AppSpacing.lg,
+                          AppSpacing.page,
+                          0,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // Charts repaint in isolation: scrolling or KPI
+                            // updates elsewhere must not re-rasterize them.
+                            RepaintBoundary(
+                              child: AppEntrance(
+                                child: _DecisionsOverviewCard(
+                                  summary: state.summary!,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: AppSpacing.lg),
+                            RepaintBoundary(
+                              child: _MonthlyTrendSection(
                                 summary: state.summary!,
                               ),
                             ),
-                          ),
-                          const SizedBox(height: AppSpacing.lg),
-                          RepaintBoundary(
-                            child: _MonthlyTrendSection(
+                          ],
+                        ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.page,
+                          AppSpacing.lg,
+                          AppSpacing.page,
+                          0,
+                        ),
+                        child:
+                            BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
+                              buildWhen: (p, c) => p != c,
+                              builder: (context, kpi) => Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Container(
+                                    key: _sectionKeys['overview'],
+                                    child: _ExecutiveSummarySection(kpi: kpi),
+                                  ),
+                                  const SizedBox(height: AppSpacing.lg),
+                                  _VolumeQualitySection(kpi: kpi),
+                                  const SizedBox(height: AppSpacing.lg),
+                                  Container(
+                                    key: _sectionKeys['suppliers'],
+                                    child: _SupplierScorecardSection(kpi: kpi),
+                                  ),
+                                  const SizedBox(height: AppSpacing.lg),
+                                  Container(
+                                    key: _sectionKeys['rejections'],
+                                    child: _ParetoSection(kpi: kpi),
+                                  ),
+                                  const SizedBox(height: AppSpacing.lg),
+                                  Container(
+                                    key: _sectionKeys['trend'],
+                                    child: _TrendChartSection(kpi: kpi),
+                                  ),
+                                  const SizedBox(height: AppSpacing.lg),
+                                  Container(
+                                    key: _sectionKeys['outlook'],
+                                    child: _ForecastStabilitySection(kpi: kpi),
+                                  ),
+                                  const SizedBox(height: AppSpacing.lg),
+                                  _DataQualitySection(kpi: kpi),
+                                  const SizedBox(height: AppSpacing.lg),
+                                  Container(
+                                    key: _sectionKeys['quality'],
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        _LabQcSection(kpi: kpi),
+                                        const SizedBox(height: AppSpacing.lg),
+                                        _NcrSection(kpi: kpi),
+                                        const SizedBox(height: AppSpacing.lg),
+                                        _SopGoalsSection(kpi: kpi),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: AppSpacing.lg),
+                                  Container(
+                                    key: _sectionKeys['stock'],
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        _InventorySection(kpi: kpi),
+                                        const SizedBox(height: AppSpacing.lg),
+                                        _AgingDefectsSection(kpi: kpi),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: AppSpacing.lg),
+                                ],
+                              ),
+                            ),
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.page,
+                          0,
+                          AppSpacing.page,
+                          AppSpacing.page,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _InsightsAndRecommendationsSection(
                               summary: state.summary!,
                             ),
-                          ),
-                        ],
+                            const SizedBox(height: AppSpacing.lg),
+                            _TopBreakdownSection(summary: state.summary!),
+                            const SizedBox(height: 80),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.page,
-                        AppSpacing.lg,
-                        AppSpacing.page,
-                        0,
-                      ),
-                      child:
-                          BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
-                            buildWhen: (p, c) => p != c,
-                            builder: (context, kpi) => Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Container(
-                                  key: _sectionKeys['overview'],
-                                  child: _ExecutiveSummarySection(kpi: kpi),
-                                ),
-                                const SizedBox(height: AppSpacing.lg),
-                                _VolumeQualitySection(kpi: kpi),
-                                const SizedBox(height: AppSpacing.lg),
-                                Container(
-                                  key: _sectionKeys['suppliers'],
-                                  child: _SupplierScorecardSection(kpi: kpi),
-                                ),
-                                const SizedBox(height: AppSpacing.lg),
-                                Container(
-                                  key: _sectionKeys['rejections'],
-                                  child: _ParetoSection(kpi: kpi),
-                                ),
-                                const SizedBox(height: AppSpacing.lg),
-                                Container(
-                                  key: _sectionKeys['trend'],
-                                  child: _TrendChartSection(kpi: kpi),
-                                ),
-                                const SizedBox(height: AppSpacing.lg),
-                                Container(
-                                  key: _sectionKeys['outlook'],
-                                  child: _ForecastStabilitySection(kpi: kpi),
-                                ),
-                                const SizedBox(height: AppSpacing.lg),
-                                _DataQualitySection(kpi: kpi),
-                                const SizedBox(height: AppSpacing.lg),
-                                Container(
-                                  key: _sectionKeys['quality'],
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      _LabQcSection(kpi: kpi),
-                                      const SizedBox(height: AppSpacing.lg),
-                                      _NcrSection(kpi: kpi),
-                                      const SizedBox(height: AppSpacing.lg),
-                                      _SopGoalsSection(kpi: kpi),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: AppSpacing.lg),
-                                Container(
-                                  key: _sectionKeys['stock'],
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      _InventorySection(kpi: kpi),
-                                      const SizedBox(height: AppSpacing.lg),
-                                      _AgingDefectsSection(kpi: kpi),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(height: AppSpacing.lg),
-                              ],
-                            ),
-                          ),
-                    ),
-                  ),
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.page,
-                        0,
-                        AppSpacing.page,
-                        AppSpacing.page,
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _InsightsAndRecommendationsSection(
-                            summary: state.summary!,
-                          ),
-                          const SizedBox(height: AppSpacing.lg),
-                          _TopBreakdownSection(summary: state.summary!),
-                          const SizedBox(height: 80),
-                        ],
-                      ),
-                    ),
-                  ),
+                  ],
                 ],
               ],
-            ],
+            ),
           ),
           // Back-to-top floating button (no Scaffold needed). It owns its
           // own scroll listener so crossing the threshold never rebuilds
@@ -379,11 +453,7 @@ class _ToTopButtonState extends State<_ToTopButton> {
               onTap: _toTop,
               child: const Padding(
                 padding: EdgeInsets.all(12),
-                child: Icon(
-                  Icons.arrow_upward,
-                  color: Colors.white,
-                  size: 22,
-                ),
+                child: Icon(Icons.arrow_upward, color: Colors.white, size: 22),
               ),
             ),
           ),
@@ -394,28 +464,36 @@ class _ToTopButtonState extends State<_ToTopButton> {
 }
 
 class _StickyNavBar extends SliverPersistentHeaderDelegate {
-  final String period;
-  final ValueChanged<String> onPeriodChange;
   final ValueChanged<String> onGo;
   final double topPadding;
+  final String period;
+  final ValueChanged<String> onPeriodChange;
+  final int filterCount;
+  final VoidCallback onOpenFilter;
+  final Future<void> Function() onRefresh;
+  final bool refreshing;
   const _StickyNavBar({
-    required this.period,
-    required this.onPeriodChange,
     required this.onGo,
     required this.topPadding,
+    required this.period,
+    required this.onPeriodChange,
+    required this.filterCount,
+    required this.onOpenFilter,
+    required this.onRefresh,
+    required this.refreshing,
   });
 
-  // Fixed 120px window: two compact chip rows (~78 px of chips + gap at
-  // default scale, more under `spMax`) plus 24 px of container padding.
+  // Fixed 148px window: two compact rows (controls, then section nav) plus
+  // container padding.
   //
   // The child MUST fill the extent exactly. A pinned header reports
   // `paintExtent = min(childExtent, remaining)` against
-  // `layoutExtent = maxExtent`: when the content sized itself to 102 px
-  // inside a 116 px extent the geometry went invalid
-  // (`layoutExtent 116 > paintExtent 102`) and crashed the whole viewport.
+  // `layoutExtent = maxExtent`: when the content sizes itself smaller than
+  // the extent the geometry goes invalid
+  // (`layoutExtent > paintExtent`) and crashes the whole viewport.
   // The `SizedBox` below pins the child to [_extent] so the geometry is
   // valid at every text scale; leftover space is plain header background.
-  static const double _extent = 120;
+  static const double _extent = 148;
 
   @override
   double get minExtent => _extent;
@@ -441,6 +519,13 @@ class _StickyNavBar extends SliverPersistentHeaderDelegate {
       ('quality', AppText.t('الجودة', 'Quality'), Icons.verified_outlined),
       ('stock', AppText.t('المخزون', 'Stock'), Icons.inventory_2_outlined),
     ];
+    final periods = <(String, String)>[
+      ('7d', context.l10n.period_week),
+      ('30d', context.l10n.period_month),
+      ('90d', context.l10n.period_3months),
+      ('365d', context.l10n.period_year),
+      ('ALL', context.l10n.period_all),
+    ];
     return SizedBox(
       height: _extent,
       child: Container(
@@ -462,36 +547,60 @@ class _StickyNavBar extends SliverPersistentHeaderDelegate {
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              // Row 1 — every control in one place: months, filter, actions.
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    for (final (key, label) in [
-                      ('7d', AppText.t('أسبوع', 'Week')),
-                      ('30d', AppText.t('شهر', 'Month')),
-                      ('90d', AppText.t('3 شهور', '3 months')),
-                      ('365d', AppText.t('سنة', 'Year')),
-                      ('ALL', AppText.t('الكل', 'All')),
-                    ])
+                    for (final p in periods)
                       Padding(
                         padding: const EdgeInsets.only(right: 6),
                         child: ChoiceChip(
                           label: Text(
-                            label,
+                            p.$2,
                             style: TextStyle(fontSize: 12.spMax),
                           ),
-                          selected: period == key,
-                          onSelected: (_) => onPeriodChange(key),
+                          selected: period == p.$1,
+                          onSelected: (_) => onPeriodChange(p.$1),
                           visualDensity: VisualDensity.compact,
                           materialTapTargetSize:
                               MaterialTapTargetSize.shrinkWrap,
                         ),
                       ),
+                    Badge(
+                      isLabelVisible: filterCount > 0,
+                      label: Text('$filterCount'),
+                      child: IconButton.filledTonal(
+                        tooltip: AppText.t('الفلاتر', 'Filters'),
+                        onPressed: onOpenFilter,
+                        icon: Icon(Icons.filter_alt_outlined, size: 20.r),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    refreshing
+                        ? Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: SizedBox(
+                              width: 20.r,
+                              height: 20.r,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          )
+                        : IconButton.filledTonal(
+                            tooltip: AppText.t('تحديث', 'Refresh'),
+                            onPressed: onRefresh,
+                            icon: Icon(Icons.refresh, size: 20.r),
+                          ),
                   ],
                 ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(height: 8),
+              // Row 2 — section navigation.
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -523,203 +632,66 @@ class _StickyNavBar extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(covariant _StickyNavBar old) =>
-      old.period != period || old.topPadding != topPadding;
+      old.topPadding != topPadding ||
+      old.period != period ||
+      old.refreshing != refreshing ||
+      old.filterCount != filterCount;
 }
 
-class _HeroBanner extends StatelessWidget {
-  final String period;
-  final String selectedMaterial;
-  final String selectedSupplier;
-  final String selectedStatus;
-  final DashboardFilterOptions? filterOptions;
-  final ValueChanged<String> onPeriodChange;
-  final ValueChanged<String> onMaterialChange;
-  final ValueChanged<String> onSupplierChange;
-  final ValueChanged<String> onStatusChange;
-  const _HeroBanner({
-    required this.period,
-    required this.selectedMaterial,
-    required this.selectedSupplier,
-    required this.selectedStatus,
-    required this.filterOptions,
-    required this.onPeriodChange,
-    required this.onMaterialChange,
-    required this.onSupplierChange,
-    required this.onStatusChange,
-  });
-  String _statusLabel(String status) {
-    if (status == 'ALL') return AppText.t('جميع الحالات', 'All Statuses');
-    return statusLabel(status);
-  }
+/// Status label shared by the filter sheet (the inline card is gone: the
+/// three dropdowns live in the sheet now).
+String _statusLabel(String status) {
+  if (status == 'ALL') return AppText.t('جميع الحالات', 'All Statuses');
+  return statusLabel(status);
+}
+
+/// How many of material / supplier / status differ from ALL: the sticky
+/// filter badge count.
+int _activeFilterCount(DashboardState state) => [
+  state.selectedMaterial,
+  state.selectedSupplier,
+  state.selectedStatus,
+].where((v) => v != 'ALL').length;
+
+/// Live result line under the filters: how many inspections match plus the
+/// latest one. Hidden until the first summary arrives.
+class _ResultLine extends StatelessWidget {
+  final Map<String, dynamic>? summary;
+  const _ResultLine({required this.summary});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [AppColors.primary, AppColors.primaryDeep],
-          begin: Alignment.topRight,
-          end: Alignment.bottomLeft,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primary.withValues(alpha: 0.28),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
+    final data = summary;
+    if (data == null) return const SizedBox.shrink();
+    final count = data['filtered_count'];
+    final latest = data['latest'] as Map<String, dynamic>?;
+    final latestLabel = '${latest?['label'] ?? ''}'.trim();
+    final latestDate = '${latest?['date'] ?? ''}'.trim();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
         children: [
-          // Decorative soft circles.
-          PositionedDirectional(
-            end: -48,
-            top: -48,
-            child: Container(
-              width: 160,
-              height: 160,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.09),
-                shape: BoxShape.circle,
-              ),
-            ),
+          Icon(
+            Icons.filter_alt_outlined,
+            size: 15.r,
+            color: AppColors.textMuted,
           ),
-          PositionedDirectional(
-            end: 40,
-            bottom: -70,
-            child: Container(
-              width: 130,
-              height: 130,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.06),
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-          Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 44.r,
-                height: 44.r,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(14.r),
-                  border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Icon(Icons.analytics_outlined,
-                    color: Colors.white, size: 24.r),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  AppStrings.dashboard,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            context.l10n.dashboard_hero_subtitle,
-            style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.9),
-              fontSize: 14.spMax,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          // Period Filter Chips
-          Material(
-            color: Colors.transparent,
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final (key, label) in [
-                  ('7d', context.l10n.period_week),
-                  ('30d', context.l10n.period_month),
-                  ('90d', context.l10n.period_3months),
-                  ('365d', context.l10n.period_year),
-                  ('ALL', context.l10n.period_all),
-                ])
-                  FilterChip(
-                    selected: period == key,
-                    label: Text(label),
-                    onSelected: (_) => onPeriodChange(key),
-                    selectedColor: Colors.white,
-                    checkmarkColor: AppColors.primary,
-                    backgroundColor: Colors.white24,
-                    labelStyle: TextStyle(
-                      fontWeight: period == key
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                      color: period == key
-                          ? AppColors.primaryDeep
-                          : Colors.white,
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              latestLabel.isEmpty
+                  ? AppText.t(
+                      '$count فحص في الفترة',
+                      '$count inspections in period',
+                    )
+                  : AppText.t(
+                      '$count فحص • الأحدث: $latestLabel ($latestDate)',
+                      '$count inspections • Latest: $latestLabel ($latestDate)',
                     ),
-                  ),
-              ],
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
             ),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          // Dropdown Filters Row
-          if (filterOptions != null)
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final isWide = constraints.maxWidth >= AppBreakpoints.medium;
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 10,
-                  children: [
-                    // Material Filter
-                    SizedBox(
-                      width: isWide ? 220 : constraints.maxWidth,
-                      child: _HeroDropdown(
-                        label: context.l10n.dashboard_material,
-                        value: selectedMaterial,
-                        items: filterOptions!.materials,
-                        onChanged: (v) => onMaterialChange(v ?? 'ALL'),
-                      ),
-                    ),
-                    // Supplier Filter
-                    SizedBox(
-                      width: isWide ? 220 : constraints.maxWidth,
-                      child: _HeroDropdown(
-                        label: context.l10n.dashboard_supplier,
-                        value: selectedSupplier,
-                        items: filterOptions!.suppliers,
-                        onChanged: (v) => onSupplierChange(v ?? 'ALL'),
-                      ),
-                    ),
-                    // Status Filter
-                    SizedBox(
-                      width: isWide ? 200 : constraints.maxWidth,
-                      child: _HeroDropdown(
-                        label: context.l10n.dashboard_status,
-                        value: selectedStatus,
-                        items: [
-                          for (final st in filterOptions!.statuses)
-                            {'id': st, 'name': _statusLabel(st)},
-                        ],
-                        onChanged: (v) => onStatusChange(v ?? 'ALL'),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ],
           ),
         ],
       ),
@@ -727,12 +699,12 @@ class _HeroBanner extends StatelessWidget {
   }
 }
 
-class _HeroDropdown extends StatelessWidget {
+class _FilterDropdown extends StatelessWidget {
   final String label;
   final String value;
   final List<Map<String, dynamic>> items;
   final ValueChanged<String?> onChanged;
-  const _HeroDropdown({
+  const _FilterDropdown({
     required this.label,
     required this.value,
     required this.items,
@@ -740,17 +712,18 @@ class _HeroDropdown extends StatelessWidget {
   });
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.borderMuted),
+    return InputDecorator(
+      decoration: InputDecoration(
+        labelText: label,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: items.any((i) => i['id'] == value) ? value : 'ALL',
           isExpanded: true,
+          menuMaxHeight: 320,
           isDense: true,
           dropdownColor: AppColors.surface,
           style: TextStyle(fontSize: 13.spMax, color: AppColors.textStrong),
@@ -763,165 +736,6 @@ class _HeroDropdown extends StatelessWidget {
                 child: Text('${item['name']}', overflow: TextOverflow.ellipsis),
               ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _QuickActionsBar extends StatelessWidget {
-  const _QuickActionsBar();
-
-  Future<void> _openNewInspection(BuildContext context) async {
-    final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
-    if (wide) {
-      final saved = await showAppWindow<bool>(
-        context,
-        title: AppText.t('فحص خامة جديد', 'New Material Inspection'),
-        icon: Icons.add_task,
-        size: AppWindowSize.lg,
-        scrollBody: false,
-        child: BlocProvider(
-          create: (c) => InspectionFormCubit(
-            repo: getIt<InspectionRepository>(),
-            reference: getIt<ReferenceRepository>(),
-          )..loadMaterials(),
-          child: const InspectionFormScreen(),
-        ),
-      );
-      if (saved == true && context.mounted) {
-        context.read<DashboardCubit>().load();
-      }
-    } else {
-      context.go('/inspection-new');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _ActionButton(
-            label: context.l10n.dashboard_new_inspection,
-            icon: Icons.add_task,
-            color: AppColors.primary,
-            onTap: () => _openNewInspection(context),
-          ),
-          const SizedBox(width: 10),
-          _ActionButton(
-            label: context.l10n.dashboard_history,
-            icon: Icons.history,
-            color: AppColors.accent,
-            onTap: () => context.go('/inspections'),
-          ),
-          const SizedBox(width: 10),
-          _ActionButton(
-            label: context.l10n.dashboard_reports,
-            icon: Icons.description_outlined,
-            color: AppColors.info,
-            onTap: () => context.go('/reports'),
-          ),
-          const SizedBox(width: 10),
-          _ActionButton(
-            label: context.l10n.dashboard_lab,
-            icon: Icons.biotech_outlined,
-            color: AppColors.success,
-            onTap: () => context.go('/lab'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ActionButton extends StatefulWidget {
-  final String label;
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-  const _ActionButton({
-    required this.label,
-    required this.icon,
-    required this.color,
-    required this.onTap,
-  });
-
-  @override
-  State<_ActionButton> createState() => _ActionButtonState();
-}
-
-class _ActionButtonState extends State<_ActionButton> {
-  bool _isHovered = false;
-
-  void _setHovered(bool value) {
-    if (!mounted || _isHovered == value) return;
-    setState(() => _isHovered = value);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return MouseRegion(
-      onEnter: (_) => _setHovered(true),
-      onExit: (_) => _setHovered(false),
-      cursor: SystemMouseCursors.click,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        curve: Curves.easeOutCubic,
-        decoration: BoxDecoration(
-          color: _isHovered
-              ? widget.color.withValues(alpha: isDark ? 0.20 : 0.08)
-              : AppColors.surface,
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: _isHovered
-                ? widget.color.withValues(alpha: 0.55)
-                : AppColors.borderMuted,
-            width: _isHovered ? 1.2 : 1.0,
-          ),
-          boxShadow: _isHovered
-              ? [
-                  BoxShadow(
-                    color: widget.color.withValues(alpha: 0.18),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ]
-              : null,
-        ),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
-          child: InkWell(
-            onTap: widget.onTap,
-            borderRadius: BorderRadius.circular(10),
-            mouseCursor: SystemMouseCursors.click,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnimatedScale(
-                    scale: _isHovered ? 1.12 : 1.0,
-                    duration: const Duration(milliseconds: 180),
-                    curve: Curves.easeOutCubic,
-                    child: Icon(widget.icon, size: 18.r, color: widget.color),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    widget.label,
-                    style: TextStyle(
-                      fontSize: 13.spMax,
-                      fontWeight: FontWeight.w600,
-                      color: _isHovered ? widget.color : AppColors.textStrong,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
         ),
       ),
     );
@@ -1003,12 +817,8 @@ class _QcQuickCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final qc = kpi.bundle.qc;
     final total = qc.total;
-    final acceptRate = total == 0
-        ? 0.0
-        : (qc.pass / total * 100);
-    final rejectRate = total == 0
-        ? 0.0
-        : (qc.fail / total * 100);
+    final acceptRate = total == 0 ? 0.0 : (qc.pass / total * 100);
+    final rejectRate = total == 0 ? 0.0 : (qc.fail / total * 100);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -1026,6 +836,7 @@ class _QcQuickCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     AppText.t('جودة الفحوصات', 'Inspection quality'),
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
@@ -1103,6 +914,8 @@ class _QcQuickCard extends StatelessWidget {
                   Flexible(
                     child: Text(
                       '${AppText.t('الإجمالي', 'Total')}: $total',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 12.spMax,
@@ -1112,6 +925,9 @@ class _QcQuickCard extends StatelessWidget {
                   Flexible(
                     child: Text(
                       '${AppText.t('رفض', 'Reject')}: ${rejectRate.toStringAsFixed(1)}%',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.end,
                       style: TextStyle(
                         color: AppColors.danger,
                         fontSize: 12.spMax,
@@ -1209,6 +1025,7 @@ class _DailyTasksCardState extends State<_DailyTasksCard> {
                     Expanded(
                       child: Text(
                         AppText.t('المهام اليومية', 'Daily tasks'),
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
@@ -1218,6 +1035,8 @@ class _DailyTasksCardState extends State<_DailyTasksCard> {
                         '$done من $total منجزة',
                         '$done of $total done',
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 12.spMax,
                         fontWeight: FontWeight.bold,
@@ -1280,6 +1099,7 @@ class _DecisionsOverviewCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     context.l10n.period_decisions_title,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
@@ -1351,6 +1171,7 @@ class _DecisionsOverviewCard extends StatelessWidget {
                 Flexible(
                   child: Text(
                     '${context.l10n.total_in_period}$total',
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: AppColors.textMuted,
@@ -1362,7 +1183,9 @@ class _DecisionsOverviewCard extends StatelessWidget {
                 Flexible(
                   child: Text(
                     '${context.l10n.rejection_rate_general}$rejectionRate%',
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.end,
                     style: TextStyle(
                       color: AppColors.danger,
                       fontSize: 12.spMax,
@@ -1515,7 +1338,8 @@ class _MonthlyTrendRowState extends State<_MonthlyTrendRow> {
     final label = '${widget.item['label'] ?? ''}';
     final total = widget.item['total'] ?? 0;
     final rate = '${widget.item['approvalRate'] ?? '0.0'}';
-    final approvedPct = double.tryParse('${widget.item['approvedWidth'] ?? 0}') ?? 0.0;
+    final approvedPct =
+        double.tryParse('${widget.item['approvedWidth'] ?? 0}') ?? 0.0;
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
@@ -1684,8 +1508,13 @@ class _InsightCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     '${map['title']}',
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontWeight: FontWeight.bold, color: color),
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: color,
+                      height: 1.35,
+                    ),
                   ),
                 ),
               ],
@@ -1892,16 +1721,20 @@ class _TopItemProgressState extends State<_TopItemProgress> {
                 Expanded(
                   child: Text(
                     widget.label,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13.spMax,
+                      height: 1.35,
                       color: _isHovered ? widget.color : null,
                     ),
                   ),
                 ),
                 Text(
                   '${widget.count} (${widget.rate})',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: AppColors.textMuted,
                     fontSize: 12.spMax,
@@ -2699,7 +2532,8 @@ class _TrendChartSection extends StatelessWidget {
                             barTouchData: BarTouchData(
                               touchTooltipData: BarTouchTooltipData(
                                 getTooltipItem: (group, groupIndex, rod, rodIndex) {
-                                  if (group.x < 0 || group.x >= trend.length) return null;
+                                  if (group.x < 0 || group.x >= trend.length)
+                                    return null;
                                   final t = trend[group.x];
                                   return BarTooltipItem(
                                     '${t.label}\n${t.total} ${AppText.t('فحص', 'inspections')} • ${t.approvalRate}%',
@@ -3318,10 +3152,12 @@ class _SupplierRowState extends State<_SupplierRow> {
                       Expanded(
                         child: Text(
                           widget.score.name,
+                          maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 13.spMax,
+                            height: 1.35,
                             color: _isHovered ? AppColors.primary : null,
                           ),
                         ),
@@ -3344,8 +3180,11 @@ class _SupplierRowState extends State<_SupplierRow> {
                   const SizedBox(height: 2),
                   Text(
                     '${widget.score.total} ${AppText.t('فحص', 'inspections')} • ${AppText.t('الرفض', 'Rejected')}: ${widget.score.rejected} • ${AppText.t('الحالة', 'Status')}: ${_tierWord(widget.score.tier)}',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 11.spMax,
+                      height: 1.4,
                       color: AppColors.textMuted,
                     ),
                   ),
@@ -3355,7 +3194,10 @@ class _SupplierRowState extends State<_SupplierRow> {
                     child: LinearProgressIndicator(
                       value: widget.maxScore == 0
                           ? 0
-                          : (widget.score.score / widget.maxScore).clamp(0.0, 1.0),
+                          : (widget.score.score / widget.maxScore).clamp(
+                              0.0,
+                              1.0,
+                            ),
                       minHeight: 6,
                       color: AppColors.primary,
                       backgroundColor: AppColors.borderMuted,

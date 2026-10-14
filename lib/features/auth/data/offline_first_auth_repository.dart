@@ -13,7 +13,8 @@ import '../../../core/firebase/firebase_bootstrap.dart';
 import '../../../core/network/connectivity_service.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/sync/device_registry.dart';
-import '../../../core/sync/remote/auth_remote_data_source.dart' show GoogleSignInException;
+import '../../../core/sync/remote/auth_remote_data_source.dart'
+    show GoogleSignInException, RemoteAuthException;
 import '../../../core/sync/remote/remote_data_source.dart';
 import '../../../core/sync/sync_metadata.dart';
 import '../domain/auth_repository.dart';
@@ -35,6 +36,7 @@ class OfflineFirstAuthRepository implements AuthRepository {
     required this.bootstrap,
     this.devices,
     this.onOrganizationBound,
+    this.onSignedOut,
   });
 
   final AuthRemoteDataSource remote;
@@ -48,12 +50,18 @@ class OfflineFirstAuthRepository implements AuthRepository {
   /// (plan §14-P9.1); absent in tests that do not exercise it.
   final DeviceRegistry? devices;
 
-
   /// Hook invoked once the organization database is ready (start the sync
   /// engine, run the per-org seeds, ...). Wired in `app_bootstrap.dart`.
+  /// Runs for `active` members only (plan §8): a pending/disabled account
+  /// never opens the company database and never starts the sync cycle.
   Future<void> Function(String organizationId)? onOrganizationBound;
 
-  final StreamController<AuthState> _states = StreamController<AuthState>.broadcast();
+  /// Hook invoked on sign-out / leave so the sync cycle stops with the
+  /// session (plan §3/§8): no heartbeat, no push/pull after unbinding.
+  Future<void> Function()? onSignedOut;
+
+  final StreamController<AuthState> _states =
+      StreamController<AuthState>.broadcast();
 
   AppSession _session = kEmptySession;
   AuthState _state = AuthState.signedOut;
@@ -72,7 +80,8 @@ class OfflineFirstAuthRepository implements AuthRepository {
   bool get isFirebaseAvailable => remote.isConfigured;
 
   @override
-  List<String> get missingConfiguration => bootstrap.isReady ? const [] : bootstrap.missingKeys;
+  List<String> get missingConfiguration =>
+      bootstrap.isReady ? const [] : bootstrap.missingKeys;
 
   // ── Restore ─────────────────────────────────────────────────────────────
 
@@ -88,12 +97,14 @@ class OfflineFirstAuthRepository implements AuthRepository {
     final cached = await sessionStore.restore();
     if (cached != null) {
       _session = cached.copyWith(offline: true, clearToken: true);
-      await _bindOrganization(_session.organizationId);
-      // Same rule as the offline branch of `resolveProfile`: a cached
-      // `invited`/`disabled` member must not be reported as ready, otherwise
-      // booting offline hands the shell a dashboard the account cannot use.
-      if (!_session.isActiveMember) return _set(AuthState.awaitingActivation);
-      return _set(AuthState.ready);
+      // No local leak (plan §8): only an `active` member binds the company
+      // database and starts the sync cycle. Anything else unbinds.
+      if (_session.isActiveMember) {
+        await _bindOrganization(_session.organizationId);
+        return _set(AuthState.ready);
+      }
+      await dbHelper.bindOrg(null);
+      return _set(AuthState.awaitingActivation);
     }
     return _set(AuthState.signedOut);
   }
@@ -103,8 +114,11 @@ class OfflineFirstAuthRepository implements AuthRepository {
   @override
   Future<void> signInWithGoogle() async {
     if (!remote.isConfigured) {
-      throw const AuthFailure(
-        'تعذر تسجيل الدخول: لم يتم ضبط تسجيل Google بشكل صحيح. أعد تشغيل التطبيق بعد ضبط الإعدادات.',
+      throw AuthFailure(
+        AppText.t(
+          'تعذر تسجيل الدخول: لم يتم ضبط تسجيل Google بشكل صحيح. أعد تشغيل التطبيق بعد ضبط الإعدادات.',
+          'Unable to sign in: Google sign-in is not configured correctly. Restart the app after fixing the configuration.',
+        ),
         code: 'missing_config',
       );
     }
@@ -128,6 +142,68 @@ class OfflineFirstAuthRepository implements AuthRepository {
     await resolveProfile(user: user);
   }
 
+  @override
+  Future<void> signInWithEmail({
+    required String email,
+    required String password,
+  }) async {
+    if (!remote.isConfigured) {
+      throw AuthFailure(
+        AppText.t(
+          'Firebase غير مضبوط. أكمل إعداد Firebase أولاً.',
+          'Firebase is not configured. Complete the Firebase setup first.',
+        ),
+        code: 'missing_config',
+      );
+    }
+    try {
+      await remote.signInWithEmail(email: email, password: password);
+      final user = await remote.currentUser();
+      if (user == null) {
+        throw AuthFailure(
+          AppText.t(
+            'تعذر استعادة حساب Firebase بعد تسجيل الدخول.',
+            'Could not restore the Firebase account after sign-in.',
+          ),
+        );
+      }
+      await resolveProfile(user: user);
+    } on RemoteAuthException catch (e) {
+      throw AuthFailure(_emailMessage(e.code, e.message), code: e.code);
+    }
+  }
+
+  @override
+  Future<void> createPasswordAccount({
+    required String email,
+    required String password,
+  }) async {
+    if (!remote.isConfigured) {
+      throw AuthFailure(
+        AppText.t(
+          'Firebase غير مضبوط. أكمل إعداد Firebase أولاً.',
+          'Firebase is not configured. Complete the Firebase setup first.',
+        ),
+        code: 'missing_config',
+      );
+    }
+    try {
+      await remote.createPasswordAccount(email: email, password: password);
+      final user = await remote.currentUser();
+      if (user == null) {
+        throw AuthFailure(
+          AppText.t(
+            'تعذر إنشاء حساب Firebase.',
+            'Could not create the Firebase account.',
+          ),
+        );
+      }
+      await resolveProfile(user: user);
+    } on RemoteAuthException catch (e) {
+      throw AuthFailure(_emailMessage(e.code, e.message), code: e.code);
+    }
+  }
+
   // ── Profile resolution ──────────────────────────────────────────────────
 
   @override
@@ -145,10 +221,14 @@ class OfflineFirstAuthRepository implements AuthRepository {
         final cached = await sessionStore.restore();
         if (cached != null) {
           _session = cached.copyWith(offline: true, clearToken: true);
+          // A cached non-active session must never be reported as ready:
+          // the shell would offer a dashboard the account cannot use, and
+          // the company database must stay closed (plan §8).
+          if (!_session.isActiveMember) {
+            await dbHelper.bindOrg(null);
+            return _set(AuthState.awaitingActivation);
+          }
           await _bindOrganization(_session.organizationId);
-          // A cached `invited`/`disabled` session must never be reported as
-          // ready: the shell would offer a dashboard the account cannot use.
-          if (!_session.isActiveMember) return _set(AuthState.awaitingActivation);
           return _set(AuthState.ready);
         }
       }
@@ -159,6 +239,8 @@ class OfflineFirstAuthRepository implements AuthRepository {
     }
 
     if (profile == null) {
+      // `no_company` (plan §1): no `users/{uid}` binding yet. The account may
+      // create a trial company or join with an invite.
       _session = AppSession(
         uid: account.uid,
         email: account.email,
@@ -170,14 +252,17 @@ class OfflineFirstAuthRepository implements AuthRepository {
         status: MemberStatus.invited,
         organizationId: '',
       );
+      await dbHelper.bindOrg(null);
       return _set(AuthState.noProfile);
     }
 
-    final readOnly = profile.role == AppRoles.viewer;
+    final readOnly = roleIsReadOnly(normalizeRole(profile.role));
     _session = AppSession(
       uid: profile.uid,
       email: profile.email,
-      displayName: profile.displayName.isNotEmpty ? profile.displayName : (account.displayName ?? ''),
+      displayName: profile.displayName.isNotEmpty
+          ? profile.displayName
+          : (account.displayName ?? ''),
       photoUrl: account.photoUrl,
       organizationId: profile.organizationId,
       memberId: profile.memberId,
@@ -187,10 +272,17 @@ class OfflineFirstAuthRepository implements AuthRepository {
       readOnlyDevice: readOnly,
       signedInAt: DateTime.now(),
     );
+    // Plan §8: the company database opens and the sync cycle starts for
+    // `active` members only. Anything else (invited/pending_activation /
+    // disabled) unbinds locally and waits on the activation screen.
+    if (!_session.isActiveMember) {
+      await dbHelper.bindOrg(null);
+      await _persistSession();
+      return _set(AuthState.awaitingActivation);
+    }
     await _bindOrganization(_session.organizationId);
     await _persistSession();
 
-    if (!_session.isActiveMember) return _set(AuthState.awaitingActivation);
     return _set(AuthState.ready);
   }
 
@@ -200,10 +292,31 @@ class OfflineFirstAuthRepository implements AuthRepository {
   Future<void> changeOrganization(String organizationId) async {
     final profile = await remote.loadProfile(_session.uid);
     if (profile == null) {
-      throw const AuthFailure('لا يوجد ملف مستخدم لهذا الحساب');
+      throw AuthFailure(
+        AppText.t(
+          'لا يوجد ملف مستخدم لهذا الحساب',
+          'No user profile exists for this account.',
+        ),
+      );
     }
     if (profile.organizationId != organizationId) {
-      throw const AuthFailure('هذا الحساب غير مرتبط بالمؤسسة المختارة');
+      throw AuthFailure(
+        AppText.t(
+          'هذا الحساب غير مرتبط بالمؤسسة المختارة',
+          'This account is not linked to the selected organization.',
+        ),
+      );
+    }
+    // A disabled/invited/pending member must not re-bind the org database:
+    // the profile check above only verified the org id, not that the member
+    // may still enter it.
+    if (profile.status != 'active') {
+      throw AuthFailure(
+        AppText.t(
+          'تم تعطيل عضويتك في هذه المؤسسة',
+          'Your membership in this organization is not active.',
+        ),
+      );
     }
     await _bindOrganization(organizationId);
     await _persistSession();
@@ -215,7 +328,15 @@ class OfflineFirstAuthRepository implements AuthRepository {
     _session = kEmptySession;
     _state = AuthState.signedOut;
     await sessionStore.clear();
+    // Plan §3: leaving/sign-out drops the local binding (the company database
+    // is closed) and stops the sync cycle; records stay server-side as audit
+    // history and are never hard-deleted here.
     await dbHelper.bindOrg(null);
+    try {
+      await onSignedOut?.call();
+    } on Object {
+      // Stopping the engine must not block the local sign-out.
+    }
     try {
       await remote.signOut();
     } on Object {
@@ -240,7 +361,6 @@ class OfflineFirstAuthRepository implements AuthRepository {
     }
     await signOut();
   }
-
 
   // ── Internals ───────────────────────────────────────────────────────────
 
@@ -283,7 +403,10 @@ class OfflineFirstAuthRepository implements AuthRepository {
   /// Deliberately *not* a hardware id (plan P1.4) — no `device_info_plus`.
   static String _generateDeviceId() {
     final seed = '${Platform.operatingSystem}:${Platform.localHostname}';
-    final digest = sha256.convert(utf8.encode(seed)).toString().substring(0, 16);
+    final digest = sha256
+        .convert(utf8.encode(seed))
+        .toString()
+        .substring(0, 16);
     return 'device_${Platform.operatingSystem}_$digest';
   }
 
@@ -332,5 +455,53 @@ class OfflineFirstAuthRepository implements AuthRepository {
           'Unable to sign in with Google right now. Please try again.',
         );
     }
+  }
+
+  /// Firebase Auth codes use hyphens (`invalid-email`) while the local
+  /// contract uses underscores (`invalid_email`): normalize first so a
+  /// hyphenated code never falls through to the raw English fallback.
+  static String _emailMessage(String code, String fallback) {
+    final normalized = code.replaceAll('-', '_');
+    return switch (normalized) {
+      'invalid_email' => AppText.t(
+        'أدخل بريدًا إلكترونيًا صحيحًا.',
+        'Enter a valid email address.',
+      ),
+    'member_exists' => AppText.t(
+      'هذا البريد عضو نشط بالفعل في الشركة.',
+      'This email is already an active company member.',
+    ),
+      'email_already_in_use' || 'credential_already_in_use' => AppText.t(
+        'البريد مرتبط بحساب آخر. سجّل الدخول بالبريد أو Google أولًا.',
+        'This email is already linked to another account. Sign in first.',
+      ),
+      'user_not_found' || 'wrong_password' || 'invalid_credential' =>
+        AppText.t(
+          'البريد أو كلمة المرور غير صحيحة.',
+          'The email or password is incorrect.',
+        ),
+      'weak_password' => AppText.t(
+        'اختر كلمة مرور أقوى من 6 أحرف.',
+        'Choose a stronger password.',
+      ),
+      'network_request_failed' => AppText.t(
+        'لا يوجد اتصال بالإنترنت.',
+        'No internet connection.',
+      ),
+      'email_mismatch' => AppText.t(
+        'بريد كلمة المرور يجب أن يطابق الحساب المسجل.',
+        'The password email must match the signed-in account.',
+      ),
+      'too_many_requests' => AppText.t(
+        'محاولات كثيرة. حاول لاحقًا.',
+        'Too many attempts. Try again later.',
+      ),
+      // Unknown codes never leak raw English technical text to the UI; the
+      // code itself stays on AuthFailure.code for debugging.
+      _ => AppText.t(
+        'تعذر إكمال العملية. حاول مرة أخرى.',
+        'Unable to complete the operation. Try again.',
+      ),
+    };
   }
 }

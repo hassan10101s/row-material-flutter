@@ -10,6 +10,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_required_toggle.dart';
 import '../../../../di/service_locator.dart';
 import '../../domain/parameter_type.dart';
@@ -557,45 +558,29 @@ class ProductEditorState extends State<ProductEditor> {
 
   /// The form itself, in document order.
   List<Widget> _fields() => [
-    TextField(
+    AppField(
+      label: AppText.t('الاسم', 'Name'),
       controller: _name,
       onChanged: (_) => setState(() => _nameError = null),
+      error: _nameError,
       enabled: !_saving,
-      decoration: InputDecoration(
-        labelText: AppText.t('الاسم', 'Name'),
-        isDense: true,
-        errorText: _nameError,
-        border: const OutlineInputBorder(),
-      ),
     ),
     const SizedBox(height: AppSpacing.md),
     Row(
       children: [
         Expanded(
-          child: _labeled(
-            AppText.t('النوع', 'Category'),
-            TextField(
-              controller: _category,
-              enabled: !_saving,
-              decoration: const InputDecoration(
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
-            ),
+          child: AppField(
+            label: AppText.t('النوع', 'Category'),
+            controller: _category,
+            enabled: !_saving,
           ),
         ),
         const SizedBox(width: AppSpacing.md),
         Expanded(
-          child: _labeled(
-            AppText.t('الوصف', 'Description'),
-            TextField(
-              controller: _description,
-              enabled: !_saving,
-              decoration: const InputDecoration(
-                isDense: true,
-                border: OutlineInputBorder(),
-              ),
-            ),
+          child: AppField(
+            label: AppText.t('الوصف', 'Description'),
+            controller: _description,
+            enabled: !_saving,
           ),
         ),
       ],
@@ -658,18 +643,6 @@ class ProductEditorState extends State<ProductEditor> {
     const SizedBox(height: AppSpacing.lg),
   ];
 
-  Widget _labeled(String label, Widget child) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        label,
-        style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
-      ),
-      const SizedBox(height: AppSpacing.xs),
-      child,
-    ],
-  );
-
   Widget _sectionTitle(String ar, String en) => Row(
     children: [
       Icon(Icons.science_outlined, size: 18.r, color: AppColors.primary),
@@ -714,21 +687,18 @@ class ProductEditorState extends State<ProductEditor> {
     final requirement = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextField(
+        AppField(
+          label: AppText.t('الاشتراط', 'Requirement'),
           controller: row.reqCtrl,
-          enabled: !_saving,
           onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: AppText.t('مثال: عادي', 'e.g. Normal'),
-            border: const OutlineInputBorder(),
-          ),
+          hint: AppText.t('مثال: عادي', 'e.g. Normal'),
+          enabled: !_saving,
         ),
         if (_suggestionChips(row.reqCtrl.text).isNotEmpty) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.xs),
           Wrap(
-            spacing: 4,
-            runSpacing: 4,
+            spacing: AppSpacing.xs,
+            runSpacing: AppSpacing.xs,
             children: [
               for (final chip in _suggestionChips(row.reqCtrl.text))
                 _requirementChip(chip),
@@ -788,10 +758,13 @@ class ProductEditorState extends State<ProductEditor> {
     final reject = _isRejectWord(word);
     final color = reject ? AppColors.danger : AppColors.success;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
       ),
       child: Text(
         word,
@@ -827,34 +800,22 @@ class ProductEditorState extends State<ProductEditor> {
               _onChemicalChange(row, v);
             },
     );
-    final min = TextField(
+    final min = AppField(
+      label: AppText.t('الحد الأدنى', 'Min'),
       controller: row.minCtrl,
       enabled: enabled,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        isDense: true,
-        labelText: AppText.t('الحد الأدنى', 'Min'),
-        border: const OutlineInputBorder(),
-      ),
     );
-    final max = TextField(
+    final max = AppField(
+      label: AppText.t('الحد الأقصى', 'Max'),
       controller: row.maxCtrl,
       enabled: enabled,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        isDense: true,
-        labelText: AppText.t('الحد الأقصى', 'Max'),
-        border: const OutlineInputBorder(),
-      ),
     );
-    final unit = TextField(
+    final unit = AppField(
+      label: AppText.t('الوحدة الموروثة', 'Inherited unit'),
       controller: row.unitCtrl,
       enabled: false,
-      decoration: InputDecoration(
-        isDense: true,
-        labelText: AppText.t('الوحدة الموروثة', 'Inherited unit'),
-        border: const OutlineInputBorder(),
-      ),
     );
     final remove = IconButton(
       tooltip: AppStrings.delete,

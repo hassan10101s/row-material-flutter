@@ -132,6 +132,15 @@ String qcDocId(Map<String, dynamic> row) =>
 
 String labTestDocId(Map<String, dynamic> row) => 'lt_${row['id']}';
 
+/// Cross-device identity for comprehensive sync (plan §1): the Firestore
+/// document id IS the local `remote_id` (UUID for new rows,
+/// `legacy_<table>_<id>` backfill for old rows).
+String remoteIdDocId(Map<String, dynamic> row) {
+  final remoteId = '${row['remote_id'] ?? ''}';
+  if (remoteId.isNotEmpty) return remoteId;
+  return 'legacy_${row['id']}';
+}
+
 String Function(Map<String, dynamic> row) labConfigDocId(String table) =>
     (row) => 'lc_${table}_${row['id']}';
 
@@ -176,7 +185,9 @@ final List<SyncEntity> syncEntities = [
       'chemicalReferenceJson',
       'sampleNamesJson',
       'snapshotJson',
-      'reportHtml',
+      // NOTE: no `reportHtml` — derived artifact, rebuilt locally (see
+      // `buildRemotePayload`). Kept out so documents stay small and
+      // re-renders never churn the sync payload.
       'decisionStatus',
       'decisionReason',
       'followUpNote',
@@ -222,6 +233,34 @@ final List<SyncEntity> syncEntities = [
       'testedBy',
       'testedAt',
       'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
+  ),
+  SyncEntity(
+    type: 'productBatchSample',
+    collection: SyncCollection.productBatchSamples,
+    localTable: 'product_batch_samples',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    mutableFields: {
+      'batchId',
+      'sampleNo',
+      'sampleName',
+      'sampleTaker',
+      'physicalResultsJson',
+      'chemicalResultsJson',
+      'testedBy',
+      'testedByName',
+      'testedAt',
+      'decisionStatus',
+      'decisionReason',
+      'localId',
+      'remoteId',
       'version',
       'updatedAt',
       'updatedBy',
@@ -372,6 +411,172 @@ final List<SyncEntity> syncEntities = [
       'updatedBy',
     },
   ),
+  // ── Comprehensive sync (plan §3): inventory / transactions / equipment /
+  // worksheets / reference. Each gets its own collection so one edit never
+  // overwrites an unrelated table, and `remote_id` is the document id.
+  SyncEntity(
+    type: 'inventoryItem',
+    collection: SyncCollection.inventoryItems,
+    localTable: 'lab_inventory',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    mutableFields: {
+      'name',
+      'category',
+      'unit',
+      'currentQty',
+      'minQty',
+      'description',
+      'localId',
+      'remoteId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
+  ),
+  SyncEntity(
+    type: 'inventoryTransaction',
+    collection: SyncCollection.inventoryTransactions,
+    localTable: 'inventory_transactions',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    appendOnly: true,
+    mutableFields: const {},
+  ),
+  SyncEntity(
+    type: 'consumption',
+    collection: SyncCollection.consumption,
+    localTable: 'lab_consumption_log',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    appendOnly: true,
+    mutableFields: const {},
+  ),
+  SyncEntity(
+    type: 'stockAdjustment',
+    collection: SyncCollection.stockAdjustments,
+    localTable: 'lab_stock_adjustments',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    appendOnly: true,
+    mutableFields: const {},
+  ),
+  SyncEntity(
+    type: 'equipment',
+    collection: SyncCollection.equipment,
+    localTable: 'lab_equipment',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    mutableFields: {
+      'name',
+      'code',
+      'manufacturer',
+      'description',
+      'lastCalibrationDate',
+      'localId',
+      'remoteId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
+  ),
+  SyncEntity(
+    type: 'equipmentEvent',
+    collection: SyncCollection.equipmentEvents,
+    localTable: 'lab_equipment_events',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    mutableFields: {
+      'equipmentId',
+      'equipmentRemoteId',
+      'eventType',
+      'eventDate',
+      'notes',
+      'localId',
+      'remoteId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
+  ),
+  SyncEntity(
+    type: 'worksheet',
+    collection: SyncCollection.worksheets,
+    localTable: 'lab_worksheet',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    mutableFields: {
+      'sourceType',
+      'sourceRefId',
+      'sourceName',
+      'sampleNumber',
+      'entryCode',
+      'status',
+      'voidReason',
+      'voidedBy',
+      'voidedAt',
+      'localId',
+      'remoteId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
+  ),
+  SyncEntity(
+    type: 'referenceMaterial',
+    collection: SyncCollection.referenceMaterials,
+    localTable: 'reference_materials',
+    naturalKeyIdentity: true,
+    docId: remoteIdDocId,
+    permission: 'lab_results.update',
+    mutableFields: {
+      'materialName',
+      'materialCode',
+      'category',
+      'unit',
+      'active',
+      'localId',
+      'remoteId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
+  ),
+  SyncEntity(
+    type: 'labMaterialAnalysis',
+    collection: SyncCollection.labConfig,
+    localTable: 'lab_material_analyses',
+    docId: labConfigDocId('lab_material_analyses'),
+    accepts: labConfigSelector('lab_material_analyses'),
+    permission: 'lab_results.update',
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
+  ),
 ];
 
 /// Audit log rows are not part of `syncEntities` (the normal cycle does not walk
@@ -409,6 +614,13 @@ Map<String, dynamic> buildRemotePayload(
     }
     final camel = _toCamel(entry.key);
     if (_internalColumns.contains(camel)) continue;
+    // Derived artifacts are never synced, only the data they render from:
+    // `report_html` (full HTML + embedded base64 logo/QR images) is rebuilt
+    // locally by `refreshReportHtml` and re-rendered on demand at export.
+    // Pushing it bloats every document toward the 900 kB oversized guard and
+    // turns each local re-render into sync churn. The receiver keeps/regenerates
+    // its own copy (`report_html` stays a local cache column).
+    if (camel == 'reportHtml') continue;
     // `createdAt` is write-once and is stamped from the envelope below, so the
     // local `created_at` string must never be copied through. See the note
     // where the sentinel is written for why an update must omit it entirely.
@@ -468,8 +680,7 @@ class FieldTimestampSentinel {
 /// Firestore size guard without the old double-allocating
 /// `jsonEncode(x).toLowerCase().codeUnits.length` (lowercased copy + code-unit
 /// list, and UTF-16 units instead of bytes). Single sanitized encode.
-int _payloadBytes(Map<String, dynamic> payload) =>
-    SyncCodec.byteSize(payload);
+int _payloadBytes(Map<String, dynamic> payload) => SyncCodec.byteSize(payload);
 
 Map<String, dynamic> _stripSyncColumns(Map<String, dynamic> row) {
   const syncColumns = {
@@ -478,6 +689,14 @@ Map<String, dynamic> _stripSyncColumns(Map<String, dynamic> row) {
     'remote_synced_at',
     'sync_state',
     'deleted_at',
+    'remote_id',
+    'device_id',
+    'updated_by',
+    'updated_at',
+    // Derived artifacts, same rule as `reportHtml` in `buildRemotePayload`:
+    // the nested labConfig `payload` must carry data only.
+    'report_html',
+    'last_pdf_path',
   };
   return {
     for (final entry in row.entries)
@@ -533,6 +752,190 @@ Future<Set<String>> availableColumns(DatabaseExecutor db, String table) async {
   return {for (final column in info) '${column['name']}'};
 }
 
+/// Remap a remote document's foreign keys to this device's ids, in place.
+///
+/// The envelope carries the origin device's raw ids, which are meaningless
+/// here: writing them verbatim either violates FK constraints (e.g.
+/// `created_by: 'local_1'` in an INTEGER FK column, or a `material_id` this
+/// device never had) or silently links the wrong row (both devices'
+/// autoincrement ids collide by construction). All three remote-apply paths
+/// (pull, manual keep-remote, auto-rebase) must call this before writing:
+/// `doc` is the remote document (carries codes/kind), `resolved` is the
+/// column-filtered local row being written.
+Future<void> resolveRemoteRowRefs(
+  DatabaseExecutor txn,
+  SyncEntity entity,
+  Map<String, dynamic> resolved,
+  Map<String, dynamic> doc, {
+  required Future<int> Function(DatabaseExecutor txn) ensureProductSentinel,
+  Future<int> Function(String uid)? userIdFor,
+}) async {
+  Future<int> mapUser(String uid) async {
+    if (userIdFor != null) return userIdFor(uid);
+    if (uid.isEmpty || uid.startsWith('local_')) return 0;
+    final rows = await txn.query(
+      'users',
+      columns: const ['id'],
+      where: 'uid = ?',
+      whereArgs: [uid],
+      limit: 1,
+    );
+    return rows.isEmpty ? 0 : (rows.first['id'] as num).toInt();
+  }
+
+  for (final column in const ['created_by', 'changed_by']) {
+    final value = resolved[column];
+    if (value is String) resolved[column] = await mapUser(value);
+  }
+
+  // Person columns on lab/sync tables hold Firebase uid strings (TEXT).
+  // Older code wrote raw strings like 'local_1' or emails straight into
+  // INTEGER columns and crashed later in int.parse. Normalize here: map
+  // known uids to local ids where the column is INTEGER-affinity, otherwise
+  // keep the uid string (TEXT columns) but never keep a 'local_*' placeholder.
+  for (final column in const ['tested_by', 'assigned_to', 'updated_by']) {
+    final value = resolved[column];
+    if (value is! String) continue;
+    if (value.isEmpty || value.startsWith('local_')) {
+      resolved[column] = null;
+      continue;
+    }
+    // If the target column is TEXT-affinity (new installs + QC tables),
+    // keep the uid verbatim. INTEGER-affinity legacy columns get the mapped id.
+    // We cannot PRAGMA per row cheaply here, so: keep uid strings that look
+    // like Firebase uids (long/alphanumeric) and map only short numeric strings.
+    final asInt = int.tryParse(value);
+    if (asInt != null) {
+      resolved[column] = asInt;
+    } else if (value.contains('@')) {
+      // Email leaked into an id column (legacy offline_first_lab_repository
+      // wrote guard.email): drop to null rather than poison the row.
+      resolved[column] = null;
+    }
+    // else: keep uid string for TEXT columns.
+  }
+
+  if (entity.localTable == 'lab_equipment_events') {
+    // `equipment_id` is a per-device autoincrement id: the origin device's
+    // value is meaningless here. Remap through the cross-device parent
+    // identity (`equipment_remote_id`), which the writer stamps at create
+    // time. Missing parent => transient: the equipment master lands in the
+    // same cycle and the failed-docs retry at the end picks this up.
+    final parentRemote = '${doc['equipmentRemoteId'] ?? doc['equipment_remote_id'] ?? resolved['equipment_remote_id'] ?? ''}';
+    if (parentRemote.isEmpty) {
+      throw StateError('transient: equipment event without parent identity');
+    }
+    final parent = await txn.query(
+      'lab_equipment',
+      columns: const ['id'],
+      where: 'remote_id = ?',
+      whereArgs: [parentRemote],
+      limit: 1,
+    );
+    if (parent.isEmpty) {
+      throw StateError(
+          'transient: lab equipment $parentRemote not synced yet');
+    }
+    resolved['equipment_id'] = (parent.first['id'] as num).toInt();
+    resolved['equipment_remote_id'] = parentRemote;
+    return;
+  }
+
+  if (entity.localTable != 'inspections') return;
+
+  final kind =
+      '${resolved['inspection_kind'] ?? doc['inspectionKind'] ?? doc['inspection_kind'] ?? 'raw'}';
+  if (kind == 'product') {
+    resolved['material_id'] = await ensureProductSentinel(txn);
+  } else {
+    final code =
+        '${doc['materialCode'] ?? doc['material_code'] ?? resolved['material_code'] ?? ''}';
+    final name =
+        '${doc['materialName'] ?? doc['material_name'] ?? resolved['material_name'] ?? ''}';
+    if (code.isEmpty && name.isEmpty) {
+      if (resolved['material_id'] is! num) return; // nothing to resolve.
+      // No code identity (old parked payload): keep a valid same-device link,
+      // but fail loudly instead of silently linking a placeholder when the
+      // numeric id points nowhere on this device.
+      final id = (resolved['material_id'] as num).toInt();
+      final exists = await txn.query(
+        'reference_materials',
+        columns: const ['id'],
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      if (exists.isEmpty) {
+        throw StateError('unknown material id $id with no code to resolve it');
+      }
+    } else {
+      resolved['material_id'] = await resolveMaterialIdByCodeOrName(
+        txn,
+        code: code,
+        name: name,
+      );
+    }
+  }
+  final productId = resolved['product_id'];
+  if (productId != null) {
+    final exists = await txn.query(
+      'lab_products',
+      columns: const ['id'],
+      where: 'id = ?',
+      whereArgs: [(productId as num).toInt()],
+      limit: 1,
+    );
+    if (exists.isEmpty) {
+      throw StateError('transient: lab product $productId not synced yet');
+    }
+  }
+}
+
+/// Local id of the material identified by [code] (then [name]).
+///
+/// Creates a placeholder catalog row when neither matches: the alternative is
+/// losing the inspection forever (the pull cursor used to run past it) or
+/// linking it to an unrelated material that happens to hold the origin
+/// device's numeric id. The placeholder carries the real code/name, so the
+/// ledger still reads correctly; `PullWorker` re-links to the true row when
+/// it arrives.
+Future<int> resolveMaterialIdByCodeOrName(
+  DatabaseExecutor txn, {
+  required String code,
+  required String name,
+}) async {
+  if (code.isNotEmpty) {
+    final byCode = await txn.query(
+      'reference_materials',
+      columns: const ['id'],
+      where: 'material_code = ?',
+      whereArgs: [code],
+      limit: 1,
+    );
+    if (byCode.isNotEmpty) return (byCode.first['id'] as num).toInt();
+  }
+  if (name.isNotEmpty) {
+    final byName = await txn.query(
+      'reference_materials',
+      columns: const ['id'],
+      where: 'material_name = ?',
+      whereArgs: [name],
+      limit: 1,
+    );
+    if (byName.isNotEmpty) return (byName.first['id'] as num).toInt();
+  }
+  // ignore: avoid_print
+  print('[sync] creating placeholder material code=$code name=$name');
+  return txn.insert('reference_materials', {
+    'material_name': name.isNotEmpty ? name : 'Unknown ($code)',
+    'material_code': code.isNotEmpty ? code : 'UNK',
+    'physical_reference_json': '{}',
+    'chemical_reference_json': '{}',
+    'imported_at': DateTime.now().toIso8601String(),
+    'active': 1,
+  });
+}
+
 /// Local primary key of a remote document (or of a parked local payload).
 ///
 /// Tries the envelope's `localId` first, then the natural key of the table, so
@@ -553,15 +956,50 @@ Future<int?> findLocalRef(
   String entityId,
   Map<String, dynamic> data, {
   String? localDeviceId,
+  Set<String>? columns,
 }) async {
+  // Comprehensive sync plan §1: `remote_id` is the cross-device identity.
+  // Try it first — it matches rows created on any device, including ones
+  // whose natural key was edited locally after creation.
+  try {
+    final cols = columns ?? await availableColumns(db, entity.localTable);
+    if (cols.contains('remote_id') && entityId.isNotEmpty) {
+      final byRemote = await db.query(
+        entity.localTable,
+        columns: ['id'],
+        where: 'remote_id = ?',
+        whereArgs: [entityId],
+        limit: 1,
+      );
+      if (byRemote.isNotEmpty) return (byRemote.first['id'] as num).toInt();
+      final payloadRemote = data['remoteId'] ?? data['remote_id'];
+      if (payloadRemote is String &&
+          payloadRemote.isNotEmpty &&
+          payloadRemote != entityId) {
+        final byPayload = await db.query(
+          entity.localTable,
+          columns: ['id'],
+          where: 'remote_id = ?',
+          whereArgs: [payloadRemote],
+          limit: 1,
+        );
+        if (byPayload.isNotEmpty) return (byPayload.first['id'] as num).toInt();
+      }
+    }
+  } on Object {
+    // Column/table missing on a legacy file: fall through to legacy matching.
+  }
   final localId = data['localId'];
   final docDeviceId = '${data['deviceId'] ?? ''}';
-  final foreign = localDeviceId != null &&
+  final foreign =
+      localDeviceId != null &&
       localDeviceId.isNotEmpty &&
       docDeviceId.isNotEmpty &&
       docDeviceId != localDeviceId;
   final natural = _naturalKey(entity, entityId, data);
-  if (entity.usesLocalIdAsRef && localId is num && (!foreign || natural == null)) {
+  if (entity.usesLocalIdAsRef &&
+      localId is num &&
+      (!foreign || natural == null)) {
     final rows = await db.query(
       entity.localTable,
       columns: ['id'],
@@ -590,6 +1028,54 @@ Future<int?> findLocalRef(
   Map<String, dynamic> data,
 ) {
   switch (entity.localTable) {
+    case 'lab_inventory':
+      final name = data['name'];
+      if (name is! String || name.isEmpty) return null;
+      return ('name = ?', [name]);
+    case 'lab_equipment':
+      final code = data['code'];
+      if (code is String && code.isNotEmpty) return ('code = ?', [code]);
+      final name = data['name'];
+      if (name is String && name.isNotEmpty) return ('name = ?', [name]);
+      return null;
+    case 'lab_equipment_events':
+      // Identity is `remote_id` first (see `findLocalRef`). The fallback
+      // below must NOT use `equipment_id`: it is a per-device autoincrement
+      // id, so the origin device's value points at an unrelated local row.
+      // `equipment_remote_id` is the cross-device parent identity.
+      final parentRemote = data['equipmentRemoteId'] ??
+          data['equipment_remote_id'];
+      final eventDate = data['eventDate'] ?? data['event_date'];
+      if (parentRemote is! String || parentRemote.isEmpty) return null;
+      if (eventDate == null) return null;
+      return (
+        'equipment_remote_id = ? AND event_date = ?',
+        [parentRemote, eventDate]
+      );
+    case 'lab_worksheet':
+      final entryCode = data['entryCode'] ?? data['entry_code'];
+      final sampleNumber = data['sampleNumber'] ?? data['sample_number'];
+      if (entryCode is String && entryCode.isNotEmpty) {
+        return ('entry_code = ?', [entryCode]);
+      }
+      if (sampleNumber is String && sampleNumber.isNotEmpty) {
+        return ('sample_number = ?', [sampleNumber]);
+      }
+      return null;
+    case 'reference_materials':
+      final code = data['materialCode'] ?? data['material_code'];
+      if (code is String && code.isNotEmpty)
+        return ('material_code = ?', [code]);
+      final name = data['materialName'] ?? data['material_name'];
+      if (name is String && name.isNotEmpty) {
+        return ('material_name = ?', [name]);
+      }
+      return null;
+    case 'inventory_transactions':
+    case 'lab_consumption_log':
+    case 'lab_stock_adjustments':
+      // Append-only ledgers: no natural key — identity is `remote_id` only.
+      return null;
     case 'inspections':
       // `entry_code` is UNIQUE across both kinds (raw + product share one
       // code space), so it stays the cross-device identity for both.
@@ -699,6 +1185,18 @@ Map<String, dynamic> remoteToLocalRow(
   row['remote_version'] = document['version'];
   row['updated_by'] = document['updatedBy'];
   row['deleted_at'] = document['deletedAt'];
+  final remoteId = document['remoteId'] ?? document['remote_id'];
+  if (remoteId is String && remoteId.isNotEmpty) {
+    row['remote_id'] = remoteId;
+  }
+  final deviceId = document['deviceId'] ?? document['device_id'];
+  if (deviceId is String && deviceId.isNotEmpty) {
+    row['device_id'] = deviceId;
+  }
+  final updatedAt = document['updatedAt'] ?? document['updated_at'];
+  if (updatedAt is String && updatedAt.isNotEmpty) {
+    row['updated_at'] = updatedAt;
+  }
   if (entity.localTable == 'audit_logs' && row['organization_id'] == null) {
     final org = '${organizationId ?? document['organizationId'] ?? ''}';
     if (org.isNotEmpty) row['organization_id'] = org;

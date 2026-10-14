@@ -47,10 +47,12 @@ class AuditFilter {
 /// the same `AuditTrail` the sync cycle prunes through: one code path for the
 /// permission, the filters and the retention.
 class AuditController extends ChangeNotifier {
-  AuditController(this.trail, {this.pageSize = 50});
+  AuditController(this.trail, {this._pageSize = 200});
 
   final AuditTrailReader trail;
-  final int pageSize;
+  int _pageSize;
+
+  int get pageSize => _pageSize;
 
   AuditFilter _filter = const AuditFilter();
   AuditPage _page = AuditPage.empty;
@@ -121,6 +123,20 @@ class AuditController extends ChangeNotifier {
   Future<void> previousPage() async {
     if (!hasPrevious) return;
     _offset = (_offset - pageSize).clamp(0, 1 << 31);
+    await load();
+  }
+
+  Future<void> setPage(int page) async {
+    final maxPage = pageCount - 1;
+    final clamped = page.clamp(0, maxPage < 0 ? 0 : maxPage);
+    _offset = clamped * pageSize;
+    await load();
+  }
+
+  Future<void> setPageSize(int size) async {
+    if (size <= 0 || size == _pageSize) return;
+    _pageSize = size;
+    _offset = 0;
     await load();
   }
 }

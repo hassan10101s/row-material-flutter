@@ -112,6 +112,10 @@ class HtmlPdfExporter {
   }
 
   /// Port of `pdf_headless.py:_find_headless_browser`.
+  ///
+  /// Order: explicit candidates → PATH (`where.exe`/`which`) → Windows
+  /// registry `App Paths` (covers non-default install dirs, MSIX-safe
+  /// read-only `reg query`). Result cached per process. Never throws.
   Future<String?> findBrowser() async {
     if (_browserCache != null) return _browserCache;
     // Existence checks in parallel: four sequential filesystem round trips
@@ -125,6 +129,15 @@ class HtmlPdfExporter {
     for (final name in const ['msedge.exe', 'chrome.exe']) {
       final resolved = await _which(name);
       if (resolved != null) return _browserCache = resolved;
+    }
+    if (Platform.isWindows) {
+      for (final key in const [
+        r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe',
+        r'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe',
+      ]) {
+        final resolved = await _registryAppPath(key);
+        if (resolved != null) return _browserCache = resolved;
+      }
     }
     return null;
   }
@@ -141,10 +154,39 @@ class HtmlPdfExporter {
   static Future<String?> _which(String name) async {
     try {
       final bin = Platform.isWindows ? 'where.exe' : 'which';
-      final result = await Process.run(bin, [name]);
+      final result = await Process.run(bin, [name]).timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
+      );
       if (result.exitCode == 0) {
         final line = '${result.stdout}'.trim().split(RegExp(r'\r?\n')).first;
         if (line.isNotEmpty && File(line).existsSync()) return line;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Reads the default value of an `App Paths` registry key (e.g. the Edge
+  /// install dir when it is not on PATH and not in Program Files). Read-only,
+  /// works inside MSIX containers. Returns null on any failure.
+  static Future<String?> _registryAppPath(String key) async {
+    try {
+      final result =
+          await Process.run('reg', ['query', key, '/ve']).timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
+      );
+      if (result.exitCode != 0) return null;
+      final out = '${result.stdout}';
+      // Output line looks like: `(Default)    REG_SZ    C:\...\msedge.exe`
+      for (final line in out.split(RegExp(r'\r?\n'))) {
+        final idx = line.indexOf('REG_SZ');
+        if (idx < 0) continue;
+        final candidate = line.substring(idx + 'REG_SZ'.length).trim();
+        if (candidate.toLowerCase().endsWith('.exe') &&
+            await _exists(candidate)) {
+          return candidate;
+        }
       }
     } catch (_) {}
     return null;

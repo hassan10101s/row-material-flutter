@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../../lib/design_system/widgets/app_date_field.dart';
+import 'package:material_lab/design_system/widgets/app_date_field.dart';
 
 void main() {
   testWidgets('supports text entry and opens the date picker', (tester) async {

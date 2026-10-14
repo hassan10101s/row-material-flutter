@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
 
@@ -164,7 +165,7 @@ class AppWizardBottomBar extends StatelessWidget {
                   height: AppSpacing.mobileCtaHeight.h,
                   child: OutlinedButton(
                     onPressed: onBack,
-                    child: Text(backLabel ?? 'رجوع'),
+                    child: Text(backLabel ?? AppText.t('رجوع', 'Back')),
                   ),
                 ),
               ),

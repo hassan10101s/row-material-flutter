@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 
+import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_format.dart';
 import 'qc_enums.dart';
 import 'qc_goal.dart';
@@ -281,13 +282,19 @@ class QcGoalBundle extends Equatable {
         )
         .length;
     if (openAssignments > 0) {
-      return '$openAssignments assignment(s) still open';
+      return AppText.t(
+        '$openAssignments تكليفات ما زالت مفتوحة',
+        '$openAssignments assignment(s) still open',
+      );
     }
     final openActions = actions
         .where((a) => !a.isDone && a.status != QcGoalActionStatus.cancelled)
         .length;
     if (openActions > 0) {
-      return '$openActions action(s) still open';
+      return AppText.t(
+        '$openActions إجراءات ما زالت مفتوحة',
+        '$openActions action(s) still open',
+      );
     }
     return '';
   }

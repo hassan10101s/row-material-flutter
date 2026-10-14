@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../app/auth_gate.dart';
@@ -9,15 +10,24 @@ import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_card.dart';
+import '../../../../design_system/widgets/app_dialogs.dart';
+import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
+import '../../../../design_system/widgets/app_paginated_table.dart';
+import '../../../../design_system/export/table_html_export.dart';
 import '../../../organizations/domain/organization_repository.dart';
 import '../../domain/member_repository.dart';
 import 'leave_organization_section.dart';
 
 /// MembersScreen (plan P3.4): list + Add(email, role) + Activate + Change role
-/// + Disable. Every action is online-only; the guard message explains why a
-/// button is disabled instead of failing after a click.
+/// + Disable + Resend invite. Every action is online-only; the guard message
+/// explains why a button is disabled instead of failing after a click.
+///
+/// Invite flow covered here:
+/// `invited` (manager sent invite) → member signs in with the same e-mail →
+/// `pending_activation` → manager activates → `active`.
 class MembersScreen extends StatefulWidget {
   const MembersScreen({super.key, this.embedded = false});
 
@@ -29,8 +39,10 @@ class MembersScreen extends StatefulWidget {
 }
 
 class _MembersScreenState extends State<MembersScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _code = TextEditingController();
+  final _search = TextEditingController();
   MemberRepository? _repo;
   List<Member> _members = const [];
   String? _error;
@@ -40,7 +52,13 @@ class _MembersScreenState extends State<MembersScreen> {
   @override
   void initState() {
     super.initState();
-    _repo = getIt<MemberRepository>();
+    try {
+      _repo = getIt<MemberRepository>();
+    } on Object catch (e) {
+      _error = '$e';
+      _repo = null;
+      return;
+    }
     _load();
   }
 
@@ -48,10 +66,13 @@ class _MembersScreenState extends State<MembersScreen> {
   void dispose() {
     _email.dispose();
     _code.dispose();
+    _search.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
+    if (_repo == null) return;
+    if (!mounted) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -69,6 +90,7 @@ class _MembersScreenState extends State<MembersScreen> {
   }
 
   Future<void> _run(Future<void> Function() action) async {
+    if (_repo == null) return;
     setState(() {
       _busy = true;
       _error = null;
@@ -87,32 +109,149 @@ class _MembersScreenState extends State<MembersScreen> {
     }
   }
 
+  static String? validateInviteEmail(String? value) {
+    final v = (value ?? '').trim().toLowerCase();
+    if (v.isEmpty) {
+      return AppText.t('البريد الإلكتروني مطلوب', 'Email is required.');
+    }
+    if (v.length < 4 || !v.contains('@') || v.contains(' ')) {
+      return AppText.t('البريد الإلكتروني غير صالح', 'Invalid email address.');
+    }
+    final parts = v.split('@');
+    if (parts.length != 2 || parts[0].isEmpty || !parts[1].contains('.')) {
+      return AppText.t('البريد الإلكتروني غير صالح', 'Invalid email address.');
+    }
+    return null;
+  }
+
   /// Sends an invite for [role]. The owner uses the co-owner shortcut to make
   /// a second administrator, which is how ownership is shared: `ownerUid` is
   /// immutable in the rules, so a second `admin` is the supported form of
   /// co-ownership.
   Future<void> _invite(String role) async {
-    final email = _email.text.trim();
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final email = _email.text.trim().toLowerCase();
+    // Client-side duplicate hint before the remote round-trip.
+    final duplicate = _members.any((m) => m.email.toLowerCase() == email);
+    if (duplicate) {
+      final existing = _members.firstWhere(
+        (m) => m.email.toLowerCase() == email,
+      );
+      if (existing.isActive) {
+        if (mounted) {
+          AppFeedback.error(
+            context,
+            AppText.t(
+              'هذا البريد عضو نشط بالفعل في الشركة',
+              'This email is already an active company member.',
+            ),
+          );
+        }
+        return;
+      }
+      // Invited/pending → treat as resend so the manager does not create
+      // confusion with two rows for one address.
+      await _run(() => _repo!.resendInvite(memberId: existing.id));
+      if (mounted) {
+        AppFeedback.success(
+          context,
+          AppText.t('تمت إعادة إرسال الدعوة', 'Invite resent.'),
+        );
+      }
+      return;
+    }
     await _run(() => _repo!.invite(email: email, role: role));
     if (mounted) {
       _email.clear();
       final message = role == AppRoles.admin
           ? AppText.t(
-              'تم إرسال دعوة مالك آخر — فعّلها ليتمكن من إدارة المؤسسة.',
-              'Co-owner invite sent — activate it to grant organization management.',
+              'تم إرسال دعوة مالك آخر — فعّلها ليتمكن من إدارة الشركة.',
+              'Co-owner invite sent — activate it to grant company management.',
             )
           : AppText.t('تم إرسال الدعوة', 'Invite sent.');
       AppFeedback.success(context, message);
     }
   }
 
+  Future<void> _resend(Member member) async {
+    await _run(() => _repo!.resendInvite(memberId: member.id));
+    if (mounted) {
+      AppFeedback.success(
+        context,
+        AppText.t('تمت إعادة إرسال الدعوة', 'Invite resent.'),
+      );
+    }
+  }
+
+  Future<void> _confirmDisable(Member member) async {
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('تعطيل العضو؟', 'Disable member?'),
+      message: AppText.t(
+        'سيتم تعطيل ${member.email} ولن يتمكن من رؤية بيانات الشركة.',
+        '${member.email} will be disabled and lose access to company data.',
+      ),
+      confirmLabel: AppText.t('تعطيل', 'Disable'),
+      cancelLabel: AppText.t('إلغاء', 'Cancel'),
+      danger: true,
+    );
+    if (confirmed == true) {
+      await _run(
+        () => _repo!.setStatus(memberId: member.id, status: 'disabled'),
+      );
+    }
+  }
+
+  Future<void> _confirmRemove(Member member) async {
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('إزالة العضو؟', 'Remove member?'),
+      message: AppText.t(
+        'سيتم إزالة ${member.email} من الشركة (تُحفظ كسجل معطّل للتدقيق).',
+        '${member.email} will be removed from the company (kept as a disabled audit record).',
+      ),
+      confirmLabel: AppText.t('إزالة', 'Remove'),
+      cancelLabel: AppText.t('إلغاء', 'Cancel'),
+      danger: true,
+    );
+    if (confirmed == true) {
+      await _run(() => _repo!.removeMember(memberId: member.id));
+    }
+  }
+
+  void _copyOrgCode(String orgId) {
+    if (orgId.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: orgId));
+    AppFeedback.success(
+      context,
+      AppText.t('تم نسخ كود الشركة', 'Company code copied.'),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final gate = getIt<AuthGate>();
-    final canInvite = gate.canWrite(Permission.usersCreate);
-    final canUpdate = gate.canWrite(Permission.usersUpdate);
-    final canDisable = gate.canWrite(Permission.usersDisable);
+    // Member writes are online-only (never queued): gate the buttons on live
+    // connectivity too, or an exempt admin sees enabled buttons offline that
+    // can only fail with a raw error.
+    final online = gate.online;
+    final canInvite = gate.canWrite(Permission.usersCreate) && online;
+    final orgId = gate.organizationId;
     bool isSelf(String id) => id == gate.session.memberId;
+
+    final query = _search.text.trim().toLowerCase();
+    final visible = query.isEmpty
+        ? _members
+        : _members
+              .where(
+                (m) =>
+                    m.email.toLowerCase().contains(query) ||
+                    m.label.toLowerCase().contains(query) ||
+                    AppRoles.label(m.role).toLowerCase().contains(query),
+              )
+              .toList();
+    final activeCount = _members.where((m) => m.isActive).length;
+    final pendingCount = _members.where((m) => m.needsActivation).length;
 
     return ListView(
       padding: widget.embedded
@@ -123,7 +262,7 @@ class _MembersScreenState extends State<MembersScreen> {
           children: [
             Expanded(
               child: AppPageHeader(
-                title: AppText.t('أعضاء المؤسسة', 'Organization members'),
+                title: AppText.t('أعضاء الشركة', 'Company members'),
                 subtitle: AppText.t(
                   'الدعوات والأدوار والحالة',
                   'Invites, roles and status',
@@ -139,19 +278,119 @@ class _MembersScreenState extends State<MembersScreen> {
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
-        if (!canInvite)
+        // Shareable company code: the invitee pastes it in
+        // create-organization → join-with-invite.
+        AppCard(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Row(
+            children: [
+              const Icon(Icons.qr_code_2_outlined, size: 20),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      AppText.t(
+                        'كود الشركة للمشاركة مع المدعو',
+                        'Company code to share with the invitee',
+                      ),
+                      style: TextStyle(
+                        fontSize: 12.spMax,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xxs),
+                    SelectableText(
+                      orgId.isEmpty
+                          ? AppText.t('غير متوفر', 'Unavailable')
+                          : orgId,
+                      style: TextStyle(
+                        fontSize: 12.spMax,
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              AppButton(
+                key: const Key('copyOrgCode'),
+                label: AppText.t('نسخ', 'Copy'),
+                icon: const Icon(Icons.copy_outlined, size: 16),
+                style: AppButtonStyle.ghost,
+                small: true,
+                onPressed: orgId.isEmpty ? null : () => _copyOrgCode(orgId),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        if (_members.isNotEmpty)
+          Wrap(
+            spacing: AppSpacing.sm,
+            children: [
+              Chip(
+                label: Text(
+                  AppText.t('نشط: $activeCount', 'Active: $activeCount'),
+                ),
+              ),
+              Chip(
+                label: Text(
+                  AppText.t(
+                    'بانتظار التفعيل: $pendingCount',
+                    'Pending: $pendingCount',
+                  ),
+                ),
+              ),
+              Chip(
+                label: Text(
+                  AppText.t(
+                    'الكل: ${_members.length}',
+                    'All: ${_members.length}',
+                  ),
+                ),
+              ),
+            ],
+          ),
+        const SizedBox(height: AppSpacing.sm),
+        SizedBox(
+          width: 260.w,
+          child: AppField(
+            label: AppText.t('بحث', 'Search'),
+            controller: _search,
+            hint: 'name@company.com',
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        if (!online)
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.danger.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(AppRadii.md),
+            ),
+            child: Text(
+              AppText.t(
+                'غير متصل — الدعوات والتفعيل والتعطيل تتطلب الإنترنت.',
+                'Offline — invites, activation and disabling need the internet.',
+              ),
+              style: TextStyle(color: AppColors.danger, fontSize: 12.spMax),
+            ),
+          ),
+        if (!canInvite && online)
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
               color: AppColors.warning.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12.r),
+              borderRadius: BorderRadius.circular(AppRadii.md),
             ),
             child: Text(
               AppText.t(
                 'الدعوة والتعديل يتطلبان اتصالاً بالإنترنت وجلسة صالحة '
-                '(الدور الحالي: ${AppRoles.label(gate.role)}).',
+                    '(الدور الحالي: ${AppRoles.label(gate.role)}).',
                 'Inviting and editing require an internet connection and a valid session '
-                '(current role: ${AppRoles.label(gate.role)}).',
+                    '(current role: ${AppRoles.label(gate.role)}).',
               ),
               style: TextStyle(color: AppColors.warning, fontSize: 12.spMax),
             ),
@@ -166,110 +405,119 @@ class _MembersScreenState extends State<MembersScreen> {
         ],
         if (_busy && _members.isEmpty)
           const Center(child: CircularProgressIndicator()),
-        Card(
-          child: Column(
-            children: [
-              for (final m in _members)
-                _MemberTile(
-                  member: m,
-                  isSelf: isSelf(m.id),
-                  canUpdate: canUpdate,
-                  canDisable: canDisable,
-                  onActivate: () => _run(
-                    () => _repo!.setStatus(memberId: m.id, status: 'active'),
-                  ),
-                  onDisable: () => _run(
-                    () => _repo!.setStatus(memberId: m.id, status: 'disabled'),
-                  ),
-                  onRole: (role) =>
-                      _run(() => _repo!.changeRole(memberId: m.id, role: role)),
-                  onRemove: () =>
-                      _run(() => _repo!.removeMember(memberId: m.id)),
-                ),
-              if (_members.isEmpty && !_busy)
-                Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Text(AppText.t('لا يوجد أعضاء بعد — أضف أول دعوة.',
-                      'No members yet — add the first invite.')),
-                ),
+        SizedBox(
+          height: 420.h,
+          child: AppPaginatedTable(
+            minTableWidth: 860,
+            columnFlex: const [1.3, 1.4, 1.0, 0.8, 1.5],
+            headers: [
+              AppText.t('العضو', 'Member'),
+              AppText.t('البريد الإلكتروني', 'Email'),
+              AppText.t('الدور', 'Role'),
+              AppText.t('الحالة', 'Status'),
+              AppText.t('الإجراءات', 'Actions'),
             ],
+            rows: [for (final m in visible) _memberRow(m, isSelf(m.id))],
+            empty: Padding(
+              padding: const EdgeInsets.all(AppSpacing.page),
+              child: Text(
+                query.isEmpty
+                    ? AppText.t(
+                        'لا يوجد أعضاء بعد — أضف أول دعوة.',
+                        'No members yet — add the first invite.',
+                      )
+                    : AppText.t('لا نتائج مطابقة.', 'No matching members.'),
+              ),
+            ),
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
-        Text(
-          AppText.t('إضافة عضو', 'Add member'),
-          style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        Wrap(
-          spacing: AppSpacing.md,
-          runSpacing: AppSpacing.md,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        Row(
           children: [
-            SizedBox(
-              width: 260.w,
-              child: AppField(
-                label: AppText.t('البريد الإلكتروني', 'Email'),
-                controller: _email,
-                hint: 'name@company.com',
-              ),
+            Text(
+              AppText.t('إضافة عضو', 'Add member'),
+              style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
             ),
-            SizedBox(
-              width: 200.w,
-              child: DropdownButtonFormField<String>(
-                initialValue: _role,
-                // Constrains the selected value to the field width: long
-                // Arabic role labels ("مدير المؤسسة") + the arrow used to
-                // overflow this fixed-width box by a few pixels.
-                isExpanded: true,
-                decoration: InputDecoration(
-                  labelText: AppText.t('الدور', 'Role'),
-                  isDense: true,
-                ),
-                items: [
-                  for (final role in AppRoles.all)
-                    DropdownMenuItem(
-                      value: role,
-                      child: Text(
-                        AppRoles.label(role),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-                onChanged: (v) => setState(() => _role = v ?? AppRoles.lab),
-              ),
-            ),
-            SizedBox(
-              height: 42.h,
-              child: AppButton(
-                label: AppText.t('إرسال دعوة', 'Send invite'),
-                small: true,
-                loading: _busy,
-                onPressed: canInvite && !_busy ? () => _invite(_role) : null,
-              ),
-            ),
-            SizedBox(
-              height: 42.h,
-              child: AppButton(
-                label: AppText.t('دعوة مالك آخر', 'Invite co-owner'),
-                small: true,
-                style: AppButtonStyle.secondary,
-                icon: const Icon(Icons.workspace_premium_outlined, size: 18),
-                loading: _busy,
-                onPressed: canInvite && !_busy
-                    ? () => _invite(AppRoles.admin)
-                    : null,
-              ),
+            const Spacer(),
+            IconButton(
+              tooltip: AppText.t('تصدير جدول', 'Export table'),
+              visualDensity: VisualDensity.compact,
+              onPressed: visible.isEmpty ? null : () => _exportRoster(visible),
+              icon: const Icon(Icons.table_view_outlined),
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
+        Form(
+          key: _formKey,
+          child: Wrap(
+            spacing: AppSpacing.md,
+            runSpacing: AppSpacing.md,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              SizedBox(
+                width: 260.w,
+                child: AppField(
+                  label: AppText.t('البريد الإلكتروني', 'Email'),
+                  controller: _email,
+                  hint: 'name@company.com',
+                  keyboardType: TextInputType.emailAddress,
+                  textInputAction: TextInputAction.done,
+                  autovalidateMode: AutovalidateMode.onUserInteraction,
+                  validator: validateInviteEmail,
+                  onFieldSubmitted: (_) {
+                    if (canInvite && !_busy) _invite(_role);
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 200.w,
+                child: AppDropdown<String>(
+                  key: const Key('inviteRole'),
+                  value: _role,
+                  labelText: AppText.t('الدور', 'Role'),
+                  items: [
+                    for (final role in AppRoles.all)
+                      AppDropdownItem(
+                        value: role,
+                        label: AppRoles.label(role),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() => _role = v ?? AppRoles.lab),
+                ),
+              ),
+              SizedBox(
+                height: 42.h,
+                child: AppButton(
+                  key: const Key('sendInvite'),
+                  label: AppText.t('إرسال دعوة', 'Send invite'),
+                  small: true,
+                  loading: _busy,
+                  onPressed: canInvite && !_busy ? () => _invite(_role) : null,
+                ),
+              ),
+              SizedBox(
+                height: 42.h,
+                child: AppButton(
+                  label: AppText.t('دعوة مالك آخر', 'Invite co-owner'),
+                  small: true,
+                  style: AppButtonStyle.secondary,
+                  icon: const Icon(Icons.workspace_premium_outlined, size: 18),
+                  loading: _busy,
+                  onPressed: canInvite && !_busy
+                      ? () => _invite(AppRoles.admin)
+                      : null,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
         Text(
           AppText.t(
-            '«دعوة مالك آخر» ترسل الدعوة بدور مدير المؤسسة، فيحصل على نفس صلاحياتك '
+            '«دعوة مالك آخر» ترسل الدعوة بدور مدير الشركة، فيحصل على نفس صلاحياتك '
                 'على الأعضاء. يمكن إضافة أكثر من مالك.',
-            '"Invite co-owner" sends the invite with the organization-owner role, so '
+            '"Invite co-owner" sends the invite with the company-owner role, so '
                 'they get the same member-management rights as you. More than one is '
                 'allowed.',
           ),
@@ -280,126 +528,133 @@ class _MembersScreenState extends State<MembersScreen> {
         const SizedBox(height: AppSpacing.md),
         Text(
           AppText.t(
-            'بعد إرسال الدعوة يسجّل العضو الدخول بحسابه في Google بنفس البريد، ثم '
-            'يظهر له "بانتظار التفعيل" حتى تفعّله.',
-            'After sending the invite, the member signs in with their Google account on the same email, then '
-            'shows as "awaiting activation" until you activate them.',
+            'بعد إرسال الدعوة انسخ كود الشركة أعلاه وأرسله للمدعو، ثم يسجّل الدخول بحسابه في Google أو بالبريد وكلمة المرور بنفس البريد، ثم '
+                'يظهر له "بانتظار التفعيل" حتى تفعّله من زر التفعيل.',
+            'After sending the invite, copy the company code above and share it with the invitee. They sign in with their Google account on the same email, then '
+                'show as "awaiting activation" until you activate them with the activate button.',
           ),
           style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
         ),
       ],
     );
   }
-}
 
-class _MemberTile extends StatelessWidget {
-  const _MemberTile({
-    required this.member,
-    required this.isSelf,
-    required this.canUpdate,
-    required this.canDisable,
-    required this.onActivate,
-    required this.onDisable,
-    required this.onRole,
-    required this.onRemove,
-  });
-
-  final Member member;
-  final bool isSelf;
-  final bool canUpdate;
-  final bool canDisable;
-  final VoidCallback onActivate;
-  final VoidCallback onDisable;
-  final ValueChanged<String> onRole;
-  final VoidCallback onRemove;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (member.status) {
-      'active' => AppColors.success,
-      'invited' => AppColors.warning,
-      _ => AppColors.textMuted,
-    };
-    return ListTile(
-      dense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      leading: CircleAvatar(
-        backgroundColor: member.isActive
-            ? AppColors.primary
-            : AppColors.borderMuted,
-        child: Text(
-          member.email.isEmpty
-              ? '?'
-              : member.email.substring(0, 1).toUpperCase(),
-          style: const TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+  /// One roster row for the paginated table. No bulk selection here on
+  /// purpose: activate/disable/remove are destructive per-member decisions.
+  List<Widget> _memberRow(Member member, bool self) {
+    final gate = getIt<AuthGate>();
+    final canUpdate = gate.canWrite(Permission.usersUpdate) && gate.online;
+    final canDisable = gate.canWrite(Permission.usersDisable) && gate.online;
+    final color = _statusColor(member.status);
+    return [
+      Text(
+        '${member.label}${self ? ' (${AppText.t('أنت', 'You')})' : ''}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontWeight: FontWeight.w600),
       ),
-      title: Text(
-        '${member.label}${isSelf ? ' (${AppText.t('أنت', 'You')})' : ''}',
+      Text(member.email, maxLines: 1, overflow: TextOverflow.ellipsis),
+      Text(
+        AppRoles.label(member.role),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text(
-        '${member.email} · ${AppRoles.label(member.role)} · ${_statusLabel(member.status)}',
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
+      Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xxs,
+        ),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(AppRadii.md),
+        ),
+        child: Text(
+          _statusLabel(member.status),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 11.spMax, color: color),
+        ),
       ),
-      trailing: Row(
+      Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            margin: const EdgeInsetsDirectional.only(end: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              member.status,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.spMax, color: color),
-            ),
-          ),
-          if (canUpdate && member.isInvited)
+          if (canUpdate && member.needsActivation)
             IconButton(
+              key: ValueKey('activate_${member.id}'),
               tooltip: AppText.t('تفعيل', 'Activate'),
-              onPressed: onActivate,
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _run(
+                () => _repo!.setStatus(memberId: member.id, status: 'active'),
+              ),
               icon: const Icon(Icons.check_circle_outline, size: 20),
             ),
-          if (canUpdate && member.isActive && !isSelf)
+          if (canUpdate && member.needsActivation)
+            IconButton(
+              key: ValueKey('resend_${member.id}'),
+              tooltip: AppText.t('إعادة إرسال الدعوة', 'Resend invite'),
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _resend(member),
+              icon: const Icon(Icons.send_outlined, size: 20),
+            ),
+          if (canUpdate && member.isActive && !self)
             PopupMenuButton<String>(
               tooltip: AppText.t('تغيير الدور', 'Change role'),
-              onSelected: onRole,
+              onSelected: (role) => _run(
+                () => _repo!.changeRole(memberId: member.id, role: role),
+              ),
               itemBuilder: (_) => [
                 for (final role in AppRoles.all)
                   PopupMenuItem(value: role, child: Text(AppRoles.label(role))),
               ],
               icon: const Icon(Icons.manage_accounts_outlined, size: 20),
             ),
-          if (canDisable && member.isActive && !isSelf)
+          if (canDisable && member.isActive && !self)
             IconButton(
               tooltip: AppText.t('تعطيل', 'Disable'),
-              onPressed: onDisable,
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _confirmDisable(member),
               icon: const Icon(Icons.block, size: 20),
             ),
-          if (canDisable && !isSelf)
+          if (canDisable && !self)
             IconButton(
               tooltip: AppText.t('إزالة', 'Remove'),
-              onPressed: onRemove,
+              visualDensity: VisualDensity.compact,
+              onPressed: () => _confirmRemove(member),
               icon: const Icon(Icons.person_remove_outlined, size: 20),
             ),
         ],
       ),
-    );
+    ];
   }
+
+  Future<void> _exportRoster(List<Member> rows) => TableHtmlExport.export(
+    context,
+    filePrefix: 'members',
+    title: AppText.t('أعضاء الشركة', 'Company members'),
+    headers: [
+      AppText.t('العضو', 'Member'),
+      AppText.t('البريد الإلكتروني', 'Email'),
+      AppText.t('الدور', 'Role'),
+      AppText.t('الحالة', 'Status'),
+    ],
+    rows: [
+      for (final m in rows)
+        [m.label, m.email, AppRoles.label(m.role), _statusLabel(m.status)],
+    ],
+  );
+
+  static Color _statusColor(String status) => switch (status) {
+    'active' => AppColors.success,
+    'invited' => AppColors.warning,
+    'pending_activation' => AppColors.warning,
+    _ => AppColors.textMuted,
+  };
 
   static String _statusLabel(String status) => switch (status) {
     'active' => AppText.t('نشط', 'Active'),
     'invited' => AppText.t('مدعو', 'Invited'),
-    _ => AppText.t('معطّل', 'Disabled'),
+    'pending_activation' => AppText.t('بانتظار التفعيل', 'Pending activation'),
+    'disabled' => AppText.t('معطّل', 'Disabled'),
+    _ => AppText.t('غير معروف', 'Unknown'),
   };
 }

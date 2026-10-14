@@ -6,6 +6,7 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/responsive/form_factor.dart';
+import 'package:material_lab/design_system/widgets/app_paginated_table.dart';
 import 'package:material_lab/design_system/widgets/app_window.dart';
 import 'package:material_lab/features/lab/domain/lab_result_repository.dart';
 import 'package:material_lab/features/reference/domain/reference_repository.dart';
@@ -60,6 +61,18 @@ void main() {
       ],
     );
     when(
+      () => reference.listParametersPaged(
+        query: any(named: 'query'),
+        parameterType: any(named: 'parameterType'),
+        limit: any(named: 'limit'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer(
+      (_) async => <Map<String, dynamic>>[
+        {'parameter_name': 'Carbon', 'unit': '%'},
+      ],
+    );
+    when(
       () => reference.upsertParameter(
         any(),
         any(),
@@ -73,6 +86,17 @@ void main() {
     });
 
     when(() => reference.listUnits()).thenAnswer(
+      (_) async => <Map<String, dynamic>>[
+        {'symbol': '%', 'name': 'Percent', 'dimension': 'concentration'},
+      ],
+    );
+    when(
+      () => reference.listUnitsPaged(
+        query: any(named: 'query'),
+        limit: any(named: 'limit'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer(
       (_) async => <Map<String, dynamic>>[
         {'symbol': '%', 'name': 'Percent', 'dimension': 'concentration'},
       ],
@@ -104,6 +128,27 @@ void main() {
         {'id': 1, 'material_name': 'Apple Pomace', 'material_code': 'APL'},
       ],
     );
+    when(
+      () => reference.listMaterialsPaged(
+        query: any(named: 'query'),
+        limit: any(named: 'limit'),
+        offset: any(named: 'offset'),
+      ),
+    ).thenAnswer(
+      (_) async => <Map<String, dynamic>>[
+        {'id': 1, 'material_name': 'Apple Pomace', 'material_code': 'APL'},
+      ],
+    );
+    when(() => reference.countMaterials(query: any(named: 'query')))
+        .thenAnswer((_) async => 1);
+    when(
+      () => reference.countParameters(
+        query: any(named: 'query'),
+        parameterType: any(named: 'parameterType'),
+      ),
+    ).thenAnswer((_) async => 1);
+    when(() => reference.countUnits(query: any(named: 'query')))
+        .thenAnswer((_) async => 1);
 
     // Loaded up front rather than per test: an unloaded cubit renders a
     // shimmering skeleton, and `pumpAndSettle` never settles against a
@@ -183,16 +228,18 @@ void main() {
   group('a table on desktop becomes a card list on a phone', () {
     testWidgets('chemical parameters', (tester) async {
       await pumpAs(tester, AppFormFactor.desktop, paramsHost());
-      expect(find.byType(DataTable), findsOneWidget);
+      // Unified register table (design-system pager + selection + export).
+      expect(find.byType(AppPaginatedTable), findsOneWidget);
 
       await pumpAs(tester, AppFormFactor.mobile, paramsHost());
-      expect(find.byType(DataTable), findsNothing);
+      expect(find.byType(AppPaginatedTable), findsNothing);
       expect(find.text('Carbon'), findsOneWidget);
     });
 
     testWidgets('units', (tester) async {
       await pumpAs(tester, AppFormFactor.desktop, unitsHost());
-      expect(find.byType(DataTable), findsOneWidget);
+      // Unified register table (design-system pager + selection + export).
+      expect(find.byType(AppPaginatedTable), findsOneWidget);
 
       await pumpAs(tester, AppFormFactor.mobile, unitsHost());
       expect(find.byType(DataTable), findsNothing);
@@ -200,8 +247,8 @@ void main() {
     });
 
     testWidgets('materials list renders on both experiences', (tester) async {
-      // The materials list is a list on desktop too, so this is not a
-      // table/card flip - it pins that the split did not lose the rows.
+      // The materials register is a paginated table on desktop and cards on
+      // phones — this pins that the split did not lose the rows.
       for (final factor in AppFormFactor.values) {
         await pumpAs(tester, factor, materialsHost());
         expect(find.text('Apple Pomace'), findsOneWidget, reason: '$factor');
@@ -216,10 +263,20 @@ void main() {
     // because each copy would still pass its own tests. Both variants are held
     // here to a payload written out independently of either of them.
 
+    /// Opens the add editor: inline text button on desktop, FAB on mobile
+    /// (add floats like the raw-material register there).
+    Future<void> openAdd(WidgetTester tester, String label) async {
+      if (find.text(label).evaluate().isNotEmpty) {
+        await tester.tap(find.text(label));
+      } else {
+        await tester.tap(find.byType(FloatingActionButton));
+      }
+      await tester.pumpAndSettle();
+    }
+
     /// Opens the parameter editor, fills it and saves.
     Future<void> saveParam(WidgetTester tester) async {
-      await tester.tap(find.text('New Parameter'));
-      await tester.pumpAndSettle();
+      await openAdd(tester, 'New Parameter');
       await tester.enterText(find.byType(TextField).at(0), 'Carbon');
       await tester.tap(find.byType(DropdownButtonFormField<String>));
       await tester.pumpAndSettle();
@@ -232,8 +289,7 @@ void main() {
 
     /// Opens the unit editor, fills it and saves.
     Future<void> saveUnit(WidgetTester tester) async {
-      await tester.tap(find.text('New Unit'));
-      await tester.pumpAndSettle();
+      await openAdd(tester, 'New Unit');
       await tester.enterText(find.byType(TextField).at(0), 'mg/kg');
       await tester.enterText(find.byType(TextField).at(1), 'Mass');
       await tester.enterText(find.byType(TextField).at(2), 'mass');
@@ -271,8 +327,7 @@ void main() {
       for (final factor in AppFormFactor.values) {
         await pumpAs(tester, factor, host());
 
-        await tester.tap(find.text('New Parameter'));
-        await tester.pumpAndSettle();
+        await openAdd(tester, 'New Parameter');
 
         expect(find.text('Reference unit'), findsOneWidget, reason: '$factor');
         expect(
@@ -315,9 +370,10 @@ void main() {
       await pumpAs(tester, AppFormFactor.mobile, unitsHost());
       expect(find.byType(AppWindow), findsNothing);
 
-      await tester.tap(find.text('New Unit'));
+      await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
-      expect(find.byType(Scaffold), findsOneWidget);
+      // Outer harness + tab chrome + pushed editor route.
+      expect(find.byType(Scaffold), findsWidgets);
       expect(find.byType(AppBar), findsOneWidget);
       expect(find.byType(AppWindow), findsNothing);
     });
@@ -330,8 +386,7 @@ void main() {
         for (final factor in AppFormFactor.values) {
           await pumpAs(tester, factor, unitsHost());
 
-          await tester.tap(find.text('New Unit'));
-          await tester.pumpAndSettle();
+          await openAdd(tester, 'New Unit');
           await tester.enterText(find.byType(TextField).at(0), '   ');
           await tester.pump();
           await tester.tap(find.text('Save'));
@@ -367,12 +422,13 @@ void main() {
       await pumpAs(tester, AppFormFactor.mobile, materialsHost());
       expect(find.byType(Dialog), findsNothing);
 
-      await tester.tap(find.text('Add New Material'));
+      await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
       // An 880x680 dialog cannot be made usable at 400dp, so the phone gets a
       // route - and no dialog, which is the whole point.
       expect(find.byType(Dialog), findsNothing);
-      expect(find.byType(Scaffold), findsOneWidget);
+      // Outer harness + tab chrome + pushed editor route.
+      expect(find.byType(Scaffold), findsWidgets);
       expect(find.byType(AppBar), findsOneWidget);
     });
 

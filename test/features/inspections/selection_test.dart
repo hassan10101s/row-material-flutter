@@ -154,13 +154,19 @@ void main() {
         ),
       );
 
-      // Header checkbox + one per row, always visible like the Vue
-      // register; the bulk bar only appears once something is picked.
+      // Selection stays hidden until a long-press (or the header toggle):
+      // no checkbox column, only the select toggle. The bulk bar only
+      // appears once something is picked.
       expect(find.byType(AppPaginatedTable), findsOneWidget);
-      expect(find.byType(Checkbox), findsNWidgets(3));
+      expect(find.byType(Checkbox), findsNothing);
+      expect(find.byTooltip('Select'), findsOneWidget);
       expect(find.textContaining('Export report ('), findsNothing);
 
-      // Header checkbox selects both page rows.
+      // Header toggle reveals the circular boxes; the header box selects
+      // both page rows.
+      await tester.tap(find.byTooltip('Select'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Checkbox), findsNWidgets(3));
       await tester.tap(find.byType(Checkbox).first);
       await tester.pumpAndSettle();
       expect(cubit.state.selectedIds, {1, 2});
@@ -177,6 +183,8 @@ void main() {
       expect(find.text('Exported 2 reports successfully.'), findsOneWidget);
       expect(cubit.state.selectedIds, isEmpty);
       expect(find.textContaining('Export report ('), findsNothing);
+      // Clearing exits select mode again: the column hides itself.
+      expect(find.byType(Checkbox), findsNothing);
     });
 
     testWidgets('labels export uses the batch endpoint and clears',
@@ -204,10 +212,11 @@ void main() {
         ),
       );
 
-      // Select a single row via its own checkbox.
-      await tester.tap(find.byType(Checkbox).at(1));
+      // Long-pressing a row enters select mode and picks it.
+      await tester.longPress(find.text('QC-1'));
       await tester.pumpAndSettle();
       expect(cubit.state.selectedIds, {1});
+      expect(find.byType(Checkbox), findsNWidgets(3));
 
       await tester.tap(find.textContaining('Export labels (1)'));
       await tester.pumpAndSettle();

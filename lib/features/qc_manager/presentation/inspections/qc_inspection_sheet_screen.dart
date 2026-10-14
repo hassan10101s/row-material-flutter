@@ -5,16 +5,24 @@ import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/platform/platform_capability.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../di/service_locator.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_delete_confirm.dart';
+import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_expandable_card.dart';
 import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../../design_system/widgets/app_window.dart';
 import '../../domain/qc_enums.dart';
 import '../../domain/qc_inspection.dart';
 import '../../domain/qc_nc_capa.dart';
@@ -31,6 +39,27 @@ import '../widgets/qc_pill.dart';
 /// what is missing.
 class QcInspectionSheetScreen extends StatelessWidget {
   const QcInspectionSheetScreen({super.key});
+
+  static bool get _canDelete {
+    try {
+      return getIt<AuthGate>().canWrite(Permission.qcWrite);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _confirmDelete(
+    BuildContext context,
+    QcInspection inspection,
+  ) async {
+    final confirmed = await AppDeleteConfirmDialog.show(
+      context,
+      title: AppText.t('حذف الفحص', 'Delete inspection'),
+      name: inspection.refLabel,
+    );
+    if (!confirmed || !context.mounted) return;
+    await context.read<QcInspectionSheetCubit>().deleteInspection();
+  }
 
   /// Pushes the sheet, building its cubit from the service locator.
   ///
@@ -79,10 +108,19 @@ class QcInspectionSheetScreen extends StatelessWidget {
                     context.read<QcInspectionSheetCubit>().refresh(),
                 icon: const Icon(Icons.refresh),
               ),
+              if (inspection != null && QcInspectionSheetScreen._canDelete)
+                IconButton(
+                  tooltip: AppText.t('حذف', 'Delete'),
+                  onPressed: () => _confirmDelete(context, inspection),
+                  icon: Icon(
+                    Icons.delete_outline,
+                    color: AppColors.danger,
+                  ),
+                ),
             ],
           ),
           body: state.loading && inspection == null
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList(rows: 4, height: 320)
               : inspection == null
               ? AppEmptyState(
                   icon: Icons.search_off,
@@ -548,9 +586,9 @@ class _PassFailRowState extends State<_PassFailRow> {
   }
 
   static String _severityLabel(String s) => switch (s) {
-    NcSeverity.critical => 'حرج',
-    NcSeverity.major => 'متوسط',
-    _ => 'طفيف',
+    NcSeverity.critical => AppText.t('حرج', 'Critical'),
+    NcSeverity.major => AppText.t('متوسط', 'Major'),
+    _ => AppText.t('طفيف', 'Minor'),
   };
 
   @override
@@ -926,9 +964,16 @@ class _EvidenceFieldsState extends State<_EvidenceFields> {
           ),
         ],
         const SizedBox(height: AppSpacing.xs),
+        // Desktop (MSIX/EXE): `image_picker` has no Windows registrant and the
+        // camera source can never succeed — offer gallery/file instead via the
+        // same button label, keeping mobile parity (camera on phones).
         OutlinedButton.icon(
           onPressed: () => _attachPhoto(context),
-          icon: const Icon(Icons.photo_camera_outlined, size: 18),
+          icon: Icon(
+              PlatformCapability.canCaptureCamera
+                  ? Icons.photo_camera_outlined
+                  : Icons.upload_file_outlined,
+              size: 18),
           label: Text(AppText.t('إرفاق صورة', 'Attach photo')),
         ),
       ],
@@ -963,12 +1008,32 @@ class _EvidenceFieldsState extends State<_EvidenceFields> {
 
   Future<String?> _pickImage() async {
     final picker = ImagePicker();
-    final file = await picker.pickImage(
-      source: ImageSource.camera,
+    // Desktop: gallery (file dialog via file_selector_windows). Mobile:
+    // camera first, falling back to gallery on failure.
+    if (!PlatformCapability.canCaptureCamera) {
+      final file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        imageQuality: 70,
+      );
+      return file?.path;
+    }
+    try {
+      final file = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1600,
+        imageQuality: 70,
+      );
+      if (file?.path.isNotEmpty ?? false) return file?.path;
+    } catch (_) {
+      // Camera denied/unavailable — fall through to gallery.
+    }
+    final fallback = await picker.pickImage(
+      source: ImageSource.gallery,
       maxWidth: 1600,
       imageQuality: 70,
     );
-    return file?.path;
+    return fallback?.path;
   }
 }
 

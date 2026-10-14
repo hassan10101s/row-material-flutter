@@ -102,8 +102,20 @@ double unitBaseToUnit(double value, String unit) {
   return value / factor;
 }
 
+/// True when [unit] has a known conversion factor (i.e. conversions involving
+/// it are real, not silent pass-through). Seeded lab units like `g/L`, `mg/kg`,
+/// `%`, `U/g` are NOT in [_unitFactors] — callers must check this before
+/// trusting [convertQuantity].
+bool isKnownUnit(Object? unit) {
+  final u = '$unit'.trim().toLowerCase();
+  if (u.isEmpty) return false;
+  return _unitFactors.containsKey(u);
+}
+
 /// convert_quantity: convert between compatible units; unknown/mismatched
-/// dimensions return [qty] unchanged.
+/// dimensions return [qty] unchanged (legacy behavior — call
+/// [convertQuantityOrThrow] or check [isKnownUnit] first when correctness
+/// matters, e.g. reagent dosing).
 double convertQuantity(double qty, String fromUnit, String toUnit) {
   final f = fromUnit.trim().toLowerCase();
   final t = toUnit.trim().toLowerCase();
@@ -112,6 +124,23 @@ double convertQuantity(double qty, String fromUnit, String toUnit) {
   final tFactor = _unitFactors[t];
   if (fFactor == null || tFactor == null || _unitDims[f] != _unitDims[t]) {
     return qty;
+  }
+  return qty * fFactor / tFactor;
+}
+
+/// Strict variant: throws [ArgumentError] naming the unknown unit instead of
+/// silently returning [qty]. Use for dosing/consumption paths where a silent
+/// no-op would corrupt stock math.
+double convertQuantityOrThrow(double qty, String fromUnit, String toUnit) {
+  final f = fromUnit.trim();
+  final t = toUnit.trim();
+  if (f.isEmpty || t.isEmpty || f.toLowerCase() == t.toLowerCase()) return qty;
+  final fFactor = _unitFactors[f.toLowerCase()];
+  final tFactor = _unitFactors[t.toLowerCase()];
+  if (fFactor == null) throw ArgumentError('unknown fromUnit: $f');
+  if (tFactor == null) throw ArgumentError('unknown toUnit: $t');
+  if (_unitDims[f.toLowerCase()] != _unitDims[t.toLowerCase()]) {
+    throw ArgumentError('incompatible units: $f -> $t');
   }
   return qty * fFactor / tFactor;
 }

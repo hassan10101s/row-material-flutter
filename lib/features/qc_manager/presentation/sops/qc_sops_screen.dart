@@ -2,15 +2,25 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_infinite_list.dart';
+import '../../../../../design_system/widgets/app_page_header.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
+import '../../../../../di/service_locator.dart';
+import '../widgets/register_exports.dart';
 import '../../domain/qc_enums.dart';
 import '../../domain/qc_sop.dart';
 import '../cubit/qc_sops_cubit.dart';
@@ -35,6 +45,11 @@ class QcSopsScreen extends StatelessWidget {
         title: AppText.t('إجراءات التشغيل SOP', 'Procedures SOP'),
         actions: [
           IconButton(
+            tooltip: AppText.t('تصدير جدول', 'Export table'),
+            onPressed: () => RegisterExports.sops(context, cubit.state.sops),
+            icon: const Icon(Icons.table_view_outlined),
+          ),
+          IconButton(
             tooltip: AppText.t('تحديث', 'Refresh'),
             onPressed: () => cubit.refresh(),
             icon: const Icon(Icons.refresh),
@@ -57,7 +72,7 @@ class QcSopsScreen extends StatelessWidget {
             AppFeedback.error(context, state.error!),
         builder: (context, state) {
           if (state.loading && state.sops.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppSkeletonList(rows: 5);
           }
           if (state.sops.isEmpty) {
             return AppEmptyState(
@@ -74,23 +89,46 @@ class QcSopsScreen extends StatelessWidget {
                     ),
               action: state.filters.isEmpty
                   ? null
-                  : FilledButton.tonal(
+                  : AppButton(
+                      label: AppText.t('مسح الفلاتر', 'Clear filters'),
+                      style: AppButtonStyle.secondary,
                       onPressed: () => cubit.clearFilters(),
-                      child: Text(AppText.t('مسح الفلاتر', 'Clear filters')),
                     ),
             );
           }
           return Column(
             children: [
+              if (state.loading && state.sops.isNotEmpty)
+                const AppRefreshBar(),
               _SummaryStrip(summary: state.summary),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                  AppSpacing.md,
+                  0,
+                ),
+                child: AppFilterBar(
+                  searchHint: AppText.t('بحث بالرمز أو العنوان', 'Search code or title'),
+                  initialSearch: state.filters.text,
+                  onSearch: (v) => cubit.applyFilters(
+                    state.filters.copyWith(text: v),
+                  ),
+                  trailing: AppButton(
+                    label: AppText.t('فلاتر', 'Filters'),
+                    icon: const Icon(Icons.tune, size: 18),
+                    style: AppButtonStyle.ghost,
+                    small: true,
+                    onPressed: () => _openFilters(context),
+                  ),
+                ),
+              ),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () => cubit.refresh(),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(AppSpacing.md),
+                  child: AppInfiniteList(
                     itemCount: state.sops.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: AppSpacing.md),
+                    hasMore: false,
                     itemBuilder: (context, i) => _SopTile(sop: state.sops[i]),
                   ),
                 ),
@@ -124,6 +162,34 @@ class _SummaryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cards = [
+      AppSummaryCard(
+        label: AppText.t('الإجمالي', 'Total'),
+        value: '${summary.total}',
+        icon: Icons.menu_book_outlined,
+        color: AppColors.primary,
+      ),
+      AppSummaryCard(
+        label: AppText.t('مسودة', 'Draft'),
+        value: '${summary.draft}',
+        icon: Icons.edit_note,
+        color: AppColors.textMuted,
+      ),
+      AppSummaryCard(
+        label: AppText.t('بانتظار الموافقة', 'Awaiting'),
+        value: '${summary.awaitingApproval}',
+        icon: Icons.hourglass_empty,
+        color: AppColors.warning,
+      ),
+      AppSummaryCard(
+        label: AppText.t('ينتهي قريبًا', 'Expiring'),
+        value: '${summary.expiringSoon}',
+        icon: Icons.event_busy_outlined,
+        color: summary.expiringSoon > 0
+            ? AppColors.danger
+            : AppColors.textMuted,
+      ),
+    ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.md,
@@ -131,43 +197,25 @@ class _SummaryStrip extends StatelessWidget {
         AppSpacing.md,
         0,
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('الإجمالي', 'Total'),
-              value: '${summary.total}',
-              icon: Icons.menu_book_outlined,
-              color: AppColors.primary,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('مسودة', 'Draft'),
-              value: '${summary.draft}',
-              icon: Icons.edit_note,
-              color: AppColors.textMuted,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('بانتظار الموافقة', 'Awaiting'),
-              value: '${summary.awaitingApproval}',
-              icon: Icons.hourglass_empty,
-              color: AppColors.warning,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('ينتهي قريبًا', 'Expiring'),
-              value: '${summary.expiringSoon}',
-              icon: Icons.event_busy_outlined,
-              color: summary.expiringSoon > 0
-                  ? AppColors.danger
-                  : AppColors.textMuted,
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= 600) {
+            return Row(
+              children: [for (final c in cards) Expanded(child: c)],
+            );
+          }
+          return Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              for (final c in cards)
+                SizedBox(
+                  width: (constraints.maxWidth - AppSpacing.sm) / 2,
+                  child: c,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -177,6 +225,33 @@ class _SopTile extends StatelessWidget {
   const _SopTile({required this.sop});
 
   final QcSop sop;
+
+  static bool get canDelete {
+    try {
+      return getIt<AuthGate>().canWrite(Permission.qcWrite);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await AppDeleteConfirmDialog.show(
+      context,
+      title: AppText.t('حذف الإجراء', 'Delete procedure'),
+      name: sop.title.isNotEmpty ? sop.title : sop.code,
+    );
+    if (!confirmed || !context.mounted) return;
+    final cubit = context.read<QcSopsCubit>();
+    await cubit.deleteSop(sop.sopId ?? 0);
+    if (!context.mounted) return;
+    final error = cubit.state.error;
+    if (error != null && error.isNotEmpty) {
+      AppFeedback.error(context, error);
+      cubit.clearError();
+    } else {
+      AppFeedback.success(context, AppText.t('تم حذف الإجراء', 'SOP deleted'));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -197,6 +272,32 @@ class _SopTile extends StatelessWidget {
                 ),
               ),
               SopPill.status(sop.status),
+              if (canDelete) ...[
+                const SizedBox(width: AppSpacing.xs),
+                PopupMenuButton<String>(
+                  tooltip: AppText.t('خيارات', 'Options'),
+                  iconSize: 20,
+                  onSelected: (v) {
+                    if (v == 'delete') _confirmDelete(context);
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: AppColors.danger,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(AppText.t('حذف', 'Delete')),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -323,24 +424,16 @@ class _SopFilterSheetState extends State<_SopFilterSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-                  controller: _search,
-                  decoration: InputDecoration(
-                    labelText: AppText.t('بحث', 'Search'),
-                    hintText: AppText.t('رمز أو عنوان', 'Code or title'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  onChanged: (v) => cubit.applyFilters(f.copyWith(text: v)),
-                ),
+            AppField(
+              label: AppText.t('بحث', 'Search'),
+              controller: _search,
+              hint: AppText.t('رمز أو عنوان', 'Code or title'),
+              onChanged: (v) => cubit.applyFilters(f.copyWith(text: v)),
+            ),
                 const SizedBox(height: AppSpacing.sm),
-                TextField(
+                AppField(
+                  label: AppText.t('القسم', 'Department'),
                   controller: _dept,
-                  decoration: InputDecoration(
-                    labelText: AppText.t('القسم', 'Department'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
                   onChanged: (v) =>
                       cubit.applyFilters(f.copyWith(dept: v.trim())),
                 ),
@@ -352,30 +445,45 @@ class _SopFilterSheetState extends State<_SopFilterSheet> {
                   runSpacing: AppSpacing.xs,
                   children: [
                     for (final status in SopStatus.all)
-                      FilterChip(
-                        label: Text(SopPill.statusLabel(status)),
-                        selected: f.statuses.contains(status),
-                        onSelected: (_) => cubit.toggleStatus(status),
+                      AppButton(
+                        small: true,
+                        style: f.statuses.contains(status)
+                            ? AppButtonStyle.primary
+                            : AppButtonStyle.secondary,
+                        label: SopPill.statusLabel(status),
+                        onPressed: () => cubit.toggleStatus(status),
                       ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: f.includeArchived,
-                  title: Text(AppText.t('إظهار المؤرشف', 'Show archived')),
-                  onChanged: (v) =>
-                      cubit.applyFilters(f.copyWith(includeArchived: v)),
+                AppButton(
+                  small: true,
+                  style: f.includeArchived
+                      ? AppButtonStyle.primary
+                      : AppButtonStyle.secondary,
+                  icon: Icon(
+                    f.includeArchived
+                        ? Icons.check_circle
+                        : Icons.circle_outlined,
+                    size: 16,
+                  ),
+                  label: AppText.t('إظهار المؤرشف', 'Show archived'),
+                  onPressed: () => cubit.applyFilters(
+                    f.copyWith(includeArchived: !f.includeArchived),
+                  ),
                 ),
                 AppWindow.footer(
                   actions: [
-                    TextButton(
+                    AppButton(
+                      label: AppText.t('مسح', 'Clear'),
+                      style: AppButtonStyle.ghost,
+                      small: true,
                       onPressed: () => cubit.clearFilters(),
-                      child: Text(AppText.t('مسح', 'Clear')),
                     ),
-                    FilledButton(
+                    AppButton(
+                      label: AppText.t('تم', 'Done'),
+                      small: true,
                       onPressed: () => Navigator.of(context).pop(),
-                      child: Text(AppText.t('تم', 'Done')),
                     ),
                   ],
                 ),

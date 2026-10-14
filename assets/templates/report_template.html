@@ -790,6 +790,59 @@
                     </tbody>
                 </table>
             </section>
+
+            {% if show_batch_samples %}
+            <section class="section">
+                <h2 class="section-title section-chemical">عينات التشغيلة / Batch Samples</h2>
+                {% for s in batch_samples %}
+                <div class="batch-sample">
+                    <div class="batch-sample-head">
+                        <strong>{{ s.sample_no }} • {{ s.sample_name }}</strong>
+                        <span>أخذها / Taken by: {{ s.sample_taker }} • {{ s.tested_at }}</span>
+                        <span>{{ s.decision_label }}</span>
+                    </div>
+                    {% if s.physical_results %}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>البيان / Item</th>
+                                <th class="minmax-col">النتيجة الظاهرية / Physical result</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in s.physical_results %}
+                            <tr>
+                                <td class="param-cell">{{ r.analysis_name }}</td>
+                                <td class="minmax-col">{{ r.result_text }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% endif %}
+                    {% if s.chemical_results %}
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>التحليل / Analysis</th>
+                                <th class="minmax-col">النتيجة / Result</th>
+                                <th class="minmax-col">الوحدة / Unit</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for r in s.chemical_results %}
+                            <tr>
+                                <td class="param-cell">{{ r.analysis_name }}</td>
+                                <td class="minmax-col">{{ r.result_text }}</td>
+                                <td class="minmax-col">{{ r.unit }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </section>
+            {% endif %}
         </div>
 
         <div class="decision-row">
@@ -806,6 +859,7 @@
                 {% endif %}
             </section>
 
+            {% if not is_product %}
             <section class="notes-box{% if not show_status_timeline %} notes-box--centered{% endif %}">
                 <div class="decision-head">
                     <div class="decision-label">قرار الجودة  | QC Decision</div>
@@ -846,6 +900,7 @@
                 </div>
                 {% endif %}
             </section>
+            {% endif %}
         </div>
 
         <div class="accent-strip-bottom"></div>

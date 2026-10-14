@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../core/constants/app_strings.dart';
 import '../tokens/app_breakpoints.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
@@ -38,14 +39,14 @@ Future<bool> showAppConfirm(
       actions: [
         Builder(
           builder: (dialogContext) => AppButton(
-            label: cancelLabel ?? 'إلغاء',
+            label: cancelLabel ?? AppText.t('إلغاء', 'Cancel'),
             style: AppButtonStyle.secondary,
             onPressed: () => Navigator.of(dialogContext).pop(false),
           ),
         ),
         Builder(
           builder: (dialogContext) => AppButton(
-            label: confirmLabel ?? 'تأكيد',
+            label: confirmLabel ?? AppText.t('تأكيد', 'Confirm'),
             style: danger ? AppButtonStyle.danger : AppButtonStyle.primary,
             onPressed: () => Navigator.of(dialogContext).pop(true),
           ),
@@ -87,7 +88,7 @@ Future<bool> showAppConfirm(
               child: SizedBox(
                 height: AppSpacing.mobileCtaHeight,
                 child: AppButton(
-                  label: cancelLabel ?? 'إلغاء',
+                  label: cancelLabel ?? AppText.t('إلغاء', 'Cancel'),
                   style: AppButtonStyle.secondary,
                   onPressed: () => close(false),
                 ),
@@ -99,7 +100,7 @@ Future<bool> showAppConfirm(
               child: SizedBox(
                 height: AppSpacing.mobileCtaHeight,
                 child: AppButton(
-                  label: confirmLabel ?? 'تأكيد',
+                  label: confirmLabel ?? AppText.t('تأكيد', 'Confirm'),
                   style: danger
                       ? AppButtonStyle.danger
                       : AppButtonStyle.primary,
@@ -138,7 +139,7 @@ Future<void> showAppAlert(
       actions: [
         Builder(
           builder: (dialogContext) => AppButton(
-            label: okLabel ?? 'حسناً',
+            label: okLabel ?? AppText.t('حسناً', 'OK'),
             style: AppButtonStyle.secondary,
             onPressed: () => Navigator.of(dialogContext).pop(),
           ),
@@ -179,7 +180,7 @@ Future<void> showAppAlert(
         SizedBox(
           height: AppSpacing.mobileCtaHeight,
           child: AppButton(
-            label: okLabel ?? 'حسناً',
+            label: okLabel ?? AppText.t('حسناً', 'OK'),
             expanded: true,
             onPressed: () => close(),
           ),

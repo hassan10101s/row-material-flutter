@@ -72,12 +72,26 @@ class BackupManager implements BackupService {
   }
 
   Future<bool> _sameFile(String a, String b) async {
-    final resolvedA = p.canonicalize(a);
-    final resolvedB = p.canonicalize(b);
-    return resolvedA == resolvedB;
+    try {
+      final resolvedA = p.canonicalize(a);
+      final resolvedB = p.canonicalize(b);
+      return resolvedA.toLowerCase() == resolvedB.toLowerCase();
+    } on Object {
+      // canonicalize throws for malformed paths — fall back to absolute.
+      return p.absolute(a).toLowerCase() == p.absolute(b).toLowerCase();
+    }
   }
 
-  String _sqlQuote(String value) => value.replaceAll("'", "''");
+  /// SQLite string-literal quote for `VACUUM INTO '<path>'` (VACUUM takes no
+  /// bind parameters). Rejects NUL bytes which would truncate the statement;
+  /// `;`/`$`/unicode/`\\?\` long-paths are safe inside a quoted literal once
+  /// the single-quote is doubled.
+  String _sqlQuote(String value) {
+    if (value.contains('\x00')) {
+      throw ValidationError(AppErrors.backupUnreadable('invalid path'));
+    }
+    return value.replaceAll("'", "''");
+  }
 
   Future<Set<String>> _tableNames(Database db) async {
     final rows = await db.rawQuery("SELECT name FROM sqlite_master WHERE type = 'table'");
@@ -204,29 +218,94 @@ class BackupManager implements BackupService {
       throw ValidationError(AppErrors.backupPathMustDiffer);
     }
 
+    // Atomic write: VACUUM INTO a temp sibling, verify, then rename over the
+    // target. The old code deleted an existing backup *before* the VACUUM, so
+    // a OneDrive/AV lock or a full disk destroyed the only good copy.
+    // Same-filesystem rename keeps MSIX/EXE/mobile parity (no extra plugin).
     final target = File(backupPath);
-    if (await target.exists()) await target.delete();
     await target.parent.create(recursive: true);
+    final tmpTarget = File('${target.path}.tmp-${DateTime.now().microsecondsSinceEpoch}');
 
     await DbTrace.run('backup.walCheckpoint',
         () => db.rawQuery('PRAGMA wal_checkpoint(FULL)'));
-    await DbTrace.run('backup.vacuumInto',
-        () => db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'"));
+    try {
+      await DbTrace.run('backup.vacuumInto',
+          () => db.execute("VACUUM INTO '${_sqlQuote(tmpTarget.path)}'"));
+    } on Object {
+      try {
+        if (await tmpTarget.exists()) await tmpTarget.delete();
+      } catch (_) {}
+      rethrow;
+    }
 
     Database? checkDb;
     try {
-      checkDb = await _openReadOnly(backupPath);
+      checkDb = await _openReadOnly(tmpTarget.path);
       if (!await _integrityOk(checkDb)) {
+        try {
+          if (await tmpTarget.exists()) await tmpTarget.delete();
+        } catch (_) {}
         throw AppError(AppErrors.backupVerifiedFail);
       }
     } finally {
       await checkDb?.close();
     }
+    // Best-effort atomic replace with lock retry (OneDrive/AV often holds the
+    // file for a few hundred ms on Windows).
+    await _replaceWithRetry(tmpTarget, target);
     return {
       'path': backupPath,
       'size_bytes': await target.length(),
       'created_at': nowIso(),
     };
+  }
+
+  /// Rename [src] over [dst] with retries for Windows file locks (OneDrive,
+  /// antivirus, Explorer preview). Falls back to copy+delete when rename fails
+  /// (e.g. cross-volume target).
+  static Future<void> _replaceWithRetry(File src, File dst,
+      {int attempts = 5}) async {
+    Object? lastError;
+    for (var i = 0; i < attempts; i++) {
+      try {
+        if (await dst.exists()) await dst.delete();
+      } catch (e) {
+        lastError = e;
+        await Future<void>.delayed(Duration(milliseconds: 150 * (i + 1)));
+        continue;
+      }
+      try {
+        await src.rename(dst.path);
+        return;
+      } catch (e) {
+        lastError = e;
+        // Cross-device rename or lingering lock: try copy once, then retry.
+        try {
+          await src.copy(dst.path);
+          try {
+            await src.delete();
+          } catch (_) {}
+          return;
+        } catch (_) {}
+        await Future<void>.delayed(Duration(milliseconds: 150 * (i + 1)));
+      }
+    }
+    throw AppError(AppErrors.backupUnreadable(
+        'could not replace backup target (locked?): $lastError'));
+  }
+
+  /// Delete with retries for Windows locks. Returns true when gone.
+  static Future<bool> _deleteWithRetry(File file, {int attempts = 5}) async {
+    for (var i = 0; i < attempts; i++) {
+      try {
+        if (!await file.exists()) return true;
+        await file.delete();
+        return true;
+      } catch (_) {
+        await Future<void>.delayed(Duration(milliseconds: 150 * (i + 1)));
+      }
+    }
+    return false;
   }
 
   /// Create an automatic safety backup (retaining the latest 5) before a
@@ -236,6 +315,33 @@ class BackupManager implements BackupService {
   Future<void> autoBackup() async {
     try {
       final dir = await dbHelper.paths.autoBackupDir();
+      // Gate: VACUUM INTO rewrites the whole file while holding the single FFI
+      // connection (every badge/dashboard read parks behind it). Running it on
+      // every org bind turned each restart into a seconds-long stall. Skip
+      // when a fresh auto-backup already exists; manual/retention paths are
+      // unaffected.
+      try {
+        final existing = dir
+            .listSync()
+            .whereType<File>()
+            .where((f) =>
+                p.basename(f.path).startsWith('material_lab_backup_') &&
+                f.path.endsWith('.db'))
+            .toList();
+        if (existing.isNotEmpty) {
+          existing.sort((a, b) => b
+              .statSync()
+              .modified
+              .compareTo(a.statSync().modified));
+          final newest = existing.first.statSync().modified;
+          if (DateTime.now().difference(newest) <
+              const Duration(hours: 12)) {
+            return;
+          }
+        }
+      } catch (_) {
+        // Listing must never block the backup itself.
+      }
       final backupPath = p.join(dir.path, 'material_lab_backup_${fileTimestamp()}.db');
 
       final db = await dbHelper.database;
@@ -297,8 +403,11 @@ class BackupManager implements BackupService {
       await dbHelper.close();
 
       for (final side in [livePath, '$livePath-wal', '$livePath-shm']) {
-        final f = File(side);
-        if (await f.exists()) await f.delete();
+        final ok = await _deleteWithRetry(File(side));
+        if (!ok) {
+          throw AppError(AppErrors.backupRestoreFailed(
+              'live database is locked (OneDrive/antivirus?). Close Explorer preview and retry.'));
+        }
       }
       await File(migrated).copy(livePath);
 
@@ -409,6 +518,9 @@ class BackupManager implements BackupService {
           }
           if (newMaterials.isNotEmpty) {
             // Batched insert + single IN-reselect (was 2*N sequential).
+            // Labelled: inside a transaction `batch()` is sqflite's raw Batch,
+            // which bypasses `TracedBatch` and would otherwise be an invisible
+            // holder in stall reports.
             final batch = (txn as dynamic).batch() as dynamic;
             for (final m in newMaterials) {
               batch.insert(
@@ -423,7 +535,10 @@ class BackupManager implements BackupService {
                 conflictAlgorithm: ConflictAlgorithm.ignore,
               );
             }
-            await batch.commit(noResult: true);
+            await DbTrace.run(
+              'import.materialsBatch(${newMaterials.length})',
+              () => batch.commit(noResult: true),
+            );
             final qmarks = List.filled(newMaterials.length, '?').join(',');
             final names = [for (final m in newMaterials) m[0] as Object];
             final idRows = await txn.rawQuery(

@@ -317,7 +317,18 @@ class PushWorker {
       );
       return PushResult.success(entry.baseVersion + 1);
     } on Object catch (e) {
-      return PushResult.retryable('$e');
+      // Auth/size rejections must become visible conflicts, not infinite
+      // pending retries: otherwise deletes of never-pushed docs spin forever
+      // while the badge still claims progress.
+      final text = '$e';
+      if (text.contains('permission-denied') ||
+          text.contains('permission_denied') ||
+          text.contains('unauthenticated') ||
+          text.contains('invalid-argument') ||
+          text.contains('failed-precondition')) {
+        return PushResult.rejected(text);
+      }
+      return PushResult.retryable(text);
     }
   }
 
@@ -513,6 +524,16 @@ class PushWorker {
       Map<String, dynamic>.from(remote),
       organizationId: session.organizationId,
     )..['sync_state'] = 'synced';
+    // Same FK-safe mapping as the pull path: origin-device ids must never be
+    // written raw (they died on FK or linked the wrong row on keep-remote).
+    await resolveRemoteRowRefs(
+      db,
+      entity,
+      row,
+      Map<String, dynamic>.from(remote),
+      ensureProductSentinel:
+          (exec) => queue.dbHelper.ensureProductSentinelMaterialId(exec),
+    );
     if (columns.contains('updated_at') && '${remote['updatedAt'] ?? ''}'.isNotEmpty) {
       row['updated_at'] = '${remote['updatedAt']}';
     }

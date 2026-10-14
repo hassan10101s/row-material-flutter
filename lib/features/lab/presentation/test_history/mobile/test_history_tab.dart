@@ -40,15 +40,11 @@ class MobileTestHistoryTab extends StatelessWidget {
             local: getIt<LabLocalRepository>(),
           )..load(),
           child: Scaffold(
-            appBar: AppBar(
-              title: Text(AppText.t('اختبار جديد', 'New Test')),
-            ),
+            appBar: AppBar(title: Text(AppText.t('اختبار جديد', 'New Test'))),
             body: SafeArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(AppSpacing.pageMobile),
-                child: RunTestTab(
-                  onTestRun: () {},
-                ),
+                child: RunTestTab(onTestRun: () {}),
               ),
             ),
           ),
@@ -128,9 +124,11 @@ class MobileTestHistoryTab extends StatelessWidget {
                     Expanded(
                       child: SizedBox(
                         height: AppSpacing.mobileCtaHeight.h,
-                        child: OutlinedButton(
+                        child: AppButton(
+                          label: AppText.t('إلغاء', 'Cancel'),
+                          style: AppButtonStyle.secondary,
+                          expanded: true,
                           onPressed: () => close(),
-                          child: Text(AppText.t('إلغاء', 'Cancel')),
                         ),
                       ),
                     ),
@@ -139,7 +137,9 @@ class MobileTestHistoryTab extends StatelessWidget {
                       flex: 2,
                       child: SizedBox(
                         height: AppSpacing.mobileCtaHeight.h,
-                        child: FilledButton(
+                        child: AppButton(
+                          label: AppText.t('تطبيق', 'Apply'),
+                          expanded: true,
                           onPressed: () {
                             scope.applyFilters(
                               mode: dMode,
@@ -152,7 +152,6 @@ class MobileTestHistoryTab extends StatelessWidget {
                             );
                             close();
                           },
-                          child: Text(AppText.t('تطبيق', 'Apply')),
                         ),
                       ),
                     ),
@@ -173,38 +172,27 @@ class MobileTestHistoryTab extends StatelessWidget {
       builder: (context, scope, d) {
         final state = context.watch<TestHistoryCubit>().state;
         if (state.loading && state.rows.isEmpty) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                AppText.t('سجل تحاليل المعمل', 'Test history'),
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              const AppSkeletonList(rows: 8, lines: 5, height: 460),
-            ],
-          );
+          return const AppSkeletonList(rows: 8, lines: 5, height: 460);
         }
         return AppErrorFeedback<TestHistoryCubit, TestHistoryState>(
           selector: (s) => s.error,
-          child: SingleChildScrollView(
-            child: Column(
+          // Own Scaffold so the add action floats exactly like the
+          // raw-material register instead of blocking the top of the
+          // screen. No title: the tab chip already says where you are.
+          // No hero animation: sibling lab tabs share one IndexedStack,
+          // so default-tagged FAB heroes would collide (same rule as the
+          // inspections registers).
+          child: Scaffold(
+            floatingActionButton: FloatingActionButton(
+              heroTag: null,
+              tooltip: AppText.t('اختبار جديد', 'New test'),
+              onPressed: () => _openNewTest(context),
+              child: Icon(Icons.add, size: 24.r),
+            ),
+            body: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  AppText.t('سجل تحاليل المعمل', 'Test history'),
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                SizedBox(
-                  width: double.infinity,
-                  child: AppButton(
-                    label: AppText.t('اختبار جديد', 'New test'),
-                    icon: Icon(Icons.add_circle_outline, size: 20.r),
-                    onPressed: () => _openNewTest(context),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
+                // Pinned: search + filters + counts never scroll away.
                 AppCard(
                   padding: const EdgeInsets.all(AppSpacing.md),
                   child: Column(
@@ -232,41 +220,74 @@ class MobileTestHistoryTab extends StatelessWidget {
                     ],
                   ),
                 ),
-                const SizedBox(height: AppSpacing.md),
-                if (d.paged.slice.isEmpty)
-                  AppEmptyState(
-                    icon: Icons.science_outlined,
-                    title: state.rows.isEmpty
-                        ? AppText.t(
-                            'لا توجد تحاليل بعد',
-                            'No analyses yet',
-                          )
-                        : AppText.t(
-                            'لا توجد نتائج مطابقة',
-                            'No matching results',
-                          ),
-                  )
-                else
-                  TestHistoryCards(
-                    slice: d.paged.slice,
-                    start: d.paged.start,
-                    onOpen: (row) async {
-                      final edited = await TestHistoryDetailScreen.open(
-                        context,
-                        row,
-                      );
-                      if (edited && context.mounted) {
-                        context.read<TestHistoryCubit>().load();
-                      }
-                    },
+                if (scope.selecting) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  TestHistorySelectionBar(
+                    rows: scope.selectedRows(d.sorted),
+                    onClear: scope.clearSelection,
                   ),
+                ],
                 const SizedBox(height: AppSpacing.md),
-                TestHistoryPagination(
-                  page: scope.page,
-                  pageCount: d.paged.pageCount,
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: () => context.read<TestHistoryCubit>().load(),
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (d.paged.slice.isEmpty)
+                            AppEmptyState(
+                              icon: Icons.science_outlined,
+                              title: state.rows.isEmpty
+                                  ? AppText.t(
+                                      'لا توجد تحاليل بعد',
+                                      'No analyses yet',
+                                    )
+                                  : AppText.t(
+                                      'لا توجد نتائج مطابقة',
+                                      'No matching results',
+                                    ),
+                            )
+                          else
+                            TestHistoryCards(
+                              slice: d.paged.slice,
+                              start: d.paged.start,
+                              selecting: scope.selecting,
+                              selectedIds: scope.selectedIds,
+                              onToggleSelect: (row) =>
+                                  scope.toggleSelected(thRowKey(row)),
+                              onLongPressRow: (row) =>
+                                  scope.toggleSelected(thRowKey(row)),
+                              onOpen: (row) async {
+                                // In select mode a tap toggles the checkbox
+                                // instead of opening the editor.
+                                if (scope.selecting) {
+                                  scope.toggleSelected(thRowKey(row));
+                                  return;
+                                }
+                                final edited =
+                                    await TestHistoryDetailScreen.open(
+                                      context,
+                                      row,
+                                    );
+                                if (edited && context.mounted) {
+                                  context.read<TestHistoryCubit>().load();
+                                }
+                              },
+                            ),
+                          const SizedBox(height: AppSpacing.md),
+                          TestHistoryPagination(
+                            page: scope.page,
+                            pageCount: d.paged.pageCount,
+                          ),
+                          // Breathing room above the FAB / gesture bar.
+                          const SizedBox(height: 80),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-                // Breathing room above the bottom nav / gesture bar.
-                const SizedBox(height: AppSpacing.xl),
               ],
             ),
           ),

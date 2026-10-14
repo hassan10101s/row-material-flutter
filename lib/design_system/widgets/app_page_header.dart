@@ -19,6 +19,7 @@ class AppPageHeader extends StatelessWidget {
     this.accent,
     this.actions = const [],
     this.bottom,
+    this.showTitle = true,
   });
 
   final String title;
@@ -28,8 +29,16 @@ class AppPageHeader extends StatelessWidget {
   final List<Widget> actions;
   final Widget? bottom;
 
+  /// Desktop pages render their title in the shell topbar (outside the page
+  /// scope) and pass false, so the tables below gain the header's vertical
+  /// space. Actions/bottom still render; with neither, this is a no-op box.
+  final bool showTitle;
+
   @override
   Widget build(BuildContext context) {
+    if (!showTitle && actions.isEmpty && bottom == null) {
+      return const SizedBox.shrink();
+    }
     final accentColor = accent ?? AppColors.primary;
     final narrow = MediaQuery.sizeOf(context).width < AppBreakpoints.compact;
     final titleBlock = Row(
@@ -48,9 +57,7 @@ class AppPageHeader extends StatelessWidget {
                 ],
               ),
               borderRadius: BorderRadius.circular(AppRadii.md),
-              border: Border.all(
-                color: accentColor.withValues(alpha: 0.2),
-              ),
+              border: Border.all(color: accentColor.withValues(alpha: 0.2)),
             ),
             child: Icon(icon, size: 22.r, color: accentColor),
           ),
@@ -90,6 +97,26 @@ class AppPageHeader extends StatelessWidget {
         ),
       ],
     );
+
+    if (!showTitle) {
+      // Title lives in the shell topbar: actions alone, right-aligned.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (actions.isNotEmpty)
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              alignment: WrapAlignment.end,
+              children: actions,
+            ),
+          if (bottom != null) ...[
+            if (actions.isNotEmpty) const SizedBox(height: AppSpacing.md),
+            bottom!,
+          ],
+        ],
+      );
+    }
 
     if (actions.isEmpty && bottom == null) return titleBlock;
 
@@ -132,10 +159,7 @@ class AppPageHeader extends StatelessWidget {
             ],
           ],
         ),
-        if (bottom != null) ...[
-          const SizedBox(height: AppSpacing.md),
-          bottom!,
-        ],
+        if (bottom != null) ...[const SizedBox(height: AppSpacing.md), bottom!],
       ],
     );
   }
@@ -187,10 +211,7 @@ class AppFilterBar extends StatelessWidget {
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
               crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                ...filters,
-                ?trailing,
-              ],
+              children: [...filters, ?trailing],
             ),
           ],
         ],

@@ -21,6 +21,11 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        // Required by ':flutter_local_notifications' (checks AAR metadata at
+        // :app:checkDebugAarMetadata). Without this the build fails with:
+        // "Dependency ':flutter_local_notifications' requires core library
+        //  desugaring to be enabled for :app."
+        isCoreLibraryDesugaringEnabled = true
     }
 
     // Release signing lives OUTSIDE the repo: F:/material lab/key.properties
@@ -70,4 +75,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Pairs with compileOptions.isCoreLibraryDesugaringEnabled above.
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 }

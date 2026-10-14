@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
@@ -12,22 +13,22 @@ import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
-import '../../data/lab_repo.dart';
 import '../../domain/lab_local_repository.dart';
 
 /// Arabic/English label for an equipment event type.
 String equipmentEventLabel(String type) => switch (type) {
-      LabRepo.equipmentEventMaintenance =>
-        AppText.t('صيانة', 'Maintenance'),
-      LabRepo.equipmentEventRepair => AppText.t('إصلاح', 'Repair'),
-      _ => AppText.t('معايرة', 'Calibration'),
-    };
+  EquipmentEventType.maintenance => AppText.t('صيانة', 'Maintenance'),
+  EquipmentEventType.repair => AppText.t('إصلاح', 'Repair'),
+  _ => AppText.t('معايرة', 'Calibration'),
+};
 
 /// Shows the equipment form: dialog window on desktop, full-screen route
 /// on phones. Returns true when a row was saved.
-Future<bool> showEquipmentForm(BuildContext context,
-    [Map<String, dynamic>? item]) async {
-  final isDesktop = MediaQuery.sizeOf(context).width >= 800;
+Future<bool> showEquipmentForm(
+  BuildContext context, [
+  Map<String, dynamic>? item,
+]) async {
+  final isDesktop = FormFactor.current.isDesktop;
   final form = _EquipmentForm(item: item);
   if (isDesktop) {
     final saved = await showAppWindow<bool>(
@@ -68,11 +69,8 @@ Future<bool> showEquipmentEventForm(
   int equipmentId, [
   Map<String, dynamic>? event,
 ]) async {
-  final isDesktop = MediaQuery.sizeOf(context).width >= 800;
-  final form = _EquipmentEventForm(
-    equipmentId: equipmentId,
-    event: event,
-  );
+  final isDesktop = FormFactor.current.isDesktop;
+  final form = _EquipmentEventForm(equipmentId: equipmentId, event: event);
   if (isDesktop) {
     final saved = await showAppWindow<bool>(
       context,
@@ -117,8 +115,9 @@ class _EquipmentForm extends StatefulWidget {
 }
 
 class _EquipmentFormState extends State<_EquipmentForm> {
-  late final TextEditingController _name =
-      TextEditingController(text: '${widget.item?['name'] ?? ''}');
+  late final TextEditingController _name = TextEditingController(
+    text: '${widget.item?['name'] ?? ''}',
+  );
   late final TextEditingController _manufacturer = TextEditingController(
     text: '${widget.item?['manufacturer'] ?? ''}',
   );
@@ -158,21 +157,15 @@ class _EquipmentFormState extends State<_EquipmentForm> {
           lastCalibrationDate: _calibration.text.trim(),
         );
       } else {
-        await repo.updateEquipment(
-          (widget.item!['id'] as num).toInt(),
-          {
-            'name': _name.text.trim(),
-            'manufacturer': _manufacturer.text.trim(),
-            'description': _description.text.trim(),
-            'last_calibration_date': _calibration.text.trim(),
-          },
-        );
+        await repo.updateEquipment((widget.item!['id'] as num).toInt(), {
+          'name': _name.text.trim(),
+          'manufacturer': _manufacturer.text.trim(),
+          'description': _description.text.trim(),
+          'last_calibration_date': _calibration.text.trim(),
+        });
       }
       if (mounted) {
-        AppFeedback.success(
-          context,
-          AppText.t('تم الحفظ', 'Saved.'),
-        );
+        AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved.'));
         Navigator.of(context).pop(true);
       }
     } on AppError catch (e) {
@@ -235,8 +228,9 @@ class _EquipmentFormState extends State<_EquipmentForm> {
             AppButton(
               style: AppButtonStyle.secondary,
               label: AppText.t('إلغاء', 'Cancel'),
-              onPressed:
-                  _saving ? null : () => Navigator.of(context).pop(false),
+              onPressed: _saving
+                  ? null
+                  : () => Navigator.of(context).pop(false),
             ),
           ],
         ),
@@ -268,10 +262,7 @@ class _ReadOnlyCode extends StatelessWidget {
           child: Text(
             code,
             textDirection: TextDirection.ltr,
-            style: TextStyle(
-              fontSize: 13.spMax,
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(fontSize: 13.spMax, fontWeight: FontWeight.w700),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
@@ -288,18 +279,15 @@ class _ReadOnlyCode extends StatelessWidget {
 class _EquipmentEventForm extends StatefulWidget {
   final int equipmentId;
   final Map<String, dynamic>? event;
-  const _EquipmentEventForm({
-    required this.equipmentId,
-    this.event,
-  });
+  const _EquipmentEventForm({required this.equipmentId, this.event});
 
   @override
   State<_EquipmentEventForm> createState() => _EquipmentEventFormState();
 }
 
 class _EquipmentEventFormState extends State<_EquipmentEventForm> {
-  late String _type = LabRepo.normalizeEquipmentEventType(
-    widget.event?['event_type'] ?? LabRepo.equipmentEventCalibration,
+  late String _type = EquipmentEventType.normalize(
+    widget.event?['event_type'] ?? EquipmentEventType.calibration,
   );
   late final TextEditingController _date = TextEditingController(
     text: '${widget.event?['event_date'] ?? todayIso()}',
@@ -324,28 +312,20 @@ class _EquipmentEventFormState extends State<_EquipmentEventForm> {
         await repo.addEquipmentEvent(
           equipmentId: widget.equipmentId,
           eventType: _type,
-          eventDate: _date.text.trim().isEmpty
-              ? todayIso()
-              : _date.text.trim(),
+          eventDate: _date.text.trim().isEmpty ? todayIso() : _date.text.trim(),
           notes: _notes.text.trim(),
         );
       } else {
-        await repo.updateEquipmentEvent(
-          (widget.event!['id'] as num).toInt(),
-          {
-            'event_type': _type,
-            'event_date': _date.text.trim().isEmpty
-                ? todayIso()
-                : _date.text.trim(),
-            'notes': _notes.text.trim(),
-          },
-        );
+        await repo.updateEquipmentEvent((widget.event!['id'] as num).toInt(), {
+          'event_type': _type,
+          'event_date': _date.text.trim().isEmpty
+              ? todayIso()
+              : _date.text.trim(),
+          'notes': _notes.text.trim(),
+        });
       }
       if (mounted) {
-        AppFeedback.success(
-          context,
-          AppText.t('تم الحفظ', 'Saved.'),
-        );
+        AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved.'));
         Navigator.of(context).pop(true);
       }
     } on AppError catch (e) {
@@ -371,16 +351,14 @@ class _EquipmentEventFormState extends State<_EquipmentEventForm> {
         DropdownButtonFormField<String>(
           initialValue: _type,
           isExpanded: true,
+          menuMaxHeight: 320,
           decoration: const InputDecoration(
             border: OutlineInputBorder(),
             isDense: true,
           ),
           items: [
-            for (final t in LabRepo.equipmentEventTypes)
-              DropdownMenuItem(
-                value: t,
-                child: Text(equipmentEventLabel(t)),
-              ),
+            for (final t in EquipmentEventType.values)
+              DropdownMenuItem(value: t, child: Text(equipmentEventLabel(t))),
           ],
           onChanged: _saving ? null : (v) => setState(() => _type = v ?? _type),
         ),
@@ -416,8 +394,9 @@ class _EquipmentEventFormState extends State<_EquipmentEventForm> {
             AppButton(
               style: AppButtonStyle.secondary,
               label: AppText.t('إلغاء', 'Cancel'),
-              onPressed:
-                  _saving ? null : () => Navigator.of(context).pop(false),
+              onPressed: _saving
+                  ? null
+                  : () => Navigator.of(context).pop(false),
             ),
           ],
         ),

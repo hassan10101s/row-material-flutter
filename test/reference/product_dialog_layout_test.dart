@@ -51,10 +51,11 @@ void main() {
     reference = _ReferenceMock();
     when(() => labConfig.listProducts()).thenAnswer((_) async => []);
     when(() => labConfig.listAnalyses()).thenAnswer((_) async => []);
-    when(() => reference.listParameters())
-        .thenAnswer((_) async => List<Map<String, dynamic>>.from(
-              _physicalParams.map(Map<String, dynamic>.from),
-            ));
+    when(() => reference.listParameters()).thenAnswer(
+      (_) async => List<Map<String, dynamic>>.from(
+        _physicalParams.map(Map<String, dynamic>.from),
+      ),
+    );
     getIt.registerSingleton<ReferenceRepository>(reference);
   });
 
@@ -63,10 +64,8 @@ void main() {
     await getIt.reset();
   });
 
-  Widget host(ProductsCubit cubit) => BlocProvider.value(
-        value: cubit,
-        child: const ProductsTab(),
-      );
+  Widget host(ProductsCubit cubit) =>
+      BlocProvider.value(value: cubit, child: const ProductsTab());
 
   group('product editor mirrors the material editor', () {
     testWidgets('desktop dialog can add a physical row', (tester) async {
@@ -94,7 +93,8 @@ void main() {
       await cubit.load();
       await _pumpWide(tester, host(cubit));
 
-      await tester.tap(find.text('منتج جديد'));
+      // Add floats on mobile (FAB), no top text button.
+      await tester.tap(find.byType(FloatingActionButton));
       await tester.pumpAndSettle();
       expect(find.byType(AppWindow), findsNothing);
 
@@ -105,8 +105,9 @@ void main() {
       expect(find.text('اختر بارامتراً ظاهرياً…'), findsOneWidget);
     });
 
-    testWidgets('material editor compact row does not nest Expanded',
-        (tester) async {
+    testWidgets('material editor compact row does not nest Expanded', (
+      tester,
+    ) async {
       await _pumpWide(
         tester,
         MaterialEditor(

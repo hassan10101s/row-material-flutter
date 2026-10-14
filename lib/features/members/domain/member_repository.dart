@@ -23,7 +23,11 @@ class Member {
 
   bool get isActive => status == 'active';
   bool get isInvited => status == 'invited';
+  bool get isPendingActivation => status == 'pending_activation';
   bool get isDisabled => status == 'disabled';
+
+  /// Needs a manager decision: fresh invite or claimed but not activated yet.
+  bool get needsActivation => isInvited || isPendingActivation;
 
   /// True once the member signed in with Google and claimed the invite.
   bool get isLinked => uid.isNotEmpty;
@@ -53,7 +57,17 @@ abstract interface class MemberRepository {
   Future<List<Member>> listMembers();
 
   /// Invites by e-mail. `inviteKey = base64url_nopad(lower(email))`.
+  ///
+  /// Normalizes the address, rejects invalid/self invites and unknown roles.
+  /// Re-inviting an `invited`/`pending_activation` address is a resend (the
+  /// remote bumps the version); re-inviting an `active` address fails with
+  /// `member_exists`.
   Future<void> invite({required String email, required String role});
+
+  /// Resends the invite for an existing roster entry without retyping the
+  /// e-mail. Looks the member up by [memberId] and re-invites with its stored
+  /// e-mail/role.
+  Future<void> resendInvite({required String memberId});
 
   Future<void> changeRole({required String memberId, required String role});
 

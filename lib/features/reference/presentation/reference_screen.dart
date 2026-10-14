@@ -32,10 +32,7 @@ class _RefTab {
 /// cubit `load()`s and five tables before the user looked at any of them
 /// (same pattern as the Lab's `_LazyTab`).
 class _LazyTab extends StatefulWidget {
-  const _LazyTab({
-    required this.active,
-    required this.builder,
-  });
+  const _LazyTab({required this.active, required this.builder});
 
   final bool active;
   final WidgetBuilder builder;
@@ -116,22 +113,12 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
         ),
       ),
     ];
+    // Title lives in the shell topbar (both experiences); the tab chips
+    // below already say where you are.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.page,
-            AppSpacing.page,
-            AppSpacing.page,
-            0,
-          ),
-          child: Text(
-            AppStrings.reference,
-            style: Theme.of(context).textTheme.headlineSmall,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
+        const SizedBox(height: AppSpacing.page),
         SizedBox(
           height: 46.h,
           child: SingleChildScrollView(
@@ -141,7 +128,9 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
               children: [
                 for (var i = 0; i < tabs.length; i++)
                   Padding(
-                    padding: const EdgeInsetsDirectional.only(start: AppSpacing.sm),
+                    padding: const EdgeInsetsDirectional.only(
+                      start: AppSpacing.sm,
+                    ),
                     child: ChoiceChip(
                       label: Text(tabs[i].label),
                       avatar: Icon(tabs[i].icon, size: 18.r),
@@ -160,10 +149,7 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
               index: _tab,
               children: [
                 for (var i = 0; i < tabs.length; i++)
-                  _LazyTab(
-                    active: _tab == i,
-                    builder: tabs[i].builder,
-                  ),
+                  _LazyTab(active: _tab == i, builder: tabs[i].builder),
               ],
             ),
           ),

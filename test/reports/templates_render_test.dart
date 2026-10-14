@@ -146,6 +146,36 @@ void main() {
       expect(out, contains('Quality Control Report'));
       expect(out, isNot(contains(r'{{')));
     });
+
+    test('report_template.html (product batch samples, own results)', () {
+      final row = _row(entryCode: 'BATCH-50T')
+        ..['inspection_kind'] = 'product'
+        ..['batch_samples'] = [
+          {
+            'sample_no': 1,
+            'sample_name': 'Sample 1',
+            'sample_taker': 'Karim',
+            'tested_by_name_resolved': 'QC Tech',
+            'tested_at': '2026-01-01 10:30:00',
+            'decision_status': 'APPROVED',
+            'decision_reason': '',
+            'physical_results_json': '{"Color": "white"}',
+            'chemical_results_json':
+                '[{"name": "Protein", "result": "12.5", "unit": "%"}]',
+          },
+        ];
+      final ctx = buildInspectionContext(
+        row,
+        settings: settings,
+      )..['qr_image_data_uri'] = '';
+      final out = tinyJinjaRender(_tpl('report_template.html'), ctx);
+      expect(out, contains('عينات التشغيلة'));
+      expect(out, contains('Karim'));
+      expect(out, contains('Color'));
+      expect(out, contains('Protein'));
+      expect(out, contains('12.5'));
+      expect(out, isNot(contains(r'{{')));
+    });
   });
 
   group('new engine constructs (regression)', () {

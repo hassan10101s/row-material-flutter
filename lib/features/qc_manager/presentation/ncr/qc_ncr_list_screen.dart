@@ -9,7 +9,9 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_adaptive_list.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../design_system/widgets/app_page_size.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/export/table_html_export.dart';
 import '../cubit/qc_ncr_cubit.dart';
 import 'widgets/ncr_list_parts.dart';
 
@@ -38,6 +40,19 @@ class QcNcrListScreen extends StatelessWidget {
           appBar: AppTopAppBar(
             title: AppText.t('حالات عدم المطابقة', 'Non-conformances'),
             actions: [
+              IconButton(
+                tooltip: AppText.t('تصدير جدول', 'Export table'),
+                onPressed: cubit.state.rows.isEmpty
+                    ? null
+                    : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'ncr',
+                          title: ncrExportTitle(),
+                          headers: ncrHeaders(),
+                          rows: ncrExportRows(cubit.state.rows),
+                        ),
+                icon: const Icon(Icons.table_view_outlined),
+              ),
               IconButton(
                 tooltip: AppText.t('تصفية', 'Filters'),
                 onPressed: () => openNcrFilters(context, state, cubit),
@@ -146,6 +161,54 @@ class QcNcrListScreen extends StatelessWidget {
                                       : null,
                                 ),
                               ),
+                            ),
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpacing.md,
+                              AppSpacing.sm,
+                              AppSpacing.md,
+                              AppSpacing.sm,
+                            ),
+                            child: Wrap(
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              alignment: WrapAlignment.spaceBetween,
+                              spacing: AppSpacing.sm,
+                              runSpacing: 4,
+                              children: [
+                                AppPageSizeSelector(
+                                  value: cubit.pageSize,
+                                  onChanged: (v) => cubit.setPageSize(v),
+                                ),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    AppButton(
+                                      small: true,
+                                      style: AppButtonStyle.ghost,
+                                      label: AppText.t('السابق', 'Previous'),
+                                      onPressed: state.hasPrevious
+                                          ? cubit.previousPage
+                                          : null,
+                                    ),
+                                    Text(
+                                      '${AppText.t('صفحة', 'Page')} ${state.page} / ${state.pageCount}',
+                                      style: TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 12.spMax,
+                                      ),
+                                    ),
+                                    AppButton(
+                                      small: true,
+                                      style: AppButtonStyle.ghost,
+                                      label: AppText.t('التالي', 'Next'),
+                                      onPressed: state.hasNext
+                                          ? cubit.nextPage
+                                          : null,
+                                    ),
+                                  ],
+                                ),
+                              ],
                             ),
                           ),
                         ],

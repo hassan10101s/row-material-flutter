@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/responsive/form_factor.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/feedback/app_feedback_export.dart';
@@ -9,6 +10,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_date_field.dart';
+import '../../../../design_system/widgets/app_field.dart';
 import '../cubit/lab_reports_cubit.dart';
 import '../cubit/lab_reports_state.dart';
 
@@ -52,122 +54,107 @@ class _LabReportsTabState extends State<LabReportsTab> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              AppText.t('تقارير المعمل', 'Lab reports'),
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const SizedBox(height: AppSpacing.md),
+            // Desktop title lives in the shell topbar.
+            if (FormFactor.current.isMobile) ...[
+              Text(
+                AppText.t('تقارير المعمل', 'Lab reports'),
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
             AppCard(
-              padding: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppText.t('التقرير اليومي', 'Daily report'),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    AppDateField(
-                      controller: _date,
-                      label: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    AppButton(
-                      label: AppStrings.exportPdf,
-                      loading: state.busy == 'daily',
-                      onPressed: state.busy == 'daily'
-                          ? null
-                          : () => cubit.runDaily(_date.text.trim()),
-                    ),
-                  ],
-                ),
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppText.t('التقرير اليومي', 'Daily report'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  AppDateField(
+                    controller: _date,
+                    label: AppText.t('التاريخ', 'Date (YYYY-MM-DD)'),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    label: AppStrings.exportPdf,
+                    loading: state.busy == 'daily',
+                    onPressed: state.busy == 'daily'
+                        ? null
+                        : () => cubit.runDaily(_date.text.trim()),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: AppSpacing.md),
             AppCard(
-              padding: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppText.t('التقرير الشهري', 'Monthly report'),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: _month,
-                            decoration: InputDecoration(
-                              labelText: AppText.t('الشهر', 'Month (1-12)'),
-                              isDense: true,
-                            ),
-                          ),
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppText.t('التقرير الشهري', 'Monthly report'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AppField(
+                          label: AppText.t('الشهر', 'Month (1-12)'),
+                          controller: _month,
                         ),
-                        const SizedBox(width: AppSpacing.md),
-                        Expanded(
-                          child: TextField(
-                            controller: _year,
-                            decoration: InputDecoration(
-                              labelText: AppText.t('السنة', 'Year'),
-                              isDense: true,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    AppButton(
-                      label: AppStrings.exportPdf,
-                      loading: state.busy == 'monthly',
-                      onPressed: state.busy == 'monthly'
-                          ? null
-                          : () => cubit.runMonthly(
-                              int.tryParse(_month.text.trim()) ?? 0,
-                              int.tryParse(_year.text.trim()) ?? 0,
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            AppCard(
-              padding: EdgeInsets.zero,
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.lg),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppText.t('التقرير السنوي', 'Yearly report'),
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    TextField(
-                      controller: _year,
-                      decoration: InputDecoration(
-                        labelText: AppText.t('السنة', 'Year'),
-                        isDense: true,
                       ),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    AppButton(
-                      label: AppStrings.exportPdf,
-                      loading: state.busy == 'yearly',
-                      onPressed: state.busy == 'yearly'
-                          ? null
-                          : () => cubit.runYearly(
-                              int.tryParse(_year.text.trim()) ?? 0,
-                            ),
-                    ),
-                  ],
-                ),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(
+                        child: AppField(
+                          label: AppText.t('السنة', 'Year'),
+                          controller: _year,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    label: AppStrings.exportPdf,
+                    loading: state.busy == 'monthly',
+                    onPressed: state.busy == 'monthly'
+                        ? null
+                        : () => cubit.runMonthly(
+                            int.tryParse(_month.text.trim()) ?? 0,
+                            int.tryParse(_year.text.trim()) ?? 0,
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppCard(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    AppText.t('التقرير السنوي', 'Yearly report'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  AppField(
+                    label: AppText.t('السنة', 'Year'),
+                    controller: _year,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    label: AppStrings.exportPdf,
+                    loading: state.busy == 'yearly',
+                    onPressed: state.busy == 'yearly'
+                        ? null
+                        : () => cubit.runYearly(
+                            int.tryParse(_year.text.trim()) ?? 0,
+                          ),
+                  ),
+                ],
               ),
             ),
           ],

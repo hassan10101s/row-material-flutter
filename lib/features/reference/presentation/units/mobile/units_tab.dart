@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -9,21 +11,53 @@ import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
+import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_infinite_list.dart';
+import '../../../../../design_system/widgets/app_page_header.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../../design_system/export/table_html_export.dart';
 import '../../cubit/units_cubit.dart';
 import '../../cubit/units_state.dart';
+import '../desktop/units_tab.dart' show DesktopUnitsTab;
 import '../units_editor.dart';
 
-/// Mobile units settings.
-///
-/// The table becomes a card per unit, led by the symbol because that is the
-/// identity the user scans for and the value the delete confirmation quotes.
-/// The 420dp dialog becomes a full-screen route: three text fields plus the
-/// on-screen keyboard does not fit a dialog on a 400dp grid.
-class MobileUnitsTab extends StatelessWidget {
+/// Mobile units settings: searchable infinite cards + full-screen editor.
+class MobileUnitsTab extends StatefulWidget {
   const MobileUnitsTab({super.key});
+
+  @override
+  State<MobileUnitsTab> createState() => _MobileUnitsTabState();
+}
+
+class _MobileUnitsTabState extends State<MobileUnitsTab> {
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      context.read<UnitsCubit>().setQuery(_searchCtrl.text.trim());
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.removeListener(_onSearchChanged);
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _openEditor(
     BuildContext context, [
@@ -63,56 +97,142 @@ class MobileUnitsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cubit = context.read<UnitsCubit>();
     final state = context.watch<UnitsCubit>().state;
+    final countLabel = state.hasMore
+        ? '${state.rows.length}+'
+        : '${state.rows.length}';
     return AppErrorFeedback<UnitsCubit, UnitsState>(
       selector: (s) => s.error,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            AppText.t('إعدادات الوحدات', 'Units Settings'),
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          FilledButton.icon(
-            onPressed: () => _openEditor(context),
-            icon: Icon(Icons.add, size: 20.r),
-            label: Text(AppText.t('وحدة جديدة', 'New Unit')),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          if (state.loading && state.rows.isEmpty)
-            const AppSkeletonList(rows: 6, lines: 3, height: 380)
-          else if (state.rows.isEmpty)
-            Expanded(
-              child: AppEmptyState(
-                icon: Icons.straighten_outlined,
-                title: AppText.t('لا توجد وحدات.', 'No units found.'),
-                subtitle: AppText.t(
-                  'أضف وحدات مثل % و mg/kg و ppm.',
-                  'Add units like %, mg/kg, ppm.',
+      // Add floats like the raw-material register (heroTag null: sibling
+      // tabs share one IndexedStack).
+      child: Scaffold(
+        floatingActionButton: FloatingActionButton(
+          heroTag: null,
+          tooltip: AppText.t('وحدة جديدة', 'New Unit'),
+          onPressed: () => _openEditor(context),
+          child: Icon(Icons.add, size: 24.r),
+        ),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AppPageHeader(
+              title: AppText.t('إعدادات الوحدات', 'Units Settings'),
+              subtitle: '$countLabel ${AppText.t('وحدة', 'units')}',
+              icon: Icons.straighten_outlined,
+              actions: [
+                IconButton(
+                  tooltip: AppText.t('تصدير جدول', 'Export table'),
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                  onPressed: state.rows.isEmpty
+                      ? null
+                      : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'units',
+                          title: DesktopUnitsTab.exportTitle(),
+                          headers: DesktopUnitsTab.exportHeaders(),
+                          rows: DesktopUnitsTab.exportRows(
+                            state.rows,
+                            state.usage,
+                          ),
+                        ),
+                  icon: const Icon(Icons.table_view_outlined),
                 ),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.separated(
-                itemCount: state.rows.length,
-                separatorBuilder: (_, _) =>
-                    const SizedBox(height: AppSpacing.sm),
-                itemBuilder: (context, index) {
-                  final u = state.rows[index];
-                  return _UnitCard(
-                    symbol: '${u['symbol'] ?? ''}',
-                    name: '${u['name'] ?? '-'}',
-                    dimension: '${u['dimension'] ?? '-'}',
-                    usage: state.usage['${u['symbol'] ?? ''}'] ?? 0,
-                    onEdit: () => _openEditor(context, u),
-                    onDelete: () => _delete(context, u),
-                  );
-                },
-              ),
+              ],
             ),
-        ],
+            const SizedBox(height: AppSpacing.md),
+            AppField(
+              label: AppText.t(
+                'بحث بالرمز أو الاسم',
+                'Search symbol or name...',
+              ),
+              controller: _searchCtrl,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
+            Expanded(child: _buildBody(context, cubit, state)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, UnitsCubit cubit, UnitsState state) {
+    if (state.loading && state.rows.isEmpty) {
+      return const AppSkeletonList(rows: 6, lines: 3, height: 380);
+    }
+    if (state.rows.isEmpty) {
+      if (state.error != null) {
+        return RefreshIndicator(
+          onRefresh: () => cubit.refresh(),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              AppErrorState(
+                title: AppText.t('تعذّر التحميل', 'Could not load'),
+                subtitle: state.error,
+                onRetry: () => cubit.refresh(),
+              ),
+            ],
+          ),
+        );
+      }
+      return RefreshIndicator(
+        onRefresh: () => cubit.refresh(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            AppEmptyState(
+              icon: Icons.straighten_outlined,
+              title: state.query.isEmpty
+                  ? AppText.t('لا توجد وحدات.', 'No units found.')
+                  : AppText.t('لا توجد نتائج مطابقة', 'No matching units.'),
+              subtitle: state.query.isEmpty
+                  ? AppText.t(
+                      'أضف وحدات مثل % و mg/kg و ppm.',
+                      'Add units like %, mg/kg, ppm.',
+                    )
+                  : null,
+              action: state.query.isEmpty
+                  ? null
+                  : AppButton(
+                      style: AppButtonStyle.secondary,
+                      label: AppText.t('مسح البحث', 'Clear search'),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        cubit.setQuery('');
+                      },
+                    ),
+            ),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: () => cubit.refresh(),
+      child: AppInfiniteList(
+        itemCount: state.rows.length,
+        hasMore: state.hasMore,
+        loadingMore: state.loadingMore,
+        errorMore: state.errorMore,
+        onLoadMore: () => cubit.loadMore(),
+        onRetry: () => cubit.loadMore(),
+        totalLabel:
+            '${state.rows.length} ${AppText.t('وحدة', 'units')} • ${AppText.t('نهاية القائمة', 'End of list')}',
+        itemBuilder: (context, index) {
+          final u = state.rows[index];
+          return _UnitCard(
+            symbol: '${u['symbol'] ?? ''}',
+            name: '${u['name'] ?? '-'}',
+            dimension: '${u['dimension'] ?? '-'}',
+            usage: state.usage['${u['symbol'] ?? ''}'] ?? 0,
+            onEdit: () => _openEditor(context, u),
+            onDelete: () => _delete(context, u),
+          );
+        },
       ),
     );
   }
@@ -140,79 +260,73 @@ class _UnitCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+    return AppCard(
+      enableHover: false,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  symbol,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14.spMax,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textStrong,
+                  ),
+                ),
+                if (name.isNotEmpty && name != '-')
                   Text(
-                    symbol,
+                    name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.spMax,
+                      color: AppColors.textMuted,
+                    ),
+                  ),
+                if (dimension.isNotEmpty && dimension != '-')
+                  Text(
+                    dimension,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 14.spMax,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textStrong,
-                    ),
-                  ),
-                  if (name.isNotEmpty && name != '-')
-                    Text(
-                      name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.spMax,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  if (dimension.isNotEmpty && dimension != '-')
-                    Text(
-                      dimension,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.spMax,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                  Text(
-                    AppText.t(
-                      'مستخدمة في $usage',
-                      'Used in $usage',
-                    ),
-                    style: TextStyle(
                       fontSize: 12.spMax,
-                      color: usage > 0
-                          ? AppColors.success
-                          : AppColors.textMuted,
-                      fontWeight: FontWeight.w600,
+                      color: AppColors.textMuted,
                     ),
                   ),
-                ],
-              ),
+                Text(
+                  AppText.t('مستخدمة في $usage', 'Used in $usage'),
+                  style: TextStyle(
+                    fontSize: 12.spMax,
+                    color: usage > 0 ? AppColors.success : AppColors.textMuted,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
             ),
-            IconButton(
-              tooltip: AppStrings.edit,
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              onPressed: onEdit,
-              icon: Icon(Icons.edit_outlined, size: 20.r),
+          ),
+          IconButton(
+            tooltip: AppStrings.edit,
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            onPressed: onEdit,
+            icon: Icon(Icons.edit_outlined, size: 20.r),
+          ),
+          IconButton(
+            tooltip: AppStrings.delete,
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            onPressed: onDelete,
+            icon: Icon(
+              Icons.delete_outline,
+              size: 20.r,
+              color: AppColors.danger,
             ),
-            IconButton(
-              tooltip: AppStrings.delete,
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              onPressed: onDelete,
-              icon: Icon(
-                Icons.delete_outline,
-                size: 20.r,
-                color: AppColors.danger,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -28,28 +28,36 @@ class RemoteDocument {
   /// False when the document is missing (deleted upstream).
   final bool exists;
 
-  static const RemoteDocument missing = RemoteDocument(id: '', data: {}, version: 0, exists: false);
+  static const RemoteDocument missing = RemoteDocument(
+    id: '',
+    data: {},
+    version: 0,
+    exists: false,
+  );
 }
 
 /// Result of a push: either a new version, or a classified failure.
 class PushResult {
   const PushResult.success(this.version, {this.payload})
-      : kind = PushResultKind.success,
-        error = null,
-        remote = null;
-  const PushResult.rejected(this.error, {this.remote, this.kind = PushResultKind.permissionDenied})
-      : version = 0,
-        payload = null;
+    : kind = PushResultKind.success,
+      error = null,
+      remote = null;
+  const PushResult.rejected(
+    this.error, {
+    this.remote,
+    this.kind = PushResultKind.permissionDenied,
+  }) : version = 0,
+       payload = null;
   const PushResult.retryable(this.error)
-      : kind = PushResultKind.retryable,
-        version = 0,
-        payload = null,
-        remote = null;
+    : kind = PushResultKind.retryable,
+      version = 0,
+      payload = null,
+      remote = null;
   const PushResult.oversized(this.error)
-      : kind = PushResultKind.payloadTooLarge,
-        version = 0,
-        payload = null,
-        remote = null;
+    : kind = PushResultKind.payloadTooLarge,
+      version = 0,
+      payload = null,
+      remote = null;
 
   final PushResultKind kind;
   final int version;
@@ -158,7 +166,16 @@ enum SyncCollection {
   invites('invites'),
   auditLogs('auditLogs'),
   devices('devices'),
-  meta('meta');
+  meta('meta'),
+  inventoryItems('inventoryItems'),
+  inventoryTransactions('inventoryTransactions'),
+  equipment('equipment'),
+  equipmentEvents('equipmentEvents'),
+  worksheets('worksheets'),
+  consumption('consumption'),
+  stockAdjustments('stockAdjustments'),
+  referenceMaterials('referenceMaterials'),
+  productBatchSamples('productBatchSamples');
 
   const SyncCollection(this.path);
 
@@ -172,6 +189,20 @@ abstract interface class AuthRemoteDataSource {
   Future<RemoteUser?> currentUser();
 
   Future<void> signInWithGoogle();
+
+  /// Firebase email/password sign-in for members who created an app password.
+  Future<void> signInWithEmail({
+    required String email,
+    required String password,
+  });
+
+  /// Creates an email/password Firebase account. If the current Firebase
+  /// session is already signed in with Google, the credential is linked to
+  /// that same uid instead of creating a second account.
+  Future<void> createPasswordAccount({
+    required String email,
+    required String password,
+  });
 
   Future<void> signOut();
 
@@ -192,7 +223,10 @@ abstract interface class AuthRemoteDataSource {
 
   Future<OrganizationProfile?> loadOrganization(String organizationId);
 
-  Future<void> updateOrganization(String organizationId, Map<String, dynamic> data);
+  Future<void> updateOrganization(
+    String organizationId,
+    Map<String, dynamic> data,
+  );
 
   /// Claims an invite: writes `users/{uid}` from the invite content.
   Future<void> acceptInvite({
@@ -267,7 +301,12 @@ abstract interface class GoogleAuthDataSource {
 }
 
 class GoogleAuthResult {
-  const GoogleAuthResult({this.idToken, this.email, this.displayName, this.photoUrl});
+  const GoogleAuthResult({
+    this.idToken,
+    this.email,
+    this.displayName,
+    this.photoUrl,
+  });
 
   final String? idToken;
   final String? email;
@@ -278,7 +317,12 @@ class GoogleAuthResult {
 }
 
 class RemoteUser {
-  const RemoteUser({required this.uid, required this.email, this.displayName, this.photoUrl});
+  const RemoteUser({
+    required this.uid,
+    required this.email,
+    this.displayName,
+    this.photoUrl,
+  });
 
   final String uid;
   final String email;
@@ -309,16 +353,26 @@ class UserProfile {
   final String? photoUrl;
   final int version;
 
-  static UserProfile? fromMap(Map<String, dynamic>? data, String uid, String email) {
+  static UserProfile? fromMap(
+    Map<String, dynamic>? data,
+    String uid,
+    String email,
+  ) {
     if (data == null) return null;
     final orgId = '${data['organizationId'] ?? ''}';
     if (orgId.isEmpty) return null;
+    // Legacy bound accounts without a status wait for activation instead of
+    // entering the dashboard automatically (plan §9).
+    final rawStatus = data['status'];
+    final status = rawStatus == null || '$rawStatus'.isEmpty
+        ? 'pending_activation'
+        : '$rawStatus';
     return UserProfile(
       uid: uid,
       email: '${data['email'] ?? email}',
       organizationId: orgId,
       role: '${data['role'] ?? 'viewer'}',
-      status: '${data['status'] ?? 'invited'}',
+      status: status,
       memberId: '${data['memberId'] ?? ''}',
       displayName: '${data['displayName'] ?? ''}',
       photoUrl: data['photoUrl'] as String?,

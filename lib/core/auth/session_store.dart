@@ -5,6 +5,12 @@ import 'app_session.dart';
 /// Encrypted cache of the last session so the app can be opened **offline**
 /// (plan §8.4). It grants no new permission: the cached token is only used for
 /// read-only local work, and every remote write still requires a live token.
+///
+/// Storage backend per platform (flutter_secure_storage):
+/// - Android: EncryptedSharedPreferences (`aOptions.resetOnError` below).
+/// - iOS/macOS: Keychain. - Windows (MSIX + plain EXE): DPAPI via
+///   `flutter_secure_storage_windows` (no options needed — DPAPI is the
+///   default). Linux: libsecret. `restore()` never throws at boot.
 class SessionStore {
   SessionStore({FlutterSecureStorage? storage})
     : _storage =

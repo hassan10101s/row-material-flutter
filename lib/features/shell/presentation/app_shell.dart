@@ -15,6 +15,8 @@ import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/widgets/app_adaptive.dart';
 import '../../auth/domain/user.dart';
+import '../../../di/service_locator.dart';
+import '../../notifications/data/notification_service.dart';
 import '../../settings/domain/export_root_service.dart';
 import '../../sync/presentation/sync_status_controller.dart';
 import 'desktop/app_shell.dart';
@@ -81,6 +83,37 @@ class _AppShellState extends State<AppShell> {
     connectivityChanges: widget.connectivity.onStatusChange,
   )..start();
 
+  bool _consumedNotifTap = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Killed-app OS notification tap: the payload was stashed by
+    // NotificationService.initOs before the router existed. Consume once.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_consumedNotifTap || !mounted) return;
+      _consumedNotifTap = true;
+      try {
+        final service = getIt<NotificationService>();
+        final payload = service.pendingPayload;
+        if (payload == null || payload.isEmpty) return;
+        service.pendingPayload = null;
+        final target = _routeForPayload(payload);
+        if (target != null && mounted) context.go(target);
+      } on Object {
+        // Best effort: stay on the current page (unregistered in tests).
+      }
+    });
+  }
+
+  static String? _routeForPayload(String payload) {
+    final parts = payload.split(':');
+    if (parts.length != 2 || parts[1].isEmpty) return null;
+    if (parts[0] == 'inspection') return '/inspections?highlight=${parts[1]}';
+    if (parts[0] == 'lab') return '/lab?tab=0&highlight=${parts[1]}';
+    return null;
+  }
+
   @override
   void dispose() {
     _syncStatus.dispose();
@@ -91,7 +124,6 @@ class _AppShellState extends State<AppShell> {
   /// from the injected session rather than the locator.
   List<ShellNavEntry> _entries(User user) => shellNavEntries(
     canSeeSettings: user.canSeeSettings,
-    canAudit: widget.gate.session.permissions.contains(Permission.auditRead),
     canReadQc: widget.gate.session.permissions.contains(Permission.qcRead),
   );
 

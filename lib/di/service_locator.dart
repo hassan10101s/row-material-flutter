@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -23,6 +24,7 @@ import '../core/security/password_hash.dart';
 import '../core/services/seed_service.dart';
 import '../core/sync/audit_logger.dart';
 import '../core/sync/audit_trail.dart';
+import '../core/sync/backfill_service.dart';
 import '../core/sync/conflict_resolver.dart';
 import '../core/sync/device_registry.dart';
 import '../core/sync/entity_registry.dart';
@@ -39,6 +41,11 @@ import '../features/auth/domain/auth_repository.dart';
 import '../features/auth/data/offline_first_auth_repository.dart';
 import '../features/audit/presentation/audit_controller.dart';
 import '../features/backup/data/backup_manager.dart';
+import '../app/headless.dart' show isHeadlessBackground;
+import '../app/notif_poll_task.dart';
+import '../features/notifications/data/fcm_push_service.dart';
+import '../features/notifications/data/notification_service.dart';
+import '../features/notifications/presentation/notification_controller.dart';
 import '../features/backup/domain/backup_service.dart';
 import '../features/dashboard/data/dashboard_repo.dart';
 import '../features/dashboard/domain/dashboard_repository.dart';
@@ -49,6 +56,7 @@ import '../features/lab/data/lab_repo.dart';
 import '../features/lab/data/offline_first_lab_repository.dart';
 import '../features/lab/domain/lab_local_repository.dart';
 import '../features/lab/domain/lab_result_repository.dart';
+import '../features/lab/domain/product_batch_repository.dart';
 import '../features/members/domain/member_repository.dart';
 import '../features/organizations/data/firestore_organization_repository.dart';
 import '../features/organizations/data/member_write_guard.dart';
@@ -95,7 +103,8 @@ Future<void> initServiceLocator() async {
   // The QR scanner needs the same seal key the reports were sealed with to
   // verify same-device prints (cross-device prints resolve by entry code).
   getIt.registerSingleton<LocalSecret>(secret);
-  final dbHelper = await _databaseHelper();  final hasher = PasswordHasher(
+  final dbHelper = await _databaseHelper();
+  final hasher = PasswordHasher(
     pepper: String.fromCharCodes(await secret.load()),
   );
 
@@ -105,7 +114,10 @@ Future<void> initServiceLocator() async {
   final firebaseAuth = bootstrap.isReady ? FirebaseAuth.instance : null;
   final remote = FirestoreDataSource(firestore: firestore, auth: firebaseAuth);
   final authRemote = AuthRemoteDataSourceImpl(
-    firestore: FirestoreDataSource(firestore: firestore, auth: firebaseAuth),
+    // Use the same remote adapter for auth, organizations and sync. Creating
+    // a second adapter around the same Firebase handles split tracing,
+    // configuration and retry behavior between otherwise identical services.
+    firestore: remote,
     google: GoogleAuthDataSourceImpl(),
     auth: firebaseAuth,
   );
@@ -222,7 +234,8 @@ Future<void> initServiceLocator() async {
         // Device-scoped entry codes: minted rows carry this device's tag so
         // two offline devices can never mint the same entry_code (which is
         // also the sync document id). Empty before registration → legacy.
-        deviceTagProvider: () => getIt<SyncMetadata>().get(SyncMetadata.deviceIdKey),
+        deviceTagProvider: () =>
+            getIt<SyncMetadata>().get(SyncMetadata.deviceIdKey),
         guard: getIt<WriteGuard>(),
         queue: queue,
         audit: audit,
@@ -247,6 +260,9 @@ Future<void> initServiceLocator() async {
     )
     ..registerLazySingleton<LabLocalRepository>(
       () => getIt<LabRepo>() as LabLocalRepository,
+    )
+    ..registerLazySingleton<ProductBatchRepository>(
+      () => getIt<LabRepo>() as ProductBatchRepository,
     )
     ..registerLazySingleton<ReportHtmlBuilder>(
       () => ReportHtmlBuilder(
@@ -420,6 +436,15 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<ConflictResolver>(
       () => ConflictResolver(queue: queue, remote: remote),
     )
+    // Temporary backfill uploader: re-queues local rows that never reached
+    // the server so the next syncNow pushes them in batches.
+    ..registerLazySingleton<BackfillService>(
+      () => BackfillService(
+        dbHelper: dbHelper,
+        queue: queue,
+        guard: getIt<WriteGuard>(),
+      ),
+    )
     ..registerLazySingleton<SyncEngine>(() {
       final pushWorker = PushWorker(
         queue: queue,
@@ -460,7 +485,21 @@ Future<void> initServiceLocator() async {
         conflicts: getIt<ConflictResolver>(),
         remote: remote,
       );
-    });
+    })
+    // ── Mobile-only new-item notifications ─────────────────────────────
+    // Built over the same dbHelper/metadata the sync engine uses, so the
+    // watermarks live in the per-organization database (plan D3).
+    ..registerLazySingleton<NotificationService>(
+      () => NotificationService(dbHelper: dbHelper, metadata: metadata),
+    )
+    ..registerLazySingleton<NotificationController>(
+      () => NotificationController(getIt<NotificationService>()),
+    )
+    // Killed-app push (FCM topics `org_<orgId>`). Lazy so desktop builds
+    // never touch firebase_messaging; initialized in startNotifications().
+    ..registerLazySingleton<FcmPushService>(
+      () => FcmPushService(notifications: getIt<NotificationService>()),
+    );
 
   debugPrint(
     '[bootstrap] service locator ready (firebase: ${bootstrap.status.name})',
@@ -470,14 +509,32 @@ Future<void> initServiceLocator() async {
 /// Wires the "organization bound" side effects (defaults → seeds → lab defaults
 /// → auto backup → `org_bound_at` → device registry). Kept here so the
 /// repository never imports a feature module.
+///
+/// The binder runs for `active` members only (the repository guarantees it):
+/// a pending/disabled account never opens the company database and never
+/// starts the sync cycle (plan §8). Sign-out stops the engine again.
 Future<void> registerOrganizationBinder(AuthRepository auth) async {
   if (auth is OfflineFirstAuthRepository) {
     auth.onOrganizationBound = (organizationId) async {
       await getIt<SettingsRepo>().ensureDefaults();
+      // Headless background polls re-bind the org every 15 min in a separate
+      // isolate that shares the same SQLite file: skip everything except the
+      // cheap defaults + bound marker. Seeds, lab defaults, backups, device
+      // registration and the sync engine all contend for the file lock
+      // (BEGIN EXCLUSIVE ~5s stall) and the dispatcher drives its own
+      // pull + notification scan directly.
+      if (isHeadlessBackground) {
+        await getIt<SyncMetadata>().markOrgBound(DateTime.now());
+        debugPrint('[bootstrap] organization $organizationId bound (headless)');
+        return;
+      }
       await getIt<SeedService>().ensureInitialImport();
       await getIt<LabRepo>().ensureDefaultAnalyses();
       await getIt<LabRepo>().syncReferenceAnalyses();
-      await getIt<BackupManager>().autoBackup();
+      // VACUUM INTO rewrites the whole file while holding the single
+      // connection: never block the bind (first frame / auth state) on it.
+      // Fire-and-forget with its own error handling inside autoBackup.
+      unawaited(getIt<BackupManager>().autoBackup());
       await getIt<SyncMetadata>().markOrgBound(DateTime.now());
       // Register this device once per organization (plan §8.5 step 4) and then
       // let the engine start: the queue is now bound to the right database.
@@ -487,7 +544,66 @@ Future<void> registerOrganizationBinder(AuthRepository auth) async {
         debugPrint('[bootstrap] device registration skipped: $e');
       }
       getIt<SyncEngine>().start();
+      // Mobile-only bell: same hooks as app startup (engine start above does
+      // not run them on an org switch). Best effort, never fails the bind.
+      if ((Platform.isAndroid || Platform.isIOS) && !isHeadlessBackground) {
+        try {
+          final controller = getIt<NotificationController>();
+          // Pulled rows (other devices) -> bell + OS notification. Own saves
+          // stay silent via the onEnqueued hook below (they watermark first).
+          getIt<SyncEngine>().onPullApplied =
+              () => controller.refresh(showOs: true);
+          // Own saves -> bell within seconds. Chains the engine's debounced
+          // push (buildSyncEngine sets onEnqueued to scheduleSync); without
+          // this, saves after an org switch would only surface on next pull.
+          final queue = getIt<SyncQueue>();
+          final prev = queue.onEnqueued;
+          queue.onEnqueued = () {
+            prev?.call();
+            unawaited(controller.refresh());
+          };
+          // Bell populates without blocking the bind: `load` is two cheap
+          // reads (recent + unread count) fired off while the bind returns,
+          // and the heavier watermark scans wait for the pull hooks and the
+          // 30 s timer instead of stalling startup on the FFI lock.
+          unawaited(controller.load());
+          controller.startAutoRefresh(showOs: true);
+          // Killed-app push follows the org: (re)subscribe to the new
+          // `org_<id>` topic so Cloud Function fan-out reaches this device
+          // even when the app is killed. Old topic is unsubscribed inside.
+          try {
+            await getIt<FcmPushService>().setOrganization(organizationId);
+          } on Object catch (e) {
+            debugPrint('[bootstrap] fcm topic skipped: $e');
+          }
+          // Poll scheduling lives in startNotifications() (after the first
+          // frame). Scheduling here too re-registers the periodic task on
+          // every org bind and churns JobScheduler (cancel/schedule storm
+          // visible in logcat as repeated Job ID bumps).
+        } on Object catch (e) {
+          debugPrint('[bootstrap] notifications skipped: $e');
+        }
+      }
       debugPrint('[bootstrap] organization $organizationId bound');
+    };
+    auth.onSignedOut = () async {
+      try {
+        getIt<SyncEngine>().stop();
+      } on Object catch (e) {
+        debugPrint('[bootstrap] sync engine stop skipped: $e');
+      }
+      if (Platform.isAndroid || Platform.isIOS) {
+        try {
+          await const AndroidNotifPollScheduler().cancel();
+        } on Object {
+          // Nothing was registered.
+        }
+        try {
+          await getIt<FcmPushService>().setOrganization(null);
+        } on Object {
+          // Best effort.
+        }
+      }
     };
   }
 }

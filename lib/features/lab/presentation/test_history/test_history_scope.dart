@@ -28,7 +28,8 @@ class TestHistoryScope extends StatefulWidget {
     BuildContext context,
     TestHistoryScopeState scope,
     TestHistoryData data,
-  ) builder;
+  )
+  builder;
 
   @override
   State<TestHistoryScope> createState() => TestHistoryScopeState();
@@ -55,7 +56,8 @@ class TestHistoryData {
     int start,
     List<Map<String, dynamic>> slice,
     int pageSize,
-  }) paged;
+  })
+  paged;
   final List<({String key, String label})> chips;
 }
 
@@ -69,22 +71,35 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
   String chemicalId = '';
   String rangeState = '';
   int page = 1;
+  int pageSize = thPageSize;
   String sortKey = 'tested_at';
   int sortDir = -1;
+
+  /// Long-press multi-select: hidden until the first long-press, cleared
+  /// explicitly or whenever the visible set changes (filter/query). Kept
+  /// across pages so a print can span them; the print resolves keys against
+  /// the current rows and ignores stale ones.
+  final Set<String> selectedIds = <String>{};
+
+  bool get selecting => selectedIds.isNotEmpty;
 
   static const recordLimits = ['50', '100', '300', '500', '1000', '5000'];
 
   @override
   void initState() {
     super.initState();
-    context.read<TestHistoryCubit>().load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<TestHistoryCubit>().load();
+    });
   }
 
   @override
   void didUpdateWidget(covariant TestHistoryScope oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.refreshTick != oldWidget.refreshTick) {
-      context.read<TestHistoryCubit>().load();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) context.read<TestHistoryCubit>().load();
+      });
     }
   }
 
@@ -97,11 +112,15 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
   void resetPage() => page = 1;
 
   /// Called on every keystroke (the controller already holds the text).
-  void onQueryChanged() => setState(resetPage);
+  void onQueryChanged() => setState(() {
+        resetPage();
+        selectedIds.clear();
+      });
 
   void clearQuery() => setState(() {
     query.clear();
     resetPage();
+    selectedIds.clear();
   });
 
   void setSort(String key) {
@@ -127,6 +146,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
       rangeState = '';
       query.clear();
       resetPage();
+      selectedIds.clear();
     });
   }
 
@@ -148,6 +168,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
       rangeState = range;
       recordLimit = limit;
       resetPage();
+      selectedIds.clear();
     });
   }
 
@@ -170,12 +191,60 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
       chemicalId = next.chemicalId;
       rangeState = next.rangeState;
       resetPage();
+      selectedIds.clear();
     });
   }
+
+  /// Enters selection mode on first use (long-press) and toggles [key].
+  /// Leaving zero selected exits the mode and hides the checkboxes again.
+  void toggleSelected(String key) {
+    setState(() {
+      if (!selectedIds.remove(key)) selectedIds.add(key);
+    });
+  }
+
+  void selectKeys(Iterable<String> keys) {
+    setState(() => selectedIds.addAll(keys));
+  }
+
+  /// Select-all-on-page checkbox: selects the page when any row is missing,
+  /// clears it back when all of it is already selected.
+  void toggleSelectAll(Iterable<String> keys) {
+    setState(() {
+      final list = keys.toList();
+      if (list.isNotEmpty && list.every(selectedIds.contains)) {
+        selectedIds.removeAll(list);
+      } else {
+        selectedIds.addAll(list);
+      }
+    });
+  }
+
+  void clearSelection() {
+    if (selectedIds.isEmpty) return;
+    setState(selectedIds.clear);
+  }
+
+  /// Rows (from the current filtered list) behind the selection, in list
+  /// order. Stale keys (row filtered out since) are ignored.
+  List<Map<String, dynamic>> selectedRows(
+    List<Map<String, dynamic>> rows,
+  ) => [
+    for (final r in rows)
+      if (selectedIds.contains(thRowKey(r))) r,
+  ];
 
   void setPage(int p) => setState(() => page = p);
   void nextPage() => setState(() => page++);
   void prevPage() => setState(() => page--);
+
+  void setPageSize(int size) {
+    if (size <= 0 || size == pageSize) return;
+    setState(() {
+      pageSize = size;
+      resetPage();
+    });
+  }
 
   List<Map<String, dynamic>> buildRows(
     List<Map<String, dynamic>> history,
@@ -201,7 +270,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
     final chemOptions = thBuildChemicalOptions(state.log);
     final sorted = buildRows(state.rows, state.log);
     final summary = thBuildSummary(sorted);
-    final paged = thPagination(sorted, page);
+    final paged = thPagination(sorted, page, pageSize);
     final chips = thBuildChips(
       filterMode: filterMode,
       specificDate: specificDate,

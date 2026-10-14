@@ -1,5 +1,6 @@
 import 'package:equatable/equatable.dart';
 
+import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_format.dart';
 import 'qc_enums.dart';
@@ -115,13 +116,22 @@ class QcGoal extends Equatable {
   /// when it may not. The form layer turns the message into a field error.
   String get completionBlocker {
     if (!isOpenState && status != QcGoalStatus.completed) {
-      return 'Goal is not in an open state';
+      return AppText.t('الهدف ليس في حالة مفتوحة', 'Goal is not in an open state');
     }
-    if (completedBy.trim().isEmpty) return 'A finisher ID is required';
-    if (completedByName.trim().isEmpty) return 'A finisher name is required';
-    if (completedAt.trim().isEmpty) return 'A completion date is required';
+    if (completedBy.trim().isEmpty) {
+      return AppText.t('معرّف المنجز مطلوب', 'A finisher ID is required');
+    }
+    if (completedByName.trim().isEmpty) {
+      return AppText.t('اسم المنجز مطلوب', 'A finisher name is required');
+    }
+    if (completedAt.trim().isEmpty) {
+      return AppText.t('تاريخ الإنجاز مطلوب', 'A completion date is required');
+    }
     if (needsEvidence && !hasCompletionEvidence) {
-      return 'Evidence is required for a critical goal';
+      return AppText.t(
+        'الدليل مطلوب للهدف الحرج',
+        'Evidence is required for a critical goal',
+      );
     }
     return '';
   }

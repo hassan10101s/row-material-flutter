@@ -155,4 +155,95 @@ void main() {
     expect(updated['version'], 4);
     expect(created['version'], 1, reason: 'a create starts the version at 1');
   });
+
+  group('derived artifacts are never synced', () {
+    /// Fails on any non-scalar leaf (a blob that slipped into the payload).
+    /// JSON itself only carries num/String/bool/null/List/Map; anything else
+    /// is a locally-generated object (Timestamp, Uint8List, PDF bytes).
+    void expectScalarLeaves(Object? value, String path) {
+      if (value == null || value is num || value is bool || value is String) {
+        return;
+      }
+      if (value is List) {
+        for (var i = 0; i < value.length; i++) {
+          expectScalarLeaves(value[i], '$path[$i]');
+        }
+        return;
+      }
+      if (value is Map) {
+        for (final entry in value.entries) {
+          expectScalarLeaves(entry.value, '$path.${entry.key}');
+        }
+        return;
+      }
+      fail('non-scalar payload leaf at $path: ${value.runtimeType}');
+    }
+
+    test('a sample never carries reportHtml, even with a huge stored report',
+        () {
+      final entity = SyncEntity.byType('sample')!;
+      final bigHtml =
+          '<!DOCTYPE html><html><body>' '${'x' * 200000}' '</body></html>';
+      final payload = buildRemotePayload(
+        entity,
+        {
+          'id': 11,
+          'entry_code': 'QC-7',
+          'decision_status': 'APPROVED',
+          'report_html': bigHtml,
+          'last_pdf_path': '/data/data/pkg/files/MaterialLab/r.pdf',
+          'created_at': '2026-01-02T03:04:05.000Z',
+          'created_by': null,
+          'deleted_at': null,
+          'version': 4,
+        },
+        ctx,
+        asCreate: false,
+      );
+
+      expect(payload.containsKey('reportHtml'), isFalse,
+          reason: 'rendered HTML is rebuilt locally, never uploaded');
+      expect(payload.containsKey('report_html'), isFalse);
+      final encoded = payload.toString();
+      expect(encoded, isNot(contains('<html')),
+          reason: 'no HTML fragment may leak under any key');
+      expect(encoded, isNot(contains('data:image')),
+          reason: 'no embedded base64 image may leak');
+      expect(encoded, isNot(contains('/data/data/')),
+          reason: 'no local file path may leak');
+      // 200 kB of HTML in, bytes out must stay tiny: business data only.
+      expect(encoded.length, lessThan(10000));
+      expectScalarLeaves(payload, 'sample');
+    });
+
+    test('no entity payload carries html paths or non-scalar leaves', () {
+      for (final entity in syncEntities) {
+        final payload = buildRemotePayload(
+          entity,
+          {
+            'id': 11,
+            'report_html': '<html>leak</html>',
+            'last_pdf_path': '/tmp/leak.pdf',
+            'created_at': '2026-01-02T03:04:05.000Z',
+            'created_by': null,
+            'deleted_at': null,
+            'version': 4,
+          },
+          ctx,
+          asCreate: false,
+        );
+        for (final key in payload.keys) {
+          final lower = key.toLowerCase();
+          expect(lower.contains('html'), isFalse,
+              reason: '${entity.type} leaked derived key $key');
+          expect(lower.contains('pdf'), isFalse,
+              reason: '${entity.type} leaked file key $key');
+        }
+        // Catches the nested labConfig `payload` string as well.
+        expect(payload.toString(), isNot(contains('<html>')),
+            reason: '${entity.type} leaked HTML content');
+        expectScalarLeaves(payload, entity.type);
+      }
+    });
+  });
 }

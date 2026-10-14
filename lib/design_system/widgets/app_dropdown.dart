@@ -38,6 +38,7 @@ class AppDropdown<T> extends StatelessWidget {
     this.errorText,
     this.isDense = true,
     this.missingLabel,
+    this.menuMaxHeight = 320,
   });
 
   final T? value;
@@ -47,6 +48,12 @@ class AppDropdown<T> extends StatelessWidget {
   final String? hintText;
   final String? errorText;
   final bool isDense;
+
+  /// Cap for the open menu height. Without it a long option list (hundreds of
+  /// materials) builds a menu taller than the window and the framework throws
+  /// `menuLimits.top + menuLimits.height <= size.height` in
+  /// `_DropdownMenuRouteLayout.getPositionForChild`, killing the app in debug.
+  final double menuMaxHeight;
 
   /// Label for the synthetic option shown for a dangling [value].
   final String Function(T missing)? missingLabel;
@@ -83,6 +90,7 @@ class AppDropdown<T> extends StatelessWidget {
       initialValue: value,
       isDense: isDense,
       isExpanded: true,
+      menuMaxHeight: menuMaxHeight,
       decoration: InputDecoration(
         isDense: isDense,
         labelText: labelText,

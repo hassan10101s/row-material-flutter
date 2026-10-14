@@ -10,6 +10,7 @@ import 'app_adaptive.dart';
 import 'app_card.dart';
 import 'app_empty_state.dart';
 import 'app_paginated_table.dart';
+import 'app_page_size.dart';
 
 /// One row, described once, for both experiences.
 ///
@@ -45,13 +46,15 @@ class AppAdaptiveDataView extends StatefulWidget {
     required this.headers,
     required this.rows,
     this.onRowTap,
-    this.rowsPerPage = 10,
+    this.rowsPerPage = kDefaultPageSize,
     this.columnFlex,
     this.empty,
     this.totalLabel,
     this.loading = false,
     this.headerTrailing,
     this.cardsOnly = false,
+    this.onPageSizeChanged,
+    this.pageSizeOptions = kPageSizeOptions,
   });
 
   final List<String> headers;
@@ -66,6 +69,9 @@ class AppAdaptiveDataView extends StatefulWidget {
 
   /// Cards on desktop too — the table variant is skipped.
   final bool cardsOnly;
+
+  final Future<void> Function(int pageSize)? onPageSizeChanged;
+  final List<int> pageSizeOptions;
 
   @override
   State<AppAdaptiveDataView> createState() => _AppAdaptiveDataViewState();
@@ -91,6 +97,8 @@ class _AppAdaptiveDataViewState extends State<AppAdaptiveDataView> {
       ],
       onRowTap: widget.onRowTap,
       rowsPerPage: widget.rowsPerPage,
+      onPageSizeChanged: widget.onPageSizeChanged,
+      pageSizeOptions: widget.pageSizeOptions,
       columnFlex: widget.columnFlex,
       empty: widget.empty,
       totalLabel: widget.totalLabel,

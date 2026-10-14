@@ -12,11 +12,9 @@ import 'package:material_lab/core/sync/device_registry.dart';
 import 'package:material_lab/core/sync/pull_worker.dart';
 import 'package:material_lab/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
-import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_engine.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
-import 'package:material_lab/features/auth/domain/user.dart';
 import 'package:material_lab/features/inspections/data/inspection_repo.dart';
 import 'package:material_lab/features/inspections/data/offline_first_inspection_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
@@ -54,20 +52,20 @@ class _Device {
   SessionSource get source => SessionSource.empty(() => session);
 
   PushWorker pusher(InMemoryDataSource remote) => PushWorker(
-        queue: queue,
-        metadata: metadata,
-        remote: remote,
-        audit: audit,
-        source: source,
-      );
+    queue: queue,
+    metadata: metadata,
+    remote: remote,
+    audit: audit,
+    source: source,
+  );
 
   PullWorker puller(InMemoryDataSource remote) => PullWorker(
-        queue: queue,
-        metadata: metadata,
-        remote: remote,
-        conflicts: ConflictResolver(queue: queue, remote: remote),
-        source: source,
-      );
+    queue: queue,
+    metadata: metadata,
+    remote: remote,
+    conflicts: ConflictResolver(queue: queue, remote: remote),
+    source: source,
+  );
 
   SyncEngine engine(
     InMemoryDataSource remote, {
@@ -77,8 +75,9 @@ class _Device {
   }) {
     // ignore: avoid_redundant_argument_values
     when(() => connectivity.isOnline).thenReturn(online);
-    when(() => connectivity.onStatusChange)
-        .thenAnswer((_) => const Stream<bool>.empty());
+    when(
+      () => connectivity.onStatusChange,
+    ).thenAnswer((_) => const Stream<bool>.empty());
     final devices = DeviceRegistry(
       remote: remote,
       metadata: metadata,
@@ -99,19 +98,17 @@ class _Device {
   }
 
   OfflineFirstInspectionRepository repo() => OfflineFirstInspectionRepository(
-        dbHelper: fixture.helper,
-        referenceRepo: ReferenceRepo(
-          dbHelper: fixture.helper,
-          deviceTagProvider:
-              deviceTag == null ? null : () async => deviceTag!,
-        ),
-        guard: _LiveGuard(this),
-        queue: queue,
-        audit: audit,
-      );
+    dbHelper: fixture.helper,
+    referenceRepo: ReferenceRepo(
+      dbHelper: fixture.helper,
+      deviceTagProvider: deviceTag == null ? null : () async => deviceTag!,
+    ),
+    guard: _LiveGuard(this),
+    queue: queue,
+    audit: audit,
+  );
 
-  Future<List<Map<String, Object?>>> rows() =>
-      fixture.db.query('inspections');
+  Future<List<Map<String, Object?>>> rows() => fixture.db.query('inspections');
 
   Future<List<Map<String, Object?>>> conflicts() =>
       fixture.db.query('sync_conflicts', where: 'resolution IS NULL');
@@ -153,14 +150,14 @@ void main() {
   late InMemoryDataSource remote;
 
   AppSession sessionFor(String deviceId) => AppSession(
-        uid: 'uid_$deviceId',
-        email: '$deviceId@material-lab.test',
-        organizationId: orgId,
-        memberId: 'member_$deviceId',
-        role: AppRoles.admin,
-        status: 'active',
-        deviceId: deviceId,
-      );
+    uid: 'uid_$deviceId',
+    email: '$deviceId@material-lab.test',
+    organizationId: orgId,
+    memberId: 'member_$deviceId',
+    role: AppRoles.admin,
+    status: 'active',
+    deviceId: deviceId,
+  );
 
   setUp(() async {
     final a = await openSyncFixture();
@@ -180,15 +177,15 @@ void main() {
   });
 
   Map<String, dynamic> payload({String supplier = 'Cement Supplier Co'}) => {
-        'material_id': 1,
-        'inspection_date': '2026-09-01',
-        'supplier': supplier,
-        'sample_taken_by': 'Mohamed Ali',
-        'quantity': '10',
-        'sample_names': ['S1'],
-        'physical_results': {'color': 'good'},
-        'decision_status': 'APPROVED',
-      };
+    'material_id': 1,
+    'inspection_date': '2026-09-01',
+    'supplier': supplier,
+    'sample_taken_by': 'Mohamed Ali',
+    'quantity': '10',
+    'sample_names': ['S1'],
+    'physical_results': {'color': 'good'},
+    'decision_status': 'APPROVED',
+  };
 
   const user = UserContext(id: 1, fullName: 'Ahmed Ali', role: 'admin');
 
@@ -231,8 +228,11 @@ void main() {
       expect(pushedA.conflicts, 0);
       final pushedB = await phone.pusher(remote).runOnce();
       expect(pushedB.failed, 0);
-      expect(pushedB.conflicts, 0,
-          reason: 'no version race: different documents');
+      expect(
+        pushedB.conflicts,
+        0,
+        reason: 'no version race: different documents',
+      );
 
       await laptop.puller(remote).runOnce();
       await phone.puller(remote).runOnce();
@@ -243,8 +243,11 @@ void main() {
         final codes = {for (final r in rows) '${r['entry_code']}'};
         expect(codes, {codeA, codeB});
         expect(await device.queue.countPending(), 0);
-        expect(await device.conflicts(), isEmpty,
-            reason: 'nobody taps anything');
+        expect(
+          await device.conflicts(),
+          isEmpty,
+          reason: 'nobody taps anything',
+        );
       }
     },
   );
@@ -258,34 +261,32 @@ void main() {
       await phone.puller(remote).runOnce();
 
       // Device A edits and pushes first (remote v2).
-      await laptop.repo().update(
-        created['id'] as int,
-        {...payload(), 'supplier': 'Supplier A edit'},
-        user,
-      );
+      await laptop.repo().update(created['id'] as int, {
+        ...payload(),
+        'supplier': 'Supplier A edit',
+      }, user);
       final pushedA = await laptop.pusher(remote).runOnce();
       expect(pushedA.conflicts, 0);
 
       // Device B edited from v1 without seeing v2: a version race that used
       // to park a manual conflict row.
       final phoneRow = (await phone.rows()).single;
-      await phone.repo().update(
-        (phoneRow['id'] as num).toInt(),
-        {...payload(), 'supplier': 'Supplier B edit'},
-        user,
-      );
+      await phone.repo().update((phoneRow['id'] as num).toInt(), {
+        ...payload(),
+        'supplier': 'Supplier B edit',
+      }, user);
       final pushedB = await phone.pusher(remote).runOnce();
       expect(pushedB.failed, 0);
-      expect(pushedB.conflicts, 0,
-          reason: 'the race rebases itself, no tap');
+      expect(pushedB.conflicts, 0, reason: 'the race rebases itself, no tap');
       expect(pushedB.pushed, greaterThanOrEqualTo(1));
 
       // B edited strictly later, so B wins everywhere after one pull each.
       await laptop.puller(remote).runOnce();
       await phone.puller(remote).runOnce();
       for (final device in [laptop, phone]) {
-        final row = (await device.rows())
-            .singleWhere((r) => '${r['entry_code']}' == code);
+        final row = (await device.rows()).singleWhere(
+          (r) => '${r['entry_code']}' == code,
+        );
         expect(row['supplier'], 'Supplier B edit');
         expect((row['remote_version'] as num).toInt(), 3);
         expect(await device.conflicts(), isEmpty);
@@ -304,12 +305,15 @@ void main() {
 
       // The 60-minute timer cannot be what moves this: only the debounced
       // post-mutation hook fires.
-      await waitFor(() async =>
-          remote.documents.keys.any((k) => k.startsWith('$orgId/samples/')));
+      await waitFor(
+        () async =>
+            remote.documents.keys.any((k) => k.startsWith('$orgId/samples/')),
+      );
       await waitFor(() async => (await laptop.queue.countPending()) == 0);
 
-      final key = remote.documents.keys
-          .singleWhere((k) => k.startsWith('$orgId/samples/'));
+      final key = remote.documents.keys.singleWhere(
+        (k) => k.startsWith('$orgId/samples/'),
+      );
       expect((remote.documents[key]!['version'] as num).toInt(), 1);
       expect(await laptop.conflicts(), isEmpty);
     },

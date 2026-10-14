@@ -11,8 +11,10 @@ import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback_export.dart';
+import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
+import '../../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../../design_system/widgets/app_page_header.dart';
@@ -22,6 +24,7 @@ import '../../../../../design_system/widgets/app_status_badge.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
 import '../widgets/bulk_export.dart';
+import '../widgets/inspection_filters.dart';
 import '../../../../reference/domain/reference_repository.dart';
 import '../../../../reports/domain/report_repository.dart';
 import '../../../../lab/domain/lab_result_repository.dart';
@@ -113,6 +116,139 @@ class DesktopInspectionsScreen extends StatelessWidget {
     }
   }
 
+  /// Filter dialog (same UX as the lab test-history table): material/product
+  /// + status + date period drafts applied on "Apply", discarded on
+  /// cancel/dismiss.
+  Future<void> _openFilterDialog(BuildContext context) async {
+    final cubit = context.read<InspectionsCubit>();
+    final isProduct = cubit.isProduct;
+    final materialOptions = await loadInspectionMaterialOptions(
+      ref: getIt<ReferenceRepository>(),
+      isProduct: isProduct,
+    );
+    if (!context.mounted) return;
+    var dStatus = cubit.state.status;
+    var dFrom = cubit.state.dateFrom;
+    var dTo = cubit.state.dateTo;
+    int? dMaterial = cubit.state.materialId;
+
+    await showAppWindow<void>(
+      context,
+      title: AppText.t('الفلاتر', 'Filters'),
+      icon: Icons.filter_alt_outlined,
+      maxWidth: 640,
+      scrollBody: false,
+      child: StatefulBuilder(
+        builder: (dialogContext, setDraft) {
+          Future<void> pickDate(bool isFrom) async {
+            final now = DateTime.now();
+            final initial = parseIsoDate(isFrom ? dFrom : dTo) ?? now;
+            final picked = await showDatePicker(
+              context: dialogContext,
+              initialDate: initial,
+              firstDate: DateTime(now.year - 20),
+              lastDate: DateTime(now.year + 1),
+            );
+            if (picked == null || !dialogContext.mounted) return;
+            final iso = inspectionDayIso(picked);
+            setDraft(() {
+              if (isFrom) {
+                dFrom = iso;
+                if (dTo.isNotEmpty && dTo.compareTo(iso) < 0) dTo = iso;
+              } else {
+                dTo = iso;
+                if (dFrom.isNotEmpty && dFrom.compareTo(iso) > 0) dFrom = iso;
+              }
+            });
+          }
+
+          return Column(
+            children: [
+              Expanded(
+                child: SingleChildScrollView(
+                  child: InspectionFilterGrid(
+                    isProduct: isProduct,
+                    status: dStatus,
+                    dateFrom: dFrom,
+                    dateTo: dTo,
+                    onStatus: (v) => setDraft(() => dStatus = v),
+                    onFrom: (v) => setDraft(() => dFrom = v),
+                    onTo: (v) => setDraft(() => dTo = v),
+                    onPickDate: pickDate,
+                    materialLabel: isProduct
+                        ? AppText.t('المنتج', 'Product')
+                        : AppText.t('الخامة', 'Material'),
+                    materialOptions: materialOptions,
+                    selectedMaterialId: dMaterial,
+                    onMaterial: (v) => setDraft(() => dMaterial = v),
+                  ),
+                ),
+              ),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.sm,
+                  AppSpacing.lg,
+                  AppSpacing.md,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSoft,
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(AppRadii.sm),
+                  ),
+                  border: Border(top: BorderSide(color: AppColors.borderMuted)),
+                ),
+                child: Row(
+                  children: [
+                    AppButton(
+                      label: AppText.t('مسح الكل', 'Clear all'),
+                      style: AppButtonStyle.ghost,
+                      small: true,
+                      onPressed: () => setDraft(() {
+                        dStatus = '';
+                        dFrom = '';
+                        dTo = '';
+                        dMaterial = null;
+                      }),
+                    ),
+                    const Spacer(),
+                    AppButton(
+                      label: AppText.t('إلغاء', 'Cancel'),
+                      style: AppButtonStyle.secondary,
+                      small: true,
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                    ),
+                    const SizedBox(width: 8),
+                    AppButton(
+                      label: AppText.t('تطبيق', 'Apply'),
+                      style: AppButtonStyle.primary,
+                      small: true,
+                      onPressed: () {
+                        cubit.applyFilters(
+                          status: dStatus,
+                          dateFrom: dFrom,
+                          dateTo: dTo,
+                          materialId: dMaterial,
+                          materialName: inspectionMaterialNameFor(
+                            materialOptions,
+                            dMaterial,
+                            cubit.state.materialName,
+                          ),
+                        );
+                        Navigator.of(dialogContext).pop();
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _exportFollowUp(BuildContext context) async {
     try {
       final path = await context.read<InspectionsCubit>().exportFollowUp();
@@ -169,17 +305,14 @@ class DesktopInspectionsScreen extends StatelessWidget {
     final canCreate = user?.canCreateInspection ?? false;
     // Bulk-export selection (Vue register parity): ids of this page plus
     // the tristate for the header checkbox.
-    final pageIds = [
-      for (final r in state.visible) (r['id'] as num).toInt(),
-    ];
+    final pageIds = [for (final r in state.visible) (r['id'] as num).toInt()];
     final selectedCount = state.selectedIds.length;
-    final selectedOnPage =
-        pageIds.where(state.selectedIds.contains).length;
+    final selectedOnPage = pageIds.where(state.selectedIds.contains).length;
     final bool? selectAllValue = pageIds.isEmpty || selectedOnPage == 0
         ? false
         : selectedOnPage == pageIds.length
-            ? true
-            : null;
+        ? true
+        : null;
     final selectedIndices = <int>{
       for (var i = 0; i < pageIds.length; i++)
         if (state.selectedIds.contains(pageIds[i])) i,
@@ -191,50 +324,40 @@ class DesktopInspectionsScreen extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppPageHeader(
-              title: isProduct
-                  ? AppText.t('فحص المنتجات', 'Product inspections')
-                  : AppStrings.inspections,
-              subtitle:
-                  '${state.total} ${AppText.t('فحص', 'inspections')}',
-              icon: isProduct
-                  ? Icons.factory_outlined
-                  : Icons.inventory_2_outlined,
-              actions: [
-                if (canCreate)
-                  AppButton(
-                    icon: Icon(Icons.add, size: 18.r),
-                    label: isProduct
-                        ? AppText.t(
-                            'فحص منتج جديد', 'New product inspection')
-                        : AppStrings.newInspection,
-                    onPressed: () => _newInspection(context),
-                  ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
+            // Title lives in the shell topbar on desktop; search and every
+            // action share one row so no vertical space is wasted.
             AppFilterBar(
               searchLabel: AppText.t('بحث', 'Search'),
               onSearch: (v) => cubit.setQuery(v),
+              trailing: canCreate
+                  ? AppButton(
+                      icon: Icon(Icons.add, size: 18.r),
+                      label: isProduct
+                          ? AppText.t('فحص منتج جديد', 'New product inspection')
+                          : AppStrings.newInspection,
+                      onPressed: () => _newInspection(context),
+                    )
+                  : null,
               filters: [
+                InspectionFilterButton(
+                  activeCount: inspectionActiveFilterCount(state),
+                  onPressed: () => _openFilterDialog(context),
+                ),
                 ConstrainedBox(
-                  constraints:
-                      const BoxConstraints(minWidth: 200, maxWidth: 260),
-                  child: DropdownButtonFormField<String>(
-                    initialValue: state.status,
-                    isExpanded: true,
-                    decoration: InputDecoration(
-                      labelText: AppText.t('الحالة', 'Status'),
-                      isDense: true,
-                    ),
+                  constraints: const BoxConstraints(
+                    minWidth: 200,
+                    maxWidth: 260,
+                  ),
+                  child: AppDropdown<String>(
+                    value: state.status,
+                    labelText: AppText.t('الحالة', 'Status'),
                     items: [
-                      DropdownMenuItem(
+                      AppDropdownItem(
                         value: '',
-                        child: Text(AppText.t('الكل', 'All')),
+                        label: AppText.t('الكل', 'All'),
                       ),
                       for (final s in _allStatuses)
-                        DropdownMenuItem(
-                            value: s, child: Text(statusLabel(s))),
+                        AppDropdownItem(value: s, label: statusLabel(s)),
                     ],
                     onChanged: (v) => cubit.setStatus(v ?? ''),
                   ),
@@ -248,25 +371,25 @@ class DesktopInspectionsScreen extends StatelessWidget {
                       ? null
                       : () => _exportFollowUp(context),
                 ),
-                if (!kIsWeb &&
-                    defaultTargetPlatform == TargetPlatform.android)
+                if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
                   AppButton(
-                    icon: Icon(
-                      Icons.qr_code_scanner_outlined,
-                      size: 18.r,
-                    ),
+                    icon: Icon(Icons.qr_code_scanner_outlined, size: 18.r),
                     label: AppText.t('مسح رمز', 'Scan QR'),
                     style: AppButtonStyle.secondary,
-                    onPressed: () => Navigator.of(context).push(
-                      AppPageRoute(
-                        builder: (_) => const QrScanScreen(),
-                      ),
-                    ),
+                    onPressed: () => Navigator.of(
+                      context,
+                    ).push(AppPageRoute(builder: (_) => const QrScanScreen())),
                   ),
               ],
             ),
+            InspectionFilterChips(
+              chips: inspectionFilterChips(state, isProduct: isProduct),
+              onClearChip: (key) => cubit.clearChip(key),
+              onClearAll: () => cubit.clearFilters(),
+            ),
             const SizedBox(height: AppSpacing.md),
-            if (state.loading && state.visible.isNotEmpty) const AppRefreshBar(),
+            if (state.loading && state.visible.isNotEmpty)
+              const AppRefreshBar(),
             if (state.loading && state.visible.isEmpty) ...[
               const AppSkeletonList(rows: 8, lines: 5, height: 460),
             ] else if (state.visible.isEmpty) ...[
@@ -275,11 +398,15 @@ class DesktopInspectionsScreen extends StatelessWidget {
                     ? Icons.factory_outlined
                     : Icons.inventory_2_outlined,
                 title: isProduct
-                    ? AppText.t('لا توجد فحوصات منتجات', 'No product inspections')
+                    ? AppText.t(
+                        'لا توجد فحوصات منتجات',
+                        'No product inspections',
+                      )
                     : AppText.t('لا توجد فحوصات', 'No inspections'),
                 subtitle: AppText.t(
-                    'ابدأ بفحص جديد أو عدّل معايير البحث.',
-                    'Start a new inspection or adjust the search.'),
+                  'ابدأ بفحص جديد أو عدّل معايير البحث.',
+                  'Start a new inspection or adjust the search.',
+                ),
               ),
             ] else ...[
               if (selectedCount > 0) ...[
@@ -287,19 +414,24 @@ class DesktopInspectionsScreen extends StatelessWidget {
                   selectedCount: selectedCount,
                   onExportReports: () => exportSelectedReports(context),
                   onExportLabels: () => exportSelectedLabels(context),
+                  onExportTable: () => exportSelectedTable(context),
                   onClear: cubit.clearSelection,
                 ),
                 const SizedBox(height: AppSpacing.md),
               ],
               AppPaginatedTable(
-                columnFlex: const [1.0, 1.15, 2.6, 1.8, 0.95, 1.25, 1.4],
+                // Products carry no header decision: no decision column.
+                columnFlex: isProduct
+                    ? const [1.0, 1.15, 2.6, 1.8, 0.95, 1.4]
+                    : const [1.0, 1.15, 2.6, 1.8, 0.95, 1.25, 1.4],
                 rowsPerPage: state.pageSize,
                 total: state.total,
                 page: state.page,
                 onPageChanged: cubit.setPage,
+                onPageSizeChanged: cubit.setPageSize,
                 selectedIndices: selectedIndices,
-                onToggleIndex: (index) =>
-                    cubit.toggleSelect(pageIds[index]),
+                selectHidden: true,
+                onToggleIndex: (index) => cubit.toggleSelect(pageIds[index]),
                 selectAllValue: selectAllValue,
                 onToggleAll: (select) =>
                     cubit.setPageSelection(pageIds, select ?? false),
@@ -313,7 +445,7 @@ class DesktopInspectionsScreen extends StatelessWidget {
                       ? AppText.t('التشغيلة', 'Batch')
                       : AppText.t('المورد', 'Supplier'),
                   AppText.t('الكمية', 'Qty'),
-                  AppText.t('القرار', 'Decision'),
+                  if (!isProduct) AppText.t('القرار', 'Decision'),
                   '',
                 ],
                 rows: [
@@ -344,24 +476,30 @@ class DesktopInspectionsScreen extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
-                      AppStatusBadge('${r['decision_status']}'),
+                      // Products carry no header decision (per-sample only).
+                      if (!isProduct) AppStatusBadge('${r['decision_status']}'),
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          IconButton(
-                            tooltip: AppText.t('تحديث القرار', 'Decision'),
-                            icon: Icon(Icons.gavel_outlined, size: 18.r),
-                            onPressed: () => _openDecision(context, r),
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 36,
-                              minHeight: 36,
+                          // Decision editing is raw-only.
+                          if (!isProduct)
+                            IconButton(
+                              tooltip: AppText.t('تحديث القرار', 'Decision'),
+                              icon: Icon(Icons.gavel_outlined, size: 18.r),
+                              onPressed: () => _openDecision(context, r),
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
                             ),
-                          ),
                           IconButton(
                             tooltip: AppText.t('تصدير PDF', 'PDF'),
-                            icon: Icon(Icons.picture_as_pdf_outlined, size: 18.r),
+                            icon: Icon(
+                              Icons.picture_as_pdf_outlined,
+                              size: 18.r,
+                            ),
                             onPressed: () => _exportOne(context, r, 'report'),
                             visualDensity: VisualDensity.compact,
                             padding: EdgeInsets.zero,

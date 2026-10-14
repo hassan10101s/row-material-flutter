@@ -7,6 +7,16 @@ import 'package:path/path.dart' as p;
 import 'seal_codec.dart';
 
 /// Port of core/utils.py load_or_create_local_secret.
+///
+/// Security notes (desktop best-practice):
+/// - This pepper/QR-seal key is a *local* secret, not a user credential. On
+///   Windows (MSIX + plain EXE) it lives at `%APPDATA%\MaterialLab\.secret`.
+///   OS-level ACLs of `%APPDATA%` already restrict it to the current user;
+///   DPAPI-encryption would require an async plugin at every sync-codec call,
+///   so the file stays plaintext by design (same as the Python port).
+/// - Writes are atomic (temp + rename) so a crash/AV lock never leaves a
+///   half-written secret. A corrupt file falls back to sha256-of-bytes, then
+///   to a fresh 32-byte secret — matching the Python recreate behaviour.
 class LocalSecret {
   LocalSecret(this._directory);
 
@@ -35,7 +45,21 @@ class LocalSecret {
       } catch (_) {}
     }
     final secret = secureRandomBytes(32);
-    await file.writeAsString(b64UrlNoPad(secret), flush: true);
+    // Atomic write: temp + rename so a killed process never leaves a truncated
+    // `.secret` (which would silently re-key every QR seal on next boot).
+    final tmp = File('$filePath.tmp-${DateTime.now().microsecondsSinceEpoch}');
+    await tmp.writeAsString(b64UrlNoPad(secret), flush: true);
+    try {
+      await tmp.rename(filePath);
+    } catch (_) {
+      // Cross-volume or locked (AV): copy fallback, best effort.
+      try {
+        await tmp.copy(filePath);
+        await tmp.delete();
+      } catch (_) {
+        await file.writeAsString(b64UrlNoPad(secret), flush: true);
+      }
+    }
     return secret;
   }
 

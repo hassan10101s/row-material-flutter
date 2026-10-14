@@ -141,7 +141,9 @@ void main() {
     expect(controller_.pageCount, 3);
     expect(controller_.hasNext, isTrue);
     expect(controller_.hasPrevious, isFalse);
-    expect(find.text('Page 1 / 3 · 5'), findsOneWidget);
+    // The table footer (design-system pager) shows the same state.
+    expect(find.text('2 of 5'), findsOneWidget);
+    expect(find.text('1 of 3'), findsOneWidget);
 
     await controller_.nextPage();
     await tester.pump();

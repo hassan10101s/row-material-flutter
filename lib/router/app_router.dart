@@ -14,10 +14,9 @@ import '../core/sync/sync_metadata.dart';
 import '../core/sync/sync_queue.dart';
 import '../core/theme/theme_service.dart';
 import '../design_system/animations/app_animations.dart';
+import '../design_system/widgets/app_page_size.dart' show kMobileMaxPageSize;
 import '../di/platform_ports.dart';
 import '../di/service_locator.dart';
-import '../features/audit/presentation/audit_controller.dart';
-import '../features/audit/presentation/audit/audit_screen.dart';
 import '../features/auth/domain/auth_repository.dart';
 import '../features/auth/presentation/cubit/create_organization_cubit.dart';
 import '../features/auth/presentation/cubit/login_cubit.dart';
@@ -78,7 +77,6 @@ abstract final class AppRoutes {
   static const String settings = '/settings';
   static const String members = '/members';
   static const String sync = '/sync';
-  static const String audit = '/audit';
 
   /// QC Manager (plan V6_ENHANCED §22.7, §12.2).
   static const String qcNcr = '/qc-ncr';
@@ -227,6 +225,10 @@ class AppRouter {
                     create: (c) => InspectionsCubit(
                       repo: getIt<InspectionRepository>(),
                       reports: getIt<ReportRepository>(),
+                      // Phones page through cards, not a table: cap at 50.
+                      initialPageSize: FormFactor.current.isMobile
+                          ? kMobileMaxPageSize
+                          : 200,
                     )..load(),
                   ),
                   BlocProvider(
@@ -234,7 +236,10 @@ class AppRouter {
                         ReportsCubit(repo: getIt<ReportRepository>()),
                   ),
                 ],
-                child: const InspectionCenterScreen(),
+                // `?highlight=<localId>` from a notification tap.
+                child: InspectionCenterScreen(
+                  highlightId: s.uri.queryParameters['highlight'],
+                ),
               ),
             ),
           ),
@@ -248,6 +253,10 @@ class AppRouter {
                     create: (c) => InspectionsCubit(
                       repo: getIt<InspectionRepository>(),
                       reports: getIt<ReportRepository>(),
+                      // Same mobile cap as the inspections route above.
+                      initialPageSize: FormFactor.current.isMobile
+                          ? kMobileMaxPageSize
+                          : 200,
                     )..load(),
                   ),
                   BlocProvider(
@@ -263,10 +272,18 @@ class AppRouter {
             path: AppRoutes.lab,
             pageBuilder: (c, s) => AppPage<LabScreen>(
               name: s.uri.path,
-              builder: (c) => BlocProvider(
-                create: (c) => LabCubit(),
-                child: const LabScreen(),
-              ),
+              // `?tab=0&highlight=<localId>` from a notification tap:
+              // test-history tab + banner. Unknown tab values fall back to 0.
+              builder: (c) {
+                final tab =
+                    int.tryParse(s.uri.queryParameters['tab'] ?? '0') ?? 0;
+                return BlocProvider(
+                  create: (c) => LabCubit()..setTab(tab.clamp(0, 5)),
+                  child: LabScreen(
+                    highlightId: s.uri.queryParameters['highlight'],
+                  ),
+                );
+              },
             ),
           ),
           GoRoute(
@@ -288,13 +305,6 @@ class AppRouter {
             pageBuilder: (c, s) => AppPage<SyncScreen>(
               name: s.uri.path,
               builder: (c) => const SyncScreen(),
-            ),
-          ),
-          GoRoute(
-            path: AppRoutes.audit,
-            pageBuilder: (c, s) => AppPage<AuditScreen>(
-              name: s.uri.path,
-              builder: (c) => AuditScreen(controller: getIt<AuditController>()),
             ),
           ),
           GoRoute(
@@ -496,12 +506,6 @@ class AppRouter {
     switch (path) {
       case AppRoutes.members:
         if (!session.permissions.contains(Permission.usersRead)) {
-          return AppRoutes.dashboard;
-        }
-      case AppRoutes.audit:
-        // The audit trail is synced down from `auditLogs`; without the
-        // permission there is nothing to show.
-        if (!session.permissions.contains(Permission.auditRead)) {
           return AppRoutes.dashboard;
         }
       case AppRoutes.settings:

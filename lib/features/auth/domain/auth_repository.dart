@@ -47,6 +47,16 @@ abstract interface class AuthRepository {
   /// Open the browser and sign in with Google. Throws [AuthFailure].
   Future<void> signInWithGoogle();
 
+  Future<void> signInWithEmail({
+    required String email,
+    required String password,
+  });
+
+  Future<void> createPasswordAccount({
+    required String email,
+    required String password,
+  });
+
   /// Restore a session: Firebase when online, the encrypted cache when not.
   Future<AuthState> restoreSession();
 

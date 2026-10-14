@@ -6,13 +6,13 @@ import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
-import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
-import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../../design_system/export/table_html_export.dart';
 import '../../cubit/products_cubit.dart';
 import '../../cubit/products_state.dart';
 import 'product_editor.dart';
@@ -31,10 +31,8 @@ class DesktopProductsTab extends StatelessWidget {
     final cubit = context.read<ProductsCubit>();
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => DesktopProductEditor(
-        productsCubit: cubit,
-        product: product,
-      ),
+      builder: (_) =>
+          DesktopProductEditor(productsCubit: cubit, product: product),
     );
     if (saved != true || !context.mounted) return;
     await context.read<ProductsCubit>().load();
@@ -78,7 +76,17 @@ class DesktopProductsTab extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ProductsHeader(onAdd: () => _openEditor(context)),
+          ProductsHeader(
+            onAdd: () => _openEditor(context),
+            canExport: state.rows.isNotEmpty,
+            onExportTable: () => TableHtmlExport.export(
+              context,
+              filePrefix: 'products',
+              title: ProductsTable.exportTitle(),
+              headers: ProductsTable.exportHeaders(),
+              rows: ProductsTable.exportRows(state.rows),
+            ),
+          ),
           const SizedBox(height: AppSpacing.md),
           if (state.loading && state.rows.isEmpty)
             const AppSkeletonList(rows: 6, lines: 3, height: 380)
@@ -104,59 +112,30 @@ class DesktopProductsTab extends StatelessWidget {
           else ...[
             if (state.loading) const LinearProgressIndicator(),
             Flexible(
-              flex: 5,
-              child: ProductsTable(
-                rows: state.rows,
-                onEdit: (p) => _openEditor(context, p),
-                onDelete: (p) => _delete(context, p),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            if (state.rows.isNotEmpty)
-              Flexible(
-                flex: 3,
-                child: AppCard(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          AppText.t(
-                            'الفحص الظاهري والتحليل الكيميائي',
-                            'Physical & chemical references',
-                          ),
-                          style: TextStyle(
-                            fontSize: 14.spMax,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        for (final p in state.rows)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              bottom: AppSpacing.sm,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${p['name'] ?? ''}',
-                                  style: TextStyle(
-                                    fontSize: 13.spMax,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppColors.primary,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                ProductRefChips(p),
-                              ],
-                            ),
-                          ),
-                      ],
+              flex: 1,
+              child: Column(
+                children: [
+                  Expanded(
+                    child: ProductsTable(
+                      rows: state.rows,
+                      onEdit: (p) => _openEditor(context, p),
+                      onDelete: (p) => _delete(context, p),
                     ),
                   ),
-                ),
+                  AppDesktopLoadMore(
+                    loaded: state.rows.length,
+                    total: state.total,
+                    hasMore: state.hasMore,
+                    loadingMore: state.loadingMore,
+                    errorMore: state.errorMore,
+                    onLoadMore: () =>
+                        context.read<ProductsCubit>().loadMore(),
+                    onRetry: () =>
+                        context.read<ProductsCubit>().loadMore(),
+                  ),
+                ],
               ),
+            ),
           ],
         ],
       ),

@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
@@ -22,7 +23,8 @@ class CreateOrganizationScreen extends StatefulWidget {
   const CreateOrganizationScreen({super.key});
 
   @override
-  State<CreateOrganizationScreen> createState() => _CreateOrganizationScreenState();
+  State<CreateOrganizationScreen> createState() =>
+      _CreateOrganizationScreenState();
 }
 
 class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
@@ -50,7 +52,10 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
       builder: (context, state) {
         final cubit = context.read<CreateOrganizationCubit>();
         final isCreate = state.mode == CreateMode.create;
-        return AppErrorFeedback<CreateOrganizationCubit, CreateOrganizationState>(
+        return AppErrorFeedback<
+          CreateOrganizationCubit,
+          CreateOrganizationState
+        >(
           selector: (s) => s.error,
           child: Scaffold(
             backgroundColor: AppColors.background,
@@ -66,39 +71,68 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Icon(Icons.apartment, size: 44.r, color: AppColors.primary),
+                          Icon(
+                            Icons.apartment,
+                            size: 44.r,
+                            color: AppColors.primary,
+                          ),
                           const SizedBox(height: AppSpacing.md),
                           Text(
-                            isCreate ? 'إنشاء مؤسسة جديدة' : 'لدي دعوة انضمام',
+                            isCreate
+                                ? AppText.t(
+                                    'إنشاء شركة جديدة',
+                                    'Create a new company',
+                                  )
+                                : AppText.t(
+                                    'لدي دعوة انضمام',
+                                    'I have an invite',
+                                  ),
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.headlineSmall,
                           ),
                           const SizedBox(height: AppSpacing.xs),
                           Text(
                             isCreate
-                                ? 'أنشئ مؤسسة وسيتم ربط كل عيّناتها ومختبراتها وحساباتها بها.'
-                                : 'أدخل كود المؤسسة الذي أرسله لك مدير المؤسسة.',
+                                ? AppText.t(
+                                    'أنشئ شركة تجريبية وسيتم ربط كل عيّناتها ومختبراتها وحساباتها بها. الشركة الجديدة تبدأ بحالة تجريبية وصلاحيات محدودة.',
+                                    'Create a trial company; its samples, lab work and accounts will be bound to it. A new company starts in trial status with limited permissions.',
+                                  )
+                                : AppText.t(
+                                    'أدخل كود الشركة الذي أرسله لك مدير الشركة.',
+                                    'Enter the company code your manager sent you.',
+                                  ),
                             textAlign: TextAlign.center,
-                            style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 13.spMax,
+                            ),
                           ),
                           const SizedBox(height: AppSpacing.lg),
                           if (isCreate)
                             AppField(
-                              label: 'اسم المؤسسة',
+                              label: AppText.t('اسم الشركة', 'Company name'),
                               controller: _name,
-                              hint: 'اسم الشركة أو المصنع',
+                              hint: AppText.t(
+                                'اسم الشركة أو المصنع',
+                                'Company or factory name',
+                              ),
                               onChanged: cubit.setName,
                             )
                           else
                             AppField(
-                              label: 'كود المؤسسة',
+                              label: AppText.t('كود الشركة', 'Company code'),
                               controller: _inviteCode,
-                              hint: 'org_…',
+                              hint: AppText.t(
+                                'org_…',
+                                'org_…',
+                              ),
                               onChanged: cubit.setInviteCode,
                             ),
                           const SizedBox(height: AppSpacing.lg),
                           AppButton(
-                            label: isCreate ? 'إنشاء المؤسسة' : 'انضمام بالدعوة',
+                            label: isCreate
+                                ? AppText.t('إنشاء الشركة', 'Create company')
+                                : AppText.t('انضمام بالدعوة', 'Join with invite'),
                             expanded: true,
                             loading: state.busy,
                             onPressed: state.busy ? null : cubit.submit,
@@ -107,8 +141,20 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                           TextButton(
                             onPressed: state.busy
                                 ? null
-                                : () => isCreate ? cubit.useInvite() : cubit.useCreate(),
-                            child: Text(isCreate ? 'لدي دعوة انضمام' : 'إنشاء مؤسسة جديدة'),
+                                : () => isCreate
+                                      ? cubit.useInvite()
+                                      : cubit.useCreate(),
+                            child: Text(
+                              isCreate
+                                  ? AppText.t(
+                                      'لدي دعوة انضمام',
+                                      'I have an invite',
+                                    )
+                                  : AppText.t(
+                                      'إنشاء شركة جديدة',
+                                      'Create a new company',
+                                    ),
+                            ),
                           ),
                         ],
                       ),

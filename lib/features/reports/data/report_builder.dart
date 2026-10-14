@@ -1,8 +1,11 @@
 import 'package:intl/intl.dart';
 
 import '../../lab/core/formula_engine.dart';
+import '../../lab/domain/product_batch_repository.dart'
+    show decodeBatchChemical, decodeBatchPhysical;
 import '../../qc_manager/data/ncr_export_service.dart';
 import '../../reference/data/reference_repo.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/domain/rules.dart';
 import '../../../core/security/qr_builder.dart';
 import '../../../core/services/aggregation.dart';
@@ -13,10 +16,63 @@ import '../../../core/utils/app_format.dart';
 /// rendering. Mirrors the Jinja context dicts so reports stay 1:1.
 
 const List<int> _qrByteCapacityM = [
-  14, 26, 42, 62, 84, 106, 122, 152, 180, 213, 251, 287, 331, 362, 412, 450,
-  504, 560, 624, 666, 711, 779, 857, 911, 997, 1059, 1125, 1190, 1264, 1370,
-  1452, 1538, 1628, 1722, 1809, 1911, 1989, 2099, 2213, 2331,
+  14,
+  26,
+  42,
+  62,
+  84,
+  106,
+  122,
+  152,
+  180,
+  213,
+  251,
+  287,
+  331,
+  362,
+  412,
+  450,
+  504,
+  560,
+  624,
+  666,
+  711,
+  779,
+  857,
+  911,
+  997,
+  1059,
+  1125,
+  1190,
+  1264,
+  1370,
+  1452,
+  1538,
+  1628,
+  1722,
+  1809,
+  1911,
+  1989,
+  2099,
+  2213,
+  2331,
 ];
+
+/// Grouping bucket for a missing material name. Null, empty and
+/// whitespace-only collapse into one localized bucket so reports never show
+/// an invisible empty-titled section next to "unknown".
+String _materialBucket(Object? raw) {
+  final text = '${raw ?? ''}';
+  if (text.trim().isEmpty) return AppText.t('غير معروف', 'Unknown');
+  return text;
+}
+
+/// Grouping bucket for a missing supplier name (same idea as [_materialBucket]).
+String _supplierBucket(Object? raw) {
+  final text = '${raw ?? ''}'.trim();
+  if (text.isEmpty) return AppText.t('بدون مورد', 'No supplier');
+  return text;
+}
 
 /// Byte-mode QR capacity fallback (error level M) — port of qrcode table.
 int qrCapacityBytesM(int version) => _qrByteCapacityM[version - 1];
@@ -44,11 +100,7 @@ List<Map<String, dynamic>> buildPhysicalData(
     for (final r in results) {
       actuals.add((r.toString().isNotEmpty) ? r.toString() : '-');
     }
-    data.add({
-      'name': name,
-      'req': reqValue,
-      'actuals': actuals,
-    });
+    data.add({'name': name, 'req': reqValue, 'actuals': actuals});
   });
   return data;
 }
@@ -71,7 +123,9 @@ List<Map<String, dynamic>> buildChemicalData(
     for (final r in results) {
       final text = r.toString();
       isOuts.add(isOutOfRange(text, minValue, maxValue));
-      actualsFormatted.add(formatValueWithUnit(text.isEmpty ? '-' : text, unit));
+      actualsFormatted.add(
+        formatValueWithUnit(text.isEmpty ? '-' : text, unit),
+      );
     }
     data.add({
       'name': name,
@@ -106,8 +160,7 @@ List<Map<String, dynamic>> mergeLabTests(
         : rawUnit;
     final sampleCells = <String>[];
     for (final t in tests) {
-      sampleCells
-          .add("${t['sample_name'] ?? ''}: ${t['result_text'] ?? '-'}");
+      sampleCells.add("${t['sample_name'] ?? ''}: ${t['result_text'] ?? '-'}");
     }
     var results = List<String>.from(sampleCells);
     if (results.length < sampleNames.length) {
@@ -119,18 +172,21 @@ List<Map<String, dynamic>> mergeLabTests(
     results = results.sublist(0, sampleNames.length);
     final actualsFormatted = <String>[];
     for (final r in results) {
-      actualsFormatted
-          .add(r.isNotEmpty ? '(Lab) ${formatValueWithUnit(r, unit)}' : '');
+      actualsFormatted.add(
+        r.isNotEmpty ? '(Lab) ${formatValueWithUnit(r, unit)}' : '',
+      );
     }
     final minText = tests.isNotEmpty ? tests[0]['range_min'] : null;
     final maxText = tests.isNotEmpty ? tests[0]['range_max'] : null;
     final isOuts = <bool>[];
     for (final test in tests) {
-      isOuts.add(isOutOfRange(
-        '${test['result_text']}',
-        minText == null ? null : (minText as num?)?.toDouble(),
-        maxText == null ? null : (maxText as num?)?.toDouble(),
-      ));
+      isOuts.add(
+        isOutOfRange(
+          '${test['result_text']}',
+          minText == null ? null : (minText as num?)?.toDouble(),
+          maxText == null ? null : (maxText as num?)?.toDouble(),
+        ),
+      );
     }
     while (isOuts.length < sampleNames.length) {
       isOuts.add(false);
@@ -174,7 +230,9 @@ List<dynamic> _resultsFor(Object? value, int sampleCount) {
 }
 
 /// Port of render_html status timeline builder.
-List<Map<String, dynamic>> buildStatusTimeline(Map<String, dynamic> inspection) {
+List<Map<String, dynamic>> buildStatusTimeline(
+  Map<String, dynamic> inspection,
+) {
   final timeline = <Map<String, dynamic>>[];
   final raw = (inspection['status_history'] as List<dynamic>?) ?? const [];
   for (final rawRow in raw.reversed) {
@@ -240,6 +298,48 @@ Map<String, dynamic> buildInspectionContext(
 
   final decisionReason = '${inspection['decision_reason'] ?? ''}'.trim();
   final isProduct = '${inspection['inspection_kind'] ?? 'raw'}' == 'product';
+  // Product batch samples (محضر التشغيلة): the table inside the report.
+  // Built here from live rows so the extract always reflects the data;
+  // raw inspections never carry this key. Each sample carries its own
+  // results (physical map + multiple chemical rows), independent of lab.
+  final rawBatchSamples = (inspection['batch_samples'] as List?) ?? const [];
+  final batchSamples = <Map<String, dynamic>>[];
+  for (final raw in rawBatchSamples) {
+    final s = Map<String, dynamic>.from(raw as Map);
+    final smeta = decisionMeta('${s['decision_status'] ?? ''}');
+    final physical = <Map<String, dynamic>>[];
+    final physicalDecoded = decodeBatchPhysical(s['physical_results_json']);
+    for (final entry in physicalDecoded.entries) {
+      physical.add({
+        'analysis_name': entry.key,
+        'result_text': entry.value.isEmpty ? '-' : entry.value,
+      });
+    }
+    final chemical = <Map<String, dynamic>>[];
+    for (final r in decodeBatchChemical(s['chemical_results_json'])) {
+      chemical.add({
+        'analysis_name': '${r['name'] ?? ''}',
+        'result_text': '${r['result'] ?? ''}'.isEmpty ? '-' : '${r['result']}',
+        'unit': '${r['unit'] ?? ''}',
+      });
+    }
+    final taker = '${s['sample_taker'] ?? ''}'.trim();
+    batchSamples.add({
+      'sample_no': '${s['sample_no'] ?? ''}',
+      'sample_name': '${s['sample_name'] ?? ''}',
+      'sample_taker': taker.isEmpty ? '-' : taker,
+      'tested_by':
+          '${s['tested_by_name_resolved'] ?? s['tested_by_name'] ?? '-'}',
+      'tested_at': '${s['tested_at'] ?? ''}',
+      'decision_status': '${s['decision_status'] ?? ''}',
+      'decision_label': '${s['decision_status'] ?? ''}'.isEmpty
+          ? '-'
+          : '${smeta['label_ar']} / ${smeta['label_en']}',
+      'decision_reason': '${s['decision_reason'] ?? ''}',
+      'physical_results': physical,
+      'chemical_results': chemical,
+    });
+  }
   return {
     'inspection_id': inspection['id'] ?? '-',
     'is_product': isProduct,
@@ -258,9 +358,10 @@ Map<String, dynamic> buildInspectionContext(
     'sample_names': sampleNames,
     'physical_data': physicalData,
     'chemical_data': chemicalData,
+    'batch_samples': batchSamples,
+    'show_batch_samples': isProduct && batchSamples.isNotEmpty,
     'decision_status': inspection['decision_status'],
-    'decision_label':
-        '${meta['label_en']} / ${meta['label_ar']}',
+    'decision_label': '${meta['label_en']} / ${meta['label_ar']}',
     'decision_class': meta['css_class'],
     'decision_reason': decisionReason.isEmpty ? '-' : decisionReason,
     'show_decision_reason': decisionReason.isNotEmpty,
@@ -272,11 +373,12 @@ Map<String, dynamic> buildInspectionContext(
         inspection['decision_status'] == 'PARTIAL_REJECTION',
     'decision_version': inspection['decision_version'] ?? 1,
     'generated_at': inspection['updated_at'] ?? nowIso(),
-    'department_label': settings['department_label'] ??
-        'Quality Assurance Department',
+    'department_label':
+        settings['department_label'] ?? 'Quality Assurance Department',
     'report_logo_data_uri': settings['report_logo_data_uri'] ?? '',
     'status_timeline': statusTimeline,
-    'show_status_timeline': statusTimeline.length > 1,
+    // Decision timeline is raw-only; products decide per sample.
+    'show_status_timeline': !isProduct && statusTimeline.length > 1,
     'qr_payload_text': qrPayloadText,
   };
 }
@@ -300,8 +402,8 @@ Map<String, dynamic> buildLabelContext(
     'width_cm': widthCm,
     'height_cm': heightCm,
     'quantity_display': formatLabelQuantity(inspection['quantity']),
-    'department_label': settings['department_label'] ??
-        'Quality Assurance Department',
+    'department_label':
+        settings['department_label'] ?? 'Quality Assurance Department',
     'generated_at': (nowIso().substring(0, 16)).replaceAll('T', ' '),
   };
 }
@@ -394,8 +496,18 @@ Map<String, dynamic> buildDailyContext(
 }
 
 const List<String> _monthsAr = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+  'يناير',
+  'فبراير',
+  'مارس',
+  'أبريل',
+  'مايو',
+  'يونيو',
+  'يوليو',
+  'أغسطس',
+  'سبتمبر',
+  'أكتوبر',
+  'نوفمبر',
+  'ديسمبر',
 ];
 
 String _monthNameAr(int month) => _monthsAr[month - 1];
@@ -403,7 +515,8 @@ String _monthNameAr(int month) => _monthsAr[month - 1];
 double _safeQty(Object? value) => safeFloat(value) ?? 0.0;
 
 Map<String, dynamic> _materialSupplierSectionData(
-    List<Map<String, dynamic>> items) {
+  List<Map<String, dynamic>> items,
+) {
   var sq = 0.0;
   var srj = 0.0;
   var sa = 0, sp = 0, sr = 0;
@@ -430,8 +543,7 @@ Map<String, dynamic> _materialSupplierSectionData(
     'approved': sa,
     'partial': sp,
     'rejected': sr,
-    'approval_rate':
-        items.isEmpty ? 0.0 : roundPct(sa / items.length * 100),
+    'approval_rate': items.isEmpty ? 0.0 : roundPct(sa / items.length * 100),
   };
 }
 
@@ -445,18 +557,19 @@ Map<String, dynamic> buildMonthlyContext(
 }) {
   final materials = <String, List<Map<String, dynamic>>>{};
   for (final insp in inspections) {
-    final name = '${insp['material_name'] ?? 'Unknown'}';
+    final name = _materialBucket(insp['material_name']);
     materials.putIfAbsent(name, () => []).add(insp);
   }
   final suppliers = <String, List<Map<String, dynamic>>>{};
   for (final insp in inspections) {
-    final name = '${insp['supplier'] ?? ''}'.trim().isEmpty
-        ? 'بدون مورد'
-        : '${insp['supplier'] ?? ''}'.trim();
+    final name = _supplierBucket(insp['supplier']);
     suppliers.putIfAbsent(name, () => []).add(insp);
   }
 
-  var approvedCount = 0, conditionalCount = 0, partialCount = 0, rejectedCount = 0;
+  var approvedCount = 0,
+      conditionalCount = 0,
+      partialCount = 0,
+      rejectedCount = 0;
   var totalQty = 0.0, totalRejectedQty = 0.0;
   for (final i in inspections) {
     final status = i['decision_status'];
@@ -508,9 +621,7 @@ Map<String, dynamic> buildMonthlyContext(
         mr++;
         mrj += iq;
       }
-      final supName = '${i['supplier'] ?? ''}'.trim().isEmpty
-          ? 'بدون مورد'
-          : '${i['supplier'] ?? ''}'.trim();
+      final supName = _supplierBucket(i['supplier']);
       matSuppliers.putIfAbsent(supName, () => []).add(i);
     }
     final matSupplierList = <Map<String, dynamic>>[];
@@ -518,7 +629,9 @@ Map<String, dynamic> buildMonthlyContext(
       final data = _materialSupplierSectionData(supItems);
       matSupplierList.add({'name': supName, ...data});
     });
-    matSupplierList.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+    matSupplierList.sort(
+      (a, b) => (b['count'] as int).compareTo(a['count'] as int),
+    );
     materialSections.add({
       'name': matName,
       'count': matItems.length,
@@ -528,8 +641,9 @@ Map<String, dynamic> buildMonthlyContext(
       'approved': ma,
       'partial': mp,
       'rejected': mr,
-      'approval_rate':
-          matItems.isEmpty ? 0.0 : roundPct(ma / matItems.length * 100),
+      'approval_rate': matItems.isEmpty
+          ? 0.0
+          : roundPct(ma / matItems.length * 100),
       'suppliers': matSupplierList,
     });
   });
@@ -539,36 +653,58 @@ Map<String, dynamic> buildMonthlyContext(
     final data = _materialSupplierSectionData(supItems);
     supplierSections.add({'name': supName, ...data});
   });
-  supplierSections.sort((a, b) =>
-      (a['approval_rate'] as num).compareTo(b['approval_rate'] as num));
+  supplierSections.sort(
+    (a, b) => (a['approval_rate'] as num).compareTo(b['approval_rate'] as num),
+  );
 
   final recommendations = <String>[];
   if (inspections.isEmpty) {
     recommendations.add(
-        'لا توجد بيانات كافية لإنشاء توصيات تشغيلية لهذا الشهر. توصي بضمان إدخال جميع الفحوصات في الشهور القادمة.');
+      AppText.t(
+        'لا توجد بيانات كافية لإنشاء توصيات تشغيلية لهذا الشهر. توصي بضمان إدخال جميع الفحوصات في الشهور القادمة.',
+        'Not enough data to generate operational recommendations for this month. Make sure all inspections are entered in the coming months.',
+      ),
+    );
   } else {
     if (approvalRate >= 90) {
       recommendations.add(
-          'تقديم أداء متميز في الجودة هذا الشهر مع معدل قبول يبلغ ${approvalRate.toStringAsFixed(1)}% — جاري الاستمرار في الحفاظ على هذه المعايير العالية وتوثيق جميع الإجراءات المتبعة.');
+        AppText.t(
+          'تقديم أداء متميز في الجودة هذا الشهر مع معدل قبول يبلغ ${approvalRate.toStringAsFixed(1)}% — جاري الاستمرار في الحفاظ على هذه المعايير العالية وتوثيق جميع الإجراءات المتبعة.',
+          'Outstanding quality performance this month with an acceptance rate of ${approvalRate.toStringAsFixed(1)}% — keep up these high standards and document all procedures followed.',
+        ),
+      );
     } else if (approvalRate >= 75) {
       recommendations.add(
-          'معدل القبول العام يبلغ ${approvalRate.toStringAsFixed(1)}% وهو ضمن المستوى الجيد — جاري تنفيذ مراجعة تفصيلية للحالات المرفوضة والمقبولة مشروطًا لتحديد الأسباب الجذرية وتحسين الأداء في الشهر القادم.');
+        AppText.t(
+          'معدل القبول العام يبلغ ${approvalRate.toStringAsFixed(1)}% وهو ضمن المستوى الجيد — جاري تنفيذ مراجعة تفصيلية للحالات المرفوضة والمقبولة مشروطًا لتحديد الأسباب الجذرية وتحسين الأداء في الشهر القادم.',
+          'Overall acceptance rate is ${approvalRate.toStringAsFixed(1)}%, which is good — run a detailed review of rejected and conditionally accepted cases to find root causes and improve next month.',
+        ),
+      );
     } else {
       recommendations.add(
-          'معدل القبول العام منخفض (${approvalRate.toStringAsFixed(1)}%) — جاري تفعيل فريق جودة للتحقيق في الأسباب الجذرية وتنفيذ إجراءات تصحيحية فورية لتعديل سلسلة التوريد ومعايير الفحص.');
+        AppText.t(
+          'معدل القبول العام منخفض (${approvalRate.toStringAsFixed(1)}%) — جاري تفعيل فريق جودة للتحقيق في الأسباب الجذرية وتنفيذ إجراءات تصحيحية فورية لتعديل سلسلة التوريد ومعايير الفحص.',
+          'Overall acceptance rate is low (${approvalRate.toStringAsFixed(1)}%) — task a quality team to investigate root causes and apply immediate corrective actions for the supply chain and inspection criteria.',
+        ),
+      );
     }
 
     Map<String, dynamic>? worstMaterial;
     for (final mat in materialSections) {
       final rate = (mat['approval_rate'] as num).toDouble();
       if (rate < 75 &&
-          (worstMaterial == null || rate < (worstMaterial['approval_rate'] as num).toDouble())) {
+          (worstMaterial == null ||
+              rate < (worstMaterial['approval_rate'] as num).toDouble())) {
         worstMaterial = mat;
       }
     }
     if (worstMaterial != null) {
       recommendations.add(
-          'خامة "${worstMaterial['name']}" تعاني من أدنى معدل قبول (${(worstMaterial['approval_rate'] as num).toStringAsFixed(1)}%) — جاري تشديد معايير الجودة والفحص لهذه الخامة أو إبلاغ المشتريات بتقييم خيارات الموردين الحاليين ومدى موثوقيتهم.');
+        AppText.t(
+          'خامة "${worstMaterial['name']}" تعاني من أدنى معدل قبول (${(worstMaterial['approval_rate'] as num).toStringAsFixed(1)}%) — جاري تشديد معايير الجودة والفحص لهذه الخامة أو إبلاغ المشتريات بتقييم خيارات الموردين الحاليين ومدى موثوقيتهم.',
+          'Material "${worstMaterial['name']}" has the lowest acceptance rate (${(worstMaterial['approval_rate'] as num).toStringAsFixed(1)}%) — tighten quality and inspection criteria for it, or ask purchasing to review current suppliers and their reliability.',
+        ),
+      );
     }
 
     final worstSuppliers = supplierSections
@@ -576,32 +712,56 @@ Map<String, dynamic> buildMonthlyContext(
         .toList();
     if (worstSuppliers.length >= 3) {
       final top3 = List.of(worstSuppliers)
-        ..sort((a, b) =>
-            (a['approval_rate'] as num).compareTo(b['approval_rate'] as num));
+        ..sort(
+          (a, b) =>
+              (a['approval_rate'] as num).compareTo(b['approval_rate'] as num),
+        );
       final names = top3
           .take(3)
-          .map((s) =>
-              '"${s['name']}" (${(s['approval_rate'] as num).toStringAsFixed(1)}%)')
+          .map(
+            (s) =>
+                '"${s['name']}" (${(s['approval_rate'] as num).toStringAsFixed(1)}%)',
+          )
           .toList();
       recommendations.add(
-          'أقل ثلاث موردين من حيث معدل القبول هذا الشهر هم:  ${names.join(', ')} — تم التشديد على إجراءات الفحص ونوصي بمراجعة موثوقية الموردين وإعادة تقييم اتفاقيات التوريد بشكل عاجل.');
+        AppText.t(
+          'أقل ثلاث موردين من حيث معدل القبول هذا الشهر هم:  ${names.join(', ')} — تم التشديد على إجراءات الفحص ونوصي بمراجعة موثوقية الموردين وإعادة تقييم اتفاقيات التوريد بشكل عاجل.',
+          'The three lowest suppliers by acceptance rate this month are: ${names.join(', ')} — inspection procedures have been tightened; urgently review supplier reliability and supply agreements.',
+        ),
+      );
     } else if (worstSuppliers.length == 2) {
       recommendations.add(
-          'الموردين الأقل جودة هذا الشهر هما: 1) "${worstSuppliers[0]['name']}" (${(worstSuppliers[0]['approval_rate'] as num).toStringAsFixed(1)}%) و 2) "${worstSuppliers[1]['name']}" (${(worstSuppliers[1]['approval_rate'] as num).toStringAsFixed(1)}%) — تم التشديد على إجراءات الفحص ونوصي بمراجعة موثوقية الموردين.');
+        AppText.t(
+          'الموردين الأقل جودة هذا الشهر هما: 1) "${worstSuppliers[0]['name']}" (${(worstSuppliers[0]['approval_rate'] as num).toStringAsFixed(1)}%) و 2) "${worstSuppliers[1]['name']}" (${(worstSuppliers[1]['approval_rate'] as num).toStringAsFixed(1)}%) — تم التشديد على إجراءات الفحص ونوصي بمراجعة موثوقية الموردين.',
+          'The two lowest-quality suppliers this month are: 1) "${worstSuppliers[0]['name']}" (${(worstSuppliers[0]['approval_rate'] as num).toStringAsFixed(1)}%) and 2) "${worstSuppliers[1]['name']}" (${(worstSuppliers[1]['approval_rate'] as num).toStringAsFixed(1)}%) — inspection procedures have been tightened; review supplier reliability.',
+        ),
+      );
     } else if (worstSuppliers.length == 1) {
       recommendations.add(
-          'المورد "${worstSuppliers[0]['name']}" يقدم أداء منخفض هذا الشهر بمعدل قبول ${(worstSuppliers[0]['approval_rate'] as num).toStringAsFixed(1)}% — تم التشديد على إجراءات الفحص ونوصي بمراجعة موثوقية المورد.');
+        AppText.t(
+          'المورد "${worstSuppliers[0]['name']}" يقدم أداء منخفض هذا الشهر بمعدل قبول ${(worstSuppliers[0]['approval_rate'] as num).toStringAsFixed(1)}% — تم التشديد على إجراءات الفحص ونوصي بمراجعة موثوقية المورد.',
+          'Supplier "${worstSuppliers[0]['name']}" performs poorly this month with an acceptance rate of ${(worstSuppliers[0]['approval_rate'] as num).toStringAsFixed(1)}% — inspection procedures have been tightened; review this supplier.',
+        ),
+      );
     }
 
     if (conditionalCount > 0) {
       recommendations.add(
-          'يوجد $conditionalCount فحص تم قبوله مشروطًا — جاري متابعة جميع المتطلبات المطلوبة وإغلاقها قبل نهاية الشهر.');
+        AppText.t(
+          'يوجد $conditionalCount فحص تم قبوله مشروطًا — جاري متابعة جميع المتطلبات المطلوبة وإغلاقها قبل نهاية الشهر.',
+          'There are $conditionalCount conditionally accepted inspections — follow up on all requirements and close them before month end.',
+        ),
+      );
     }
     if (totalRejectedQty > 0 && totalQty > 0) {
       final pct = roundPct(totalRejectedQty / totalQty * 100);
       if (pct > 15) {
         recommendations.add(
-            'نسبة الكمية المرفوضة هذا الشهر هي ${pct.toStringAsFixed(1)}% والتي تتجاوز 15% — توصي بتحليل مفصل للأسباب وتنفيذ إجراءات تصحيحية لتجنب خسائر إضافية في الشهور القادمة.');
+          AppText.t(
+            'نسبة الكمية المرفوضة هذا الشهر هي ${pct.toStringAsFixed(1)}% والتي تتجاوز 15% — توصي بتحليل مفصل للأسباب وتنفيذ إجراءات تصحيحية لتجنب خسائر إضافية في الشهور القادمة.',
+            'Rejected quantity this month is ${pct.toStringAsFixed(1)}%, above 15% — run a detailed root-cause analysis with corrective actions to avoid further losses.',
+          ),
+        );
       }
     }
   }
@@ -650,14 +810,18 @@ Map<String, dynamic> buildMonthlyContext(
       final rows = byMonth[monthKey] ?? const [];
       trendCount = rows.length;
       trendApp = rows
-          .where((r) =>
-              r['decision_status'] == 'APPROVED' ||
-              r['decision_status'] == 'CONDITIONAL_APPROVAL')
+          .where(
+            (r) =>
+                r['decision_status'] == 'APPROVED' ||
+                r['decision_status'] == 'CONDITIONAL_APPROVAL',
+          )
           .length;
       trendRej = rows
-          .where((r) =>
-              r['decision_status'] == 'PARTIAL_REJECTION' ||
-              r['decision_status'] == 'FULL_REJECTION')
+          .where(
+            (r) =>
+                r['decision_status'] == 'PARTIAL_REJECTION' ||
+                r['decision_status'] == 'FULL_REJECTION',
+          )
           .length;
       for (final r in rows) {
         trendQty += _safeQty(r['quantity']);
@@ -668,10 +832,12 @@ Map<String, dynamic> buildMonthlyContext(
       'count': trendCount,
       'approved': trendApp,
       'rejected': trendRej,
-      'approval_rate':
-          trendCount == 0 ? 0.0 : roundPct(trendApp / trendCount * 100),
-      'rejection_rate':
-          trendCount == 0 ? 0.0 : roundPct(trendRej / trendCount * 100),
+      'approval_rate': trendCount == 0
+          ? 0.0
+          : roundPct(trendApp / trendCount * 100),
+      'rejection_rate': trendCount == 0
+          ? 0.0
+          : roundPct(trendRej / trendCount * 100),
       'total_qty': formatQuantity(trendQty),
       'is_current': tr['is_current'] == true,
     });
@@ -714,18 +880,19 @@ Map<String, dynamic> buildYearlyContext(
 }) {
   final materials = <String, List<Map<String, dynamic>>>{};
   for (final insp in inspections) {
-    final name = '${insp['material_name'] ?? 'Unknown'}';
+    final name = _materialBucket(insp['material_name']);
     materials.putIfAbsent(name, () => []).add(insp);
   }
   final suppliers = <String, List<Map<String, dynamic>>>{};
   for (final insp in inspections) {
-    final name = '${insp['supplier'] ?? ''}'.trim().isEmpty
-        ? 'بدون مورد'
-        : '${insp['supplier'] ?? ''}'.trim();
+    final name = _supplierBucket(insp['supplier']);
     suppliers.putIfAbsent(name, () => []).add(insp);
   }
 
-  var approvedCount = 0, conditionalCount = 0, partialCount = 0, rejectedCount = 0;
+  var approvedCount = 0,
+      conditionalCount = 0,
+      partialCount = 0,
+      rejectedCount = 0;
   var totalQty = 0.0, totalRejectedQty = 0.0;
   for (final i in inspections) {
     final status = i['decision_status'];
@@ -780,9 +947,7 @@ Map<String, dynamic> buildYearlyContext(
         mr++;
         mrj += iq;
       }
-      final supName = '${i['supplier'] ?? ''}'.trim().isEmpty
-          ? 'بدون مورد'
-          : '${i['supplier'] ?? ''}'.trim();
+      final supName = _supplierBucket(i['supplier']);
       matSuppliers.putIfAbsent(supName, () => []).add(i);
     }
     final matSupplierList = <Map<String, dynamic>>[];
@@ -790,7 +955,9 @@ Map<String, dynamic> buildYearlyContext(
       final data = _materialSupplierSectionData(supItems);
       matSupplierList.add({'name': supName, ...data});
     });
-    matSupplierList.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+    matSupplierList.sort(
+      (a, b) => (b['count'] as int).compareTo(a['count'] as int),
+    );
     materialSections.add({
       'name': matName,
       'count': matItems.length,
@@ -801,24 +968,29 @@ Map<String, dynamic> buildYearlyContext(
       'conditional': mc,
       'partial': mp,
       'rejected': mr,
-      'approval_rate':
-          matItems.isEmpty ? 0.0 : roundPct(ma / matItems.length * 100),
+      'approval_rate': matItems.isEmpty
+          ? 0.0
+          : roundPct(ma / matItems.length * 100),
       'suppliers': matSupplierList,
     });
   });
-  materialSections.sort((a, b) => (b['count'] as int).compareTo(a['count'] as int));
+  materialSections.sort(
+    (a, b) => (b['count'] as int).compareTo(a['count'] as int),
+  );
 
   final supplierSections = <Map<String, dynamic>>[];
   suppliers.forEach((supName, supItems) {
     final data = _materialSupplierSectionData(supItems);
     supplierSections.add({'name': supName, ...data});
   });
-  supplierSections.sort((a, b) =>
-      (a['approval_rate'] as num).compareTo(b['approval_rate'] as num));
+  supplierSections.sort(
+    (a, b) => (a['approval_rate'] as num).compareTo(b['approval_rate'] as num),
+  );
 
   final monthlyStats = <Map<String, dynamic>>[];
   for (var m = 1; m <= 12; m++) {
-    final prefix = '${year.toString().padLeft(4, '0')}-${m.toString().padLeft(2, '0')}';
+    final prefix =
+        '${year.toString().padLeft(4, '0')}-${m.toString().padLeft(2, '0')}';
     final monthInspections = inspections
         .where((i) => '${i['inspection_date'] ?? ''}'.startsWith(prefix))
         .toList();
@@ -869,17 +1041,22 @@ Map<String, dynamic> buildYearlyContext(
   for (var qi = 0; qi < 4; qi++) {
     final qMonths = monthlyStats.sublist(qi * 3, qi * 3 + 3);
     final qTotal = qMonths.fold<int>(0, (s, m) => s + (m['total'] as int));
-    final qApproved = qMonths.fold<int>(0, (s, m) => s + (m['approved'] as int));
+    final qApproved = qMonths.fold<int>(
+      0,
+      (s, m) => s + (m['approved'] as int),
+    );
     final qPartial = qMonths.fold<int>(0, (s, m) => s + (m['partial'] as int));
-    final qRejected = qMonths.fold<int>(0, (s, m) => s + (m['rejected'] as int));
+    final qRejected = qMonths.fold<int>(
+      0,
+      (s, m) => s + (m['rejected'] as int),
+    );
     quarterlyStats.add({
       'name': quarterNames[qi],
       'total': qTotal,
       'approved': qApproved,
       'partial': qPartial,
       'rejected': qRejected,
-      'approval_rate':
-          qTotal == 0 ? 0.0 : roundPct(qApproved / qTotal * 100),
+      'approval_rate': qTotal == 0 ? 0.0 : roundPct(qApproved / qTotal * 100),
       'rejection_rate': qTotal == 0
           ? 0.0
           : roundPct((qPartial + qRejected) / qTotal * 100),
@@ -897,17 +1074,21 @@ Map<String, dynamic> buildYearlyContext(
   final recommendations = <String>[];
   if (inspections.isEmpty) {
     recommendations.add(
-        'لا توجد بيانات كافية لإنشاء توصيات تشغيلية لهذا العام. يُوصى بضمان إدخال جميع الفحوصات بشكل منتظم.');
+      'لا توجد بيانات كافية لإنشاء توصيات تشغيلية لهذا العام. يُوصى بضمان إدخال جميع الفحوصات بشكل منتظم.',
+    );
   } else {
     if (approvalRate >= 90) {
       recommendations.add(
-          'أداء متميز في الجودة خلال عام $year بمعدل قبول إجمالي ${approvalRate.toStringAsFixed(1)}% — يُوصى بتوثيق الإجراءات المتبعة كمعيار مرجعي (Benchmark) للأعوام القادمة.');
+        'أداء متميز في الجودة خلال عام $year بمعدل قبول إجمالي ${approvalRate.toStringAsFixed(1)}% — يُوصى بتوثيق الإجراءات المتبعة كمعيار مرجعي (Benchmark) للأعوام القادمة.',
+      );
     } else if (approvalRate >= 75) {
       recommendations.add(
-          'معدل القبول العام ${approvalRate.toStringAsFixed(1)}% ضمن المستوى الجيد — يُوصى بتحليل تفصيلي للحالات المرفوضة لتحديد الأنماط المتكررة وتنفيذ إجراءات تحسين مستهدفة.');
+        'معدل القبول العام ${approvalRate.toStringAsFixed(1)}% ضمن المستوى الجيد — يُوصى بتحليل تفصيلي للحالات المرفوضة لتحديد الأنماط المتكررة وتنفيذ إجراءات تحسين مستهدفة.',
+      );
     } else {
       recommendations.add(
-          'معدل القبول العام منخفض (${approvalRate.toStringAsFixed(1)}%) — يتطلب تفعيل فريق جودة متخصص للتحقيق في الأسباب الجذرية وتنفيذ خطة تصحيحية شاملة.');
+        'معدل القبول العام منخفض (${approvalRate.toStringAsFixed(1)}%) — يتطلب تفعيل فريق جودة متخصص للتحقيق في الأسباب الجذرية وتنفيذ خطة تصحيحية شاملة.',
+      );
     }
 
     Map<String, dynamic>? worstMaterial;
@@ -915,39 +1096,51 @@ Map<String, dynamic> buildYearlyContext(
       final rate = (mat['approval_rate'] as num).toDouble();
       if (rate < 75 &&
           (mat['count'] as int) >= 3 &&
-          (worstMaterial == null || rate < (worstMaterial['approval_rate'] as num).toDouble())) {
+          (worstMaterial == null ||
+              rate < (worstMaterial['approval_rate'] as num).toDouble())) {
         worstMaterial = mat;
       }
     }
     if (worstMaterial != null) {
       recommendations.add(
-          'خامة "${worstMaterial['name']}" سجلت أدنى معدل قبول (${(worstMaterial['approval_rate'] as num).toStringAsFixed(1)}%) من إجمالي ${worstMaterial['count']} فحص — يُوصى بتشديد معايير الفحص لهذه الخامة ومراجعة مصادر التوريد.');
+        'خامة "${worstMaterial['name']}" سجلت أدنى معدل قبول (${(worstMaterial['approval_rate'] as num).toStringAsFixed(1)}%) من إجمالي ${worstMaterial['count']} فحص — يُوصى بتشديد معايير الفحص لهذه الخامة ومراجعة مصادر التوريد.',
+      );
     }
 
     final worstSuppliers = supplierSections
-        .where((s) =>
-            (s['approval_rate'] as num).toDouble() < 75 && (s['count'] as int) >= 3)
+        .where(
+          (s) =>
+              (s['approval_rate'] as num).toDouble() < 75 &&
+              (s['count'] as int) >= 3,
+        )
         .toList();
     if (worstSuppliers.length >= 3) {
       final top3 = List.of(worstSuppliers)
-        ..sort((a, b) =>
-            (a['approval_rate'] as num).compareTo(b['approval_rate'] as num));
+        ..sort(
+          (a, b) =>
+              (a['approval_rate'] as num).compareTo(b['approval_rate'] as num),
+        );
       final names = top3
           .take(3)
-          .map((s) =>
-              '"${s['name']}" (${(s['approval_rate'] as num).toStringAsFixed(1)}%)')
+          .map(
+            (s) =>
+                '"${s['name']}" (${(s['approval_rate'] as num).toStringAsFixed(1)}%)',
+          )
           .toList();
       recommendations.add(
-          'أقل ثلاثة موردين من حيث معدل القبول السنوي: ${names.join('، ')} — يُوصى بمراجعة اتفاقيات التوريد وتقييم البدائل المتاحة.');
+        'أقل ثلاثة موردين من حيث معدل القبول السنوي: ${names.join('، ')} — يُوصى بمراجعة اتفاقيات التوريد وتقييم البدائل المتاحة.',
+      );
     } else if (worstSuppliers.isNotEmpty) {
       for (final ws in worstSuppliers.take(2)) {
         recommendations.add(
-            'المورد "${ws['name']}" سجل معدل قبول ${(ws['approval_rate'] as num).toStringAsFixed(1)}% خلال ${ws['count']} فحص — يتطلب مراجعة جدية لموثوقية التوريد.');
+          'المورد "${ws['name']}" سجل معدل قبول ${(ws['approval_rate'] as num).toStringAsFixed(1)}% خلال ${ws['count']} فحص — يتطلب مراجعة جدية لموثوقية التوريد.',
+        );
       }
     }
 
-    final activeQuarters =
-        quarterlyStats.where((q) => (q['total'] as int) > 0).toList();
+    final activeQuarters = quarterlyStats
+        .where((q) => (q['total'] as int) > 0)
+        .toList();
     if (activeQuarters.length >= 2) {
       Map<String, dynamic>? bestQ;
       Map<String, dynamic>? worstQ;
@@ -963,9 +1156,11 @@ Map<String, dynamic> buildYearlyContext(
       }
       if (bestQ != null &&
           worstQ != null &&
-          (bestQ['approval_rate'] as num) - (worstQ['approval_rate'] as num) > 10) {
+          (bestQ['approval_rate'] as num) - (worstQ['approval_rate'] as num) >
+              10) {
         recommendations.add(
-            'تفاوت ملحوظ في الأداء بين الأرباع: أفضل ربع ${bestQ['name']} (${(bestQ['approval_rate'] as num).toStringAsFixed(1)}%) وأضعف ربع ${worstQ['name']} (${(worstQ['approval_rate'] as num).toStringAsFixed(1)}%) — يُوصى بتحليل العوامل الموسمية المؤثرة.');
+          'تفاوت ملحوظ في الأداء بين الأرباع: أفضل ربع ${bestQ['name']} (${(bestQ['approval_rate'] as num).toStringAsFixed(1)}%) وأضعف ربع ${worstQ['name']} (${(worstQ['approval_rate'] as num).toStringAsFixed(1)}%) — يُوصى بتحليل العوامل الموسمية المؤثرة.',
+        );
       }
     }
 
@@ -973,13 +1168,15 @@ Map<String, dynamic> buildYearlyContext(
       final pct = roundPct(totalRejectedQty / totalQty * 100);
       if (pct > 10) {
         recommendations.add(
-            'نسبة الكمية المرفوضة السنوية تبلغ ${pct.toStringAsFixed(1)}% من إجمالي الكميات — يمثل ذلك خسارة مادية كبيرة تستوجب تنفيذ برنامج تأهيل موردين متقدم.');
+          'نسبة الكمية المرفوضة السنوية تبلغ ${pct.toStringAsFixed(1)}% من إجمالي الكميات — يمثل ذلك خسارة مادية كبيرة تستوجب تنفيذ برنامج تأهيل موردين متقدم.',
+        );
       }
     }
     if (conditionalCount > 0) {
       final condPct = roundPct(conditionalCount / inspections.length * 100);
       recommendations.add(
-          'تم تسجيل $conditionalCount قبول مشروط (${condPct.toStringAsFixed(1)}% من الإجمالي) — يُوصى بمتابعة جميع الشروط المعلقة وضمان إغلاقها وفق الجدول الزمني المحدد.');
+        'تم تسجيل $conditionalCount قبول مشروط (${condPct.toStringAsFixed(1)}% من الإجمالي) — يُوصى بمتابعة جميع الشروط المعلقة وضمان إغلاقها وفق الجدول الزمني المحدد.',
+      );
     }
   }
 
@@ -1018,8 +1215,7 @@ Map<String, dynamic> buildFollowUpContext(
   required String dateStr,
   String shiftLabel = '',
 }) {
-  final summary =
-      aggregateTotals(inspections, allowBlankSuppliers: true);
+  final summary = aggregateTotals(inspections, allowBlankSuppliers: true);
   final materialSections = buildMaterialSections(inspections);
   final formattedDate = _formatLongDate(dateStr);
   return {
@@ -1031,7 +1227,8 @@ Map<String, dynamic> buildFollowUpContext(
     'conditional': summary['conditional'],
     'partial': summary['partial'],
     'rejected': summary['rejected'],
-    'accepted_total': (summary['approved'] as int) + (summary['conditional'] as int),
+    'accepted_total':
+        (summary['approved'] as int) + (summary['conditional'] as int),
     'conditional_partial': summary['conditional_partial'],
     'approval_rate': summary['approval_rate'],
     'total_quantity': formatQuantity(summary['total_qty']),
@@ -1058,10 +1255,11 @@ String _rangeText(Map<String, dynamic> item) {
   final minimum = item['min'];
   final maximum = item['max'];
   if (minimum == null && maximum == null) return '-';
-  final unit = '${item['range_unit'] ?? ''}'
-          .isNotEmpty
+  final unit = '${item['range_unit'] ?? ''}'.isNotEmpty
       ? '${item['range_unit']}'
-      : ('${item['analysis_unit'] ?? ''}'.isNotEmpty ? '${item['analysis_unit']}' : '%');
+      : ('${item['analysis_unit'] ?? ''}'.isNotEmpty
+            ? '${item['analysis_unit']}'
+            : '%');
   if (minimum == null) return '≤ $maximum $unit';
   if (maximum == null) return '≥ $minimum $unit';
   return '$minimum - $maximum $unit';
@@ -1073,7 +1271,9 @@ String _resultText(Map<String, dynamic> item) {
   if (item['value'] != null) {
     final unit = '${item['range_unit'] ?? ''}'.isNotEmpty
         ? '${item['range_unit']}'
-        : ('${item['analysis_unit'] ?? ''}'.isNotEmpty ? '${item['analysis_unit']}' : '%');
+        : ('${item['analysis_unit'] ?? ''}'.isNotEmpty
+              ? '${item['analysis_unit']}'
+              : '%');
     return '$resultText $unit'.trim();
   }
   return resultText;
@@ -1092,19 +1292,19 @@ Map<String, dynamic> buildLabReportContext(
     final sourceName = '${test['source_name'] ?? ''}'.isNotEmpty
         ? '${test['source_name']}'
         : ('${test['sample_name'] ?? ''}'.isNotEmpty
-            ? '${test['sample_name']}'
-            : 'غير محدد');
-    final section =
-        sourceSections.putIfAbsent(sourceName, () => {
-              'name': sourceName,
-              'source_type': sourceType,
-              'type_label': sourceType == 'product'
-                  ? 'منتج | Product'
-                  : 'خام | Raw',
-              'count': 0,
-              'out_count': 0,
-              'rows': <Map<String, dynamic>>[],
-            });
+              ? '${test['sample_name']}'
+              : 'غير محدد');
+    final section = sourceSections.putIfAbsent(
+      sourceName,
+      () => {
+        'name': sourceName,
+        'source_type': sourceType,
+        'type_label': sourceType == 'product' ? 'منتج | Product' : 'خام | Raw',
+        'count': 0,
+        'out_count': 0,
+        'rows': <Map<String, dynamic>>[],
+      },
+    );
     section['count'] = (section['count'] as int) + 1;
     final state = '${test['range_state'] ?? 'none'}';
     if (state == 'out') {
@@ -1134,10 +1334,12 @@ Map<String, dynamic> buildLabReportContext(
   final outCount = tests
       .where((t) => '${t['range_state'] ?? 'none'}' == 'out')
       .length;
-  final inCount =
-      tests.where((t) => '${t['range_state'] ?? 'none'}' == 'in').length;
-  final noRangeCount =
-      tests.where((t) => '${t['range_state'] ?? 'none'}' == 'none').length;
+  final inCount = tests
+      .where((t) => '${t['range_state'] ?? 'none'}' == 'in')
+      .length;
+  final noRangeCount = tests
+      .where((t) => '${t['range_state'] ?? 'none'}' == 'none')
+      .length;
   return {
     'title': title,
     'period_label': periodLabel,
@@ -1176,8 +1378,7 @@ Map<String, dynamic> buildNcrReportContext(NcrExportBundle bundle) {
   return {
     'scope': bundle.filters.describe,
     'generated_at': nowIsoAt(bundle.generatedAt),
-    'generated_by':
-        bundle.generatedBy.isEmpty ? '-' : bundle.generatedBy,
+    'generated_by': bundle.generatedBy.isEmpty ? '-' : bundle.generatedBy,
     'department_label': 'Quality Assurance Department',
     'report_logo_data_uri': '',
     'total': bundle.rows.length,
@@ -1226,10 +1427,8 @@ Map<String, dynamic> buildNcrReportContext(NcrExportBundle bundle) {
           'inspection': r.inspectionRefId.isEmpty
               ? (r.inspectorName.isEmpty ? '-' : r.inspectorName)
               : r.inspectionRefId,
-          'lot_batch':
-              r.lotNo.isNotEmpty ? r.lotNo : r.batchNo,
-          'assignee':
-              r.assignedToName.isEmpty ? '-' : r.assignedToName,
+          'lot_batch': r.lotNo.isNotEmpty ? r.lotNo : r.batchNo,
+          'assignee': r.assignedToName.isEmpty ? '-' : r.assignedToName,
           'due': r.dueDate.isEmpty ? '-' : r.dueDate,
           'is_overdue': r.isOverdue,
           'overdue_display': r.isOverdue ? 'YES' : 'NO',

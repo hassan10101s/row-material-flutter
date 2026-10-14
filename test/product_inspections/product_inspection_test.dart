@@ -10,7 +10,8 @@ import '../sync/sync_test_fixture.dart';
 /// Product (batch) inspections: one `inspections` row per production batch
 /// (`inspection_kind = 'product'`) with formula/batch numbers instead of
 /// supplier/vehicle, reference from the product's analysis ranges, and the
-/// same lab linkage as raw materials.
+/// same lab linkage as raw materials — but deliberately NO header quality
+/// decision: decisions live per sample inside the batch.
 void main() {
   late SyncFixture fx;
   late InspectionRepo repo;
@@ -83,35 +84,37 @@ void main() {
       expect((products.first['ranges'] as List), hasLength(1));
     });
 
-    test('builds chemical reference from ranges + next entry code',
-        () async {
+    test('builds chemical reference from ranges + next entry code', () async {
       final productId = await seedProduct();
       final ctx = await reference.getProductForInspection(
         productId,
         inspectionDate: '2026-09-27',
       );
       expect(ctx['product_name'], 'Protein 21%');
-      final chemical =
-          Map<String, dynamic>.from(ctx['chemical_reference'] as Map);
+      final chemical = Map<String, dynamic>.from(
+        ctx['chemical_reference'] as Map,
+      );
       expect(chemical.keys, contains('Protein'));
       expect('${ctx['next_entry_code']}', contains('20260927'));
     });
   });
 
   group('product inspection records', () {
-    test('creates a batch row with formula/batch and no supplier',
-        () async {
+    test('creates a batch row with formula/batch and no supplier', () async {
       final productId = await seedProduct();
-      final row =
-          await repo.create(productPayload(productId, 'PPRO-20260927-001'), admin);
+      final row = await repo.create(
+        productPayload(productId, 'PPRO-20260927-001'),
+        admin,
+      );
       expect(row['inspection_kind'], 'product');
       expect(row['product_id'], productId);
       expect(row['formula_number'], 'F-12');
       expect(row['batch_number'], 'B-77');
       expect(row['supplier'], isEmpty);
       expect(row['material_name'], 'Protein 21%');
-      final chemical =
-          Map<String, dynamic>.from(row['chemical_results'] as Map);
+      final chemical = Map<String, dynamic>.from(
+        row['chemical_results'] as Map,
+      );
       expect('${chemical['Protein']}', '21');
     });
 
@@ -120,6 +123,28 @@ void main() {
       final payload = productPayload(productId, '');
       final row = await repo.create(payload, admin);
       expect('${row['entry_code']}', contains('20260927'));
+    });
+
+    test('creates a tracking record with no values at all', () async {
+      // A product report is batch traceability: creation requires nothing
+      // but product + formula/batch — no taker, no physical/chemical values.
+      final productId = await seedProduct();
+      final row = await repo.create(<String, dynamic>{
+        'inspection_kind': 'product',
+        'product_id': productId,
+        'formula_number': 'F-12',
+        'batch_number': 'B-77',
+        'entry_code': 'PPRO-20260927-099',
+        'inspection_date': '2026-09-27',
+        'quantity': '',
+        'sample_taken_by': '',
+        'sample_names': ['Result'],
+        'physical_results': <String, dynamic>{},
+        'chemical_results': <String, dynamic>{},
+        'decision_status': 'APPROVED',
+      }, admin);
+      expect(row['inspection_kind'], 'product');
+      expect(row['sample_taken_by'], isEmpty);
     });
 
     test('rejects a missing formula or batch number', () async {
@@ -165,11 +190,17 @@ void main() {
       expect(found, hasLength(1));
     });
 
-    test('updates formula/batch and records decisions', () async {
+    test('updates formula/batch but never a header decision', () async {
       final productId = await seedProduct();
-      final created =
-          await repo.create(productPayload(productId, 'PPRO-20260927-001'), admin);
+      final created = await repo.create(
+        productPayload(productId, 'PPRO-20260927-001'),
+        admin,
+      );
       final id = created['id'] as int;
+      // Any decision keys in the payload are ignored: new rows store empty.
+      expect(created['decision_status'], isEmpty);
+      expect(created['decision_reason'], isEmpty);
+      expect(created['rejected_quantity'], isEmpty);
       final updated = await repo.update(id, {
         'formula_number': 'F-13',
         'batch_number': 'B-78',
@@ -177,12 +208,16 @@ void main() {
       expect(updated['formula_number'], 'F-13');
       expect(updated['batch_number'], 'B-78');
 
-      final decided = await repo.updateStatus(id, {
-        'decision_status': 'FULL_REJECTION',
-        'decision_reason': 'protein below range',
-      }, admin);
-      expect(decided['decision_status'], 'FULL_REJECTION');
-      expect(decided['inspection_kind'], 'product');
+      // Header decisions are refused for products (per-sample only).
+      expect(
+        () => repo.updateStatus(id, {
+          'decision_status': 'FULL_REJECTION',
+          'decision_reason': 'protein below range',
+        }, admin),
+        throwsA(isA<ValidationError>()),
+      );
+      final reloaded = await repo.getById(id);
+      expect(reloaded['decision_status'], isEmpty);
     });
   });
 
@@ -208,34 +243,41 @@ void main() {
       expect(resolved['product_id'], productId);
     });
 
-    test('running a test against the batch entry code links + range-checks',
-        () async {
-      final productId = await seedProduct();
-      await repo.create(productPayload(productId, 'PPRO-20260927-001'), admin);
-      final analyses = await lab.listAnalyses();
-      final analysisId = (analyses
-              .firstWhere((a) => '${a['name']}' == 'Protein')['id'] as num)
-          .toInt();
+    test(
+      'running a test against the batch entry code links + range-checks',
+      () async {
+        final productId = await seedProduct();
+        await repo.create(
+          productPayload(productId, 'PPRO-20260927-001'),
+          admin,
+        );
+        final analyses = await lab.listAnalyses();
+        final analysisId =
+            (analyses.firstWhere((a) => '${a['name']}' == 'Protein')['id']
+                    as num)
+                .toInt();
 
-      final result = await lab.runSampleTest(
-        analysisId: analysisId,
-        sourceType: 'product',
-        sourceRefId: productId,
-        sourceName: 'Protein 21%',
-        sampleName: 'Result',
-        resultText: '21',
-        dynamicValues: const {},
-        entryCode: 'PPRO-20260927-001',
-      );
-      final test = Map<String, dynamic>.from(result['test'] as Map);
-      expect(test['entry_code'], 'PPRO-20260927-001');
-      final range = result['range_check'] as Map?;
-      expect(range, isNotNull);
-      expect(range!['out_of_range'], isFalse);
+        final result = await lab.runSampleTest(
+          analysisId: analysisId,
+          sourceType: 'product',
+          sourceRefId: productId,
+          sourceName: 'Protein 21%',
+          sampleName: 'Result',
+          resultText: '21',
+          dynamicValues: const {},
+          entryCode: 'PPRO-20260927-001',
+        );
+        final test = Map<String, dynamic>.from(result['test'] as Map);
+        expect(test['entry_code'], 'PPRO-20260927-001');
+        final range = result['range_check'] as Map?;
+        expect(range, isNotNull);
+        expect(range!['out_of_range'], isFalse);
 
-      final linked =
-          await lab.listSampleTestsForEntryCode('PPRO-20260927-001');
-      expect(linked, hasLength(1));
-    });
+        final linked = await lab.listSampleTestsForEntryCode(
+          'PPRO-20260927-001',
+        );
+        expect(linked, hasLength(1));
+      },
+    );
   });
 }

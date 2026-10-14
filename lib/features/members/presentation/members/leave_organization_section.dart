@@ -9,6 +9,7 @@ import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../di/service_locator.dart';
 import '../../../organizations/domain/organization_repository.dart';
@@ -70,16 +71,16 @@ class _LeaveOrganizationSectionState extends State<LeaveOrganizationSection> {
       context,
       danger: true,
       icon: Icons.logout,
-      title: AppText.t('مغادرة المؤسسة', 'Leave this organization?'),
+      title: AppText.t('مغادرة الشركة', 'Leave this company?'),
       message: _isOwner
           ? AppText.t(
-              'أنت مالك هذه المؤسسة. مغادرتها ستجعل المؤسسة بلا مالك، ولن تتمكن '
+              'أنت مالك هذه الشركة. مغادرتها ستجعل الشركة بلا مالك، ولن تتمكن '
                   'من العودة إلا بدعوة جديدة. يُفضّل إضافة مالك آخر أولاً.',
               'You are the owner of this organization. Leaving makes it ownerless '
                   'and you can only return with a new invite. Add another owner first.',
             )
           : AppText.t(
-              'سيتم إنهاء عضويتك في هذه المؤسسة وتسجيل خروجك من التطبيق على هذا '
+              'سيتم إنهاء عضويتك في هذه الشركة وتسجيل خروجك من التطبيق على هذا '
                   'الجهاز. يمكنك العودة لاحقاً بدعوة جديدة.',
               'Your membership will end and you will be signed out on this device. '
                   'You can rejoin later with a new invite.',
@@ -99,7 +100,7 @@ class _LeaveOrganizationSectionState extends State<LeaveOrganizationSection> {
       if (mounted) {
         AppFeedback.info(
           context,
-          AppText.t('غادرت المؤسسة', 'You left the organization.'),
+          AppText.t('غادرت الشركة', 'You left the company.'),
         );
         context.go('/login');
       }
@@ -117,12 +118,11 @@ class _LeaveOrganizationSectionState extends State<LeaveOrganizationSection> {
   Widget build(BuildContext context) {
     final gate = getIt<AuthGate>();
     final online = gate.online;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    return AppCard(
+      padding: const EdgeInsets.all(AppSpacing.xl),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
             Row(
               children: [
                 Icon(
@@ -168,14 +168,13 @@ class _LeaveOrganizationSectionState extends State<LeaveOrganizationSection> {
                 ),
               ),
             AppButton(
-              label: AppText.t('مغادرة المؤسسة', 'Leave organization'),
+              label: AppText.t('مغادرة الشركة', 'Leave company'),
               style: AppButtonStyle.danger,
               icon: const Icon(Icons.logout, size: 18),
               loading: _busy,
               onPressed: online && !_busy ? _leave : null,
             ),
-          ],
-        ),
+        ],
       ),
     );
   }

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -22,9 +25,45 @@ import 'l10n/generated/app_localizations.dart';
 import 'router/app_router.dart';
 
 Future<void> main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // Desktop best-practice #1: never die with a black screen. Zone + framework
+  // errors are routed to debugPrint (release: platform log) and the widget
+  // tree gets an Arabic-friendly fallback instead of a grey screen.
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('[flutter-error] ${details.exceptionAsString()}');
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[platform-error] $error');
+    return true;
+  };
+  ErrorWidget.builder = (details) => _StartupErrorView(
+        message: 'حدث خطأ غير متوقع. أعد تشغيل التطبيق.\nUnexpected error — restart the app.',
+        details: kDebugMode ? '${details.exception}' : null,
+        retry: null,
+      );
 
-  await appBootstrap();
+  await runZonedGuarded(() async {
+    WidgetsFlutterBinding.ensureInitialized();
+
+    // First pixels ASAP: bootstrap (Firebase init, per-org DB open, seeds,
+    // backup) stays off the critical path behind a splash instead of a black
+    // screen. The splash is deliberately dependency-free — no theme service,
+    // no ScreenUtil, no localization — so it can paint before any of that.
+    runApp(const _BootstrapSplash());
+    try {
+      await appBootstrap();
+    } on Object catch (e) {
+      // Bootstrap (DB open, Firebase, seeds) failed: swap the spinner for a
+      // retry screen instead of hanging forever. Keeps MSIX/EXE + mobile
+      // parity — same widget on every platform.
+      debugPrint('[bootstrap] failed: $e');
+      runApp(_StartupErrorView(
+        message: 'تعذر بدء التشغيل (قاعدة البيانات أو الشبكة).\nStartup failed — check DB / network.',
+        details: kDebugMode ? '$e' : null,
+        retry: () => main(),
+      ));
+      return;
+    }
 
   final themeService = getIt<ThemeService>();
   await themeService.init();
@@ -39,6 +78,106 @@ Future<void> main() async {
 
   final router = AppRouter(authGate: getIt<AuthGate>()).router;
   runApp(MaterialLabApp(router: router));
+
+  // Mobile-only bell + poll scheduling after the first frame (no-op on
+  // desktop): plugin init and the bell scans interleave with the first paint
+  // instead of delaying it.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(startNotifications());
+  });
+  }, (error, stack) {
+    debugPrint('[zone-error] $error');
+  });
+}
+
+/// Retry-capable fatal-startup view. Dependency-free like [_BootstrapSplash]
+/// so it can be shown even when DI/theme/router all failed. Same on
+/// MSIX, plain EXE, Android and iOS (parity).
+
+/// Retry-capable fatal-startup view. Dependency-free like [_BootstrapSplash]
+/// so it can be shown even when DI/theme/router all failed. Same on
+/// MSIX, plain EXE, Android and iOS (parity).
+class _StartupErrorView extends StatelessWidget {
+  const _StartupErrorView({required this.message, this.details, this.retry});
+
+  final String message;
+  final String? details;
+  final Future<void> Function()? retry;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: const Color(0xFFF3F6FB),
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline, size: 48, color: Color(0xFFB91C1C)),
+                  const SizedBox(height: 16),
+                  Text(message, textAlign: TextAlign.center,
+                    textDirection: TextDirection.rtl,
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF0F172A))),
+                  if (details != null) ...[
+                    const SizedBox(height: 8),
+                    Text(details!, textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                  ],
+                  if (retry != null) ...[
+                    const SizedBox(height: 20),
+                    FilledButton.icon(
+                      onPressed: () => retry!(),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('إعادة المحاولة / Retry'),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Dependency-free launch splash: paints before Firebase, the database and
+/// the theme service are ready, so a slow cold start shows a spinner instead
+/// of a black screen. Replaced by [MaterialLabApp] once bootstrap finishes.
+class _BootstrapSplash extends StatelessWidget {
+  const _BootstrapSplash();
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Color(0xFFF3F6FB),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(),
+              SizedBox(height: 16),
+              Text(
+                'MaterialLab',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF0F172A),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// MaterialLabApp — RTL Arabic-first bilingual Material app (Windows desktop).

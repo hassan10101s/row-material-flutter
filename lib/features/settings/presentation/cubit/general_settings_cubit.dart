@@ -1,3 +1,4 @@
+import '../../../../core/constants/app_strings.dart';
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../domain/settings_repository.dart';
@@ -9,6 +10,10 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
     : super(const GeneralSettingsState());
 
   final SettingsRepository repo;
+
+  /// Fallback department label shown on reports when none is stored yet.
+  static String get _defaultDepartmentLabel =>
+      AppText.t('قسم ضمان الجودة', 'Quality Assurance Department');
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true));
@@ -22,7 +27,7 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
           loading: false,
           departmentLabel: label?.trim().isNotEmpty == true
               ? label!
-              : 'Quality Assurance Department',
+              : _defaultDepartmentLabel,
           logoPath: logoPath ?? '',
           logoDataUri: logoDataUri ?? '',
           exportRootPath: exportRootPath?.trim() ?? '',
@@ -32,7 +37,7 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
       safeEmit(
         state.copyWith(
           loading: false,
-          departmentLabel: 'Quality Assurance Department',
+          departmentLabel: _defaultDepartmentLabel,
         ),
       );
     }

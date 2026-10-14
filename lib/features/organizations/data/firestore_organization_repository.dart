@@ -1,5 +1,9 @@
-import '../../../core/sync/remote/auth_remote_data_source.dart' show RemoteAuthException;
-import '../../../core/sync/remote/remote_data_source.dart' hide OrganizationProfile;
+import '../../../core/auth/permissions.dart';
+import '../../../core/sync/remote/auth_remote_data_source.dart'
+    show RemoteAuthException;
+import '../../../core/constants/app_strings.dart';
+import '../../../core/sync/remote/remote_data_source.dart'
+    hide OrganizationProfile;
 import '../../members/domain/member_repository.dart';
 import '../domain/organization_repository.dart';
 import 'member_write_guard.dart';
@@ -35,38 +39,112 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
   Future<String> createOrganization({required String name}) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) {
-      throw const OrganizationFailure('اسم المؤسسة مطلوب', code: 'validation');
+      throw OrganizationFailure(
+        AppText.t('اسم المؤسسة مطلوب', 'Organization name is required.'),
+        code: 'validation',
+      );
     }
     final user = await remote.currentUser();
     if (user == null) {
-      throw const OrganizationFailure('انتهت جلسة الدخول، أعد تسجيل الدخول', code: 'signed_out');
+      throw OrganizationFailure(
+        AppText.t(
+          'انتهت جلسة الدخول، أعد تسجيل الدخول',
+          'Session expired, please sign in again.',
+        ),
+        code: 'signed_out',
+      );
     }
-    return remote.createOrganization(
-      uid: user.uid,
-      email: user.email,
-      displayName: user.displayName ?? '',
-      organizationName: trimmed,
-    ).onError<RemoteAuthException>((error, _) {
-      throw OrganizationFailure(error.message, code: error.code);
-    });
+    // Single-company policy (§2): read the current profile before creating.
+    // A bound account (invited/pending_activation/active) is refused with a
+    // clear message — sign-out alone never unblocks this, only leaving does.
+    final existing = await remote.loadProfile(user.uid);
+    if (existing != null &&
+        existing.organizationId.isNotEmpty &&
+        (existing.status == 'invited' ||
+            existing.status == 'pending_activation' ||
+            existing.status == 'active')) {
+      throw OrganizationFailure(
+        AppText.t(
+          'هذا الحساب مرتبط بشركة حالية. غادر الشركة الحالية أولًا لإنشاء شركة جديدة.',
+          'This account is already linked to a company. Leave the current company first to create a new one.',
+        ),
+        code: 'member_exists',
+      );
+    }
+    return remote
+        .createOrganization(
+          uid: user.uid,
+          email: user.email,
+          displayName: user.displayName ?? '',
+          organizationName: trimmed,
+        )
+        .onError<RemoteAuthException>((error, _) {
+          throw OrganizationFailure(
+            _remoteCreateMessage(error),
+            code: error.code,
+          );
+        });
   }
+
+  /// Bilingual mapping for the remote creation errors: raw technical English
+  /// must never reach the UI, while the code stays for debugging.
+  static String _remoteCreateMessage(RemoteAuthException error) =>
+      switch (error.code) {
+        'member_exists' => AppText.t(
+          'هذا الحساب مرتبط بشركة حالية. غادر الشركة الحالية أولًا لإنشاء شركة جديدة.',
+          'This account is already linked to a company. Leave the current company first to create a new one.',
+        ),
+        'organization_exists' => AppText.t(
+          'الشركة موجودة بالفعل.',
+          'Organization already exists.',
+        ),
+        _ => AppText.t(
+          'تعذر إنشاء الشركة. حاول مرة أخرى.',
+          'Could not create the company. Try again.',
+        ),
+      };
 
   @override
   Future<void> joinWithInvite({required String organizationId}) async {
     final user = await remote.currentUser();
     if (user == null) {
-      throw const OrganizationFailure('انتهت جلسة الدخول، أعد تسجيل الدخول', code: 'signed_out');
+      throw OrganizationFailure(
+        AppText.t(
+          'انتهت جلسة الدخول، أعد تسجيل الدخول',
+          'Session expired, please sign in again.',
+        ),
+        code: 'signed_out',
+      );
     }
     final orgId = organizationId.trim();
     if (orgId.isEmpty) {
-      throw const OrganizationFailure('كود المؤسسة مطلوب', code: 'validation');
+      throw OrganizationFailure(
+        AppText.t('كود المؤسسة مطلوب', 'Organization code is required.'),
+        code: 'validation',
+      );
     }
     // The Rules only allow reading the invite whose e-mail equals the token
     // e-mail, so a miss is a plain "not found" (plan §8.3 → "Access Denied").
-    final invite = await remote.findInvite(orgId, user.email);
+    // A denied read (unverified e-mail) surfaces the same way: hint at
+    // verification instead of showing a raw permission error.
+    Invite? invite;
+    try {
+      invite = await remote.findInvite(orgId, user.email);
+    } on Object catch (_) {
+      throw OrganizationFailure(
+        AppText.t(
+          'تعذّر قراءة الدعوة — تحقق من اتصالك وتأكد من توثيق بريدك ثم حاول مجددًا.',
+          'Could not read the invite — check your connection, make sure your email is verified, then try again.',
+        ),
+        code: 'invite_not_found',
+      );
+    }
     if (invite == null) {
-      throw const OrganizationFailure(
-        'لا توجد دعوة مطابقة لبريدك في هذه المؤسسة',
+      throw OrganizationFailure(
+        AppText.t(
+          'لا توجد دعوة مطابقة لبريدك في هذه المؤسسة',
+          'No matching invite for your email in this organization.',
+        ),
         code: 'invite_not_found',
       );
     }
@@ -103,7 +181,10 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
   @override
   Future<void> rename(String name) async {
     if (name.trim().isEmpty) {
-      throw const OrganizationFailure('اسم المؤسسة مطلوب', code: 'validation');
+      throw OrganizationFailure(
+        AppText.t('اسم المؤسسة مطلوب', 'Organization name is required.'),
+        code: 'validation',
+      );
     }
     _require('org.update');
     await remote.updateOrganization(_organizationId, {'name': name.trim()});
@@ -123,8 +204,11 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
 
   void _require(String permissionId) {
     if (!guard.allows(permissionId)) {
-      throw const OrganizationFailure(
-        'هذه العملية تتطلب اتصالاً بالإنترنت وجلسة صالحة',
+      throw OrganizationFailure(
+        AppText.t(
+          'هذه العملية تتطلب اتصالاً بالإنترنت وجلسة صالحة',
+          'This action requires an internet connection and a valid session.',
+        ),
         code: 'not_allowed',
       );
     }
@@ -145,29 +229,91 @@ class _Members implements MemberRepository {
 
   @override
   Future<List<Member>> listMembers() async {
-    final documents = await _remote.listMembers(_orgId);
-    final members = documents.map(Member.fromDocument).toList()
-      ..sort((a, b) {
-        final byStatus = _statusOrder(a.status).compareTo(_statusOrder(b.status));
-        if (byStatus != 0) return byStatus;
-        return a.email.toLowerCase().compareTo(b.email.toLowerCase());
-      });
-    return members;
+    try {
+      final documents = await _remote.listMembers(_orgId);
+      final members = documents.map(Member.fromDocument).toList()
+        ..sort((a, b) {
+          final byStatus = _statusOrder(
+            a.status,
+          ).compareTo(_statusOrder(b.status));
+          if (byStatus != 0) return byStatus;
+          return a.email.toLowerCase().compareTo(b.email.toLowerCase());
+        });
+      return members;
+    } on RemoteAuthException catch (e) {
+      throw OrganizationFailure(e.message, code: e.code);
+    } on Object catch (e) {
+      throw _mapRemoteError(e);
+    }
+  }
+
+  /// Member writes are online-only (never queued): even the exempt `admin`
+  /// role must have connectivity here, otherwise the button looks enabled
+  /// offline and only fails later with a raw Firestore error.
+  void _requireOnline() {
+    if (!_guard.online) {
+      throw OrganizationFailure(
+        AppText.t(
+          'هذه العملية تتطلب اتصالاً بالإنترنت',
+          'This action requires an internet connection.',
+        ),
+        code: 'offline',
+      );
+    }
   }
 
   @override
   Future<void> invite({required String email, required String role}) async {
     final normalized = email.trim().toLowerCase();
-    if (normalized.length < 4 || !normalized.contains('@')) {
-      throw const OrganizationFailure('البريد الإلكتروني غير صالح', code: 'validation');
+    if (normalized.length < 4 ||
+        !normalized.contains('@') ||
+        !_emailLooksValid(normalized)) {
+      throw OrganizationFailure(
+        AppText.t('البريد الإلكتروني غير صالح', 'Invalid email address.'),
+        code: 'validation',
+      );
     }
+    if (!AppRoles.isValid(role)) {
+      throw OrganizationFailure(
+        AppText.t('الدور غير صالح', 'Invalid role.'),
+        code: 'validation',
+      );
+    }
+    final selfEmail = _guard.email.trim().toLowerCase();
+    if (selfEmail.isNotEmpty && normalized == selfEmail) {
+      throw OrganizationFailure(
+        AppText.t(
+          'لا يمكنك دعوة نفسك — هذا البريد مرتبط بحسابك.',
+          'You cannot invite yourself — this email belongs to your account.',
+        ),
+        code: 'validation',
+      );
+    }
+    _requireOnline();
     _owner._require('users.create');
-    final memberId = await _remote.createInvite(
-      organizationId: _orgId,
-      email: normalized,
-      role: role,
-      invitedBy: _guard.uid,
-    );
+    late final String memberId;
+    try {
+      memberId = await _remote.createInvite(
+        organizationId: _orgId,
+        email: normalized,
+        role: role,
+        invitedBy: _guard.uid,
+      );
+    } on RemoteAuthException catch (error) {
+      final message = switch (error.code) {
+        'member_exists' => AppText.t(
+          'هذا البريد عضو نشط بالفعل في الشركة',
+          'This email is already an active company member.',
+        ),
+        'invalid_email' => AppText.t(
+          'البريد الإلكتروني غير صالح',
+          'Invalid email address.',
+        ),
+        'invalid_role' => AppText.t('الدور غير صالح', 'Invalid role.'),
+        _ => error.message,
+      };
+      throw OrganizationFailure(message, code: error.code);
+    }
     await _remote.writeAudit(
       organizationId: _orgId,
       action: 'MEMBER_INVITED',
@@ -179,13 +325,85 @@ class _Members implements MemberRepository {
   }
 
   @override
-  Future<void> changeRole({required String memberId, required String role}) async {
-    _owner._require('users.update');
-    await _remote.updateMember(
+  Future<void> resendInvite({required String memberId}) async {
+    if (memberId.trim().isEmpty) {
+      throw OrganizationFailure(
+        AppText.t('العضو غير صالح', 'Invalid member.'),
+        code: 'validation',
+      );
+    }
+    _requireOnline();
+    _owner._require('users.create');
+    final members = await listMembers();
+    Member? target;
+    for (final m in members) {
+      if (m.id == memberId) {
+        target = m;
+        break;
+      }
+    }
+    if (target == null) {
+      throw OrganizationFailure(
+        AppText.t('العضو غير موجود', 'Member not found.'),
+        code: 'not_found',
+      );
+    }
+    if (target.isActive) {
+      throw OrganizationFailure(
+        AppText.t(
+          'هذا البريد عضو نشط بالفعل في الشركة',
+          'This email is already an active company member.',
+        ),
+        code: 'member_exists',
+      );
+    }
+    final memberIdOut = await _remote.createInvite(
       organizationId: _orgId,
-      memberId: memberId,
-      data: {'role': role},
+      email: target.email,
+      role: target.role,
+      invitedBy: _guard.uid,
     );
+    await _remote.writeAudit(
+      organizationId: _orgId,
+      action: 'MEMBER_INVITE_RESENT',
+      entityType: 'member',
+      entityId: memberIdOut,
+      details: {'email': target.email, 'role': target.role},
+    );
+    await _owner.onRosterChanged?.call();
+  }
+
+  @override
+  Future<void> changeRole({
+    required String memberId,
+    required String role,
+  }) async {
+    if (!AppRoles.isValid(role)) {
+      throw OrganizationFailure(
+        AppText.t('الدور غير صالح', 'Invalid role.'),
+        code: 'validation',
+      );
+    }
+    if (memberId == _guard.memberId) {
+      throw OrganizationFailure(
+        AppText.t(
+          'لا يمكنك تغيير دورك بنفسك — اطلب من مالك آخر.',
+          'You cannot change your own role — ask another owner.',
+        ),
+        code: 'validation',
+      );
+    }
+    _requireOnline();
+    _owner._require('users.update');
+    try {
+      await _remote.updateMember(
+        organizationId: _orgId,
+        memberId: memberId,
+        data: {'role': role},
+      );
+    } on Object catch (e) {
+      throw _mapRemoteError(e);
+    }
     await _remote.writeAudit(
       organizationId: _orgId,
       action: 'MEMBER_ROLE_CHANGED',
@@ -197,16 +415,36 @@ class _Members implements MemberRepository {
   }
 
   @override
-  Future<void> setStatus({required String memberId, required String status}) async {
+  Future<void> setStatus({
+    required String memberId,
+    required String status,
+  }) async {
     if (status != 'active' && status != 'disabled') {
-      throw const OrganizationFailure('الحالة غير صالحة', code: 'validation');
+      throw OrganizationFailure(
+        AppText.t('الحالة غير صالحة', 'Invalid status.'),
+        code: 'validation',
+      );
     }
+    if (status == 'disabled' && memberId == _guard.memberId) {
+      throw OrganizationFailure(
+        AppText.t(
+          'لا يمكنك تعطيل نفسك — استخدم المغادرة بدلًا من ذلك.',
+          'You cannot disable yourself — use Leave instead.',
+        ),
+        code: 'validation',
+      );
+    }
+    _requireOnline();
     _owner._require(status == 'active' ? 'users.update' : 'users.disable');
-    await _remote.updateMember(
-      organizationId: _orgId,
-      memberId: memberId,
-      data: {'status': status, 'activatedAt': null},
-    );
+    try {
+      await _remote.updateMember(
+        organizationId: _orgId,
+        memberId: memberId,
+        data: {'status': status, 'activatedAt': null},
+      );
+    } on Object catch (e) {
+      throw _mapRemoteError(e);
+    }
     await _remote.writeAudit(
       organizationId: _orgId,
       action: status == 'active' ? 'MEMBER_ACTIVATED' : 'MEMBER_DISABLED',
@@ -219,10 +457,21 @@ class _Members implements MemberRepository {
   @override
   Future<void> removeMember({required String memberId}) async {
     if (memberId == _guard.memberId) {
-      throw const OrganizationFailure('لا يمكنك إزالة نفسك من المؤسسة', code: 'validation');
+      throw OrganizationFailure(
+        AppText.t(
+          'لا يمكنك إزالة نفسك من المؤسسة',
+          'You cannot remove yourself from the organization.',
+        ),
+        code: 'validation',
+      );
     }
+    _requireOnline();
     _owner._require('users.disable');
-    await _remote.deleteMember(organizationId: _orgId, memberId: memberId);
+    try {
+      await _remote.deleteMember(organizationId: _orgId, memberId: memberId);
+    } on Object catch (e) {
+      throw _mapRemoteError(e);
+    }
     await _remote.writeAudit(
       organizationId: _orgId,
       action: 'MEMBER_REMOVED',
@@ -239,8 +488,11 @@ class _Members implements MemberRepository {
     final uid = _guard.uid;
     final memberId = _guard.memberId;
     if (uid.isEmpty || memberId.isEmpty || _orgId.isEmpty) {
-      throw const OrganizationFailure(
-        'جلسة الدخول غير مكتملة، أعد تسجيل الدخول',
+      throw OrganizationFailure(
+        AppText.t(
+          'جلسة الدخول غير مكتملة، أعد تسجيل الدخول',
+          'Sign-in session is incomplete, please sign in again.',
+        ),
         code: 'signed_out',
       );
     }
@@ -260,10 +512,58 @@ class _Members implements MemberRepository {
     // organization and signs out immediately afterwards.
   }
 
-  /// Active first, then invited, then disabled.
+  /// Active first, then invited/pending, then disabled.
   static int _statusOrder(String status) => switch (status) {
-        'active' => 0,
-        'invited' => 1,
-        _ => 2,
-      };
+    'active' => 0,
+    'invited' => 1,
+    'pending_activation' => 1,
+    _ => 2,
+  };
+
+  /// Minimal RFC-5322-ish check: one `@`, a dot after it, no spaces.
+  static bool _emailLooksValid(String email) {
+    if (email.contains(' ')) return false;
+    final parts = email.split('@');
+    if (parts.length != 2) return false;
+    if (parts[0].isEmpty || parts[1].isEmpty) return false;
+    if (!parts[1].contains('.')) return false;
+    return true;
+  }
+
+  /// Maps raw Firestore/remote errors to bilingual `OrganizationFailure`s so
+  /// technical strings (`permission-denied`, `unavailable`) never reach the UI.
+  static OrganizationFailure _mapRemoteError(Object e) {
+    final text = '$e';
+    if (text.contains('permission-denied') ||
+        text.contains('PERMISSION_DENIED') ||
+        text.contains('permission_denied')) {
+      return OrganizationFailure(
+        AppText.t(
+          'تم الرفض من الخادم — تحقق من صلاحياتك وحدّث القائمة.',
+          'Rejected by the server — check your permissions and refresh.',
+        ),
+        code: 'not_allowed',
+      );
+    }
+    if (text.contains('unavailable') ||
+        text.contains('deadline-exceeded') ||
+        text.contains('network') ||
+        text.contains('offline')) {
+      return OrganizationFailure(
+        AppText.t(
+          'لا يوجد اتصال بالإنترنت — تحقق من الشبكة وحاول مجددًا.',
+          'No internet connection — check the network and try again.',
+        ),
+        code: 'offline',
+      );
+    }
+    if (e is OrganizationFailure) return e;
+    return OrganizationFailure(
+      AppText.t(
+        'تعذّر إتمام العملية. حاول مرة أخرى.',
+        'Could not complete the operation. Try again.',
+      ),
+      code: 'remote_error',
+    );
+  }
 }

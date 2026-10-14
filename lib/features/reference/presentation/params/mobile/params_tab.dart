@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -9,23 +11,57 @@ import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
+import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_infinite_list.dart';
+import '../../../../../design_system/widgets/app_page_header.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../../design_system/export/table_html_export.dart';
 import '../../cubit/params_cubit.dart';
 import '../../cubit/params_state.dart';
+import '../desktop/params_tab.dart' show DesktopParamsTab;
 import '../params_editor.dart';
 
-/// Mobile parameter management.
-///
-/// The table becomes a card per parameter, and the 420dp editor dialog becomes
-/// a full-screen route to fit the form on a 400dp grid.
-class MobileParamsTab extends StatelessWidget {
+/// Mobile parameter management: searchable infinite cards, full-screen editor.
+class MobileParamsTab extends StatefulWidget {
   const MobileParamsTab({super.key, required this.parameterType});
 
   final String parameterType;
 
-  bool get _isChemical => parameterType == 'chemical';
+  @override
+  State<MobileParamsTab> createState() => _MobileParamsTabState();
+}
+
+class _MobileParamsTabState extends State<MobileParamsTab> {
+  final _searchCtrl = TextEditingController();
+  Timer? _debounce;
+
+  bool get _isChemical => widget.parameterType == 'chemical';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchCtrl.addListener(_onSearchChanged);
+  }
+
+  void _onSearchChanged() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      context.read<ParamsCubit>().setQuery(_searchCtrl.text.trim());
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchCtrl.removeListener(_onSearchChanged);
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   Future<void> _openEditor(
     BuildContext context, [
@@ -35,7 +71,7 @@ class MobileParamsTab extends StatelessWidget {
     final saved = await Navigator.of(context).push<bool>(
       appMaterialPageRoute<bool>(
         builder: (_) => _ParamEditorRoute(
-          parameterType: parameterType,
+          parameterType: widget.parameterType,
           param: param,
           onSubmit: cubit.upsert,
           unitOptions: cubit.state.units,
@@ -70,60 +106,153 @@ class MobileParamsTab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cubit = context.read<ParamsCubit>();
     final state = context.watch<ParamsCubit>().state;
+    final countLabel = state.hasMore
+        ? '${state.rows.length}+'
+        : '${state.rows.length}';
     return AppErrorFeedback<ParamsCubit, ParamsState>(
       selector: (s) => s.error,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            _isChemical
-                ? AppText.t('التحليل الكيميائي', 'Chemical Analysis')
-                : AppText.t('الفحص الظاهري', 'Physical Aspects'),
-            style: Theme.of(context).textTheme.titleLarge,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          FilledButton.icon(
-            onPressed: () => _openEditor(context),
-            icon: Icon(Icons.add, size: 20.r),
-            label: Text(AppText.t('بارامتر جديد', 'New Parameter')),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          if (state.loading && state.rows.isEmpty)
-            const AppSkeletonList(rows: 6, lines: 3, height: 380)
-          else if (state.rows.isEmpty)
-            Expanded(
-              child: AppEmptyState(
-                icon: Icons.tag_outlined,
-                title: _isChemical
-                    ? AppText.t(
-                        'لا توجد بارامترات كيميائية.',
-                        'No chemical parameters.',
-                      )
-                    : AppText.t(
-                        'لا توجد بارامترات ظاهرية.',
-                        'No physical parameters.',
-                      ),
-              ),
-            )
-          else
-            Expanded(
-              child: ListView.separated(
-                itemCount: state.rows.length,
-                separatorBuilder: (_, _) =>
-                    const SizedBox(height: AppSpacing.sm),
-                itemBuilder: (context, index) {
-                  final p = state.rows[index];
-                  return _ParamCard(
-                    name: '${p['parameter_name'] ?? ''}',
-                    unit: '${p['unit'] ?? ''}',
-                    onEdit: () => _openEditor(context, p),
-                    onDelete: () => _delete(context, p),
-                  );
-                },
-              ),
+      // Add floats like the raw-material register (heroTag null: sibling
+      // tabs share one IndexedStack).
+      child: Scaffold(
+        floatingActionButton: FloatingActionButton(
+          heroTag: null,
+          tooltip: AppText.t('بارامتر جديد', 'New Parameter'),
+          onPressed: () => _openEditor(context),
+          child: Icon(Icons.add, size: 24.r),
+        ),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AppPageHeader(
+              title: _isChemical
+                  ? AppText.t('التحليل الكيميائي', 'Chemical Analysis')
+                  : AppText.t('الفحص الظاهري', 'Physical Aspects'),
+              subtitle: '$countLabel ${AppText.t('بارامتر', 'parameters')}',
+              icon: Icons.tag_outlined,
+              actions: [
+                IconButton(
+                  tooltip: AppText.t('تصدير جدول', 'Export table'),
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                  onPressed: state.rows.isEmpty
+                      ? null
+                      : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'params',
+                          title: _isChemical
+                              ? AppText.t(
+                                  'التحليل الكيميائي',
+                                  'Parameter Chemical Analysis',
+                                )
+                              : AppText.t('الفحص الظاهري', 'Physical Aspects'),
+                          headers: DesktopParamsTab.exportHeaders(),
+                          rows: DesktopParamsTab.exportRows(state.rows),
+                        ),
+                  icon: const Icon(Icons.table_view_outlined),
+                ),
+              ],
             ),
-        ],
+            const SizedBox(height: AppSpacing.md),
+            AppField(
+              label: AppText.t(
+                'بحث بالاسم أو الوحدة',
+                'Search name or unit...',
+              ),
+              controller: _searchCtrl,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
+            Expanded(child: _buildBody(context, cubit, state)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    ParamsCubit cubit,
+    ParamsState state,
+  ) {
+    if (state.loading && state.rows.isEmpty) {
+      return const AppSkeletonList(rows: 6, lines: 3, height: 380);
+    }
+    if (state.rows.isEmpty) {
+      if (state.error != null) {
+        return RefreshIndicator(
+          onRefresh: () => cubit.refresh(),
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              AppErrorState(
+                title: AppText.t('تعذّر التحميل', 'Could not load'),
+                subtitle: state.error,
+                onRetry: () => cubit.refresh(),
+              ),
+            ],
+          ),
+        );
+      }
+      return RefreshIndicator(
+        onRefresh: () => cubit.refresh(),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: [
+            AppEmptyState(
+              icon: Icons.tag_outlined,
+              title: state.query.isEmpty
+                  ? (_isChemical
+                        ? AppText.t(
+                            'لا توجد بارامترات كيميائية.',
+                            'No chemical parameters.',
+                          )
+                        : AppText.t(
+                            'لا توجد بارامترات ظاهرية.',
+                            'No physical parameters.',
+                          ))
+                  : AppText.t(
+                      'لا توجد نتائج مطابقة',
+                      'No matching parameters.',
+                    ),
+              action: state.query.isEmpty
+                  ? null
+                  : AppButton(
+                      style: AppButtonStyle.secondary,
+                      label: AppText.t('مسح البحث', 'Clear search'),
+                      onPressed: () {
+                        _searchCtrl.clear();
+                        cubit.setQuery('');
+                      },
+                    ),
+            ),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: () => cubit.refresh(),
+      child: AppInfiniteList(
+        itemCount: state.rows.length,
+        hasMore: state.hasMore,
+        loadingMore: state.loadingMore,
+        errorMore: state.errorMore,
+        onLoadMore: () => cubit.loadMore(),
+        onRetry: () => cubit.loadMore(),
+        totalLabel:
+            '${state.rows.length} ${AppText.t('بارامتر', 'parameters')} • ${AppText.t('نهاية القائمة', 'End of list')}',
+        itemBuilder: (context, index) {
+          final p = state.rows[index];
+          return _ParamCard(
+            name: '${p['parameter_name'] ?? ''}',
+            unit: '${p['unit'] ?? ''}',
+            onEdit: () => _openEditor(context, p),
+            onDelete: () => _delete(context, p),
+          );
+        },
       ),
     );
   }
@@ -145,56 +274,55 @@ class _ParamCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+    return AppCard(
+      enableHover: false,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14.spMax,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textStrong,
+                  ),
+                ),
+                if (unit != null && unit!.isNotEmpty)
                   Text(
-                    name,
-                    maxLines: 2,
+                    unit!,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 14.spMax,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textStrong,
+                      fontSize: 12.spMax,
+                      color: AppColors.textMuted,
                     ),
                   ),
-                  if (unit != null)
-                    Text(
-                      unit!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 12.spMax,
-                        color: AppColors.textMuted,
-                      ),
-                    ),
-                ],
-              ),
+              ],
             ),
-            IconButton(
-              tooltip: AppStrings.edit,
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              onPressed: onEdit,
-              icon: Icon(Icons.edit_outlined, size: 20.r),
+          ),
+          IconButton(
+            tooltip: AppStrings.edit,
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            onPressed: onEdit,
+            icon: Icon(Icons.edit_outlined, size: 20.r),
+          ),
+          IconButton(
+            tooltip: AppStrings.delete,
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            onPressed: onDelete,
+            icon: Icon(
+              Icons.delete_outline,
+              size: 20.r,
+              color: AppColors.danger,
             ),
-            IconButton(
-              tooltip: AppStrings.delete,
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              onPressed: onDelete,
-              icon: Icon(
-                Icons.delete_outline,
-                size: 20.r,
-                color: AppColors.danger,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

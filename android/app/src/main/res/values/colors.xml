@@ -4,4 +4,6 @@
          seamless instead of showing a black box on a light field. -->
     <color name="splash_background">#FF000000</color>
     <color name="splash_background_dark">#FF000000</color>
+    <!-- FCM tray accent (teal 700, matches app primary). -->
+    <color name="material_lab_push_color">#FF0F766E</color>
 </resources>

@@ -369,6 +369,16 @@ class QcInspectionSheetCubit extends AppCubit<QcInspectionSheetState> {
     }
   }
 
+  Future<void> deleteInspection() async {
+    safeEmit(state.copyWith(saving: true, error: null));
+    try {
+      await repo.deleteInspection(state.inspectionId);
+      safeEmit(state.copyWith(saving: false, submitted: true));
+    } catch (e) {
+      safeEmit(state.copyWith(saving: false, error: '$e'));
+    }
+  }
+
   Future<void> refresh() => load();
 
   /// Records one answer.

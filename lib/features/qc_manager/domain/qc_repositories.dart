@@ -108,7 +108,11 @@ abstract interface class QcTemplateRepository {
 
   /// Copies a template and its tree under a new code, so a published checklist
   /// can be revised without touching the issued one.
-  Future<int> duplicateTemplate(int templateId, String newCode, String newName);
+  Future<int> duplicateTemplate(
+    int templateId,
+    String newName, {
+    String newCode = '',
+  });
 }
 
 /// QC inspections against a template, plus the per-item responses.

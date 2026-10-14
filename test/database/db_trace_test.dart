@@ -278,8 +278,28 @@ void main() {
     );
   });
 
-  group('tracedTransaction', () {
-    test('commits the body', () async {
+  group('TracedBatch', () {
+    test('batch() hands out a traced batch that commits like the raw one',
+        () async {
+      final traced = TracedDatabase(db);
+      final batch = traced.batch();
+      expect(batch, isA<TracedBatch>());
+      batch.insert('settings', {'key': 'b1', 'value': 'v1'});
+      batch.insert('settings', {'key': 'b2', 'value': 'v2'});
+      expect(batch.length, 2);
+      await batch.commit(noResult: true);
+      expect(
+        await traced.query(
+          'settings',
+          where: 'key IN (?, ?)',
+          whereArgs: ['b1', 'b2'],
+        ),
+        hasLength(2),
+      );
+    });
+  });
+
+  group('tracedTransaction', () {    test('commits the body', () async {
       await tracedTransaction(db, 'trace.commit', (txn) async {
         await txn.insert('settings', {'key': 'k', 'value': 'v'});
       });

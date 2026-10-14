@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_field.dart';
 
 /// Dialog/route title for the create/edit chrome, shared by both experiences.
 String unitsEditorTitle(bool isNew) => isNew
@@ -97,34 +98,22 @@ class UnitsEditorState extends State<UnitsEditor> {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        TextField(
+        AppField(
+          label: AppText.t('الرمز', 'Symbol'),
           controller: _symbol,
           onChanged: (_) => setState(() => _symbolError = null),
-          decoration: InputDecoration(
-            labelText: AppText.t('الرمز', 'Symbol'),
-            isDense: true,
-            hintText: 'mg/kg',
-            errorText: _symbolError,
-            border: const OutlineInputBorder(),
-          ),
+          hint: 'mg/kg',
+          error: _symbolError,
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
+        AppField(
+          label: AppText.t('الاسم', 'Name'),
           controller: _name,
-          decoration: InputDecoration(
-            labelText: AppText.t('الاسم', 'Name'),
-            isDense: true,
-            border: const OutlineInputBorder(),
-          ),
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
+        AppField(
+          label: AppText.t('البعد', 'Dimension'),
           controller: _dimension,
-          decoration: InputDecoration(
-            labelText: AppText.t('البعد', 'Dimension'),
-            isDense: true,
-            border: const OutlineInputBorder(),
-          ),
         ),
         if (actions != null) ...[
           const SizedBox(height: AppSpacing.md),
@@ -146,22 +135,18 @@ class UnitsEditorActions extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        TextButton(
+        AppButton(
+          style: AppButtonStyle.secondary,
+          label: AppStrings.cancel,
           onPressed: state.saving
               ? null
               : () => Navigator.of(context).pop(false),
-          child: Text(AppStrings.cancel),
         ),
         const SizedBox(width: AppSpacing.sm),
-        FilledButton(
+        AppButton(
+          label: AppStrings.save,
+          loading: state.saving,
           onPressed: state.saving ? null : state.submit,
-          child: state.saving
-              ? SizedBox(
-                  width: 18.r,
-                  height: 18.r,
-                  child: const CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Text(AppStrings.save),
         ),
       ],
     );

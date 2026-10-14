@@ -6,7 +6,9 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
 import '../../../../core/sync/conflict_resolver.dart';
+import '../../../../core/sync/backfill_service.dart';
 import '../../../../core/sync/sync_engine.dart';
+import '../../../../core/sync/sync_metadata.dart';
 import '../../../../core/sync/sync_queue.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
@@ -14,7 +16,10 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
+import '../../../../design_system/widgets/app_paginated_table.dart';
+import '../../../../design_system/export/table_html_export.dart';
 import '../../../../core/constants/app_strings.dart';
 
 /// SyncScreen (plan P13.4/P25): status, pending/blocked counters, manual
@@ -105,6 +110,46 @@ class _SyncScreenState extends State<SyncScreen> {
         await _refresh();
       });
 
+  /// "إعادة السحب الكامل": forget pull cursors and re-walk every collection
+  /// from the beginning. For devices whose cursor was poisoned by old code
+  /// that advanced past documents it failed to apply: those rows are behind
+  /// the cursor, so no normal pull (and no reinstall — APK reinstall keeps
+  /// app data) will ever fetch them. Applied rows re-skip cheaply and queued
+  /// local edits are untouched, unlike wiping app data.
+  Future<void> _fullRepull() => _guarded(() async {
+        await getIt<SyncMetadata>().clearCursors();
+        await _engine.syncNow(reason: 'full-repull', pullOnly: true);
+        await _refresh();
+        if (mounted) {
+          AppFeedback.success(
+            context,
+            AppText.t(
+              'تمت إعادة السحب الكامل',
+              'Full re-pull done',
+            ),
+          );
+        }
+      });
+
+  /// "رفع المتأخر": re-queue every local inspection row that never reached
+  /// the server (imports / restores / lost queue rows), then push in batches.
+  /// Temporary recovery tool for the current history backlog.
+  Future<void> _backfill() => _guarded(() async {
+        final report =
+            await getIt<BackfillService>().enqueueUnsyncedSamples();
+        await _engine.syncNow(reason: 'backfill');
+        await _refresh();
+        if (mounted) {
+          AppFeedback.success(
+            context,
+            AppText.t(
+              'تم تجهيز ${report.total} سجل للرفع (${report.tombstones} حذف)',
+              'Queued ${report.total} record(s) for upload (${report.tombstones} deletes)',
+            ),
+          );
+        }
+      });
+
   /// "إعادة المحاولة": clear the backoff of every blocked row, then sync again.
   Future<void> _retryAll() =>
       _guarded(() async {
@@ -180,6 +225,18 @@ class _SyncScreenState extends State<SyncScreen> {
               icon: const Icon(Icons.cloud_download_outlined, size: 18),
               onPressed: _busy || !gate.online ? null : _downloadHistory,
             ),
+            AppButton(
+              label: AppText.t('سحب كامل', 'Full re-pull'),
+              small: true,
+              icon: const Icon(Icons.refresh_outlined, size: 18),
+              onPressed: _busy || !gate.online ? null : _fullRepull,
+            ),
+            AppButton(
+              label: AppText.t('رفع المتأخر', 'Upload backlog'),
+              small: true,
+              icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+              onPressed: _busy || !gate.online ? null : _backfill,
+            ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
@@ -248,46 +305,157 @@ class _SyncScreenState extends State<SyncScreen> {
           ),
         ],
         const SizedBox(height: AppSpacing.lg),
-        Text(
-          AppText.t('الطابور', 'Queue'),
-          style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
+        Row(
+          children: [
+            Text(
+              AppText.t('الطابور', 'Queue'),
+              style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
+            ),
+            const Spacer(),
+            IconButton(
+              tooltip: AppText.t('تصدير جدول', 'Export table'),
+              visualDensity: VisualDensity.compact,
+              onPressed: _queueRows.isEmpty
+                  ? null
+                  : () => TableHtmlExport.export(
+                        context,
+                        filePrefix: 'sync_queue',
+                        title: AppText.t('طابور المزامنة', 'Sync queue'),
+                        headers: _QueueRow.exportHeaders(),
+                        rows: _QueueRow.exportRows(_queueRows),
+                      ),
+              icon: const Icon(Icons.table_view_outlined),
+            ),
+          ],
         ),
         const SizedBox(height: AppSpacing.sm),
         if (_queueRows.isEmpty)
           Text(AppText.t('لا توجد عناصر في الطابور.', 'Queue is empty.'))
         else
-          Card(
-            child: Column(
-              children: [
+          SizedBox(
+            height: 320.h,
+            child: AppPaginatedTable(
+              minTableWidth: 720,
+              columnFlex: const [1.4, 0.8, 0.8, 1.2, 0.8],
+              headers: [
+                ..._QueueRow.exportHeaders(),
+                AppText.t('الإجراءات', 'Actions'),
+              ],
+              rows: [
                 for (final row in _queueRows)
-                  _QueueRow(
-                    row: row,
-                    onRetry: _busy || !gate.online
-                        ? null
-                        : () => _retryOne(row),
-                  ),
+                  [
+                    Text(
+                      '${row['entity_type']} · ${row['entity_id']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      '${row['operation']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      _QueueRow.statusLabel('${row['status'] ?? ''}'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      _QueueRow.infoText(row),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    () {
+                      final status = '${row['status'] ?? ''}';
+                      if (status == 'failed' || status == 'conflict') {
+                        return AppButton(
+                          label: AppText.t('إعادة', 'Retry'),
+                          small: true,
+                          style: AppButtonStyle.ghost,
+                          onPressed: _busy || !gate.online
+                              ? null
+                              : () => _retryOne(row),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    }(),
+                  ],
               ],
             ),
           ),
         const SizedBox(height: AppSpacing.lg),
-        Text(
-          AppText.t('التعارضات', 'Conflicts'),
-          style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
+        Row(
+          children: [
+            Text(
+              AppText.t('التعارضات', 'Conflicts'),
+              style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
+            ),
+            const Spacer(),
+            IconButton(
+              tooltip: AppText.t('تصدير جدول', 'Export table'),
+              visualDensity: VisualDensity.compact,
+              onPressed: _rows.isEmpty
+                  ? null
+                  : () => TableHtmlExport.export(
+                        context,
+                        filePrefix: 'sync_conflicts',
+                        title: AppText.t('تعارضات المزامنة', 'Sync conflicts'),
+                        headers: _ConflictRow.exportHeaders(),
+                        rows: _ConflictRow.exportRows(_rows),
+                      ),
+              icon: const Icon(Icons.table_view_outlined),
+            ),
+          ],
         ),
         const SizedBox(height: AppSpacing.sm),
         if (_rows.isEmpty)
           Text(AppText.t(
               'لا توجد تعارضات — كل البيانات متزامنة.', 'No conflicts — all data is synced.'))
         else
-          Card(
-            child: Column(
-              children: [
+          SizedBox(
+            height: 320.h,
+            child: AppPaginatedTable(
+              minTableWidth: 720,
+              columnFlex: const [1.4, 0.9, 1.1, 1.6],
+              headers: [
+                ..._ConflictRow.exportHeaders(),
+                AppText.t('الإجراءات', 'Actions'),
+              ],
+              rows: [
                 for (final row in _rows)
-                  _ConflictRow(
-                    row: row,
-                    onKeepLocal: () => _keepLocal(row),
-                    onKeepRemote: () => _keepRemote(row),
-                  ),
+                  [
+                    Text(
+                      '${row['entity_type']} · ${row['entity_id']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      '${row['direction']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      '${row['detected_at']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AppButton(
+                          label: AppText.t('إبقاء المحلي', 'Keep local'),
+                          small: true,
+                          style: AppButtonStyle.ghost,
+                          onPressed: () => _keepLocal(row),
+                        ),
+                        AppButton(
+                          label: AppText.t('إبقاء الخادم', 'Keep server'),
+                          small: true,
+                          style: AppButtonStyle.ghost,
+                          onPressed: () => _keepRemote(row),
+                        ),
+                      ],
+                    ),
+                  ],
               ],
             ),
           ),
@@ -328,6 +496,7 @@ class _SyncScreenState extends State<SyncScreen> {
       await _conflicts.keepRemote(
         (row['id'] as num).toInt(),
         organizationId: gate.organizationId,
+        session: _SessionView(gate.session.uid, gate.session.deviceId),
       );
       await _refresh();
     });
@@ -378,124 +547,95 @@ class _Tile extends StatelessWidget {
   Widget build(BuildContext context) {
     return SizedBox(
       width: width,
-      child: Card(
+      child: AppCard(
         margin: const EdgeInsetsDirectional.only(end: AppSpacing.sm),
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.spMax,
-                ),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 12.spMax,
               ),
-              const SizedBox(height: 4),
-              Text(
-                value,
-                style: TextStyle(
-                  fontSize: 18.spMax,
-                  fontWeight: FontWeight.w700,
-                  color: color,
-                ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              value,
+              style: TextStyle(
+                fontSize: 18.spMax,
+                fontWeight: FontWeight.w700,
+                color: color,
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// One `sync_queue` row: what it is, how many attempts it took and - when it is
-/// blocked - a per-row retry that clears the backoff.
-class _QueueRow extends StatelessWidget {
-  const _QueueRow({required this.row, this.onRetry});
+/// Shared labels + export mapping for one `sync_queue` row: what it is, how
+/// many attempts it took and the last error. Used by the queue table and its
+/// HTML export alike.
+class _QueueRow {
+  _QueueRow._();
 
-  final Map<String, Object?> row;
-  final VoidCallback? onRetry;
-
-  static String _statusLabel(String status) {
+  static String statusLabel(String status) {
     return switch (status) {
       'pending' => AppText.t('في الانتظار', 'Pending'),
       'in_flight' => AppText.t('جارٍ الإرسال', 'Sending'),
       'failed' => AppText.t('فشل', 'Failed'),
       'conflict' => AppText.t('تعارض', 'Conflict'),
       'blocked' => AppText.t('محجوب', 'Blocked'),
-      _ => status,
+      _ => AppText.t('غير معروف', 'Unknown'),
     };
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final status = '${row['status'] ?? ''}';
+  static String infoText(Map<String, Object?> row) {
     final retryCount = (row['retry_count'] as num?)?.toInt() ?? 0;
     final error = row['last_error'];
-    return ListTile(
-      dense: true,
-      title: Text(
-        '${row['entity_type']} · ${row['entity_id']}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Text(
-        [
-          _statusLabel(status),
-          '${row['operation']}',
-          if (retryCount > 0)
-            AppText.t('محاولات: $retryCount', 'Attempts: $retryCount'),
-          if (error != null && '$error'.isNotEmpty) '$error',
-        ].join(' · '),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: status == 'failed' || status == 'conflict'
-          ? TextButton(
-              onPressed: onRetry, child: Text(AppText.t('إعادة', 'Retry')))
-          : null,
-    );
+    return [
+      if (retryCount > 0)
+        AppText.t('محاولات: $retryCount', 'Attempts: $retryCount'),
+      if (error != null && '$error'.isNotEmpty) '$error',
+    ].join(' · ');
   }
+
+  static List<String> exportHeaders() => [
+        AppText.t('الكيان', 'Entity'),
+        AppText.t('العملية', 'Operation'),
+        AppText.t('الحالة', 'Status'),
+        AppText.t('معلومات', 'Info'),
+      ];
+
+  static List<List<String>> exportRows(List<Map<String, Object?>> rows) => [
+        for (final row in rows)
+          [
+            '${row['entity_type']} · ${row['entity_id']}',
+            '${row['operation']}',
+            statusLabel('${row['status'] ?? ''}'),
+            infoText(row),
+          ],
+      ];
 }
 
-class _ConflictRow extends StatelessWidget {
-  const _ConflictRow({
-    required this.row,
-    required this.onKeepLocal,
-    required this.onKeepRemote,
-  });
+class _ConflictRow {
+  _ConflictRow._();
 
-  final Map<String, Object?> row;
-  final VoidCallback onKeepLocal;
-  final VoidCallback onKeepRemote;
+  static List<String> exportHeaders() => [
+        AppText.t('الكيان', 'Entity'),
+        AppText.t('الاتجاه', 'Direction'),
+        AppText.t('الرصد', 'Detected'),
+      ];
 
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      dense: true,
-      title: Text(
-        '${row['entity_type']} · ${row['entity_id']}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Text(
-        '${row['direction']} · ${row['detected_at']}',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TextButton(
-              onPressed: onKeepLocal,
-              child: Text(AppText.t('إبقاء المحلي', 'Keep local'))),
-          TextButton(
-            onPressed: onKeepRemote,
-            child: Text(AppText.t('إبقاء الخادم', 'Keep server')),
-          ),
-        ],
-      ),
-    );
-  }
+  static List<List<String>> exportRows(List<Map<String, Object?>> rows) => [
+        for (final row in rows)
+          [
+            '${row['entity_type']} · ${row['entity_id']}',
+            '${row['direction']}',
+            '${row['detected_at']}',
+          ],
+      ];
 }

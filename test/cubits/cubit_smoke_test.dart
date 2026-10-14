@@ -144,6 +144,8 @@ void main() {
       gate = _AuthGateMock();
       orgs = _OrganizationRepositoryMock();
       when(() => gate.updated()).thenReturn(null);
+      // `no_company` by default: the account may create a trial company.
+      when(() => auth.session).thenReturn(kEmptySession);
       when(auth.resolveProfile).thenAnswer((_) async => AuthState.ready);
       cubit = CreateOrganizationCubit(auth: auth, organizations: orgs, gate: gate);
     });
@@ -181,6 +183,27 @@ void main() {
       expect(ok, isFalse);
       expect(cubit.state.error, 'no invite');
       expect(cubit.state.busy, isFalse);
+    });
+
+    test('a bound account is refused locally without any remote call',
+        () async {
+      when(() => auth.session).thenReturn(
+        const AppSession(
+          uid: 'uid-1',
+          organizationId: 'org_1',
+          status: MemberStatus.active,
+        ),
+      );
+
+      cubit.setName('Acme');
+      final ok = await cubit.submit();
+
+      expect(ok, isFalse);
+      expect(
+        cubit.state.error,
+        'هذا الحساب مرتبط بشركة حالية. غادر الشركة الحالية أولًا لإنشاء شركة جديدة.',
+      );
+      verifyNever(() => orgs.createOrganization(name: any(named: 'name')));
     });
   });
 
@@ -244,6 +267,8 @@ void main() {
             offset: any(named: 'offset'),
             orderBy: any(named: 'orderBy'),
             kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
           )).thenAnswer((_) async => [
                 {'id': 1, 'decision_status': 'APPROVED'},
                 {'id': 2, 'decision_status': 'REJECTED'},
@@ -252,6 +277,8 @@ void main() {
             query: any(named: 'query'),
             status: any(named: 'status'),
             kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
           )).thenAnswer((_) async => 2);
       final cubit = InspectionsCubit(repo: repo, reports: reports);
       await cubit.load();
@@ -266,6 +293,8 @@ void main() {
             offset: any(named: 'offset'),
             orderBy: any(named: 'orderBy'),
             kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
           )).thenAnswer((_) async => [
                 {'id': 1, 'decision_status': 'APPROVED'},
               ]);
@@ -273,6 +302,8 @@ void main() {
             query: any(named: 'query'),
             status: 'APPROVED',
             kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
           )).thenAnswer((_) async => 1);
       await cubit.setStatus('APPROVED');
       expect(cubit.state.visible, hasLength(1));
@@ -285,11 +316,15 @@ void main() {
             offset: any(named: 'offset'),
             orderBy: any(named: 'orderBy'),
             kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
           )).thenAnswer((_) async => const []);
       when(() => repo.count(
             query: 'zzz',
             status: any(named: 'status'),
             kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
           )).thenAnswer((_) async => 0);
       await cubit.setQuery('zzz');
       expect(cubit.state.visible, isEmpty);
@@ -461,8 +496,15 @@ void main() {
   group('ReferenceCubit', () {
     test('loads the material catalog', () async {
       final repo = _ReferenceRepoMock();
-      when(() => repo.listAllMaterials())
-          .thenAnswer((_) async => [{'material_name': 'Sugar'}]);
+      when(
+        () => repo.listMaterialsPaged(
+          query: any(named: 'query'),
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+        ),
+      ).thenAnswer((_) async => [{'material_name': 'Sugar'}]);
+      when(() => repo.countMaterials(query: any(named: 'query')))
+          .thenAnswer((_) async => 1);
 
       final cubit = ReferenceCubit(repo: repo);
       await cubit.load();
@@ -720,10 +762,17 @@ void main() {
   group('InventoryCubit', () {
     test('loads the inventory list', () async {
       final repo = _LabRepoMock();
-      when(() => repo.listInventory())
-          .thenAnswer((_) async => [
-                {'id': 1, 'name': 'Acid', 'current_qty': 5.0},
-              ]);
+      when(
+        () => repo.listInventoryPaged(
+          query: any(named: 'query'),
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+        ),
+      ).thenAnswer((_) async => [
+            {'id': 1, 'name': 'Acid', 'current_qty': 5.0},
+          ]);
+      when(() => repo.countInventory(query: any(named: 'query')))
+          .thenAnswer((_) async => 1);
 
       final cubit = InventoryCubit(repo: repo);
       await cubit.load();
@@ -738,10 +787,17 @@ void main() {
   group('AnalysesCubit', () {
     test('loads analyses and deletes one', () async {
       final repo = _LabRepoMock();
-      when(() => repo.listAnalyses())
-          .thenAnswer((_) async => [
-                {'id': 1, 'name': 'Moisture'},
-              ]);
+      when(
+        () => repo.listAnalysesPaged(
+          query: any(named: 'query'),
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+        ),
+      ).thenAnswer((_) async => [
+            {'id': 1, 'name': 'Moisture'},
+          ]);
+      when(() => repo.countAnalyses(query: any(named: 'query')))
+          .thenAnswer((_) async => 1);
       when(() => repo.deleteAnalysis(1))
           .thenAnswer((_) async => {'archived': true});
 

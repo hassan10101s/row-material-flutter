@@ -2,15 +2,27 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_date_field.dart';
+import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_infinite_list.dart';
+import '../../../../../design_system/widgets/app_page_header.dart';
+import '../../../../../design_system/widgets/app_search_field.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
+import '../../../../../di/service_locator.dart';
+import '../widgets/register_exports.dart';
 import '../../domain/qc_enums.dart';
 import '../../domain/qc_goal.dart';
 import '../cubit/qc_goals_cubit.dart';
@@ -35,6 +47,11 @@ class QcGoalsScreen extends StatelessWidget {
         title: AppText.t('أهداف الجودة', 'Quality goals'),
         actions: [
           IconButton(
+            tooltip: AppText.t('تصدير جدول', 'Export table'),
+            onPressed: () => RegisterExports.goals(context, cubit.state.goals),
+            icon: const Icon(Icons.table_view_outlined),
+          ),
+          IconButton(
             tooltip: AppText.t('تحديث', 'Refresh'),
             onPressed: () => cubit.refresh(),
             icon: const Icon(Icons.refresh),
@@ -57,7 +74,7 @@ class QcGoalsScreen extends StatelessWidget {
             AppFeedback.error(context, state.error!),
         builder: (context, state) {
           if (state.loading && state.goals.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppSkeletonList(rows: 5);
           }
           if (state.goals.isEmpty) {
             return AppEmptyState(
@@ -74,37 +91,56 @@ class QcGoalsScreen extends StatelessWidget {
                     ),
               action: state.filters.isEmpty
                   ? null
-                  : FilledButton.tonal(
+                  : AppButton(
+                      label: AppText.t('مسح الفلاتر', 'Clear filters'),
+                      style: AppButtonStyle.secondary,
                       onPressed: () => cubit.clearFilters(),
-                      child: Text(AppText.t('مسح الفلاتر', 'Clear filters')),
                     ),
             );
           }
           return Column(
             children: [
+              if (state.loading && state.goals.isNotEmpty)
+                const AppRefreshBar(),
               _SummaryStrip(summary: state.summary),
               _ActiveFilterBar(
                 state: state,
                 onEdit: () => _openFilters(context),
               ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                  AppSpacing.md,
+                  0,
+                ),
+                child: AppFilterBar(
+                  searchHint: AppText.t('بحث في الأهداف', 'Search goals'),
+                  initialSearch: state.filters.dept.isNotEmpty
+                      ? state.filters.dept
+                      : null,
+                  onSearch: (v) => cubit.applyFilters(
+                    state.filters.copyWith(dept: v.trim()),
+                  ),
+                  trailing: AppButton(
+                    label: AppText.t('فلاتر', 'Filters'),
+                    icon: const Icon(Icons.tune, size: 18),
+                    style: AppButtonStyle.ghost,
+                    small: true,
+                    onPressed: () => _openFilters(context),
+                  ),
+                ),
+              ),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () => cubit.refresh(),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    itemCount: state.goals.length + 1,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: AppSpacing.md),
-                    itemBuilder: (context, i) {
-                      if (i == state.goals.length) {
-                        return _LoadMoreRow(
-                          hasMore: state.hasMore,
-                          busy: state.loadingMore,
-                          onLoadMore: () => cubit.loadMore(),
-                        );
-                      }
-                      return _GoalTile(goal: state.goals[i]);
-                    },
+                  child: AppInfiniteList(
+                    itemCount: state.goals.length,
+                    hasMore: state.hasMore,
+                    loadingMore: state.loadingMore,
+                    onLoadMore: () => cubit.loadMore(),
+                    itemBuilder: (context, i) =>
+                        _GoalTile(goal: state.goals[i]),
                   ),
                 ),
               ),
@@ -138,6 +174,32 @@ class _SummaryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cards = [
+      AppSummaryCard(
+        label: AppText.t('الإجمالي', 'Total'),
+        value: '${summary.total}',
+        icon: Icons.flag_outlined,
+        color: AppColors.primary,
+      ),
+      AppSummaryCard(
+        label: AppText.t('نشط', 'Active'),
+        value: '${summary.active}',
+        icon: Icons.play_circle_outline,
+        color: AppColors.info,
+      ),
+      AppSummaryCard(
+        label: AppText.t('متأخر', 'Late'),
+        value: '${summary.overdue}',
+        icon: Icons.schedule,
+        color: AppColors.danger,
+      ),
+      AppSummaryCard(
+        label: AppText.t('مكتمل', 'Closed'),
+        value: '${summary.completed}',
+        icon: Icons.check_circle_outline,
+        color: AppColors.success,
+      ),
+    ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.md,
@@ -145,41 +207,28 @@ class _SummaryStrip extends StatelessWidget {
         AppSpacing.md,
         0,
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('الإجمالي', 'Total'),
-              value: '${summary.total}',
-              icon: Icons.flag_outlined,
-              color: AppColors.primary,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('نشط', 'Active'),
-              value: '${summary.active}',
-              icon: Icons.play_circle_outline,
-              color: AppColors.info,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('متأخر', 'Late'),
-              value: '${summary.overdue}',
-              icon: Icons.schedule,
-              color: AppColors.danger,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('مكتمل', 'Closed'),
-              value: '${summary.completed}',
-              icon: Icons.check_circle_outline,
-              color: AppColors.success,
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final twoCol = constraints.maxWidth < 600;
+          if (!twoCol) {
+            return Row(
+              children: [
+                for (final c in cards) Expanded(child: c),
+              ],
+            );
+          }
+          return Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              for (final c in cards)
+                SizedBox(
+                  width: (constraints.maxWidth - AppSpacing.sm) / 2,
+                  child: c,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -195,22 +244,28 @@ class _ActiveFilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final f = state.filters;
+    Widget removable(String label, VoidCallback onRemove) => AppButton(
+      small: true,
+      style: AppButtonStyle.secondary,
+      icon: const Icon(Icons.close, size: 14),
+      label: label,
+      onPressed: onRemove,
+    );
     final chips = <Widget>[
       for (final status in f.statuses.toList()..sort())
-        InputChip(
-          label: Text(GoalPill.statusLabel(status)),
-          onDeleted: () => context.read<QcGoalsCubit>().toggleStatus(status),
+        removable(
+          GoalPill.statusLabel(status),
+          () => context.read<QcGoalsCubit>().toggleStatus(status),
         ),
       if (f.dept.isNotEmpty)
-        InputChip(
-          label: Text('${AppText.t('القسم', 'Dept')}: ${f.dept}'),
-          onDeleted: () =>
-              context.read<QcGoalsCubit>().applyFilters(f.copyWith(dept: '')),
+        removable(
+          '${AppText.t('القسم', 'Dept')}: ${f.dept}',
+          () => context.read<QcGoalsCubit>().applyFilters(f.copyWith(dept: '')),
         ),
       if (f.overdueOnly)
-        InputChip(
-          label: Text(AppText.t('متأخر فقط', 'Late only')),
-          onDeleted: () => context.read<QcGoalsCubit>().applyFilters(
+        removable(
+          AppText.t('متأخر فقط', 'Late only'),
+          () => context.read<QcGoalsCubit>().applyFilters(
             f.copyWith(overdueOnly: false),
           ),
         ),
@@ -242,10 +297,12 @@ class _ActiveFilterBar extends StatelessWidget {
                     children: chips,
                   ),
           ),
-          TextButton.icon(
-            onPressed: onEdit,
+          AppButton(
+            label: AppText.t('فلاتر', 'Filters'),
             icon: const Icon(Icons.tune, size: 18),
-            label: Text(AppText.t('فلاتر', 'Filters')),
+            style: AppButtonStyle.ghost,
+            small: true,
+            onPressed: onEdit,
           ),
         ],
       ),
@@ -258,6 +315,33 @@ class _GoalTile extends StatelessWidget {
   const _GoalTile({required this.goal});
 
   final QcGoal goal;
+
+  static bool get canDelete {
+    try {
+      return getIt<AuthGate>().canWrite(Permission.qcWrite);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await AppDeleteConfirmDialog.show(
+      context,
+      title: AppText.t('حذف الهدف', 'Delete goal'),
+      name: goal.title.isNotEmpty ? goal.title : goal.code,
+    );
+    if (!confirmed || !context.mounted) return;
+    final cubit = context.read<QcGoalsCubit>();
+    await cubit.deleteGoal(goal.goalId ?? 0);
+    if (!context.mounted) return;
+    final error = cubit.state.error;
+    if (error != null && error.isNotEmpty) {
+      AppFeedback.error(context, error);
+      cubit.clearError();
+    } else {
+      AppFeedback.success(context, AppText.t('تم حذف الهدف', 'Goal deleted'));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -281,6 +365,32 @@ class _GoalTile extends StatelessWidget {
               GoalPill.status(goal.status),
               const SizedBox(width: AppSpacing.xs),
               GoalPill.priority(goal.priority),
+              if (canDelete) ...[
+                const SizedBox(width: AppSpacing.xs),
+                PopupMenuButton<String>(
+                  tooltip: AppText.t('خيارات', 'Options'),
+                  iconSize: 20,
+                  onSelected: (v) {
+                    if (v == 'delete') _confirmDelete(context);
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: AppColors.danger,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(AppText.t('حذف', 'Delete')),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -348,49 +458,6 @@ class _Meta extends StatelessWidget {
   }
 }
 
-/// The paging footer. Rather than a spinner forever, it says whether there is
-/// more to load, so a short list does not pretend to be still working.
-class _LoadMoreRow extends StatelessWidget {
-  const _LoadMoreRow({
-    required this.hasMore,
-    required this.busy,
-    required this.onLoadMore,
-  });
-
-  final bool hasMore;
-  final bool busy;
-  final VoidCallback onLoadMore;
-
-  @override
-  Widget build(BuildContext context) {
-    if (busy) {
-      return const Padding(
-        padding: EdgeInsets.all(AppSpacing.lg),
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-    if (!hasMore) {
-      return Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Text(
-          AppText.t('نهاية القائمة', 'End of list'),
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      child: Center(
-        child: OutlinedButton(
-          onPressed: onLoadMore,
-          child: Text(AppText.t('تحميل المزيد', 'Load more')),
-        ),
-      ),
-    );
-  }
-}
-
 /// The filter drawer.
 ///
 /// A `BlocBuilder` rather than a snapshot of the state handed in once: the
@@ -406,8 +473,8 @@ class _GoalFilterSheet extends StatefulWidget {
 class _GoalFilterSheetState extends State<_GoalFilterSheet> {
   final _dept = TextEditingController();
   final _owner = TextEditingController();
-  String _dueFrom = '';
-  String _dueTo = '';
+  final _dueFrom = TextEditingController();
+  final _dueTo = TextEditingController();
 
   @override
   void initState() {
@@ -415,14 +482,16 @@ class _GoalFilterSheetState extends State<_GoalFilterSheet> {
     final f = context.read<QcGoalsCubit>().state.filters;
     _dept.text = f.dept;
     _owner.text = f.ownerId;
-    _dueFrom = f.dueFrom;
-    _dueTo = f.dueTo;
+    _dueFrom.text = f.dueFrom;
+    _dueTo.text = f.dueTo;
   }
 
   @override
   void dispose() {
     _dept.dispose();
     _owner.dispose();
+    _dueFrom.dispose();
+    _dueTo.dispose();
     super.dispose();
   }
 
@@ -442,34 +511,30 @@ class _GoalFilterSheetState extends State<_GoalFilterSheet> {
                 const SizedBox(height: AppSpacing.xs),
                 Wrap(
                   spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xs,
                   children: [
                     for (final status in QcGoalStatus.all)
-                      FilterChip(
-                        label: Text(GoalPill.statusLabel(status)),
-                        selected: f.statuses.contains(status),
-                        onSelected: (_) => cubit.toggleStatus(status),
+                      AppButton(
+                        small: true,
+                        style: f.statuses.contains(status)
+                            ? AppButtonStyle.primary
+                            : AppButtonStyle.secondary,
+                        label: GoalPill.statusLabel(status),
+                        onPressed: () => cubit.toggleStatus(status),
                       ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.md),
-                TextField(
+                AppField(
+                  label: AppText.t('القسم', 'Department'),
                   controller: _dept,
-                  decoration: InputDecoration(
-                    labelText: AppText.t('القسم', 'Department'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
                   onChanged: (v) =>
                       cubit.applyFilters(f.copyWith(dept: v.trim())),
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                TextField(
+                AppField(
+                  label: AppText.t('المالك (معرّف)', 'Owner id'),
                   controller: _owner,
-                  decoration: InputDecoration(
-                    labelText: AppText.t('المالك (معرّف)', 'Owner id'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
                   onChanged: (v) =>
                       cubit.applyFilters(f.copyWith(ownerId: v.trim())),
                 ),
@@ -477,85 +542,67 @@ class _GoalFilterSheetState extends State<_GoalFilterSheet> {
                 Row(
                   children: [
                     Expanded(
-                      child: _DateField(
+                      child: AppDateField(
                         label: AppText.t('من تاريخ', 'Due from'),
-                        value: _dueFrom,
-                        onPicked: (d) => setState(() => _dueFrom = d),
+                        controller: _dueFrom,
+                        onChanged: (d) => cubit.applyFilters(
+                          cubit.state.filters.copyWith(dueFrom: d.trim()),
+                        ),
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
-                      child: _DateField(
+                      child: AppDateField(
                         label: AppText.t('إلى تاريخ', 'Due to'),
-                        value: _dueTo,
-                        onPicked: (d) => setState(() => _dueTo = d),
+                        controller: _dueTo,
+                        onChanged: (d) => cubit.applyFilters(
+                          cubit.state.filters.copyWith(dueTo: d.trim()),
+                        ),
                       ),
                     ),
                   ],
                 ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: f.overdueOnly,
-                  title: Text(AppText.t('المتأخرة فقط', 'Late only')),
-                  onChanged: (v) =>
-                      cubit.applyFilters(f.copyWith(overdueOnly: v)),
+                const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  small: true,
+                  style: f.overdueOnly
+                      ? AppButtonStyle.primary
+                      : AppButtonStyle.secondary,
+                  icon: Icon(
+                    f.overdueOnly
+                        ? Icons.check_circle
+                        : Icons.circle_outlined,
+                    size: 16,
+                  ),
+                  label: AppText.t('المتأخرة فقط', 'Late only'),
+                  onPressed: () => cubit.applyFilters(
+                    f.copyWith(overdueOnly: !f.overdueOnly),
+                  ),
                 ),
                 AppWindow.footer(
                   actions: [
-                    TextButton(
+                    AppButton(
+                      label: AppText.t('مسح', 'Clear'),
+                      style: AppButtonStyle.secondary,
                       onPressed: () => cubit.clearFilters(),
-                      child: Text(AppText.t('مسح', 'Clear')),
                     ),
-                    FilledButton(
+                    AppButton(
+                      label: AppText.t('تطبيق', 'Apply'),
                       onPressed: () {
                         cubit.applyFilters(
-                          f.copyWith(dueFrom: _dueFrom, dueTo: _dueTo),
+                          f.copyWith(
+                            dueFrom: _dueFrom.text.trim(),
+                            dueTo: _dueTo.text.trim(),
+                          ),
                         );
                         Navigator.of(context).pop();
                       },
-                      child: Text(AppText.t('تطبيق', 'Apply')),
                     ),
                   ],
                 ),
               ],
             );
       },
-    );
-  }
-}
-
-class _DateField extends StatelessWidget {
-  const _DateField({
-    required this.label,
-    required this.value,
-    required this.onPicked,
-  });
-
-  final String label;
-  final String value;
-  final ValueChanged<String> onPicked;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () async {
-        final now = DateTime.now();
-        final picked = await showDatePicker(
-          context: context,
-          initialDate: now,
-          firstDate: DateTime(now.year - 5),
-          lastDate: DateTime(now.year + 5),
-        );
-        if (picked != null) onPicked(picked.toIso8601String().substring(0, 10));
-      },
-      child: InputDecorator(
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
-        child: Text(value.isEmpty ? '-' : value),
-      ),
     );
   }
 }

@@ -6,7 +6,10 @@ import '../../../../../core/utils/app_dates.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_breakpoints.dart';
+import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
+import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../domain/qc_enums.dart';
@@ -118,17 +121,17 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
           children: [
             Align(
               alignment: AlignmentDirectional.centerStart,
-              child: TextButton.icon(
-                onPressed: () => setState(() => _readMode = !_readMode),
+              child: AppButton(
+                label: _readMode
+                    ? AppText.t('تحرير', 'Edit')
+                    : AppText.t('عرض للقراءة', 'Read view'),
                 icon: Icon(
                   _readMode ? Icons.edit_outlined : Icons.menu_book_outlined,
                   size: 18,
                 ),
-                label: Text(
-                  _readMode
-                      ? AppText.t('تحرير', 'Edit')
-                      : AppText.t('عرض للقراءة', 'Read view'),
-                ),
+                style: AppButtonStyle.ghost,
+                small: true,
+                onPressed: () => setState(() => _readMode = !_readMode),
               ),
             ),
             Form(key: _form, child: Column(children: _formFields(sop))),
@@ -199,8 +202,8 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
             width: double.infinity,
             padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              border: Border.all(color: const Color(0xFFE2E8F0)),
-              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: AppColors.border),
+              borderRadius: BorderRadius.circular(AppRadii.sm),
             ),
             child: Text(
               _body.text.isEmpty
@@ -210,35 +213,34 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
             ),
           )
         else
-          TextFormField(
+          AppField(
+            label: AppText.t('المحتوى', 'Body'),
             controller: _body,
-            minLines: 12,
-            maxLines: 30,
-            decoration: InputDecoration(
-              hintText: AppText.t(
-                '1. أوقف الماكينة قبل التنظيف\n2. استخدم المنظف المعتمد\n3. امسح جميع الأسطح',
-                '1. Stop the machine\n2. Use the approved cleaner\n3. Wipe all surfaces',
-              ),
-              border: const OutlineInputBorder(),
-              alignLabelWithHint: true,
+            hint: AppText.t(
+              '1. أوقف الماكينة قبل التنظيف\n2. استخدم المنظف المعتمد\n3. امسح جميع الأسطح',
+              '1. Stop the machine\n2. Use the approved cleaner\n3. Wipe all surfaces',
             ),
+            maxLines: 12,
           ),
         const SizedBox(height: AppSpacing.lg),
         Row(
           children: [
             Expanded(
-              child: FilledButton.icon(
-                onPressed: _save,
+              child: AppButton(
+                label: AppText.t('💾 حفظ', 'Save'),
                 icon: const Icon(Icons.save_outlined, size: 18),
-                label: Text(AppText.t('💾 حفظ', 'Save')),
+                expanded: true,
+                onPressed: _save,
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
-              child: OutlinedButton.icon(
-                onPressed: () => setState(() => _readMode = !_readMode),
+              child: AppButton(
+                label: AppText.t('📖 عرض للقراءة', 'Read view'),
                 icon: const Icon(Icons.menu_book_outlined, size: 18),
-                label: Text(AppText.t('📖 عرض للقراءة', 'Read view')),
+                style: AppButtonStyle.secondary,
+                expanded: true,
+                onPressed: () => setState(() => _readMode = !_readMode),
               ),
             ),
           ],
@@ -285,14 +287,10 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: TextFormField(
+      child: AppField(
+        label: label,
         controller: controller,
         enabled: enabled,
-        decoration: InputDecoration(
-          labelText: label,
-          border: const OutlineInputBorder(),
-          isDense: true,
-        ),
         validator: required
             ? (v) => (v == null || v.trim().isEmpty)
                   ? AppText.t('هذا الحقل مطلوب', 'This field is required')

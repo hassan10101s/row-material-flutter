@@ -18,8 +18,10 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_date_field.dart';
+import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_history_autocomplete.dart';
+import '../../../../design_system/widgets/app_quantity_field.dart';
 import '../../../../design_system/widgets/app_required_toggle.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../di/service_locator.dart';
@@ -241,9 +243,13 @@ String _chemPlaceholder(_ChemCell cell) {
     if (min == max) return '= ${cell.minText}';
     return '${cell.minText} - ${cell.maxText}';
   }
-  if (min != null) return 'min ${cell.minText}';
-  if (max != null) return 'max ${cell.maxText}';
-  return 'Result';
+  if (min != null) {
+    return AppText.t('الحد ${cell.minText}', 'min ${cell.minText}');
+  }
+  if (max != null) {
+    return AppText.t('الأقصى ${cell.maxText}', 'max ${cell.maxText}');
+  }
+  return AppText.t('النتيجة', 'Result');
 }
 
 InputDecoration _inputDec(bool out, {required String hint}) {
@@ -255,7 +261,7 @@ InputDecoration _inputDec(bool out, {required String hint}) {
         ? AppColors.danger.withValues(alpha: 0.10)
         : AppColors.surface,
     border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(AppRadii.sm),
       borderSide: BorderSide(
         color: out ? AppColors.danger : AppColors.border,
         width: out ? 1.4 : 1,
@@ -486,6 +492,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     _materialFocus.dispose();
     for (final c in [
       ..._sampleNames,
+      _date,
       _expiry,
       _supplier,
       _truck,
@@ -651,7 +658,8 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       );
       return;
     }
-    if (_sampleTaker.text.trim().length < 3) {
+    // Header-level taker is raw-only; product batches track it per sample.
+    if (!_isProduct && _sampleTaker.text.trim().length < 3) {
       AppFeedback.error(
         context,
         AppText.t(
@@ -682,15 +690,26 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       'sample_names': [for (final c in _sampleNames) c.text],
       'physical_results': _collectResults(_physical),
       'chemical_results': _collectResults(_chemical),
-      'decision_status': state.decision,
-      'decision_reason': _decisionReason.text.trim(),
-      'follow_up_note': _followUp.text.trim(),
-      'rejected_quantity': _rejectedQty.text.trim(),
     };
+    // Products carry no header quality decision (per-sample only); the
+    // repo forces the columns empty regardless of what is sent.
+    if (!_isProduct) {
+      payload.addAll({
+        'decision_status': state.decision,
+        'decision_reason': _decisionReason.text.trim(),
+        'follow_up_note': _followUp.text.trim(),
+        'rejected_quantity': _rejectedQty.text.trim(),
+      });
+    }
     final cubit = context.read<InspectionFormCubit>();
     final ok = await cubit.save(
       payload,
-      UserContext(id: user.id, uid: user.uid, fullName: user.fullName, role: user.role),
+      UserContext(
+        id: user.id,
+        uid: user.uid,
+        fullName: user.fullName,
+        role: user.role,
+      ),
     );
     if (!mounted) return;
     if (ok) {
@@ -712,7 +731,8 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     // only ever saw a console line and no feedback at all.
     AppFeedback.errorFrom(
       context,
-      cubit.state.error ?? 'تعذر حفظ الفحص',
+      cubit.state.error ??
+          AppText.t('تعذر حفظ الفحص', 'Could not save the inspection.'),
       summary: AppText.t('تعذر حفظ الفحص', 'Could not save the inspection.'),
     );
   }
@@ -765,9 +785,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
           // Edit-prefill: select the material as soon as the list arrives.
           final pending = _pendingMaterialId;
           if (pending != null &&
-              state.materials.any(
-                (m) => (m['id'] as num).toInt() == pending,
-              )) {
+              state.materials.any((m) => (m['id'] as num).toInt() == pending)) {
             _pendingMaterialId = null;
             _selectMaterial(pending);
           }
@@ -948,7 +966,7 @@ class _FormBody extends StatelessWidget {
                             ),
                             controller: expiry,
                           ),
-                          const SizedBox(height: 6),
+                          const SizedBox(height: AppSpacing.xs),
                           Wrap(
                             spacing: 6,
                             children: [
@@ -957,28 +975,15 @@ class _FormBody extends StatelessWidget {
                                 (6, '6M'),
                                 (9, '9M'),
                               ])
-                                OutlinedButton(
-                                  style: OutlinedButton.styleFrom(
-                                    minimumSize: const Size(44, 26),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                    ),
-                                    tapTargetSize:
-                                        MaterialTapTargetSize.shrinkWrap,
-                                    side: BorderSide(color: AppColors.border),
-                                  ),
+                                AppButton(
+                                  small: true,
+                                  style: AppButtonStyle.secondary,
+                                  label: m.$2,
                                   onPressed: () => expiry.text = _addMonths(
                                     date.text.trim().isEmpty
                                         ? todayIso()
                                         : date.text.trim(),
                                     m.$1,
-                                  ),
-                                  child: Text(
-                                    m.$2,
-                                    style: TextStyle(
-                                      fontSize: 12.spMax,
-                                      color: AppColors.primary,
-                                    ),
                                   ),
                                 ),
                             ],
@@ -1027,55 +1032,75 @@ class _FormBody extends StatelessWidget {
                     ],
                     const SizedBox(width: AppSpacing.lg),
                     Expanded(
-                      child: AppField(
+                      child: AppQuantityField(
                         label: AppText.t('الكمية', 'Quantity'),
+                        hint: AppText.t('بالطن', 'In tons'),
                         controller: qty,
-                        keyboardType: TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.md),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AppHistoryAutocomplete(
-                        label: AppText.t('آخذ العينة', 'Sample taker'),
-                        controller: sampleTaker,
-                        options: state.sampleTakerOptions,
-                        hint: AppText.t(
-                          'اكتب للبحث في سجل الفنيين…',
-                          'Type to search the technicians log…',
+                // Product reports are batch-traceability records: no
+                // header-level taker, no header result grids — samples
+                // (with their own taker, time and results) are added
+                // later, inside the record.
+                if (!isProduct)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AppHistoryAutocomplete(
+                          label: AppText.t('آخذ العينة', 'Sample taker'),
+                          controller: sampleTaker,
+                          options: state.sampleTakerOptions,
+                          hint: AppText.t(
+                            'اكتب للبحث في سجل الفنيين…',
+                            'Type to search the technicians log…',
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.lg),
-                    Expanded(
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: AppField(
-                              label: AppText.t('رقم القيد', 'Entry code'),
-                              controller: entryCode,
+                      const SizedBox(width: AppSpacing.lg),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: AppField(
+                                label: AppText.t('رقم القيد', 'Entry code'),
+                                controller: entryCode,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                          IconButton(
-                            tooltip: AppText.t('إعادة توليد', 'Regenerate'),
-                            onPressed: onRegenerateEntry,
-                            icon: Icon(Icons.refresh, size: 20.r),
-                          ),
-                        ],
+                            const SizedBox(width: AppSpacing.sm),
+                            IconButton(
+                              tooltip: AppText.t('إعادة توليد', 'Regenerate'),
+                              onPressed: onRegenerateEntry,
+                              icon: Icon(Icons.refresh, size: 20.r),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AppField(
+                          label: AppText.t('رقم القيد', 'Entry code'),
+                          controller: entryCode,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      IconButton(
+                        tooltip: AppText.t('إعادة توليد', 'Regenerate'),
+                        onPressed: onRegenerateEntry,
+                        icon: Icon(Icons.refresh, size: 20.r),
+                      ),
+                    ],
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-            if (physical.isNotEmpty)
+            if (!isProduct && physical.isNotEmpty)
               _Card(
                 title: AppText.t('النتائج الفيزيائية', 'Physical results'),
                 children: [
@@ -1084,7 +1109,7 @@ class _FormBody extends StatelessWidget {
                   ),
                 ],
               ),
-            if (chemical.isNotEmpty) ...[
+            if (!isProduct && chemical.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.md),
               _Card(
                 title: AppText.t('النتائج الكيميائية', 'Chemical results'),
@@ -1095,7 +1120,7 @@ class _FormBody extends StatelessWidget {
                 ],
               ),
             ],
-            if (physical.isNotEmpty || chemical.isNotEmpty) ...[
+            if (!isProduct && (physical.isNotEmpty || chemical.isNotEmpty)) ...[
               const SizedBox(height: AppSpacing.md),
               Center(
                 child: AppButton(
@@ -1107,71 +1132,68 @@ class _FormBody extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(height: AppSpacing.md),
-            _Card(
-              title: AppText.t('قرار الجودة', 'Decision'),
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: state.decision,
-                  isExpanded: true,
-                  decoration: InputDecoration(
+            // Products carry no header quality decision (per-sample only).
+            if (!isProduct) ...[
+              const SizedBox(height: AppSpacing.md),
+              _Card(
+                title: AppText.t('قرار الجودة', 'Decision'),
+                children: [
+                  AppDropdown<String>(
+                    value: state.decision,
                     labelText: AppText.t('القرار', 'Decision'),
-                    isDense: true,
+                    items: [
+                      AppDropdownItem(
+                        value: 'APPROVED',
+                        label: AppText.t('قبول نهائي', 'Approved'),
+                      ),
+                      AppDropdownItem(
+                        value: 'CONDITIONAL_APPROVAL',
+                        label: AppText.t('قبول مشروط', 'Conditional'),
+                      ),
+                      AppDropdownItem(
+                        value: 'PARTIAL_REJECTION',
+                        label: AppText.t('رفض جزئي', 'Partial rejection'),
+                      ),
+                      AppDropdownItem(
+                        value: 'FULL_REJECTION',
+                        label: AppText.t('رفض كامل', 'Full rejection'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        context.read<InspectionFormCubit>().setDecision(value);
+                      }
+                    },
                   ),
-                  items: [
-                    DropdownMenuItem(
-                      value: 'APPROVED',
-                      child: Text(AppText.t('قبول نهائي', 'Approved')),
+                  const SizedBox(height: AppSpacing.md),
+                  if (state.decision == 'CONDITIONAL_APPROVAL') ...[
+                    AppField(
+                      label: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
+                      hint: AppText.t('اختياري', 'Optional'),
+                      controller: followUp,
+                      maxLines: 3,
                     ),
-                    DropdownMenuItem(
-                      value: 'CONDITIONAL_APPROVAL',
-                      child: Text(AppText.t('قبول مشروط', 'Conditional')),
-                    ),
-                    DropdownMenuItem(
-                      value: 'PARTIAL_REJECTION',
-                      child: Text(AppText.t('رفض جزئي', 'Partial rejection')),
-                    ),
-                    DropdownMenuItem(
-                      value: 'FULL_REJECTION',
-                      child: Text(AppText.t('رفض كامل', 'Full rejection')),
-                    ),
+                    const SizedBox(height: AppSpacing.md),
                   ],
-                  onChanged: (value) {
-                    if (value != null) {
-                      context.read<InspectionFormCubit>().setDecision(value);
-                    }
-                  },
-                ),
-                const SizedBox(height: AppSpacing.md),
-                if (state.decision == 'CONDITIONAL_APPROVAL') ...[
-                  AppField(
-                    label: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
-                    controller: followUp,
-                    maxLines: 3,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                ],
-                if (state.decision == 'PARTIAL_REJECTION') ...[
-                  AppField(
-                    label: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
-                    controller: rejectedQty,
-                    keyboardType: TextInputType.numberWithOptions(
-                      decimal: true,
+                  if (state.decision == 'PARTIAL_REJECTION') ...[
+                    AppQuantityField(
+                      label: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
+                      controller: rejectedQty,
                     ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+                  if (state.decision == 'FULL_REJECTION' ||
+                      state.decision == 'PARTIAL_REJECTION') ...[
+                    AppField(
+                      label: AppText.t('سبب القرار', 'Decision reason'),
+                      controller: decisionReason,
+                      maxLines: 3,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
                 ],
-                if (state.decision == 'FULL_REJECTION' ||
-                    state.decision == 'PARTIAL_REJECTION') ...[
-                  AppField(
-                    label: AppText.t('سبب القرار', 'Decision reason'),
-                    controller: decisionReason,
-                    maxLines: 3,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                ],
-              ],
-            ),
+              ),
+            ],
             const SizedBox(height: AppSpacing.xl),
             Wrap(
               spacing: AppSpacing.md,
@@ -1199,7 +1221,11 @@ class _FormBody extends StatelessWidget {
       selector: (s) => s.error,
       child: Scaffold(
         backgroundColor: AppColors.background,
-        appBar: AppTopAppBar(title: title.isEmpty ? AppText.t('فحص جديد', 'New Inspection') : title),
+        appBar: AppTopAppBar(
+          title: title.isEmpty
+              ? AppText.t('فحص جديد', 'New Inspection')
+              : title,
+        ),
         body: body,
       ),
     );
@@ -1236,12 +1262,10 @@ class _FormBody extends StatelessWidget {
                 filter: (id, query) {
                   final m = _materialById(materials, id);
                   if (m == null) return false;
-                  return '${m['material_name']}'
-                          .toLowerCase()
-                          .contains(query) ||
-                      '${m['material_code']}'
-                          .toLowerCase()
-                          .contains(query);
+                  return '${m['material_name']}'.toLowerCase().contains(
+                        query,
+                      ) ||
+                      '${m['material_code']}'.toLowerCase().contains(query);
                 },
                 onSelected: onSelectMaterial,
                 controller: materialController,
@@ -1254,16 +1278,9 @@ class _FormBody extends StatelessWidget {
                     ? Icons.factory_outlined
                     : Icons.inventory_2_outlined,
                 emptyLabel: isProduct
-                    ? AppText.t(
-                        'لا يوجد منتج مطابق',
-                        'No matching product',
-                      )
-                    : AppText.t(
-                        'لا توجد خامة مطابقة',
-                        'No matching material',
-                      ),
-                dropdownLabel:
-                    AppText.t('عرض القائمة', 'Show the list'),
+                    ? AppText.t('لا يوجد منتج مطابق', 'No matching product')
+                    : AppText.t('لا توجد خامة مطابقة', 'No matching material'),
+                dropdownLabel: AppText.t('عرض القائمة', 'Show the list'),
                 optionBuilder: (context, id, onSelected) =>
                     _materialOption(materials, id, onSelected),
               ),
@@ -1363,7 +1380,7 @@ class _FormBody extends StatelessWidget {
                 Expanded(
                   flex: 2,
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 10),
+                    padding: const EdgeInsets.only(top: AppSpacing.sm),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1432,7 +1449,7 @@ class _FormBody extends StatelessWidget {
           children: [
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: AppSpacing.xxs),
                 child: TextField(
                   controller: ctrl,
                   onSubmitted: (_) => normalize(),
@@ -1517,7 +1534,7 @@ class _FormBody extends StatelessWidget {
                 Expanded(
                   flex: 2,
                   child: Padding(
-                    padding: const EdgeInsets.only(top: 10),
+                    padding: const EdgeInsets.only(top: AppSpacing.sm),
                     child: Wrap(
                       spacing: 6,
                       runSpacing: 4,
@@ -1557,7 +1574,7 @@ class _FormBody extends StatelessWidget {
     return Expanded(
       flex: 1,
       child: Padding(
-        padding: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.only(top: AppSpacing.sm),
         child: Text(
           text,
           textAlign: TextAlign.center,
@@ -1593,8 +1610,8 @@ class _FormBody extends StatelessWidget {
                 filled: true,
                 fillColor: AppColors.surface,
                 contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 8,
+                  horizontal: AppSpacing.sm,
+                  vertical: AppSpacing.sm,
                 ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(AppRadii.sm),
@@ -1626,7 +1643,7 @@ class _FormBody extends StatelessWidget {
           children: [
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(top: 2),
+                padding: const EdgeInsets.only(top: AppSpacing.xxs),
                 child: TextField(
                   controller: ctrl,
                   onChanged: (_) {},
@@ -1639,15 +1656,18 @@ class _FormBody extends StatelessWidget {
             ),
             if (cell.unit.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(left: 6, top: 2),
+                padding: const EdgeInsets.only(
+                  left: AppSpacing.xs,
+                  top: AppSpacing.xxs,
+                ),
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 7,
+                    horizontal: AppSpacing.xs,
+                    vertical: AppSpacing.sm,
                   ),
                   decoration: BoxDecoration(
                     color: AppColors.surfaceSoft,
-                    borderRadius: BorderRadius.circular(6),
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
                     border: Border.all(color: AppColors.borderMuted),
                   ),
                   child: Text(

@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/responsive/form_factor.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/feedback/app_feedback_export.dart';
@@ -11,6 +12,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_date_field.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
+import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
 import '../cubit/reports_cubit.dart';
 import '../cubit/reports_state.dart';
@@ -74,7 +76,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
     if (text.length != 10 || text[4] != '-' || text[7] != '-') return false;
     final parsed = parseIsoDate(text);
     if (parsed == null) return false;
-    return '${_pad4(parsed.year)}-${_pad2(parsed.month)}-${_pad2(parsed.day)}' == text;
+    return '${_pad4(parsed.year)}-${_pad2(parsed.month)}-${_pad2(parsed.day)}' ==
+        text;
   }
 
   static String _pad2(int n) => n.toString().padLeft(2, '0');
@@ -106,15 +109,19 @@ class _ReportsScreenState extends State<ReportsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppPageHeader(
-              title: AppText.t('التقارير', 'Reports'),
-              subtitle: AppText.t(
-                'تقارير يومية وشهرية وسنوية بصيغة PDF',
-                'Daily, monthly and yearly PDF reports',
+            // Desktop title lives in the shell topbar; the section cards
+            // below already say what each report is.
+            if (FormFactor.current.isMobile) ...[
+              AppPageHeader(
+                title: AppText.t('التقارير', 'Reports'),
+                subtitle: AppText.t(
+                  'تقارير يومية وشهرية وسنوية بصيغة PDF',
+                  'Daily, monthly and yearly PDF reports',
+                ),
+                icon: Icons.picture_as_pdf_outlined,
               ),
-              icon: Icons.picture_as_pdf_outlined,
-            ),
-            const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.md),
+            ],
             _ReportCard(
               icon: Icons.today,
               title: AppText.t('تقرير اليومي', 'Daily report'),
@@ -136,9 +143,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       ? null
                       : () {
                           if (!_isValidIsoDate(_date.text)) {
-                            setState(() => _dateError = AppText.t(
+                            setState(
+                              () => _dateError = AppText.t(
                                 'أدخل تاريخًا صحيحًا بالصيغة YYYY-MM-DD',
-                                'Enter a valid date as YYYY-MM-DD'));
+                                'Enter a valid date as YYYY-MM-DD',
+                              ),
+                            );
                             return;
                           }
                           cubit.runDaily(_date.text.trim());
@@ -155,34 +165,28 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(
-                      child: TextField(
+                      child: AppField(
+                        label: AppText.t('الشهر', 'Month (1-12)'),
                         controller: _month,
                         keyboardType: TextInputType.number,
                         onChanged: (_) {
                           if (_monthError == null) return;
                           setState(() => _monthError = null);
                         },
-                        decoration: InputDecoration(
-                          labelText: AppText.t('الشهر', 'Month (1-12)'),
-                          isDense: true,
-                          errorText: _monthError,
-                        ),
+                        error: _monthError,
                       ),
                     ),
                     const SizedBox(width: AppSpacing.md),
                     Expanded(
-                      child: TextField(
+                      child: AppField(
+                        label: AppText.t('السنة', 'Year'),
                         controller: _monthlyYear,
                         keyboardType: TextInputType.number,
                         onChanged: (_) {
                           if (_monthlyYearError == null) return;
                           setState(() => _monthlyYearError = null);
                         },
-                        decoration: InputDecoration(
-                          labelText: AppText.t('السنة', 'Year'),
-                          isDense: true,
-                          errorText: _monthlyYearError,
-                        ),
+                        error: _monthlyYearError,
                       ),
                     ),
                   ],
@@ -199,7 +203,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             min: 1,
                             max: 12,
                             error: AppText.t(
-                                'أدخل شهرًا بين 1 و 12', 'Enter a month between 1 and 12'),
+                              'أدخل شهرًا بين 1 و 12',
+                              'Enter a month between 1 and 12',
+                            ),
                             onError: (e) => setState(() => _monthError = e),
                           );
                           if (month == null) return;
@@ -208,8 +214,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             min: 1970,
                             max: 9999,
                             error: AppText.t(
-                                'أدخل سنة صحيحة', 'Enter a valid year'),
-                            onError: (e) => setState(() => _monthlyYearError = e),
+                              'أدخل سنة صحيحة',
+                              'Enter a valid year',
+                            ),
+                            onError: (e) =>
+                                setState(() => _monthlyYearError = e),
                           );
                           if (year == null) return;
                           cubit.runMonthly(month, year);
@@ -222,18 +231,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
               icon: Icons.calendar_today,
               title: AppText.t('التقرير السنوي', 'Yearly report'),
               children: [
-                TextField(
+                AppField(
+                  label: AppText.t('السنة', 'Year'),
                   controller: _yearlyYear,
                   keyboardType: TextInputType.number,
                   onChanged: (_) {
                     if (_yearlyYearError == null) return;
                     setState(() => _yearlyYearError = null);
                   },
-                  decoration: InputDecoration(
-                    labelText: AppText.t('السنة', 'Year'),
-                    isDense: true,
-                    errorText: _yearlyYearError,
-                  ),
+                  error: _yearlyYearError,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppButton(
@@ -247,8 +253,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                             min: 1970,
                             max: 9999,
                             error: AppText.t(
-                                'أدخل سنة صحيحة', 'Enter a valid year'),
-                            onError: (e) => setState(() => _yearlyYearError = e),
+                              'أدخل سنة صحيحة',
+                              'Enter a valid year',
+                            ),
+                            onError: (e) =>
+                                setState(() => _yearlyYearError = e),
                           );
                           if (year == null) return;
                           cubit.runYearly(year);
@@ -258,10 +267,15 @@ class _ReportsScreenState extends State<ReportsScreen> {
             ),
             if (state.lastExportTitle != null) ...[
               const SizedBox(height: AppSpacing.md),
-              Text('آخر تصدير: ${state.lastExportTitle}',
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: AppColors.success)),
+              Text(
+                AppText.t(
+                  'آخر تصدير: ${state.lastExportTitle}',
+                  'Last export: ${state.lastExportTitle}',
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: AppColors.success),
+              ),
             ],
           ],
         ),
@@ -274,25 +288,31 @@ class _ReportCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final List<Widget> children;
-  const _ReportCard({required this.icon, required this.title, required this.children});
+  const _ReportCard({
+    required this.icon,
+    required this.title,
+    required this.children,
+  });
 
   @override
   Widget build(BuildContext context) {
     return AppCard(
       padding: EdgeInsets.zero,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
                 Icon(icon, color: AppColors.primary, size: 20.r),
-                const SizedBox(width: 8),
+                const SizedBox(width: AppSpacing.sm),
                 Expanded(
-                  child: Text(title,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  child: Text(
+                    title,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
               ],
             ),

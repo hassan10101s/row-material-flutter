@@ -41,6 +41,11 @@ void main() {
       find.text(AppText.t('المتابعة باستخدام Google', 'Continue with Google')),
       findsOneWidget,
     );
-    expect(find.text(AppText.t('الدعم', 'Support')), findsWidgets);
+    // Support is a single elegant entry at the bottom (company + channels
+    // live in its sheet), not inline text.
+    expect(
+      find.text(AppText.t('الدعم والتواصل', 'Support & contact')),
+      findsOneWidget,
+    );
   });
 }

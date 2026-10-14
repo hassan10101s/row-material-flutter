@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
 
@@ -70,14 +71,14 @@ class AppEmptyState extends StatelessWidget {
 class AppErrorState extends StatelessWidget {
   final String title;
   final String? subtitle;
-  final String retryLabel;
+  final String? retryLabel;
   final VoidCallback? onRetry;
 
   const AppErrorState({
     super.key,
     required this.title,
     this.subtitle,
-    this.retryLabel = 'إعادة المحاولة',
+    this.retryLabel,
     this.onRetry,
   });
 
@@ -92,7 +93,9 @@ class AppErrorState extends StatelessWidget {
           : OutlinedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh, size: 18),
-              label: Text(retryLabel),
+              label: Text(
+                retryLabel ?? AppText.t('إعادة المحاولة', 'Retry'),
+              ),
             ),
     );
   }

@@ -30,6 +30,8 @@ import '../../../../di/service_locator.dart';
 import '../../../../router/app_router.dart';
 import '../../../backup/domain/backup_service.dart';
 import '../../../../core/sync/sync_engine.dart';
+import '../../../audit/presentation/audit/audit_screen.dart';
+import '../../../audit/presentation/audit_controller.dart';
 import '../../../members/presentation/members/leave_organization_section.dart';
 import '../../../members/presentation/members/members_screen.dart';
 import '../../../sync/presentation/sync/sync_screen.dart';
@@ -43,12 +45,43 @@ import '../../domain/settings_repository.dart';
 /// Deep-linkable Settings sections, reachable as `/settings?tab=<key>`.
 enum SettingsTab {
   general('general', 'عام', 'General', 'الإعدادات العامة', 'General settings'),
-  database('database', 'قاعدة البيانات', 'Database', 'نسخ واستعادة', 'Backup and restore'),
-  members('members', 'الأعضاء', 'Members', 'إدارة حسابات المؤسسة', 'Organization accounts'),
-  sync('sync', 'المزامنة', 'Sync', 'حالة المزامنة والتعارضات', 'Sync status and conflicts'),
+  database(
+    'database',
+    'قاعدة البيانات',
+    'Database',
+    'نسخ واستعادة',
+    'Backup and restore',
+  ),
+  members(
+    'members',
+    'الأعضاء',
+    'Members',
+    'إدارة حسابات المؤسسة',
+    'Organization accounts',
+  ),
+  sync(
+    'sync',
+    'المزامنة',
+    'Sync',
+    'حالة المزامنة والتعارضات',
+    'Sync status and conflicts',
+  ),
+  audit(
+    'audit',
+    'سجل التدقيق',
+    'Audit log',
+    'سجل أنشطة الشركة',
+    'Company activity log',
+  ),
   export('export', 'التصدير', 'Export', 'نسخ احتياطية يدوية', 'Manual backups');
 
-  const SettingsTab(this.key, this.labelAr, this.labelEn, this.subtitleAr, this.subtitleEn);
+  const SettingsTab(
+    this.key,
+    this.labelAr,
+    this.labelEn,
+    this.subtitleAr,
+    this.subtitleEn,
+  );
 
   final String key;
   final String labelAr;
@@ -66,8 +99,8 @@ enum SettingsTab {
 }
 
 /// Settings (port of Web SettingsView: General / Database / Members / Sync /
-/// Export). Members and Sync used to be top-level sidebar destinations; they
-/// are sections of this screen now.
+/// Audit / Export). Members, Sync and Audit used to be top-level sidebar
+/// destinations; they are sections of this screen now.
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, this.initialTab = SettingsTab.general});
 
@@ -90,14 +123,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Title lives in the shell topbar (both experiences); the section chips
+    // below already say where you are.
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.page),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(AppText.t('الإعدادات', 'Settings'),
-              style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: AppSpacing.md),
           _SettingsTabs(
             current: _tab,
             onChange: (tab) => setState(() => _tab = tab),
@@ -124,6 +156,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ),
     SettingsTab.members => const _MembersPanel(),
     SettingsTab.sync => const SyncScreen(embedded: true),
+    SettingsTab.audit => AuditScreen(
+      controller: getIt<AuditController>(),
+      embedded: true,
+    ),
     SettingsTab.export => const _ExportBackupsPanel(),
   };
 }
@@ -219,7 +255,9 @@ class _GeneralPanelState extends State<_GeneralPanel> {
     } catch (_) {
       if (mounted) {
         AppFeedback.error(
-            context, AppText.t('تعذر قراءة الصورة', 'Could not read the image'));
+          context,
+          AppText.t('تعذر قراءة الصورة', 'Could not read the image'),
+        );
       }
     }
   }
@@ -310,10 +348,7 @@ class _GeneralPanelState extends State<_GeneralPanel> {
             _TwoColumn(
               children: [
                 _SettingsCard(
-                  title: AppText.t(
-                    'القسم والتقارير',
-                    'Department & reports',
-                  ),
+                  title: AppText.t('القسم والتقارير', 'Department & reports'),
                   children: [
                     AppField(
                       label: AppText.t(
@@ -343,10 +378,7 @@ class _GeneralPanelState extends State<_GeneralPanel> {
                   ],
                 ),
                 _SettingsCard(
-                  title: AppText.t(
-                    'مجلد حفظ تقارير PDF',
-                    'PDF reports folder',
-                  ),
+                  title: AppText.t('مجلد حفظ تقارير PDF', 'PDF reports folder'),
                   children: [
                     _ExportPathSection(
                       path: state.exportRootPath,
@@ -391,8 +423,10 @@ class _AppearanceSection extends StatelessWidget {
               style: Theme.of(context).textTheme.titleSmall,
             ),
             const SizedBox(height: AppSpacing.md),
-            Text(AppText.t('السمة', 'Theme'),
-                style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              AppText.t('السمة', 'Theme'),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
             const SizedBox(height: AppSpacing.sm),
             // SegmentedButton shows all three states at once, unlike the
             // top-bar toggle which can only imply the current one.
@@ -420,16 +454,21 @@ class _AppearanceSection extends StatelessWidget {
                   themeService.setMode(selection.first),
             ),
             const SizedBox(height: AppSpacing.lg),
-            Text(AppText.t('اللغة', 'Language'),
-                style: Theme.of(context).textTheme.bodyMedium),
+            Text(
+              AppText.t('اللغة', 'Language'),
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
             const SizedBox(height: AppSpacing.sm),
             SegmentedButton<Locale>(
               segments: [
                 ButtonSegment(
-                    value: const Locale('ar'),
-                    label: Text(AppText.t('العربية', 'Arabic'))),
+                  value: const Locale('ar'),
+                  label: Text(AppText.t('العربية', 'Arabic')),
+                ),
                 const ButtonSegment(
-                    value: Locale('en'), label: Text('English')),
+                  value: Locale('en'),
+                  label: Text('English'),
+                ),
               ],
               selected: {localeService.locale},
               showSelectedIcon: false,
@@ -482,7 +521,7 @@ class _ReportLogoSection extends StatelessWidget {
               children: [
                 Text(
                   hasLogo
-                      ? path.split('\\').last.split('/').last
+                      ? AppPaths.fileNameOf(path)
                       : AppText.t('لا يوجد شعار', 'No logo'),
                   style: TextStyle(
                     fontSize: 13.spMax,
@@ -549,7 +588,7 @@ class _ExportPathSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tail = path.split('\\').last.split('/').last;
+    final tail = AppPaths.fileNameOf(path);
     // The title lives on the wrapping card; this only lays out the rows.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -650,15 +689,9 @@ class _DatabasePanel extends StatelessWidget {
   static String _restoreMessage(DatabaseSettingsState state) {
     final notes = <String>[
       if (state.restoreConflicts > 0)
-        '${state.restoreConflicts} ${AppText.t(
-          'سجل مُنشأ تعارضاً لأنه غير موجود في النسخة',
-          'records conflicted as missing from the backup',
-        )}',
+        '${state.restoreConflicts} ${AppText.t('سجل مُنشأ تعارضاً لأنه غير موجود في النسخة', 'records conflicted as missing from the backup')}',
       if (state.restoreRequeued > 0)
-        '${state.restoreRequeued} ${AppText.t(
-          'سجل أُعيد إلى قائمة المزامنة لإرساله',
-          'records requeued for upload',
-        )}',
+        '${state.restoreRequeued} ${AppText.t('سجل أُعيد إلى قائمة المزامنة لإرساله', 'records requeued for upload')}',
     ];
     if (notes.isEmpty) {
       return AppText.t(
@@ -677,9 +710,9 @@ class _DatabasePanel extends StatelessWidget {
       title: AppText.t('تأكيد الاستعادة', 'Confirm restore'),
       message: AppText.t(
         'سيتم استبدال قاعدة البيانات الحالية بالنسخة الاحتياطية بعد عمل نسخة أمان تلقائية. '
-        'سيتم تسجيل الخروج بعد الاستعادة.',
+            'سيتم تسجيل الخروج بعد الاستعادة.',
         'The current database will be replaced with the backup, after an automatic safety copy. '
-        'You will be logged out.',
+            'You will be logged out.',
       ),
       confirmLabel: AppText.t('استعادة', 'Restore'),
       cancelLabel: AppText.t('إلغاء', 'Cancel'),
@@ -879,10 +912,7 @@ class _SettingsCard extends StatelessWidget {
           children: [
             Text(
               title,
-              style: TextStyle(
-                fontSize: 14.spMax,
-                fontWeight: FontWeight.w700,
-              ),
+              style: TextStyle(fontSize: 14.spMax, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: AppSpacing.md),
             ...children,

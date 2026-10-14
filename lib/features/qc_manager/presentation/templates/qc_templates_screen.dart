@@ -6,11 +6,22 @@ import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
+import '../../../../../design_system/feedback/app_feedback.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_infinite_list.dart';
+import '../../../../../design_system/widgets/app_page_header.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
+import '../../../../../di/service_locator.dart';
+import '../widgets/register_exports.dart';
 import '../../domain/qc_enums.dart';
 import '../../domain/qc_template.dart';
 import '../cubit/qc_templates_cubit.dart';
@@ -34,6 +45,12 @@ class QcTemplatesScreen extends StatelessWidget {
       appBar: AppTopAppBar(
         title: AppText.t('قوائم الفحص', 'Checklists'),
         actions: [
+          IconButton(
+            tooltip: AppText.t('تصدير جدول', 'Export table'),
+            onPressed: () =>
+                RegisterExports.templates(context, cubit.state.templates),
+            icon: const Icon(Icons.table_view_outlined),
+          ),
           IconButton(
             tooltip: AppText.t('تحديث', 'Refresh'),
             onPressed: () => cubit.refresh(),
@@ -59,7 +76,7 @@ class QcTemplatesScreen extends StatelessWidget {
         },
         builder: (context, state) {
           if (state.loading && state.templates.isEmpty) {
-            return const Center(child: CircularProgressIndicator());
+            return const AppSkeletonList(rows: 5);
           }
           if (state.templates.isEmpty) {
             // An error is not an empty library. Saying "no checklists yet" after a
@@ -91,29 +108,53 @@ class QcTemplatesScreen extends StatelessWidget {
                   // A failed read is worth retrying; a genuinely empty
                   // library is not, and offering "retry" there would just
                   // fail again.
-                  ? FilledButton.tonal(
+                  ? AppButton(
+                      label: AppText.t('إعادة المحاولة', 'Try again'),
+                      style: AppButtonStyle.secondary,
                       onPressed: () => cubit.refresh(),
-                      child: Text(AppText.t('إعادة المحاولة', 'Try again')),
                     )
                   : state.filters.isEmpty
                   ? null
-                  : FilledButton.tonal(
+                  : AppButton(
+                      label: AppText.t('مسح الفلاتر', 'Clear filters'),
+                      style: AppButtonStyle.secondary,
                       onPressed: () => cubit.clearFilters(),
-                      child: Text(AppText.t('مسح الفلاتر', 'Clear filters')),
                     ),
             );
           }
           return Column(
             children: [
+              if (state.loading && state.templates.isNotEmpty)
+                const AppRefreshBar(),
               _SummaryStrip(summary: state.summary),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                  AppSpacing.md,
+                  0,
+                ),
+                child: AppFilterBar(
+                  searchHint: AppText.t('بحث بالاسم أو الرمز', 'Search name or code'),
+                  initialSearch: state.filters.text,
+                  onSearch: (v) => cubit.applyFilters(
+                    state.filters.copyWith(text: v),
+                  ),
+                  trailing: AppButton(
+                    label: AppText.t('فلاتر', 'Filters'),
+                    icon: const Icon(Icons.tune, size: 18),
+                    style: AppButtonStyle.ghost,
+                    small: true,
+                    onPressed: () => _openFilters(context),
+                  ),
+                ),
+              ),
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: () => cubit.refresh(),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.all(AppSpacing.md),
+                  child: AppInfiniteList(
                     itemCount: state.templates.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: AppSpacing.md),
+                    hasMore: false,
                     itemBuilder: (context, i) =>
                         _TemplateTile(template: state.templates[i]),
                   ),
@@ -148,6 +189,32 @@ class _SummaryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cards = [
+      AppSummaryCard(
+        label: AppText.t('الإجمالي', 'Total'),
+        value: '${summary.total}',
+        icon: Icons.checklist_outlined,
+        color: AppColors.primary,
+      ),
+      AppSummaryCard(
+        label: AppText.t('منشور', 'Published'),
+        value: '${summary.published}',
+        icon: Icons.verified_outlined,
+        color: AppColors.success,
+      ),
+      AppSummaryCard(
+        label: AppText.t('مسودة', 'Draft'),
+        value: '${summary.drafts}',
+        icon: Icons.edit_note,
+        color: AppColors.textMuted,
+      ),
+      AppSummaryCard(
+        label: AppText.t('صالحة للاستخدام', 'Usable'),
+        value: '${summary.available}',
+        icon: Icons.play_circle_outline,
+        color: summary.available > 0 ? AppColors.info : AppColors.textMuted,
+      ),
+    ];
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.md,
@@ -155,43 +222,25 @@ class _SummaryStrip extends StatelessWidget {
         AppSpacing.md,
         0,
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('الإجمالي', 'Total'),
-              value: '${summary.total}',
-              icon: Icons.checklist_outlined,
-              color: AppColors.primary,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('منشور', 'Published'),
-              value: '${summary.published}',
-              icon: Icons.verified_outlined,
-              color: AppColors.success,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('مسودة', 'Draft'),
-              value: '${summary.drafts}',
-              icon: Icons.edit_note,
-              color: AppColors.textMuted,
-            ),
-          ),
-          Expanded(
-            child: AppSummaryCard(
-              label: AppText.t('صالحة للاستخدام', 'Usable'),
-              value: '${summary.available}',
-              icon: Icons.play_circle_outline,
-              color: summary.available > 0
-                  ? AppColors.info
-                  : AppColors.textMuted,
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth >= 600) {
+            return Row(
+              children: [for (final c in cards) Expanded(child: c)],
+            );
+          }
+          return Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              for (final c in cards)
+                SizedBox(
+                  width: (constraints.maxWidth - AppSpacing.sm) / 2,
+                  child: c,
+                ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -201,6 +250,36 @@ class _TemplateTile extends StatelessWidget {
   const _TemplateTile({required this.template});
 
   final QcTemplate template;
+
+  static bool get canDelete {
+    try {
+      return getIt<AuthGate>().canWrite(Permission.qcWrite);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await AppDeleteConfirmDialog.show(
+      context,
+      title: AppText.t('حذف قائمة الفحص', 'Delete checklist'),
+      name: template.name.isNotEmpty ? template.name : template.code,
+    );
+    if (!confirmed || !context.mounted) return;
+    final cubit = context.read<QcTemplatesCubit>();
+    await cubit.deleteTemplate(template.templateId ?? 0);
+    if (!context.mounted) return;
+    final error = cubit.state.error;
+    if (error != null && error.isNotEmpty) {
+      AppFeedback.error(context, error);
+      cubit.clearError();
+    } else {
+      AppFeedback.success(
+        context,
+        AppText.t('تم حذف القائمة', 'Checklist deleted'),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -224,6 +303,49 @@ class _TemplateTile extends StatelessWidget {
                 ),
               ),
               QcPill.version('v${template.version}'),
+              if (canDelete) ...[
+                const SizedBox(width: AppSpacing.xs),
+                PopupMenuButton<String>(
+                  tooltip: AppText.t('خيارات', 'Options'),
+                  iconSize: 20,
+                  onSelected: (v) {
+                    if (v == 'delete') _confirmDelete(context);
+                    if (v == 'duplicate') {
+                      context.read<QcTemplatesCubit>().duplicateTemplate(
+                        template.templateId ?? 0,
+                        '${template.code}-COPY',
+                        '${template.name} (نسخة)',
+                      );
+                    }
+                  },
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: 'duplicate',
+                      child: Row(
+                        children: [
+                          const Icon(Icons.copy_outlined, size: 18),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(AppText.t('نسخ', 'Duplicate')),
+                        ],
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.delete_outline,
+                            size: 18,
+                            color: AppColors.danger,
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                          Text(AppText.t('حذف', 'Delete')),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -239,8 +361,8 @@ class _TemplateTile extends StatelessWidget {
               QcPill(
                 template.isPeriodic
                     ? AppText.t(
-                        'مهام ${_recurrenceAr(template.recurrence)}',
-                        '${template.recurrence} tasks',
+                        'مهام ${_recurrenceLabel(template.recurrence)}',
+                        '${_recurrenceLabel(template.recurrence)} tasks',
                       )
                     : AppText.t('فحص جودة', 'Quality check'),
                 template.isPeriodic ? AppColors.info : AppColors.success,
@@ -295,12 +417,12 @@ class _TemplateTile extends StatelessWidget {
   }
 }
 
-/// Arabic label for a recurrence value (plan §3: نوعان فقط).
-String _recurrenceAr(String r) => switch (r) {
-  QcRecurrence.daily => 'يومية',
-  QcRecurrence.weekly => 'أسبوعية',
-  QcRecurrence.monthly => 'شهرية',
-  _ => 'لمرة واحدة',
+/// Localized label for a recurrence value (plan §3: نوعان فقط).
+String _recurrenceLabel(String r) => switch (r) {
+  QcRecurrence.daily => AppText.t('يومية', 'Daily'),
+  QcRecurrence.weekly => AppText.t('أسبوعية', 'Weekly'),
+  QcRecurrence.monthly => AppText.t('شهرية', 'Monthly'),
+  _ => AppText.t('لمرة واحدة', 'One-time'),
 };
 
 class _Meta extends StatelessWidget {
@@ -365,48 +487,65 @@ class _TemplateFilterSheetState extends State<_TemplateFilterSheet> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
+            AppField(
+                  label: AppText.t('بحث', 'Search'),
                   controller: _search,
-                  decoration: InputDecoration(
-                    labelText: AppText.t('بحث', 'Search'),
-                    hintText: AppText.t('اسم أو رمز', 'Name or code'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
+                  hint: AppText.t('اسم أو رمز', 'Name or code'),
                   onChanged: (v) => cubit.applyFilters(f.copyWith(text: v)),
                 ),
                 const SizedBox(height: AppSpacing.sm),
-                TextField(
+                AppField(
+                  label: AppText.t('القسم', 'Department'),
                   controller: _dept,
-                  decoration: InputDecoration(
-                    labelText: AppText.t('القسم', 'Department'),
-                    border: const OutlineInputBorder(),
-                    isDense: true,
-                  ),
                   onChanged: (v) =>
                       cubit.applyFilters(f.copyWith(dept: v.trim())),
                 ),
                 const SizedBox(height: AppSpacing.md),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: f.publishedOnly,
-                  title: Text(AppText.t('المنشورة فقط', 'Published only')),
-                  subtitle: Text(
-                    AppText.t(
-                      'ما يمكن بدء فحص منه',
-                      'What an inspection can start from',
+                Wrap(
+                  spacing: AppSpacing.xs,
+                  runSpacing: AppSpacing.xs,
+                  children: [
+                    AppButton(
+                      small: true,
+                      style: f.publishedOnly
+                          ? AppButtonStyle.primary
+                          : AppButtonStyle.secondary,
+                      icon: Icon(
+                        f.publishedOnly
+                            ? Icons.check_circle
+                            : Icons.circle_outlined,
+                        size: 16,
+                      ),
+                      label: AppText.t('المنشورة فقط', 'Published only'),
+                      onPressed: () => cubit.applyFilters(
+                        f.copyWith(publishedOnly: !f.publishedOnly),
+                      ),
                     ),
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  onChanged: (v) =>
-                      cubit.applyFilters(f.copyWith(publishedOnly: v)),
+                    AppButton(
+                      small: true,
+                      style: f.includeArchived
+                          ? AppButtonStyle.primary
+                          : AppButtonStyle.secondary,
+                      icon: Icon(
+                        f.includeArchived
+                            ? Icons.check_circle
+                            : Icons.circle_outlined,
+                        size: 16,
+                      ),
+                      label: AppText.t('إظهار المؤرشف', 'Show archived'),
+                      onPressed: () => cubit.applyFilters(
+                        f.copyWith(includeArchived: !f.includeArchived),
+                      ),
+                    ),
+                  ],
                 ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: f.includeArchived,
-                  title: Text(AppText.t('إظهار المؤرشف', 'Show archived')),
-                  onChanged: (v) =>
-                      cubit.applyFilters(f.copyWith(includeArchived: v)),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  AppText.t(
+                    'ما يمكن بدء فحص منه',
+                    'What an inspection can start from',
+                  ),
+                  style: const TextStyle(fontSize: 12),
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 Text(AppText.t('النوع', 'Type')),
@@ -416,22 +555,26 @@ class _TemplateFilterSheetState extends State<_TemplateFilterSheet> {
                   runSpacing: AppSpacing.xs,
                   children: [
                     for (final type in QcTemplateType.all)
-                      FilterChip(
-                        label: Text(QcPill.typeLabel(type)),
-                        selected: f.types.contains(type),
-                        onSelected: (_) => cubit.toggleType(type),
+                      AppButton(
+                        small: true,
+                        style: f.types.contains(type)
+                            ? AppButtonStyle.primary
+                            : AppButtonStyle.secondary,
+                        label: QcPill.typeLabel(type),
+                        onPressed: () => cubit.toggleType(type),
                       ),
                   ],
                 ),
                 AppWindow.footer(
                   actions: [
-                    TextButton(
+                    AppButton(
+                      label: AppText.t('مسح', 'Clear'),
+                      style: AppButtonStyle.secondary,
                       onPressed: () => cubit.clearFilters(),
-                      child: Text(AppText.t('مسح', 'Clear')),
                     ),
-                    FilledButton(
+                    AppButton(
+                      label: AppText.t('تم', 'Done'),
                       onPressed: () => Navigator.of(context).pop(),
-                      child: Text(AppText.t('تم', 'Done')),
                     ),
                   ],
                 ),

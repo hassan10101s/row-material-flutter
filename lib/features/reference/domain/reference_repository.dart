@@ -29,6 +29,35 @@ abstract interface class ReferenceRepository {
   /// Every material, including soft-deleted ones, for the Reference catalog.
   Future<List<Map<String, dynamic>>> listAllMaterials();
 
+  /// Paged materials for mobile infinite lists (same ordering as
+  /// [listAllMaterials], server-side `LIKE` search).
+  Future<List<Map<String, dynamic>>> listMaterialsPaged({
+    String query = '',
+    int limit = 25,
+    int offset = 0,
+  });
+
+  /// Filtered total matching [listMaterialsPaged] (drives `hasMore`).
+  Future<int> countMaterials({String query = ''});
+
+  /// Paged parameters / units for mobile infinite lists.
+  Future<List<Map<String, dynamic>>> listParametersPaged({
+    String query = '',
+    String? parameterType,
+    int limit = 25,
+    int offset = 0,
+  });
+
+  Future<int> countParameters({String query = '', String? parameterType});
+
+  Future<List<Map<String, dynamic>>> listUnitsPaged({
+    String query = '',
+    int limit = 25,
+    int offset = 0,
+  });
+
+  Future<int> countUnits({String query = ''});
+
   /// The raw row, or null when the id is unknown. Editor-only.
   Future<Map<String, dynamic>?> getMaterialRaw(int id);
 

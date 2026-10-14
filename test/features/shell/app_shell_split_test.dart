@@ -64,6 +64,9 @@ const desktopGrid = Size(1280, 720);
 const mobileGrid = Size(400, 860);
 
 /// Every route the shell owns, in the order [shellNavEntries] declares them.
+///
+/// `/audit` is deliberately absent: the trail lives only inside Settings
+/// (`/settings?tab=audit`), never as a destination of its own.
 const shellRoutes = <String>[
   '/dashboard',
   '/inspections',
@@ -71,7 +74,6 @@ const shellRoutes = <String>[
   '/quality-management',
   '/reference',
   '/settings',
-  '/audit',
 ];
 
 User _userFor(String role) => User(
@@ -112,7 +114,6 @@ void main() {
   /// shell uses.
   List<ShellNavEntry> entriesFor(String role) => shellNavEntries(
     canSeeSettings: rolePermissions(role).contains(Permission.usersRead),
-    canAudit: rolePermissions(role).contains(Permission.auditRead),
   );
 
   /// A badge that has never been started, so nothing here touches a database.
@@ -277,10 +278,7 @@ void main() {
   group('the destination list is described once, for both experiences', () {
     test('the unconditional destinations come first, in order', () {
       expect(
-        shellNavEntries(
-          canSeeSettings: false,
-          canAudit: false,
-        ).map((e) => e.path),
+        shellNavEntries(canSeeSettings: false).map((e) => e.path),
         ['/dashboard', '/inspections', '/lab'],
         reason:
             'material reports are integrated into inspections and the base '
@@ -290,50 +288,33 @@ void main() {
 
     test('the bottom bar is the first available destinations', () {
       for (final canSeeSettings in [false, true]) {
-        for (final canAudit in [false, true]) {
-          final entries = shellNavEntries(
-            canSeeSettings: canSeeSettings,
-            canAudit: canAudit,
-          );
-          expect(
-            shellBottomBarEntries(entries).map((e) => e.path),
-            entries.take(shellBottomBarSlots).map((e) => e.path),
-            reason: 'settings=$canSeeSettings audit=$canAudit',
-          );
-        }
+        final entries = shellNavEntries(canSeeSettings: canSeeSettings);
+        expect(
+          shellBottomBarEntries(entries).map((e) => e.path),
+          entries.take(shellBottomBarSlots).map((e) => e.path),
+          reason: 'settings=$canSeeSettings',
+        );
       }
     });
 
     test('the gated destinations are appended after the base entries', () {
-      expect(
-        shellNavEntries(
-          canSeeSettings: true,
-          canAudit: true,
-        ).map((e) => e.path),
-        [...shellRoutes.take(3), '/reference', '/settings', '/audit'],
-      );
+      expect(shellNavEntries(canSeeSettings: true).map((e) => e.path), [
+        ...shellRoutes.take(3),
+        '/reference',
+        '/settings',
+      ]);
     });
 
     test('the QC destination appears only for a member who can read it', () {
       // Someone without `qc.read` must not be offered a screen the route guard
       // would bounce them out of.
       expect(
-        shellNavEntries(
-          canSeeSettings: true,
-          canAudit: true,
-        ).map((e) => e.path),
-        everyElement(
-          isNot(
-            anyOf(
-              '/quality-management',
-            ),
-          ),
-        ),
+        shellNavEntries(canSeeSettings: true).map((e) => e.path),
+        everyElement(isNot(anyOf('/quality-management'))),
       );
       expect(
         shellNavEntries(
           canSeeSettings: true,
-          canAudit: true,
           canReadQc: true,
         ).map((e) => e.path),
         contains('/quality-management'),
@@ -344,15 +325,9 @@ void main() {
       expect(
         shellNavEntries(
           canSeeSettings: false,
-          canAudit: false,
           canReadQc: true,
         ).map((e) => e.path),
-        [
-          '/dashboard',
-          '/inspections',
-          '/lab',
-          '/quality-management',
-        ],
+        ['/dashboard', '/inspections', '/lab', '/quality-management'],
       );
     });
 
@@ -360,11 +335,7 @@ void main() {
       // `/qc-inspections/detail` is longer than `/qc-inspections`, so the
       // longest-prefix match is what keeps the QC block lit while a sheet is
       // open - and it must not be mistaken for the NCR report.
-      final entries = shellNavEntries(
-        canSeeSettings: false,
-        canAudit: false,
-        canReadQc: true,
-      );
+      final entries = shellNavEntries(canSeeSettings: false, canReadQc: true);
       expect(
         shellSectionIndex(entries, '/qc-inspections/detail?inspectionId=7'),
         shellSectionIndex(entries, '/qc-inspections'),
@@ -376,11 +347,7 @@ void main() {
     });
 
     test('the goals detail route lights the goals section', () {
-      final entries = shellNavEntries(
-        canSeeSettings: false,
-        canAudit: false,
-        canReadQc: true,
-      );
+      final entries = shellNavEntries(canSeeSettings: false, canReadQc: true);
       expect(
         shellSectionIndex(entries, '/qc-goals/detail?goalId=7'),
         shellSectionIndex(entries, '/qc-goals'),
@@ -394,11 +361,7 @@ void main() {
     test('a detail route under the NCR report still lights its section', () {
       // The list and detail routes are longer than `/qc-ncr`, so longest-prefix
       // matching has to keep the section highlighted on the way in.
-      final entries = shellNavEntries(
-        canSeeSettings: false,
-        canAudit: false,
-        canReadQc: true,
-      );
+      final entries = shellNavEntries(canSeeSettings: false, canReadQc: true);
       expect(
         shellSectionIndex(entries, '/qc-ncr/detail?findingId=7'),
         shellSectionIndex(entries, '/quality-management'),
@@ -409,22 +372,34 @@ void main() {
       );
     });
 
-    test('the audit gate is independent of the settings gate', () {
-      // A device switched read-only keeps `org.read` but can be stripped of
-      // `audit.read`, so the two gates cannot be folded into one condition.
-      final auditOnly = shellNavEntries(canSeeSettings: false, canAudit: true);
-      expect(auditOnly.map((e) => e.path), contains('/audit'));
-      expect(auditOnly.map((e) => e.path), isNot(contains('/settings')));
-      expect(auditOnly.map((e) => e.path), isNot(contains('/reference')));
+    test('the audit trail is never a destination of its own', () {
+      // The trail lives only inside Settings (`/settings?tab=audit`): no
+      // permission combination may surface it in the sidebar, drawer,
+      // bottom bar or shortcut list.
+      for (final canSeeSettings in [false, true]) {
+        final entries = shellNavEntries(canSeeSettings: canSeeSettings);
+        expect(entries.map((e) => e.path), isNot(contains('/audit')));
+      }
     });
 
     test('a detail route lights its section, not nothing', () {
-      final entries = shellNavEntries(canSeeSettings: true, canAudit: true);
+      final entries = shellNavEntries(canSeeSettings: true);
       expect(shellSectionIndex(entries, '/inspections'), 1);
       expect(shellSectionIndex(entries, '/inspections/42'), 1);
       expect(shellSectionIndex(entries, '/reports'), 1);
       expect(shellSectionIndex(entries, '/settings'), 4);
       expect(shellSectionIndex(entries, '/nowhere'), -1);
+    });
+
+    test('the topbar title follows the owning section', () {
+      final entries = shellNavEntries(canSeeSettings: true);
+      expect(shellPageTitle('/dashboard', entries), entries[0].label);
+      expect(shellPageTitle('/inspections', entries), entries[1].label);
+      // Detail routes and the reports tab resolve to their section.
+      expect(shellPageTitle('/inspections/42', entries), entries[1].label);
+      expect(shellPageTitle('/reports', entries), entries[1].label);
+      expect(shellPageTitle('/settings', entries), entries[4].label);
+      expect(shellPageTitle('/nowhere', entries), isNull);
     });
 
     test('the longest matching prefix wins', () {
@@ -448,7 +423,7 @@ void main() {
     });
 
     test('the shortcut bindings are Ctrl+1.. in destination order', () {
-      final entries = shellNavEntries(canSeeSettings: true, canAudit: true);
+      final entries = shellNavEntries(canSeeSettings: true);
       final navigated = <String>[];
       final bindings = shellShortcutBindings(entries, navigated.add);
 
@@ -486,6 +461,31 @@ void main() {
         listedLabels(tester),
         entries.map((e) => e.label).toList(),
         reason: 'the sidebar lists every destination, in order',
+      );
+    });
+
+    testWidgets('the topbar names the current section', (tester) async {
+      final entries = entriesFor(AppRoles.admin);
+      await pumpDesktop(
+        tester,
+        routerWith(
+          (child) => desktopShell(
+            user: _userFor(AppRoles.admin),
+            entries: entries,
+            onNavigate: (_) {},
+            child: child,
+          ),
+        ),
+      );
+
+      // Initial location is /dashboard: the bar carries the section title so
+      // pages do not repeat it.
+      expect(
+        find.descendant(
+          of: find.byType(ShellTopBar),
+          matching: find.text(entries.first.label),
+        ),
+        findsOneWidget,
       );
     });
 
@@ -587,7 +587,14 @@ void main() {
           ),
         );
         for (final entry in entries) {
-          await tester.tap(find.text(entry.label));
+          // Scoped to the nav row: the topbar carries the same section
+          // title, so a bare text finder is ambiguous.
+          await tester.tap(
+            find.descendant(
+              of: find.byType(ShellNavItem),
+              matching: find.text(entry.label),
+            ),
+          );
           await tester.pumpAndSettle();
         }
 
@@ -785,10 +792,10 @@ void main() {
       );
     }
 
-    testWidgets('an admin sees the same six destinations on both', (
+    testWidgets('an admin sees the same five destinations on both', (
       tester,
     ) async {
-      expect(entriesFor(AppRoles.admin), hasLength(6));
+      expect(entriesFor(AppRoles.admin), hasLength(5));
       await pumpRole(tester, AppRoles.admin);
     });
 
@@ -804,13 +811,12 @@ void main() {
     });
 
     testWidgets('a lab user gets neither gated destination', (tester) async {
-      // `lab` holds no `users.read` and no `audit.read`, so both gated
-      // destinations stay hidden. Reference is gated on the same flag as
-      // Settings: they are the two pages inside the settings area.
+      // `lab` holds no `users.read`, so both gated destinations stay hidden.
+      // Reference is gated on the same flag as Settings: they are the two
+      // pages inside the settings area.
       final lab = entriesFor(AppRoles.lab);
       expect(lab.map((e) => e.path), isNot(contains('/reference')));
       expect(lab.map((e) => e.path), isNot(contains('/settings')));
-      expect(lab.map((e) => e.path), isNot(contains('/audit')));
       await pumpRole(tester, AppRoles.lab);
     });
 

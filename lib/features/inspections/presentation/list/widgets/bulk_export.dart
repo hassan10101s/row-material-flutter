@@ -4,6 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_exceptions.dart';
+import '../../../../../design_system/export/table_html_export.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback_export.dart';
 import '../../../../../di/service_locator.dart';
@@ -68,6 +69,60 @@ Future<void> exportSelectedReports(BuildContext context) async {
     if (context.mounted) AppFeedback.error(context, e.message);
   } catch (e) {
     if (context.mounted) AppFeedback.errorFrom(context, e);
+  }
+}
+
+/// The ledger as an HTML table file (same shared export as every register):
+/// the selected rows in ledger column order. Selection clears on success
+/// only, mirroring the PDF/label actions above.
+Future<void> exportSelectedTable(BuildContext context) async {
+  final cubit = context.read<InspectionsCubit>();
+  final ids = cubit.state.selectedIds.toList()..sort();
+  if (ids.isEmpty) return;
+  final isProduct = cubit.isProduct;
+  final byId = <int, Map<String, dynamic>>{
+    for (final r in cubit.state.visible) (r['id'] as num).toInt(): r,
+  };
+  final rows = <Map<String, dynamic>>[];
+  for (final id in ids) {
+    rows.add(byId[id] ?? await cubit.repo.getById(id));
+  }
+  if (!context.mounted) return;
+  await TableHtmlExport.export(
+    context,
+    filePrefix: isProduct ? 'product_inspections' : 'inspections',
+    title: isProduct
+        ? AppText.t('فحوصات المنتجات', 'Product inspections')
+        : AppText.t('الفحوصات', 'Inspections'),
+    headers: [
+      AppText.t('رقم القيد', 'Entry'),
+      AppText.t('التاريخ', 'Date'),
+      isProduct
+          ? AppText.t('المنتج', 'Product')
+          : AppText.t('المادة', 'Material'),
+      isProduct
+          ? AppText.t('التشغيلة', 'Batch')
+          : AppText.t('المورد', 'Supplier'),
+      AppText.t('الكمية', 'Qty'),
+      // Products carry no header decision (per-sample only).
+      if (!isProduct) AppText.t('القرار', 'Decision'),
+    ],
+    rows: [
+      for (final r in rows)
+        [
+          '${r['entry_code']}',
+          parseIsoToDisplay('${r['inspection_date']}') ?? '',
+          '${r['material_name']}',
+          isProduct
+              ? '${r['formula_number'] ?? ''} • ${r['batch_number'] ?? ''}'
+              : '${r['supplier']}',
+          '${r['quantity']}',
+          if (!isProduct) '${r['decision_status']}',
+        ],
+    ],
+  );
+  if (context.mounted && cubit.state.selectedIds.isNotEmpty) {
+    cubit.clearSelection();
   }
 }
 

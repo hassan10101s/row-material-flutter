@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import '../../../core/app_paths.dart';
+import '../../../core/constants/app_strings.dart';
 import '../data/settings_repo.dart';
 
 /// The report export root folder (`export_root_path`), exposed as a domain
@@ -39,7 +40,10 @@ class ExportRootService {
     }
     if (paths == null) {
       throw StateError(
-        'No AppPaths available to resolve the default export root',
+        AppText.t(
+          'لا تتوفر مسارات التطبيق لحل مجلد التصدير الافتراضي',
+          'No AppPaths available to resolve the default export root',
+        ),
       );
     }
     return paths!.exportsRoot();

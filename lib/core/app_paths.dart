@@ -68,13 +68,41 @@ class AppPaths {
   Future<String> databasePathForLegacy() => legacyDatabasePath();
 
   /// True when the live database lives inside a cloud-synced folder (OneDrive).
+  ///
+  /// Desktop best-practice: SQLite + cloud sync = corruption risk. Covers
+  /// localized/renamed OneDrive, OneDrive Business/Commercial, Dropbox,
+  /// Google Drive, Box and iCloud Drive. Case-insensitive; matches both
+  /// `\OneDrive - Contoso\` and bare `onedrive` segments.
   Future<bool> isCloudSynced() async {
     final path = await databasePath();
     final lowered = path.toLowerCase();
-    return lowered.contains('onedrive') ||
-        lowered.contains(r'\dropbox\') ||
-        lowered.contains(r'\google drive\') ||
-        lowered.contains(r'\box\');
+    const markers = [
+      'onedrive',
+      'onedrivecommercial',
+      'onedrive - ',
+      'sharepoint',
+      'dropbox',
+      'google drive',
+      'googledrive',
+      'drivefs',
+      'box sync',
+      r'\box\',
+      'icloud',
+      'mega',
+      'pcloud',
+      'nextcloud',
+    ];
+    return markers.any(lowered.contains);
+  }
+
+  /// Basename helper — always use instead of `split('\\').last`.
+  /// Handles UNC, `content://`, trailing separators and mixed slashes.
+  static String fileNameOf(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    final trimmed = normalized.endsWith('/') && normalized.length > 1
+        ? normalized.substring(0, normalized.length - 1)
+        : normalized;
+    return p.basename(trimmed);
   }
 
   Future<Directory> exportsRoot() async {
@@ -83,6 +111,76 @@ class AppPaths {
     final exports = Directory(p.join(dir.path, 'exports'));
     await exports.create(recursive: true);
     return exports;
+  }
+
+  /// Ephemeral share/open staging for phones.
+  ///
+  /// Mobile best-practice: a PDF/HTML/XLSX that is only opened in a viewer or
+  /// handed to the share sheet must NOT live in the permanent `exports/` tree
+  /// — the sandbox is unreachable by any file manager, so every saved export
+  /// is invisible dead weight eating storage. Stage it in the OS cache dir
+  /// instead (auto-purgeable) and let the caller delete it after share/open.
+  /// Desktop ignores this and keeps the persistent exports tree.
+  Future<Directory> shareCacheDir() async {
+    Directory base;
+    try {
+      base = await getTemporaryDirectory();
+    } on Object {
+      // Unit tests / early boot without plugins: fall back to system temp.
+      base = Directory.systemTemp;
+    }
+    final dir = Directory(p.join(base.path, 'material_lab_share'));
+    await dir.create(recursive: true);
+    return dir;
+  }
+
+  /// Best-effort prune of staged share files older than [maxAge].
+  /// Never throws — storage hygiene must not break an export.
+  Future<void> pruneShareCache(
+      {Duration maxAge = const Duration(hours: 24)}) async {
+    try {
+      final dir = await shareCacheDir();
+      await _pruneDir(dir, maxAge);
+    } catch (_) {}
+  }
+
+  /// Best-effort prune of legacy permanent mobile exports (pre-temp era files
+  /// stranded in the unreachable sandbox). Grace period defaults to 7 days so
+  /// a just-created file is never yanked from under the share sheet.
+  Future<void> pruneLegacyMobileExports(
+      {Duration grace = const Duration(days: 7)}) async {
+    try {
+      final dir = await exportsRoot();
+      await _pruneDir(
+        dir,
+        grace,
+        extensions: const {'.pdf', '.html', '.xlsx'},
+        recursive: true,
+      );
+    } catch (_) {}
+  }
+
+  static Future<void> _pruneDir(
+    Directory dir,
+    Duration maxAge, {
+    Set<String>? extensions,
+    bool recursive = false,
+  }) async {
+    if (!await dir.exists()) return;
+    final cutoff = DateTime.now().subtract(maxAge);
+    await for (final entity in dir.list(recursive: recursive)) {
+      if (entity is! File) continue;
+      if (extensions != null &&
+          !extensions.contains(p.extension(entity.path).toLowerCase())) {
+        continue;
+      }
+      try {
+        final stat = await entity.stat();
+        if (stat.modified.isBefore(cutoff)) {
+          await entity.delete();
+        }
+      } catch (_) {}
+    }
   }
 
   /// Port of paths.default_pdf_dir (export_dir / "pdfs").

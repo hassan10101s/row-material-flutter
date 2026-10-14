@@ -3,13 +3,16 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../app/auth_gate.dart';
+import '../../../../core/auth/permissions.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/responsive/form_factor.dart';
 import '../../../../core/utils/app_format.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
+import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../design_system/widgets/app_window.dart';
@@ -19,10 +22,16 @@ import '../../domain/lab_result_repository.dart';
 
 /// Detail + edit screen for one `lab_sample_tests` row.
 ///
-/// Read-only header (analysis / source / time / tester / range state) on top,
-/// then the fillable fields — sample name, result, entry code and every
-/// dynamic value — each editable and saved back through
+/// Read-only header (analysis / source / time / tester / range state /
+/// entry code) on top, then the fillable fields — sample name, result and
+/// every dynamic value — each editable and saved back through
 /// [LabResultRepository.updateSampleTest].
+///
+/// The entry code is the link key (inspection record, QR code, sync document)
+/// and is NEVER editable here: changing it would orphan the test from its
+/// inspection. Only sample name / result / dynamic values may be corrected,
+/// and saving them re-runs the same pipeline as a new run (validation +
+/// consumption delta + range re-evaluation on read).
 class TestHistoryDetailScreen extends StatefulWidget {
   final Map<String, dynamic> row;
   final bool fullScreen;
@@ -34,9 +43,11 @@ class TestHistoryDetailScreen extends StatefulWidget {
 
   /// Opens the detail for [row]: a dialog window on desktop, a full-screen
   /// route on phones. Returns true when the row was edited.
-  static Future<bool> open(BuildContext context, Map<String, dynamic> row) async {
-    final isDesktop =
-        MediaQuery.sizeOf(context).width >= 800;
+  static Future<bool> open(
+    BuildContext context,
+    Map<String, dynamic> row,
+  ) async {
+    final isDesktop = FormFactor.current.isDesktop;
     if (isDesktop) {
       final edited = await showAppWindow<bool>(
         context,
@@ -64,7 +75,6 @@ class TestHistoryDetailScreen extends StatefulWidget {
 class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
   late final TextEditingController _sample;
   late final TextEditingController _result;
-  late final TextEditingController _entryCode;
   late final Map<String, TextEditingController> _dynamics;
   bool _saving = false;
 
@@ -73,14 +83,13 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
     super.initState();
     _sample = TextEditingController(text: '${widget.row['sample_name'] ?? ''}');
     _result = TextEditingController(text: '${widget.row['result_text'] ?? ''}');
-    _entryCode = TextEditingController(text: '${widget.row['entry_code'] ?? ''}');
     final raw = widget.row['dynamic_values'];
     final map = raw is Map
         ? Map<String, dynamic>.from(raw)
         : jsonLoads('${widget.row['dynamic_values_json'] ?? ''}');
     _dynamics = {
       for (final e in map.entries)
-        '${e.key}': TextEditingController(text: '${e.value ?? ''}'),
+        e.key: TextEditingController(text: '${e.value ?? ''}'),
     };
   }
 
@@ -88,7 +97,6 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
   void dispose() {
     _sample.dispose();
     _result.dispose();
-    _entryCode.dispose();
     for (final c in _dynamics.values) {
       c.dispose();
     }
@@ -114,11 +122,12 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
     setState(() => _saving = true);
     try {
       final repo = getIt<LabResultRepository>();
+      // entry_code is intentionally NOT sent: it is the link key and the
+      // repository refuses to change it once set (see updateSampleTest).
       await repo.updateSampleTest(
         id,
         sampleName: _sample.text.trim(),
         resultText: _result.text.trim(),
-        entryCode: _entryCode.text.trim(),
         dynamicValues: {
           for (final e in _dynamics.entries) e.key: e.value.text.trim(),
         },
@@ -141,20 +150,62 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
     }
   }
 
+  Future<void> _delete() async {
+    final id = int.tryParse('${widget.row['id'] ?? ''}');
+    if (id == null || _saving) return;
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('حذف سجل التحليل', 'Delete test record'),
+      message: AppText.t(
+        'سيتم حذف هذا السجل من قائمة تحاليل المعمل ومزامنة الحذف.',
+        'This test record will be removed and the deletion will be synchronized.',
+      ),
+      danger: true,
+      confirmLabel: AppText.t('حذف السجل', 'Delete record'),
+      cancelLabel: AppText.t('إلغاء', 'Cancel'),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _saving = true);
+    try {
+      await getIt<LabResultRepository>().deleteSampleTest(
+        id,
+        user: _currentUserMap,
+      );
+      if (!mounted) return;
+      AppFeedback.success(
+        context,
+        AppText.t('تم حذف السجل', 'Record deleted.'),
+      );
+      try {
+        context.read<TestHistoryCubit>().load();
+      } catch (_) {}
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      AppFeedback.errorFrom(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final r = widget.row;
+    // Write affordances follow the same gate the repository enforces
+    // (`labResultsUpdate`): without it the screen is strictly read-only, so
+    // a viewer/lab member can inspect a record but never reach the write
+    // path — not even to receive a refusal after typing.
+    final canEdit = getIt<AuthGate>().canWrite(Permission.labResultsUpdate);
     final out = '${r['range_state'] ?? ''}' == 'out';
     final inn = '${r['range_state'] ?? ''}' == 'in';
     final stateColor = out
         ? AppColors.danger
         : inn
-            ? AppColors.success
-            : AppColors.textMuted;
+        ? AppColors.success
+        : AppColors.textMuted;
     final range = r['min'] == null && r['max'] == null
         ? '-'
         : '${r['min'] ?? ''} – ${r['max'] ?? ''} '
-            '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
+              '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
     final body = SingleChildScrollView(
       padding: EdgeInsets.all(
         widget.fullScreen ? AppSpacing.pageMobile : AppSpacing.lg,
@@ -202,11 +253,12 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
                 _info(
                   AppText.t('المصدر', 'Source'),
                   '${r['source_name'] ?? '-'}'
-                  '${'${r['source_type'] ?? ''}'.isEmpty ? '' : ' (${r['source_type'] == 'product' ? 'منتج' : 'خام'})'}',
+                  '${'${r['source_type'] ?? ''}'.isEmpty ? '' : ' (${r['source_type'] == 'product' ? AppText.t('منتج', 'Product') : AppText.t('خام', 'Raw')})'}',
                 ),
+                _info(AppText.t('التوقيت', 'Time'), '${r['tested_at'] ?? '-'}'),
                 _info(
-                  AppText.t('التوقيت', 'Time'),
-                  '${r['tested_at'] ?? '-'}',
+                  AppText.t('كود الدخول', 'Entry code'),
+                  '${r['entry_code'] ?? '-'}',
                 ),
                 _info(
                   AppText.t('بواسطة', 'By'),
@@ -233,24 +285,30 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
                 AppField(
                   label: AppText.t('اسم العينة', 'Sample name'),
                   controller: _sample,
-                  enabled: !_saving,
+                  enabled: !_saving && canEdit,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppField(
                   label:
                       '${AppText.t('النتيجة', 'Result')} (${r['analysis_unit'] ?? '%'})',
                   controller: _result,
-                  enabled: !_saving,
+                  enabled: !_saving && canEdit,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
-                AppField(
-                  label: AppText.t('كود الدخول', 'Entry code'),
-                  controller: _entryCode,
-                  enabled: !_saving,
+                Text(
+                  AppText.t(
+                    'كود الدخول مفتاح الربط ولا يمكن تعديله.',
+                    'The entry code is the link key and cannot be changed.',
+                  ),
+                  style: TextStyle(
+                    fontSize: 12.spMax,
+                    color: AppColors.textMuted,
+                  ),
                 ),
+                const SizedBox(height: AppSpacing.md),
                 if (_dynamics.isNotEmpty) ...[
                   const SizedBox(height: AppSpacing.md),
                   Text(
@@ -265,7 +323,7 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
                     AppField(
                       label: e.key,
                       controller: e.value,
-                      enabled: !_saving,
+                      enabled: !_saving && canEdit,
                     ),
                     const SizedBox(height: AppSpacing.sm),
                   ],
@@ -274,7 +332,25 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          if (widget.fullScreen) ...[
+          if (!canEdit)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                AppText.t(
+                  'العرض فقط — تعديل نتائج المعمل يتطلب صلاحية.',
+                  'Read-only — editing lab results requires permission.',
+                ),
+                style: TextStyle(
+                  color: AppColors.warning,
+                  fontSize: 12.spMax,
+                ),
+              ),
+            )
+          else if (widget.fullScreen) ...[
             // Phones: stacked full-width CTAs (52h touch target); a Row
             // with "حفظ التعديلات" + "إغلاق" squeezes both on 360dp.
             SizedBox(
@@ -292,10 +368,22 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
               width: double.infinity,
               height: AppSpacing.mobileCtaHeight.h,
               child: AppButton(
+                style: AppButtonStyle.danger,
+                label: AppText.t('حذف السجل', 'Delete record'),
+                icon: Icon(Icons.delete_outline, size: 18.r),
+                onPressed: _saving ? null : _delete,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(
+              width: double.infinity,
+              height: AppSpacing.mobileCtaHeight.h,
+              child: AppButton(
                 style: AppButtonStyle.secondary,
                 label: AppText.t('إغلاق', 'Close'),
-                onPressed:
-                    _saving ? null : () => Navigator.of(context).pop(false),
+                onPressed: _saving
+                    ? null
+                    : () => Navigator.of(context).pop(false),
               ),
             ),
             const SizedBox(height: AppSpacing.md),
@@ -312,10 +400,18 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
                 ),
                 const SizedBox(width: AppSpacing.md),
                 AppButton(
+                  style: AppButtonStyle.danger,
+                  label: AppText.t('حذف', 'Delete'),
+                  icon: Icon(Icons.delete_outline, size: 18.r),
+                  onPressed: _saving ? null : _delete,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                AppButton(
                   style: AppButtonStyle.secondary,
                   label: AppText.t('إغلاق', 'Close'),
-                  onPressed:
-                      _saving ? null : () => Navigator.of(context).pop(false),
+                  onPressed: _saving
+                      ? null
+                      : () => Navigator.of(context).pop(false),
                 ),
               ],
             ),
@@ -334,27 +430,21 @@ class _TestHistoryDetailScreenState extends State<TestHistoryDetailScreen> {
   }
 
   Widget _info(String label, String value) => Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 90.w,
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.spMax,
-                ),
-              ),
-            ),
-            Expanded(
-              child: Text(
-                value,
-                style: TextStyle(fontSize: 13.spMax),
-              ),
-            ),
-          ],
+    padding: const EdgeInsets.only(top: 4),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 90.w,
+          child: Text(
+            label,
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+          ),
         ),
-      );
+        Expanded(
+          child: Text(value, style: TextStyle(fontSize: 13.spMax)),
+        ),
+      ],
+    ),
+  );
 }

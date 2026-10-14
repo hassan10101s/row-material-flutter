@@ -1,4 +1,5 @@
-import 'dart:io' show Platform;
+import 'dart:async' show unawaited;
+import 'dart:io' show File, Platform;
 
 import 'package:flutter/material.dart';
 
@@ -26,6 +27,12 @@ class AppFeedbackExport {
   AppFeedbackExport._();
 
   /// Shows the delivery sheet for [filePath].
+  ///
+  /// Mobile storage rule: phone exports are staged temp files (see
+  /// `ReportService.saveReport`). Once this sheet closes, the file is
+  /// scheduled for deferred deletion — the viewer/share target gets a grace
+  /// window to finish reading, then it is removed so the sandbox never
+  /// accumulates invisible exports. Desktop files are permanent and untouched.
   static Future<void> actions(
     BuildContext context, {
     required String filePath,
@@ -64,6 +71,10 @@ class AppFeedbackExport {
           delivery: delivery,
         ),
       );
+      // Sheet gone = user opened and/or shared (or dismissed). Either way the
+      // staged temp copy has served its purpose — remove it after a grace
+      // window so the external viewer/share target finishes reading first.
+      _deleteStagedAfterUse(filePath);
       return;
     }
 
@@ -84,6 +95,38 @@ class AppFeedbackExport {
           ),
         ),
       ),
+    );
+  }
+
+  /// Whether [filePath] is a staged ephemeral share file (mobile temp cache).
+  /// Only these are ever auto-deleted or treated as expirable — permanent
+  /// desktop exports and user-configured folders are always passed through.
+  static bool isStagedShareFile(String filePath) {
+    final lowered = filePath.toLowerCase().replaceAll('\\', '/');
+    return lowered.contains('/material_lab_share/') ||
+        lowered.contains('/material_lab_pdf_') ||
+        lowered.contains('/cache/');
+  }
+
+  /// Deferred deletion of a staged mobile share file. Only touches staged
+  /// paths (see [isStagedShareFile]) — permanent desktop exports and
+  /// user-configured folders are never deleted here.
+  ///
+  /// The grace delay lets the external viewer (OpenFilex) or the share-sheet
+  /// target finish reading: both are handed the path and read lazily after
+  /// our `reveal`/`share` future completes. Fire-and-forget on purpose.
+  static void _deleteStagedAfterUse(
+    String filePath, {
+    Duration grace = const Duration(minutes: 2),
+  }) {
+    if (!isStagedShareFile(filePath)) return;
+    unawaited(
+      Future<void>.delayed(grace).then((_) async {
+        try {
+          final file = File(filePath);
+          if (await file.exists()) await file.delete();
+        } catch (_) {}
+      }),
     );
   }
 }
@@ -139,6 +182,22 @@ class _ExportSheet extends StatelessWidget {
               leading: const Icon(Icons.open_in_new),
               title: Text(AppText.t('فتح الملف', 'Open the file')),
               onTap: () async {
+                // Staged temp files are deleted after use (mobile storage
+                // rule): a reopened sheet may point at a pruned file. Only
+                // staged paths get this check — permanent exports and test
+                // doubles pass straight through to the delivery port.
+                if (AppFeedbackExport.isStagedShareFile(filePath) &&
+                    !await File(filePath).exists()) {
+                  if (!context.mounted) return;
+                  AppFeedback.info(
+                    context,
+                    AppText.t(
+                      'انتهت صلاحية الملف المؤقت — أعد إنشاء التقرير',
+                      'Temporary file expired — please re-export the report',
+                    ),
+                  );
+                  return;
+                }
                 final ok = await delivery.reveal(filePath);
                 if (!context.mounted) return;
                 final navigator = Navigator.of(context);
@@ -161,6 +220,18 @@ class _ExportSheet extends StatelessWidget {
               leading: const Icon(Icons.ios_share),
               title: Text(AppText.t('مشاركة', 'Share')),
               onTap: () async {
+                if (AppFeedbackExport.isStagedShareFile(filePath) &&
+                    !await File(filePath).exists()) {
+                  if (!context.mounted) return;
+                  AppFeedback.info(
+                    context,
+                    AppText.t(
+                      'انتهت صلاحية الملف المؤقت — أعد إنشاء التقرير',
+                      'Temporary file expired — please re-export the report',
+                    ),
+                  );
+                  return;
+                }
                 final ok = await delivery.share(filePath, subject: title);
                 if (!context.mounted) return;
                 if (ok) {

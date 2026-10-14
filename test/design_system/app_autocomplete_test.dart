@@ -3,6 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:material_lab/design_system/widgets/app_autocomplete.dart';
+import 'package:material_lab/design_system/widgets/app_autocomplete_overlay.dart';
 
 /// Behavioural cover for the app-wide entity picker.
 ///
@@ -133,6 +134,18 @@ void main() {
 
     expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isFalse);
     expect(find.text('Water'), findsNothing);
+  });
+
+  testWidgets('the overlay takes the full width of its field', (tester) async {
+    await tester.pumpWidget(harness());
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+
+    final overlay = tester.widget<AppAutocompleteOverlay>(
+      find.byType(AppAutocompleteOverlay),
+    );
+    final fieldWidth = tester.getSize(find.byType(TextField)).width;
+    expect(overlay.fieldWidth, moreOrLessEquals(fieldWidth));
   });
 
   testWidgets('the caret re-opens the list from a typed query', (tester) async {

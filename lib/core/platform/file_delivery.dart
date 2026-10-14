@@ -37,7 +37,8 @@ abstract interface class FileDelivery {
 }
 
 /// Desktop implementation: reveal through the OS file manager, share through
-/// the same desktop handler.
+/// the same desktop handler (no system share sheet on Windows/Linux — the
+/// containing folder with the file pre-selected *is* the desktop share).
 class DesktopFileDelivery implements FileDelivery {
   const DesktopFileDelivery();
 
@@ -47,22 +48,33 @@ class DesktopFileDelivery implements FileDelivery {
   @override
   bool get canRevealFolder => canReveal;
 
+  /// Desktop has no share sheet: `share_plus` is registered on Windows but
+  /// shows no UI for local files in most configurations, so share degrades to
+  /// reveal. Reporting true keeps the button visible with useful behaviour
+  /// instead of hiding export on the primary platform.
   @override
-  bool get canShare => true;
+  bool get canShare => canReveal;
 
   @override
   Future<bool> reveal(String filePath) async {
     if (!canReveal) return false;
-    final dir = File(filePath).parent;
     try {
-      if (!await dir.exists()) return false;
       if (Platform.isWindows) {
-        // `explorer.exe` returns a non-zero code when it hands the request to
-        // an already-running instance, so the exit status is not a usable
-        // success signal - treat a completed launch as success.
+        // Prefer `/select` so Explorer highlights the file itself, not just
+        // its folder. `explorer.exe` returns non-zero when handing off to an
+        // existing instance — treat completed launch as success.
+        final file = File(filePath);
+        if (await file.exists()) {
+          await Process.run('explorer.exe', ['/select,', filePath]);
+          return true;
+        }
+        final dir = file.parent;
+        if (!await dir.exists()) return false;
         await Process.run('explorer.exe', [dir.path]);
         return true;
       }
+      final dir = File(filePath).parent;
+      if (!await dir.exists()) return false;
       if (Platform.isMacOS) {
         return (await Process.run('open', [dir.path])).exitCode == 0;
       }

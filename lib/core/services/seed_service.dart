@@ -28,6 +28,14 @@ class SeedService {
     'code',
   };
 
+  /// Max statements per batch commit. A whole-file single commit holds the
+  /// connection lock for seconds (the 2s+ badge stall that parks every reader
+  /// behind it); chunked commits keep each implicit transaction short so the
+  /// UI, the sync badge and the dashboard interleave between chunks.
+  /// Idempotent upserts make chunking safe: a killed import simply resumes on
+  /// the next startup.
+  static const int _batchChunkSize = 500;
+
   Future<bool> isSeedDone() async {
     final db = await dbHelper.database;
     final rows = await db
@@ -76,9 +84,14 @@ class SeedService {
     final headerMap = {for (var i = 0; i < headers.length; i++) headers[i]: i};
     final timestamp = nowIso();
     var count = 0;
-    // Single batch + one commit: the old per-row `await db.execute()` issued
-    // ~96 round-trips through the DB lock during startup.
-    final batch = db.batch();
+    var batch = db.batch();
+    var pending = 0;
+    Future<void> rollBatch() async {
+      if (pending < _batchChunkSize) return;
+      await batch.commit(noResult: true);
+      batch = db.batch();
+      pending = 0;
+    }
     for (var i = 1; i < sheet.length; i++) {
       final row = sheet[i];
       final materialName = '${_at(row, headerMap['Raw_Material_Name']) ?? ''}'.trim();
@@ -108,7 +121,9 @@ class SeedService {
           timestamp,
         ],
       );
+      pending++;
       count++;
+      await rollBatch();
     }
     if (count > 0) await batch.commit(noResult: true);
     return count;
@@ -162,7 +177,14 @@ class SeedService {
     final typeIdx = headers.indexOf('Type');
     final timestamp = nowIso();
     var count = 0;
-    final batch = db.batch();
+    var batch = db.batch();
+    var pending = 0;
+    Future<void> rollBatch() async {
+      if (pending < _batchChunkSize) return;
+      await batch.commit(noResult: true);
+      batch = db.batch();
+      pending = 0;
+    }
     for (var i = 1; i < sheet.length; i++) {
       final row = sheet[i];
       final name = '${_at(row, nameIdx) ?? ''}'.trim();
@@ -190,8 +212,11 @@ class SeedService {
           'VALUES (?, 1, ?)',
           [unit, timestamp],
         );
+        pending++;
       }
+      pending++;
       count++;
+      await rollBatch();
     }
     if (count > 0) await batch.commit(noResult: true);
     return count;
@@ -232,18 +257,30 @@ class SeedService {
       }
     }
     if (chemicalFixes.isEmpty && normalizeFixes.isEmpty) return 0;
-    final batch = db.batch();
+    var batch = db.batch();
+    var pending = 0;
+    Future<void> rollBatch() async {
+      if (pending < _batchChunkSize) return;
+      await batch.commit(noResult: true);
+      batch = db.batch();
+      pending = 0;
+    }
+
     for (final name in normalizeFixes) {
       batch.rawUpdate(
         'UPDATE parameters SET parameter_type = ? WHERE parameter_name = ?',
         [ParameterType.ofDb(null).value, name],
       );
+      pending++;
+      await rollBatch();
     }
     for (final name in chemicalFixes) {
       batch.rawUpdate(
         'UPDATE parameters SET parameter_type = ? WHERE parameter_name = ?',
         [ParameterType.chemical.value, name],
       );
+      pending++;
+      await rollBatch();
     }
     await batch.commit(noResult: true);
     return chemicalFixes.length + normalizeFixes.length;

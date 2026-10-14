@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../core/constants/app_strings.dart';
 import '../feedback/app_feedback.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
@@ -156,8 +157,10 @@ class Validators {
   }
 
   /// Pure Form validators (return error string, null when valid).
-  static String? required(String? value, [String message = 'هذا الحقل مطلوب']) {
-    if (value == null || value.trim().isEmpty) return message;
+  static String? required(String? value, [String? message]) {
+    if (value == null || value.trim().isEmpty) {
+      return message ?? AppText.t('هذا الحقل مطلوب', 'This field is required.');
+    }
     return null;
   }
 
@@ -165,16 +168,19 @@ class Validators {
       [String? message]) {
     return (value) {
       if (value == null || value.trim().length < min) {
-        return message ?? 'الحد الأدنى $min أحرف';
+        return message ??
+            AppText.t('الحد الأدنى $min أحرف', 'Minimum $min characters.');
       }
       return null;
     };
   }
 
-  static String? numeric(String? value, [String message = 'رقم غير صالح']) {
+  static String? numeric(String? value, [String? message]) {
     if (value == null || value.trim().isEmpty) return null;
     final normalized = value.trim().replaceAll(',', '');
-    if (double.tryParse(normalized) == null) return message;
+    if (double.tryParse(normalized) == null) {
+      return message ?? AppText.t('رقم غير صالح', 'Invalid number.');
+    }
     return null;
   }
 

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_button.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../router/app_router.dart';
 import '../cubit/qc_goals_cubit.dart';
@@ -93,43 +94,34 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
       ),
     ];
 
+    // Title lives in the shell topbar (both experiences); the DS tab bar
+    // below already says where you are.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.page,
-            AppSpacing.page,
-            AppSpacing.page,
-            0,
-          ),
-          child: Text(
-            AppText.t('إدارة الجودة', 'Quality management'),
-            style: Theme.of(context).textTheme.headlineSmall,
+        const SizedBox(height: AppSpacing.page),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+          child: Row(
+            children: [
+              for (var index = 0; index < tabs.length; index++)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(end: AppSpacing.sm),
+                  child: AppButton(
+                    small: true,
+                    style: _selectedTab == index
+                        ? AppButtonStyle.primary
+                        : AppButtonStyle.secondary,
+                    icon: Icon(tabs[index].icon, size: 18.r),
+                    label: tabs[index].label,
+                    onPressed: () => setState(() => _selectedTab = index),
+                  ),
+                ),
+            ],
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
-        SizedBox(
-          height: 46.h,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-            child: Row(
-              children: [
-                for (var index = 0; index < tabs.length; index++)
-                  Padding(
-                    padding: const EdgeInsets.only(left: AppSpacing.sm),
-                    child: ChoiceChip(
-                      avatar: Icon(tabs[index].icon, size: 18.r),
-                      label: Text(tabs[index].label),
-                      selected: _selectedTab == index,
-                      onSelected: (_) => setState(() => _selectedTab = index),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
         Expanded(
           child: IndexedStack(
             index: _selectedTab,

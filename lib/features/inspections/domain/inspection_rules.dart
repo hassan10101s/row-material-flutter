@@ -34,24 +34,27 @@ void validateDecisionFields(Map<String, dynamic> d) {
     throw ValidationError(AppErrors.decisionStatusRequired);
   }
   final reason = '${d['decision_reason'] ?? ''}'.trim();
-  final followUp = '${d['follow_up_note'] ?? ''}'.trim();
   final rejectedQty = '${d['rejected_quantity'] ?? ''}'.trim();
 
-  final notApproved = status == 'CONDITIONAL_APPROVAL' ||
+  final notApproved =
+      status == 'CONDITIONAL_APPROVAL' ||
       status == 'PARTIAL_REJECTION' ||
       status == 'FULL_REJECTION';
   if (notApproved && reason.isEmpty) {
     throw ValidationError(AppErrors.decisionReasonRequired);
   }
-  if (status == 'CONDITIONAL_APPROVAL' && followUp.isEmpty) {
-    throw ValidationError(AppErrors.followUpNoteRequired);
-  }
+  // The follow-up note is plain optional notes, even for conditional
+  // approval — never a save gate.
   if (status == 'PARTIAL_REJECTION') {
     if (rejectedQty.isEmpty) {
       throw ValidationError(AppErrors.rejectedQtyRequired);
     }
-    validateNonNegativeNumericText(rejectedQty, 'Rejected quantity',
-        allowEmpty: false, maxLength: rejectedQuantityMaxLength);
+    validateNonNegativeNumericText(
+      rejectedQty,
+      'Rejected quantity',
+      allowEmpty: false,
+      maxLength: rejectedQuantityMaxLength,
+    );
     final quantityValue = '${d['quantity'] ?? ''}'.trim();
     if (quantityValue.isNotEmpty) {
       final rj = safeFloat(rejectedQty) ?? 0.0;
@@ -61,8 +64,12 @@ void validateDecisionFields(Map<String, dynamic> d) {
       }
     }
   } else if (rejectedQty.isNotEmpty) {
-    validateNonNegativeNumericText(rejectedQty, 'Rejected quantity',
-        allowEmpty: false, maxLength: rejectedQuantityMaxLength);
+    validateNonNegativeNumericText(
+      rejectedQty,
+      'Rejected quantity',
+      allowEmpty: false,
+      maxLength: rejectedQuantityMaxLength,
+    );
   }
 }
 
@@ -75,15 +82,14 @@ bool hasDecisionChange(Inspection existing, Map<String, dynamic> normalized) =>
 
 void ensureWithinMaxVersions(int version) {
   if (version >= maxDecisionVersions) {
-    throw ValidationError(
-        AppErrors.maxDecisionUpdates(maxDecisionVersions));
+    throw ValidationError(AppErrors.maxDecisionUpdates(maxDecisionVersions));
   }
 }
 
 /// Snap-shot the physical/chemical reference for an inspection.
 Map<String, dynamic> buildSnapshot(Inspection i) => {
-      'material_name': i.materialName,
-      'material_code': i.materialCode,
-      'physical_reference': i.physicalReference,
-      'chemical_reference': i.chemicalReference,
-    };
+  'material_name': i.materialName,
+  'material_code': i.materialCode,
+  'physical_reference': i.physicalReference,
+  'chemical_reference': i.chemicalReference,
+};

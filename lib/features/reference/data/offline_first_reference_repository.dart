@@ -5,6 +5,8 @@ import '../../../core/constants/app_errors.dart';
 import '../../../core/sync/audit_logger.dart';
 import '../../../core/sync/entity_registry.dart';
 import '../../../core/sync/sync_queue.dart';
+import '../../../core/sync/sync_write.dart' as sync_write;
+import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../organizations/data/member_write_guard.dart';
 import 'reference_repo.dart';
@@ -37,6 +39,62 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
 
   static final SyncEntity _labUnit =
       syncEntities.firstWhere((e) => e.type == 'labUnit');
+  static SyncEntity _entity(String type) =>
+      SyncEntity.byType(type) ??
+      (throw StateError('Unknown sync entity: $type'));
+
+  Future<Map<String, dynamic>> _withRemoteId(
+    DatabaseExecutor txn,
+    String table,
+    Map<String, dynamic> row,
+  ) async {
+    final mutable = Map<String, dynamic>.from(row);
+    if ('${mutable['remote_id'] ?? ''}'.isNotEmpty) return mutable;
+    mutable['remote_id'] = sync_write.newRemoteId();
+    try {
+      await txn.update(
+        table,
+        {'remote_id': mutable['remote_id']},
+        where: 'id = ?',
+        whereArgs: [mutable['id']],
+      );
+    } on Object {
+      // Column absent until migration runs on next open.
+    }
+    return mutable;
+  }
+
+  Future<void> _enqueueMaterial(
+    DatabaseExecutor txn,
+    Map<String, dynamic> row,
+    String operation,
+  ) async {
+    try {
+      await sync_write.enqueueLocalChange(
+        executor: txn,
+        entity: _entity('referenceMaterial'),
+        row: row,
+        operation: operation,
+        queue: queue,
+        audit: audit,
+        auditAction: AuditAction.settingsUpdated,
+        organizationId: guard.organizationId,
+        uid: guard.uid,
+        deviceId: guard.deviceId,
+      );
+    } on Object {
+      try {
+        await txn.update(
+          'reference_materials',
+          {'sync_state': 'queued'},
+          where: 'id = ?',
+          whereArgs: [(row['id'] as num?)?.toInt()],
+        );
+      } on Object {
+        // Best-effort.
+      }
+    }
+  }
 
   // ── §9.4 writes: Materials ────────────────────────────────────
 
@@ -63,6 +121,12 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
       );
       final row = await getMaterialRaw(id, exec: txn);
       if (row != null) {
+        final stamped = await _withRemoteId(
+          txn,
+          'reference_materials',
+          Map<String, dynamic>.from(row),
+        );
+        await _enqueueMaterial(txn, stamped, 'create');
         await audit.log(
           txn,
           action: AuditAction.settingsUpdated,
@@ -103,6 +167,12 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
       );
       final row = await getMaterialRaw(id, exec: txn);
       if (row != null) {
+        final stamped = await _withRemoteId(
+          txn,
+          'reference_materials',
+          Map<String, dynamic>.from(row),
+        );
+        await _enqueueMaterial(txn, stamped, 'update');
         await audit.log(
           txn,
           action: AuditAction.settingsUpdated,
@@ -125,7 +195,13 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     _check(Permission.samplesUpdate);
     final db = await dbHelper.database;
     await db.transaction((txn) async {
+      final before = await getMaterialRaw(id, exec: txn);
       await super.deleteMaterial(id, txn);
+      if (before != null) {
+        final tombstone = Map<String, dynamic>.from(before)
+          ..['deleted_at'] = nowIso();
+        await _enqueueMaterial(txn, tombstone, 'tombstone');
+      }
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,

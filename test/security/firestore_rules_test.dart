@@ -505,7 +505,8 @@ void main() {
         ),
       );
 
-      // The invitee claims: uid + version only, the status stays `invited`.
+      // The invitee claims: binds the uid, the status moves invited →
+      // `pending_activation` (waiting for manager activation).
       await signInAs(newEmail);
       expectAllowed(
         'invitee claims the profile',
@@ -514,7 +515,7 @@ void main() {
             newUid,
             newEmail,
             role: 'lab',
-            status: 'invited',
+            status: 'pending_activation',
             memberId: 'member_newcomer',
             inviteKey: 'inv1',
             createdAt: '2026-01-02T00:00:00Z',
@@ -531,40 +532,29 @@ void main() {
             'member_newcomer',
             uid: newUid,
             email: newEmail,
+            status: 'pending_activation',
             version: 2,
             updatedAt: '2026-01-02T00:00:00Z',
           ),
         ),
       );
 
-      // `invited` still means no writes at all.
+      // `pending_activation` still means no reads and no writes at all.
       expectDenied(
-        'invited write after claiming',
+        'pending write after claiming',
         await userPatch(
           'organizations/$_org/samples/s_newcomer',
           envelope(uid: newUid),
         ),
       );
-
-      // The admin activates; now the member may read and write.
-      await signInAs('admin@lab.test');
-      expectAllowed(
-        'admin activates the member',
-        await userPatch(
-          'organizations/$_org/members/member_newcomer',
-          memberPayload(
-            'member_newcomer',
-            uid: newUid,
-            email: newEmail,
-            status: 'active',
-            version: 3,
-            updatedBy: adminUid,
-            updatedAt: '2026-01-03T00:00:00Z',
-          ),
-        ),
+      expectDenied(
+        'pending list after claiming',
+        await userList('organizations/$_org/samples'),
       );
-      expectAllowed(
-        'admin activates the profile',
+
+      // The invitee cannot activate itself.
+      expectDenied(
+        'self activation via the profile',
         await userPatch(
           'users/$newUid',
           userPayload(
@@ -573,12 +563,72 @@ void main() {
             role: 'lab',
             status: 'active',
             version: 2,
-            updatedBy: adminUid,
+            updatedBy: newUid,
             memberId: 'member_newcomer',
             inviteKey: 'inv1',
             createdAt: '2026-01-02T00:00:00Z',
-            updatedAt: '2026-01-03T00:00:00Z',
+            updatedAt: '2026-01-02T00:00:00Z',
           ),
+        ),
+      );
+      expectDenied(
+        'self activation via the member document',
+        await userPatch(
+          'organizations/$_org/members/member_newcomer',
+          memberPayload(
+            'member_newcomer',
+            uid: newUid,
+            email: newEmail,
+            status: 'active',
+            version: 3,
+            updatedBy: newUid,
+            updatedAt: '2026-01-02T00:00:00Z',
+          ),
+        ),
+      );
+
+      // The admin activates (member + profile + activation audit in one batch
+      // each); now the member may read and write.
+      await signInAs('admin@lab.test');
+      expectAllowed(
+        'admin activates the member',
+        await userPatch(
+          'organizations/$_org/members/member_newcomer',
+          <String, dynamic>{
+            ...memberPayload(
+              'member_newcomer',
+              uid: newUid,
+              email: newEmail,
+              status: 'active',
+              version: 3,
+              updatedBy: adminUid,
+              updatedAt: '2026-01-03T00:00:00Z',
+            ),
+            'activatedAt': '2026-01-03T00:00:00Z',
+            'activatedBy': adminUid,
+          },
+        ),
+      );
+      expectAllowed(
+        'admin activates the profile',
+        await userPatch(
+          'users/$newUid',
+          <String, dynamic>{
+            ...userPayload(
+              newUid,
+              newEmail,
+              role: 'lab',
+              status: 'active',
+              version: 2,
+              updatedBy: adminUid,
+              memberId: 'member_newcomer',
+              inviteKey: 'inv1',
+              createdAt: '2026-01-02T00:00:00Z',
+              updatedAt: '2026-01-03T00:00:00Z',
+            ),
+            'activatedAt': '2026-01-03T00:00:00Z',
+            'activatedBy': adminUid,
+          },
         ),
       );
 
@@ -851,6 +901,83 @@ void main() {
       );
     });
 
+    /// Single-company policy: a bound account cannot create a second company,
+    /// while an unbound account may create exactly one trial company.
+    group('single-company policy', () {
+      test('a bound account cannot create a second company', () async {
+        await signInAs('admin@lab.test');
+        expectDenied(
+          'active member creates a second organization',
+          await userPatch('organizations/org_second', <String, dynamic>{
+            'name': 'Second Co',
+            'ownerUid': adminUid,
+            'status': 'trial',
+            'schemaVersion': 2,
+            'version': 1,
+          }),
+        );
+      });
+
+      test('an unbound account creates a trial company as trial_owner',
+          () async {
+        const email = 'founder@trial.test';
+        final uid = await createAuthUser(email);
+        await signInAs(email);
+        expectAllowed(
+          'unbound account creates a trial organization',
+          await userPatch('organizations/org_trial_new', <String, dynamic>{
+            'name': 'Trial Co',
+            'ownerUid': uid,
+            'status': 'trial',
+            'schemaVersion': 2,
+            'version': 1,
+          }),
+        );
+        expectAllowed(
+          'founder claims the trial_owner profile',
+          await userPatch('users/$uid', <String, dynamic>{
+            ...userPayload(
+              uid,
+              email,
+              org: 'org_trial_new',
+              role: 'trial_owner',
+              status: 'active',
+              memberId: 'member_trial',
+              createdAt: '2026-01-02T00:00:00Z',
+              updatedAt: '2026-01-02T00:00:00Z',
+            ),
+            'memberId': 'member_trial',
+          }),
+        );
+        expectAllowed(
+          'founder writes the trial_owner member document',
+          await userPatch(
+            'organizations/org_trial_new/members/member_trial',
+            memberPayload(
+              'member_trial',
+              uid: uid,
+              email: email,
+              role: 'trial_owner',
+              status: 'active',
+              version: 1,
+              updatedBy: uid,
+            ),
+          ),
+        );
+        // Bound now: a second company is refused.
+        expectDenied(
+          'trial owner creates a second organization',
+          await userPatch('organizations/org_trial_second', <String, dynamic>{
+            'name': 'Second Co',
+            'ownerUid': uid,
+            'status': 'trial',
+            'schemaVersion': 2,
+            'version': 1,
+          }),
+        );
+      });
+    });
+
     /// A member must always be able to walk away from an organization on their
     /// own, and that exit may never double as a promotion, a version skip, or a
     /// way to tombstone somebody else's membership.
@@ -923,9 +1050,14 @@ void main() {
           );
           expectAllowed(
             'the member drops the organization binding from the profile',
+            // A user-facing write carries the whole document (see [userPatch]):
+            // the binding is dropped by *omitting* `organizationId` and
+            // `memberId`, exactly what the client's `FieldValue.delete()`
+            // produces after the merge.
             await userPatch('users/$leaverUid', <String, dynamic>{
+              'email': leaverEmail,
+              'role': 'lab',
               'status': 'disabled',
-              'organizationId': null,
               'version': 2,
               'updatedBy': leaverUid,
               'updatedAt': '2026-01-02T00:00:00Z',
@@ -955,9 +1087,9 @@ void main() {
         expectDenied(
           'promoting the role inside the profile update',
           await userPatch('users/$leaverUid', <String, dynamic>{
-            'status': 'disabled',
+            'email': leaverEmail,
             'role': 'admin',
-            'organizationId': null,
+            'status': 'disabled',
             'version': 2,
             'updatedBy': leaverUid,
             'updatedAt': '2026-01-02T00:00:00Z',
@@ -983,7 +1115,11 @@ void main() {
           expectDenied(
             'keeping organizationId while leaving',
             await userPatch('users/$leaverUid', <String, dynamic>{
+              'email': leaverEmail,
+              'organizationId': _org,
+              'role': 'lab',
               'status': 'disabled',
+              'memberId': 'member_$leaverUid',
               'version': 2,
               'updatedBy': leaverUid,
               'updatedAt': '2026-01-02T00:00:00Z',

@@ -4,6 +4,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
+import 'app_autocomplete_overlay.dart';
 
 /// Free-text field with history autocomplete (Vue parity).
 ///
@@ -40,8 +41,7 @@ class AppHistoryAutocomplete extends StatefulWidget {
   });
 
   @override
-  State<AppHistoryAutocomplete> createState() =>
-      _AppHistoryAutocompleteState();
+  State<AppHistoryAutocomplete> createState() => _AppHistoryAutocompleteState();
 }
 
 class _AppHistoryAutocompleteState extends State<AppHistoryAutocomplete> {
@@ -107,9 +107,8 @@ class _AppHistoryAutocompleteState extends State<AppHistoryAutocomplete> {
   }
 
   Map<String, Map<String, dynamic>> get _byName => {
-        for (final row in widget.options)
-          '${row['name'] ?? ''}': row,
-      };
+    for (final row in widget.options) '${row['name'] ?? ''}': row,
+  };
 
   Iterable<String> _suggest(TextEditingValue value) {
     final seen = <String>{};
@@ -156,8 +155,7 @@ class _AppHistoryAutocompleteState extends State<AppHistoryAutocomplete> {
               _fieldWidth = constraints.maxWidth;
             }
             return Autocomplete<String>(
-              initialValue:
-                  TextEditingValue(text: widget.controller.text),
+              initialValue: TextEditingValue(text: widget.controller.text),
               displayStringForOption: (option) => option,
               optionsBuilder: _suggest,
               onSelected: (selection) {
@@ -166,78 +164,38 @@ class _AppHistoryAutocompleteState extends State<AppHistoryAutocomplete> {
               },
               fieldViewBuilder:
                   (context, textController, focusNode, onSubmitted) {
-                _attach(textController);
-                return TextField(
-                  controller: textController,
-                  focusNode: focusNode,
-                  enabled: widget.enabled,
-                  textInputAction: widget.textInputAction,
-                  onSubmitted: (_) => onSubmitted(),
-                  decoration: InputDecoration(
-                    isDense: true,
-                    hintText: widget.hint,
-                    border: const OutlineInputBorder(),
-                    suffixIcon: widget.options.isEmpty
-                        ? null
-                        : Icon(
-                            Icons.history,
-                            size: 18.r,
-                            color: AppColors.textMuted,
-                          ),
-                  ),
-                );
-              },
-              optionsViewBuilder: (context, onSelected, options) {
-                final items = options.toList();
-                return Align(
-                  alignment: AlignmentDirectional.topStart,
-                  child: Material(
-                    elevation: 4,
-                    borderRadius: BorderRadius.circular(8),
-                    color: AppColors.surface,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxHeight: 220.h,
-                        maxWidth: _fieldWidth,
+                    _attach(textController);
+                    return TextField(
+                      controller: textController,
+                      focusNode: focusNode,
+                      enabled: widget.enabled,
+                      textInputAction: widget.textInputAction,
+                      onSubmitted: (_) => onSubmitted(),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: widget.hint,
+                        border: const OutlineInputBorder(),
+                        suffixIcon: widget.options.isEmpty
+                            ? null
+                            : Icon(
+                                Icons.history,
+                                size: 18.r,
+                                color: AppColors.textMuted,
+                              ),
                       ),
-                      child: ListView.separated(
-                        padding: EdgeInsets.zero,
-                        shrinkWrap: true,
-                        itemCount: items.length,
-                        separatorBuilder: (_, _) =>
-                            const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final name = items[index];
-                          final subtitle = _subtitle(name);
-                          return ListTile(
-                            dense: true,
-                            visualDensity: VisualDensity.compact,
-                            title: Text(
-                              name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 14.spMax),
-                            ),
-                            subtitle: subtitle.isEmpty
-                                ? null
-                                : Text(
-                                    subtitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    textDirection: TextDirection.ltr,
-                                    style: TextStyle(
-                                      fontSize: 11.spMax,
-                                      color: AppColors.textMuted,
-                                    ),
-                                  ),
-                            onTap: () => onSelected(name),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                );
-              },
+                    );
+                  },
+              // Shared design-system overlay (full field width). The tile
+              // keeps its history subtitle; the frame comes from one place.
+              optionsViewBuilder: autocompleteOverlayView<String>(
+                fieldWidth: _fieldWidth,
+                maxHeight: 220.h,
+                titleOf: (name) => name,
+                subtitleOf: _subtitle,
+                // History subtitles carry latin dates/counts; keep the
+                // reference rendering pinned left-to-right.
+                subtitleDirection: TextDirection.ltr,
+              ),
             );
           },
         ),
@@ -248,10 +206,7 @@ class _AppHistoryAutocompleteState extends State<AppHistoryAutocomplete> {
               '${widget.options.length} من السجل — اكتب للبحث أو أدخل جديداً',
               '${widget.options.length} from history — type to search or enter a new one',
             ),
-            style: TextStyle(
-              fontSize: 11.spMax,
-              color: AppColors.textMuted,
-            ),
+            style: TextStyle(fontSize: 11.spMax, color: AppColors.textMuted),
           ),
         ],
       ],

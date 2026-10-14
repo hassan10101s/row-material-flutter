@@ -16,6 +16,16 @@ class InspectionsState extends Equatable {
   final List<Map<String, dynamic>> visible;
   final String query;
   final String status;
+  /// Inclusive `inspection_date` bounds (`yyyy-MM-dd`); empty = unbounded.
+  final String dateFrom;
+  final String dateTo;
+  /// Selected material (raw register) or product (product register) id;
+  /// null = all. The same fields serve both registers because each cubit
+  /// instance is bound to one `kind` (see `InspectionsCubit.load`).
+  final int? materialId;
+
+  /// Display name of [materialId] for the filter chip; empty when unfiltered.
+  final String materialName;
   final bool loading;
   final bool exporting;
   final String? error;
@@ -29,11 +39,15 @@ class InspectionsState extends Equatable {
     this.visible = const [],
     this.query = '',
     this.status = '',
+    this.dateFrom = '',
+    this.dateTo = '',
+    this.materialId,
+    this.materialName = '',
     this.loading = true,
     this.exporting = false,
     this.error,
     this.page = 0,
-    this.pageSize = 50,
+    this.pageSize = 200,
     this.total = 0,
     this.selectedIds = const {},
   });
@@ -43,6 +57,13 @@ class InspectionsState extends Equatable {
     List<Map<String, dynamic>>? visible,
     String? query,
     String? status,
+    String? dateFrom,
+    String? dateTo,
+    int? materialId,
+    String? materialName,
+    // `copyWith` cannot tell "clear to null" from "not passed" for the
+    // nullable [materialId]; `true` resets both material fields to unfiltered.
+    bool clearMaterialId = false,
     bool? loading,
     bool? exporting,
     String? error,
@@ -56,6 +77,11 @@ class InspectionsState extends Equatable {
         visible: visible ?? this.visible,
         query: query ?? this.query,
         status: status ?? this.status,
+        dateFrom: dateFrom ?? this.dateFrom,
+        dateTo: dateTo ?? this.dateTo,
+        materialId: clearMaterialId ? null : (materialId ?? this.materialId),
+        materialName:
+            clearMaterialId ? '' : (materialName ?? this.materialName),
         loading: loading ?? this.loading,
         exporting: exporting ?? this.exporting,
         error: error ?? this.error,
@@ -71,6 +97,10 @@ class InspectionsState extends Equatable {
         visible,
         query,
         status,
+        dateFrom,
+        dateTo,
+        materialId,
+        materialName,
         loading,
         exporting,
         error,

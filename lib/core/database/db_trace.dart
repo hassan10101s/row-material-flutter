@@ -356,12 +356,14 @@ class TracedDatabase implements Database {
         () => _inner.delete(table, where: where, whereArgs: whereArgs),
       );
 
-  /// Not traced: a [Batch] only records statements, it touches the connection
-  /// when it is committed, and that commit is a transaction of its own which
-  /// reaches the tracer through [Transaction]. Wrapping the builder would only
-  /// measure how long it took to fill it.
+  /// Not traced: the builder methods below only record statements.
+  ///
+  /// Commits go through [TracedBatch] instead, because an untimed
+  /// `Batch.commit` was the one holder this report could never name: a big
+  /// import commits thousands of statements as one implicit transaction, and
+  /// while it runs every traced call on the connection parks behind it.
   @override
-  Batch batch() => _inner.batch();
+  Batch batch() => TracedBatch(_inner.batch());
 
   @override
   @Deprecated('Dev only')
@@ -386,6 +388,153 @@ class TracedDatabase implements Database {
   /// compile error naming the member, which is the right trade for a wrapper
   /// that has to stay faithful: if a future sqflite adds to the interface, the
   /// fix is to forward it here, not to discover it at runtime.
+}
+
+/// [Batch] under [DbTrace]: filling the batch stays untimed (it touches no
+/// connection), but `commit()` — the one implicit transaction holding the
+/// connection lock for its whole duration — is reported like any other call.
+///
+/// The operation count in the label is what makes the report actionable: a
+/// `db.batchCommit(2400)` stalling readers is a batch that must be chunked,
+/// not a query that needs an index.
+class TracedBatch implements Batch {
+  TracedBatch(this._inner);
+
+  final Batch _inner;
+  int _ops = 0;
+
+  void _added() => _ops++;
+
+  @override
+  void execute(String sql, [List<Object?>? arguments]) {
+    _added();
+    _inner.execute(sql, arguments);
+  }
+
+  @override
+  void rawInsert(String sql, [List<Object?>? arguments]) {
+    _added();
+    _inner.rawInsert(sql, arguments);
+  }
+
+  @override
+  void insert(
+    String table,
+    Map<String, Object?> values, {
+    String? nullColumnHack,
+    ConflictAlgorithm? conflictAlgorithm,
+  }) {
+    _added();
+    _inner.insert(
+      table,
+      values,
+      nullColumnHack: nullColumnHack,
+      conflictAlgorithm: conflictAlgorithm,
+    );
+  }
+
+  @override
+  void rawUpdate(String sql, [List<Object?>? arguments]) {
+    _added();
+    _inner.rawUpdate(sql, arguments);
+  }
+
+  @override
+  void update(
+    String table,
+    Map<String, Object?> values, {
+    String? where,
+    List<Object?>? whereArgs,
+    ConflictAlgorithm? conflictAlgorithm,
+  }) {
+    _added();
+    _inner.update(
+      table,
+      values,
+      where: where,
+      whereArgs: whereArgs,
+      conflictAlgorithm: conflictAlgorithm,
+    );
+  }
+
+  @override
+  void rawDelete(String sql, [List<Object?>? arguments]) {
+    _added();
+    _inner.rawDelete(sql, arguments);
+  }
+
+  @override
+  void delete(
+    String table, {
+    String? where,
+    List<Object?>? whereArgs,
+  }) {
+    _added();
+    _inner.delete(table, where: where, whereArgs: whereArgs);
+  }
+
+  @override
+  void query(
+    String table, {
+    bool? distinct,
+    List<String>? columns,
+    String? where,
+    List<Object?>? whereArgs,
+    String? groupBy,
+    String? having,
+    String? orderBy,
+    int? limit,
+    int? offset,
+  }) {
+    _added();
+    _inner.query(
+      table,
+      distinct: distinct,
+      columns: columns,
+      where: where,
+      whereArgs: whereArgs,
+      groupBy: groupBy,
+      having: having,
+      orderBy: orderBy,
+      limit: limit,
+      offset: offset,
+    );
+  }
+
+  @override
+  void rawQuery(
+    String sql, [
+    List<Object?>? arguments,
+  ]) {
+    _added();
+    _inner.rawQuery(sql, arguments);
+  }
+
+  @override
+  int get length => _inner.length;
+
+  @override
+  Future<List<dynamic>> commit({
+    bool? exclusive,
+    bool? noResult,
+    bool? continueOnError,
+  }) => DbTrace.run(
+    'db.batchCommit($_ops)',
+    () => _inner.commit(
+      exclusive: exclusive,
+      noResult: noResult,
+      continueOnError: continueOnError,
+    ),
+  );
+
+  @override
+  Future<List<Object?>> apply({
+    bool? noResult,
+    bool? continueOnError,
+  }) => DbTrace.run(
+    'db.batchApply($_ops)',
+    () => _inner.apply(noResult: noResult, continueOnError: continueOnError),
+  );
 }
 
 /// [Database.transaction] under [DbTrace], so a transaction that never commits

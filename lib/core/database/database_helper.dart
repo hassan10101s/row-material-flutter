@@ -299,7 +299,10 @@ class DatabaseHelper {
     );
     // Apply idempotent column/table guarantees on every open — returns on
     // existing databases (fixed version 1) otherwise never see new columns.
-    await _runLegacyGuarantees(db);
+    // Labelled: ~350 statements on the raw handle before the TracedDatabase
+    // wrap, otherwise a slow open (index builds on a large table) is an
+    // invisible holder that stall reports blame on the first badge read.
+    await DbTrace.run('db.openGuarantees', () => _runLegacyGuarantees(db));
     // Every call through the handle is timed and, if it overruns, reported with
     // its caller's stack. Wrapping the handle rather than individual call sites
     // is what makes the set of suspects complete: a stall report has to list
@@ -571,6 +574,7 @@ class DatabaseHelper {
         UNIQUE(material_id, analysis_id)
       )
     ''');
+    await _createInventoryTransactionsTable(db);
     // Reference-driven material specs (plan: every material inherits the
     // canonical parameter NAME from `parameters` but carries its own
     // acceptance/rejection limits here).
@@ -689,6 +693,17 @@ class DatabaseHelper {
       CREATE INDEX IF NOT EXISTS idx_sync_conflicts_resolution
         ON sync_conflicts(resolution)
     ''');
+    // Badge `countBadge`/`countConflicts` predicate
+    // (`resolution IS NULL OR resolution NOT IN (...)`) is non-sargable: the
+    // OR defeats `idx_sync_conflicts_resolution`, so every badge read
+    // full-scanned all resolved history. Partial index holds only unresolved
+    // rows; the query is unchanged and becomes a scan of N_unresolved rows.
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_sync_conflicts_unresolved
+        ON sync_conflicts(id)
+        WHERE resolution IS NULL
+           OR resolution NOT IN ('keep_local','keep_remote','ignored')
+    ''');
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_sync_conflicts_detected
         ON sync_conflicts(detected_at DESC, id DESC)
@@ -728,6 +743,26 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_audit_time ON audit_logs(occurred_at DESC, id DESC)',
     );
+    // Mobile-only new-item notifications (inspections + lab results).
+    // Idempotent: runs on every open via _runLegacyGuarantees -> _createSyncTables,
+    // so existing installs gain it without a version bump.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS notifications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL CHECK(type IN ('inspection','labResult')),
+        ref_id INTEGER NOT NULL,
+        entry_code TEXT NOT NULL,
+        title TEXT NOT NULL,
+        subtitle TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        read INTEGER NOT NULL DEFAULT 0,
+        UNIQUE(type, entry_code, ref_id)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_notifications_unread
+        ON notifications(read, created_at DESC, id DESC)
+    ''');
   }
 
   /// Tables mirrored to Firestore and the columns that make that possible
@@ -737,6 +772,9 @@ class DatabaseHelper {
     'inspections',
     'inspection_status_history',
     'lab_sample_tests',
+    // Product batch samples (محضر التشغيلة rows): source data, syncs like
+    // results. Raw-material flow never writes here.
+    'product_batch_samples',
     'users',
     'lab_analyses',
     'lab_analysis_items',
@@ -745,6 +783,19 @@ class DatabaseHelper {
     'lab_products',
     'lab_product_analyses',
     'lab_units',
+    'lab_material_analyses',
+    'reference_materials',
+    // `parameters` is intentionally device-local (master data seeded from
+    // assets/units.xlsx): it was listed here before but has no SyncEntity,
+    // no collection and is never enqueued/pulled. Keeping it here only added
+    // sync bookkeeping columns + backfill/index work for nothing.
+    'lab_inventory',
+    'inventory_transactions',
+    'lab_consumption_log',
+    'lab_stock_adjustments',
+    'lab_worksheet',
+    'lab_equipment',
+    'lab_equipment_events',
     // The audit outbox is never pulled back, but its rows are pushed as
     // `organizations/{orgId}/auditLogs` documents, so `SyncQueue.markDone`
     // stamps the same per-row bookkeeping on them.
@@ -764,7 +815,9 @@ class DatabaseHelper {
 
     Future<void> index(String table, String sql) async {
       if (!tables.contains(table)) {
-        debugPrint('[DatabaseHelper] skipping index on missing table "$table".');
+        debugPrint(
+          '[DatabaseHelper] skipping index on missing table "$table".',
+        );
         return;
       }
       try {
@@ -825,6 +878,28 @@ class DatabaseHelper {
     await index(
       'inspections',
       'CREATE INDEX IF NOT EXISTS idx_inspections_supplier ON inspections(supplier)',
+    );
+    // Dashboard `filterOptions` DISTINCT supplier over `kind='raw'`: composite
+    // makes it an index range walk instead of scanning all raw heap pages.
+    await index(
+      'inspections',
+      "CREATE INDEX IF NOT EXISTS idx_inspections_kind_supplier ON inspections(inspection_kind, supplier)",
+    );
+    // Dashboard `_filtered` combos (`kind` + status/material + date range):
+    // single-column indexes leave all but one predicate to filtering.
+    await index(
+      'inspections',
+      'CREATE INDEX IF NOT EXISTS idx_inspections_kind_status_date ON inspections(inspection_kind, decision_status, inspection_date DESC, id DESC)',
+    );
+    await index(
+      'inspections',
+      'CREATE INDEX IF NOT EXISTS idx_inspections_kind_material_date ON inspections(inspection_kind, material_id, inspection_date DESC, id DESC)',
+    );
+    // `_labKpis` filters `lab_sample_tests` on `tested_at` alone; the existing
+    // composite starts with `source_type`, so it never applies there.
+    await index(
+      'lab_sample_tests',
+      'CREATE INDEX IF NOT EXISTS idx_sample_tests_tested ON lab_sample_tests(tested_at DESC)',
     );
     await index(
       'inspections',
@@ -919,6 +994,21 @@ class DatabaseHelper {
     await index(
       'reference_materials',
       'CREATE INDEX IF NOT EXISTS idx_reference_active ON reference_materials(active)',
+    );
+    // Paged catalog reads (`listMaterialsPaged`, `listParametersPaged`,
+    // `listUnitsPaged`): ORDER BY name/symbol + LIMIT resolves as a
+    // top-N index walk instead of a full sort.
+    await index(
+      'reference_materials',
+      'CREATE INDEX IF NOT EXISTS idx_reference_name ON reference_materials(material_name COLLATE NOCASE)',
+    );
+    await index(
+      'parameters',
+      'CREATE INDEX IF NOT EXISTS idx_parameters_name ON parameters(parameter_name COLLATE NOCASE)',
+    );
+    await index(
+      'lab_units',
+      'CREATE INDEX IF NOT EXISTS idx_units_symbol ON lab_units(symbol COLLATE NOCASE)',
     );
 
     // QC Manager indexes live in `_createQcIndexes`, alongside the tables they
@@ -1232,6 +1322,14 @@ class DatabaseHelper {
       'worksheet_row_id',
       'worksheet_row_id INTEGER',
     );
+    // Notifications order lab results by creation time; older DBs only have
+    // tested_at, so keep this nullable and fall back to tested_at at read time.
+    await _ensureColumn(
+      db,
+      'lab_sample_tests',
+      'created_at',
+      'created_at TEXT',
+    );
     await _ensureColumn(db, 'lab_worksheet', 'entry_code', 'entry_code TEXT');
     await _ensureColumn(
       db,
@@ -1334,9 +1432,48 @@ class DatabaseHelper {
       'is_required',
       'is_required INTEGER NOT NULL DEFAULT 0',
     );
-    // Lab equipment registry (device-local, like inventory): master table +
+    // Lab equipment registry (fully synced, like inventory): master table +
     // event log. Idempotent so existing installs gain them on next open.
     await _createLabEquipmentTables(db);
+    // Cross-device link for event rows: the parent's `remote_id` at write
+    // time. Lets the pull remap `equipment_id` (a per-device autoincrement
+    // id) instead of writing the origin device's id raw.
+    await _ensureColumn(
+      db,
+      'lab_equipment_events',
+      'equipment_remote_id',
+      'equipment_remote_id TEXT',
+    );
+    await _backfillEquipmentRemoteIds(db);
+    // Unified inventory ledger (comprehensive sync plan §4): created on every
+    // open so existing installs gain it without a version bump.
+    await _createInventoryTransactionsTable(db);
+    // Product batch samples (محضر التشغيلة): one row per sample inside a
+    // product inspection (the batch header). Created on every open so
+    // existing installs gain it without a version bump. Raw-material
+    // reports never touch this table.
+    await _createProductBatchTables(db);
+    // Batch samples carry their own results now (independent of the lab
+    // chemistry pipeline): who took the sample + physical map + multiple
+    // chemical rows, all as JSON on the sample row.
+    await _ensureColumn(
+      db,
+      'product_batch_samples',
+      'sample_taker',
+      "sample_taker TEXT NOT NULL DEFAULT ''",
+    );
+    await _ensureColumn(
+      db,
+      'product_batch_samples',
+      'physical_results_json',
+      "physical_results_json TEXT NOT NULL DEFAULT '{}'",
+    );
+    await _ensureColumn(
+      db,
+      'product_batch_samples',
+      'chemical_results_json',
+      "chemical_results_json TEXT NOT NULL DEFAULT '[]'",
+    );
     // Lab products carry the same physical/chemical reference maps as
     // materials now (the product editor mirrors the material editor).
     await _ensureColumn(
@@ -1404,6 +1541,18 @@ class DatabaseHelper {
         "sync_state TEXT NOT NULL DEFAULT 'local'",
       );
       await _ensureColumn(db, table, 'deleted_at', 'deleted_at TEXT');
+      // Comprehensive sync plan §1+§2: global cross-device identity +
+      // write attribution. `remote_id` is the Firestore document id for new
+      // entities (UUID for new rows, `legacy_<table>_<id>` backfill for old).
+      await _ensureColumn(db, table, 'remote_id', 'remote_id TEXT');
+      await _ensureColumn(db, table, 'updated_at', 'updated_at TEXT');
+      // Person columns hold Firebase uids (TEXT). Older installs created this
+      // as INTEGER; SQLite type affinity still stores TEXT fine, and all
+      // readers must tolerate both (see LabRepo user-id parsing + entity
+      // registry remap). New columns are TEXT.
+      await _ensureColumn(db, table, 'updated_by', 'updated_by TEXT');
+      await _ensureColumn(db, table, 'device_id', 'device_id TEXT');
+      await _backfillRemoteIds(db, table);
     }
     // Product inspections (same `inspections` table, `inspection_kind='product'`):
     // the kind/product/formula/batch columns for existing installs. The
@@ -1430,12 +1579,7 @@ class DatabaseHelper {
       'formula_number',
       'formula_number TEXT',
     );
-    await _ensureColumn(
-      db,
-      'inspections',
-      'batch_number',
-      'batch_number TEXT',
-    );
+    await _ensureColumn(db, 'inspections', 'batch_number', 'batch_number TEXT');
     // Units registry: every unit string used anywhere in the program must
     // appear in `lab_units` so all pickers inherit from one table.
     await _backfillLabUnits(db);
@@ -1473,14 +1617,7 @@ class DatabaseHelper {
 
   /// Fallback symbols that must exist even on an empty database (the old
   /// hardcoded `inventoryUnits` plus the lab default `%`).
-  static const List<String> _defaultUnits = [
-    '%',
-    'L',
-    'mL',
-    'kg',
-    'g',
-    'pc',
-  ];
+  static const List<String> _defaultUnits = ['%', 'L', 'mL', 'kg', 'g', 'pc'];
 
   Future<void> _backfillLabUnits(Database db) async {
     final stamp = DateTime.now().toIso8601String();
@@ -1495,10 +1632,9 @@ class DatabaseHelper {
         // `lab_units` itself missing would already have failed earlier DDL.
       }
     }
-    final existing =
-        (await db.rawQuery(
-          "SELECT name FROM sqlite_master WHERE type = 'table'",
-        )).map((r) => '${r['name']}').toSet();
+    final existing = (await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    )).map((r) => '${r['name']}').toSet();
     for (final (table, column) in _unitSources) {
       if (!existing.contains(table)) continue;
       try {
@@ -1663,7 +1799,9 @@ class DatabaseHelper {
     await db.rawQuery('PRAGMA legacy_alter_table=ON');
     try {
       await db.transaction((txn) async {
-        await txn.execute('ALTER TABLE lab_inventory RENAME TO lab_inventory_legacy_v1');
+        await txn.execute(
+          'ALTER TABLE lab_inventory RENAME TO lab_inventory_legacy_v1',
+        );
         await txn.execute('''
           CREATE TABLE lab_inventory (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1805,7 +1943,107 @@ class DatabaseHelper {
   /// Idempotent (`IF NOT EXISTS`): called from both `_createSchema` (fresh
   /// installs) and `_runLegacyGuarantees` (every open, so existing installs
   /// gain the tables without a version bump).
+  Future<void> _createInventoryTransactionsTable(Database db) async {
+    // Unified append-only inventory ledger (comprehensive sync plan §4).
+    // `lab_consumption_log` + `lab_stock_adjustments` stay as detailed local
+    // records; every write there produces one row here, and THIS table is the
+    // sync source of truth. Balance = SUM(quantity_delta) per inventory item.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inventory_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remote_id TEXT UNIQUE,
+        inventory_id INTEGER NOT NULL REFERENCES lab_inventory(id),
+        inventory_remote_id TEXT,
+        quantity_delta REAL NOT NULL,
+        transaction_type TEXT NOT NULL CHECK(transaction_type IN
+          ('OPENING_BALANCE','RECEIPT','ADJUSTMENT','CONSUMPTION','REVERSAL','TRANSFER'))
+          DEFAULT 'ADJUSTMENT',
+        reference_type TEXT,
+        reference_id INTEGER,
+        reference_remote_id TEXT,
+        reason TEXT NOT NULL DEFAULT '',
+        created_by INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        updated_by INTEGER,
+        device_id TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        remote_version INTEGER NOT NULL DEFAULT 0,
+        remote_synced_at TEXT,
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        deleted_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_inventory_txn_inventory
+        ON inventory_transactions(inventory_id, created_at DESC, id DESC)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_txn_remote_id
+        ON inventory_transactions(remote_id)
+    ''');
+  }
+
+  /// Product batch samples: the "table inside the report" for product
+  /// inspections (محضر التشغيلة).
+  ///
+  /// The batch header IS the existing product `inspections` row
+  /// (`inspection_kind = 'product'`, `entry_code` = batch code, `quantity` =
+  /// e.g. 50 tons). Each sample row holds identity + tester + decision;
+  /// the sample's analysis results stay in `lab_sample_tests`
+  /// (`source_type = 'product'`, `source_ref_id` = sample id,
+  /// `entry_code` = batch code) so consumption, audit and sync reuse the
+  /// existing result pipeline instead of a parallel one.
+  ///
+  /// Source data only — no PDF/HTML/path columns (derived artifacts are
+  /// rebuilt on-device and never synced, see `buildRemotePayload`).
+  /// Idempotent (`IF NOT EXISTS`): called from `_runLegacyGuarantees`
+  /// (every open, so existing installs gain it without a version bump).
+  Future<void> _createProductBatchTables(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS product_batch_samples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        batch_id INTEGER NOT NULL REFERENCES inspections(id) ON DELETE CASCADE,
+        sample_no INTEGER NOT NULL,
+        sample_name TEXT NOT NULL,
+        sample_taker TEXT NOT NULL DEFAULT '',
+        physical_results_json TEXT NOT NULL DEFAULT '{}',
+        chemical_results_json TEXT NOT NULL DEFAULT '[]',
+        tested_by INTEGER,
+        tested_by_name TEXT NOT NULL DEFAULT '',
+        tested_at TEXT NOT NULL,
+        decision_status TEXT NOT NULL DEFAULT '',
+        decision_reason TEXT,
+        created_by INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        updated_by INTEGER,
+        remote_id TEXT UNIQUE,
+        device_id TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        remote_version INTEGER NOT NULL DEFAULT 0,
+        remote_synced_at TEXT,
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        deleted_at TEXT,
+        UNIQUE(batch_id, sample_no)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_batch_samples_batch
+        ON product_batch_samples(batch_id, sample_no ASC, id ASC)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_samples_remote_id
+        ON product_batch_samples(remote_id)
+    ''');
+  }
+
   Future<void> _createLabEquipmentTables(Database db) async {
+    // Fully synced registry (like inventory): master row + calibration /
+    // maintenance / repair log. Sync bookkeeping columns travel with the
+    // CREATE so fresh installs sync from the first write; existing installs
+    // gain them via `_runLegacyGuarantees` (syncedTables loop + the
+    // equipment_remote_id guarantee below).
     await db.execute('''
       CREATE TABLE IF NOT EXISTS lab_equipment (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1815,22 +2053,48 @@ class DatabaseHelper {
         description TEXT NOT NULL DEFAULT '',
         last_calibration_date TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
+        updated_at TEXT NOT NULL,
+        remote_id TEXT UNIQUE,
+        device_id TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        remote_version INTEGER NOT NULL DEFAULT 0,
+        remote_synced_at TEXT,
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        updated_by TEXT,
+        deleted_at TEXT
       )
     ''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS lab_equipment_events (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         equipment_id INTEGER NOT NULL REFERENCES lab_equipment(id) ON DELETE CASCADE,
+        equipment_remote_id TEXT,
         event_type TEXT NOT NULL DEFAULT 'calibration',
         event_date TEXT NOT NULL,
         notes TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL
+        created_at TEXT NOT NULL,
+        remote_id TEXT UNIQUE,
+        device_id TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        remote_version INTEGER NOT NULL DEFAULT 0,
+        remote_synced_at TEXT,
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        updated_by TEXT,
+        updated_at TEXT,
+        deleted_at TEXT
       )
     ''');
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_equipment_events_equipment
         ON lab_equipment_events(equipment_id, event_date DESC, id DESC)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_lab_equipment_remote_id
+        ON lab_equipment(remote_id)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_lab_equipment_events_remote_id
+        ON lab_equipment_events(remote_id)
     ''');
   }
 
@@ -1854,6 +2118,61 @@ class DatabaseHelper {
     final has = cols.any((c) => c['name'] == column);
     if (!has) {
       await db.execute('ALTER TABLE $table ADD COLUMN $spec');
+    }
+  }
+
+  /// Backfills `remote_id` for rows written before comprehensive sync
+  /// (plan §1): `legacy_<table>_<id>`. New rows get a UUID from the
+  /// repository layer. Idempotent: only NULL/empty cells are touched.
+  /// A unique index is created best-effort (skipped for stub tables).
+  Future<void> _backfillRemoteIds(Database db, String table) async {
+    final cols = await db.rawQuery('PRAGMA table_info($table)');
+    if (cols.isEmpty) return;
+    final names = cols.map((c) => '${c['name']}').toSet();
+    if (!names.contains('remote_id') || !names.contains('id')) return;
+    try {
+      await db.execute(
+        "UPDATE $table SET remote_id = 'legacy_${table}_' || id "
+        "WHERE remote_id IS NULL OR remote_id = ''",
+      );
+    } on Object catch (e) {
+      debugPrint(
+        '[DatabaseHelper] remote_id backfill skipped for "$table": $e',
+      );
+      return;
+    }
+    try {
+      await db.execute(
+        'CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_remote_id '
+        'ON $table(remote_id)',
+      );
+    } on Object catch (e) {
+      debugPrint('[DatabaseHelper] remote_id index skipped for "$table": $e');
+    }
+  }
+
+  /// Backfills `lab_equipment_events.equipment_remote_id` from the parent
+  /// row for events written before the column existed. Idempotent.
+  Future<void> _backfillEquipmentRemoteIds(Database db) async {
+    try {
+      final cols = await db.rawQuery(
+        'PRAGMA table_info(lab_equipment_events)',
+      );
+      if (cols.isEmpty) return;
+      final names = cols.map((c) => '${c['name']}').toSet();
+      if (!names.contains('equipment_remote_id')) return;
+      await db.execute('''
+        UPDATE lab_equipment_events
+        SET equipment_remote_id = (
+          SELECT e.remote_id FROM lab_equipment e
+          WHERE e.id = lab_equipment_events.equipment_id
+        )
+        WHERE (equipment_remote_id IS NULL OR equipment_remote_id = '')
+      ''');
+    } on Object catch (e) {
+      debugPrint(
+        '[DatabaseHelper] equipment_remote_id backfill skipped: $e',
+      );
     }
   }
 

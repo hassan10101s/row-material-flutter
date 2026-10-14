@@ -190,16 +190,8 @@ class DesktopTestHistoryTab extends StatelessWidget {
       builder: (context, scope, d) {
         final state = context.watch<TestHistoryCubit>().state;
         if (state.loading && state.rows.isEmpty) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                AppText.t('سجل تحاليل المعمل', 'Test history'),
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              const AppSkeletonList(rows: 8, lines: 5, height: 460),
-            ],
+          return const SingleChildScrollView(
+            child: AppSkeletonList(rows: 8, lines: 5, height: 460),
           );
         }
         return AppErrorFeedback<TestHistoryCubit, TestHistoryState>(
@@ -208,27 +200,13 @@ class DesktopTestHistoryTab extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        AppText.t('سجل تحاليل المعمل', 'Test history'),
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ),
-                    AppButton(
-                      label: 'اختبار جديد',
-                      icon: Icon(Icons.add_circle_outline, size: 18.r),
-                      onPressed: () => _openNewTest(context),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
                 AppCard(
                   padding: const EdgeInsets.all(AppSpacing.md),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // New test shares the search row (same level, no extra
+                      // row); the title lives in the shell topbar.
                       TestHistoryToolbar(
                         chips: d.chips,
                         hasQuery: scope.query.text.isNotEmpty,
@@ -239,6 +217,12 @@ class DesktopTestHistoryTab extends StatelessWidget {
                           d.chemOptions,
                         ),
                         onClearAll: scope.clearAllFilters,
+                        trailing: AppButton(
+                          label: AppText.t('اختبار جديد', 'New test'),
+                          icon: Icon(Icons.add_circle_outline, size: 18.r),
+                          small: true,
+                          onPressed: () => _openNewTest(context),
+                        ),
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       TestHistoryChips(
@@ -252,11 +236,36 @@ class DesktopTestHistoryTab extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
+                if (scope.selecting) ...[
+                  TestHistorySelectionBar(
+                    rows: scope.selectedRows(d.sorted),
+                    onClear: scope.clearSelection,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
                 TestHistoryTable(
                   slice: d.paged.slice,
                   start: d.paged.start,
                   isEmpty: state.rows.isEmpty,
+                  selecting: scope.selecting,
+                  selectedIds: scope.selectedIds,
+                  onToggleSelect: (row) => scope.toggleSelected(thRowKey(row)),
+                  onLongPressRow: (row) => scope.toggleSelected(thRowKey(row)),
+                  onToggleSelectAll: () => scope.toggleSelectAll([
+                    for (final r in d.paged.slice) thRowKey(r),
+                  ]),
+                  allOnPageSelected:
+                      d.paged.slice.isNotEmpty &&
+                      d.paged.slice.every(
+                        (r) => scope.selectedIds.contains(thRowKey(r)),
+                      ),
                   onOpen: (row) async {
+                    // In select mode a tap toggles the checkbox instead of
+                    // opening the editor for the whole table.
+                    if (scope.selecting) {
+                      scope.toggleSelected(thRowKey(row));
+                      return;
+                    }
                     final edited = await TestHistoryDetailScreen.open(
                       context,
                       row,
@@ -266,13 +275,11 @@ class DesktopTestHistoryTab extends StatelessWidget {
                     }
                   },
                 ),
-                if (d.paged.pageCount > 1) ...[
-                  const SizedBox(height: AppSpacing.md),
-                  TestHistoryPagination(
-                    page: scope.page,
-                    pageCount: d.paged.pageCount,
-                  ),
-                ],
+                const SizedBox(height: AppSpacing.md),
+                TestHistoryPagination(
+                  page: scope.page,
+                  pageCount: d.paged.pageCount,
+                ),
               ],
             ),
           ),

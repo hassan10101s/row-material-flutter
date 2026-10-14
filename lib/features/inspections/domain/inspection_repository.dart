@@ -30,6 +30,10 @@ abstract interface class SampleRepository {
   Future<void> delete(int inspectionId);
 
   /// [kind] filters by inspection kind (`raw` / `product`); empty = both.
+  /// [dateFrom]/[dateTo] bound `inspection_date` (inclusive, `yyyy-MM-dd`);
+  /// empty means unbounded. [materialId] filters raw inspections by
+  /// `material_id`, [productId] filters product inspections by `product_id`;
+  /// null means unfiltered.
   Future<List<Map<String, dynamic>>> list({
     String query = '',
     String status = '',
@@ -37,9 +41,21 @@ abstract interface class SampleRepository {
     int offset = 0,
     String orderBy = 'id DESC',
     String kind = '',
+    String dateFrom = '',
+    String dateTo = '',
+    int? materialId,
+    int? productId,
   });
 
-  Future<int> count({String query = '', String status = '', String kind = ''});
+  Future<int> count({
+    String query = '',
+    String status = '',
+    String kind = '',
+    String dateFrom = '',
+    String dateTo = '',
+    int? materialId,
+    int? productId,
+  });
 
   Future<Map<String, dynamic>> getById(int id);
 }
@@ -99,9 +115,21 @@ abstract interface class InspectionRepository {
     int offset = 0,
     String orderBy = 'id DESC',
     String kind = '',
+    String dateFrom = '',
+    String dateTo = '',
+    int? materialId,
+    int? productId,
   });
 
-  Future<int> count({String query = '', String status = '', String kind = ''});
+  Future<int> count({
+    String query = '',
+    String status = '',
+    String kind = '',
+    String dateFrom = '',
+    String dateTo = '',
+    int? materialId,
+    int? productId,
+  });
 
   Future<List<Map<String, dynamic>>> getStatusHistory(int inspectionId);
 

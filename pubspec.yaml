@@ -73,6 +73,18 @@ dependencies:
   share_plus: ^12.0.2
   image_picker: ^1.2.3
   workmanager: ^0.10.10
+  url_launcher: ^6.3.3
+  flutter_svg: ^2.3.0
+  # Battery-exemption prompt at the bottom of the notifications sheet
+  # (Permission.ignoreBatteryOptimizations). Android only.
+  permission_handler: ^11.4.0
+  # Mobile-only new-item notifications (inspections + lab results).
+  # Used on Android only; never initialized on desktop.
+  flutter_local_notifications: ^18.0.1
+  # Killed-app push: FCM delivers even when the app is force-stopped /
+  # swiped away, where Workmanager polls cannot run. Paired with
+  # firebase_core ^4.15.0 (FlutterFire BoM 4.20.0 -> messaging 16.7.0).
+  firebase_messaging: ^16.7.0
 dependency_overrides:
   # FirebaseAuth's Android ID-token listener can run on a Firebase worker
   # thread; use the local copy that posts those events to Android's main thread.

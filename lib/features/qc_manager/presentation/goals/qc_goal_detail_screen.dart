@@ -2,16 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
 import '../../../../../core/auth/session_source.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../di/service_locator.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_autocomplete_overlay.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_unit_field.dart';
@@ -19,8 +26,11 @@ import '../../../../../design_system/widgets/app_window.dart';
 import '../../../reference/domain/reference_repository.dart';
 import '../../domain/qc_goal.dart';
 import '../../domain/qc_enums.dart';
+import '../../domain/qc_repositories.dart';
 import '../cubit/qc_goal_detail_cubit.dart';
+import '../cubit/qc_goals_cubit.dart';
 import '../widgets/goal_pill.dart';
+import 'qc_goal_form_screen.dart';
 
 /// One goal in full: who is carrying it, what the steps are, how it is
 /// measured, what it is evidenced against, and who closed it.
@@ -90,7 +100,7 @@ class QcGoalDetailScreen extends StatelessWidget {
                 : null,
           ),
           body: state.loading && goal == null
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList(rows: 4, height: 320)
               : goal == null
               ? AppEmptyState(
                   icon: state.error != null
@@ -103,10 +113,11 @@ class QcGoalDetailScreen extends StatelessWidget {
                           'This goal no longer exists',
                         ),
                   action: state.error != null
-                      ? FilledButton.tonal(
+                      ? AppButton(
+                          label: AppText.t('إعادة المحاولة', 'Retry'),
+                          style: AppButtonStyle.secondary,
                           onPressed: () =>
                               context.read<QcGoalDetailCubit>().load(),
-                          child: Text(AppText.t('إعادة المحاولة', 'Retry')),
                         )
                       : null,
                 )
@@ -176,7 +187,9 @@ class _FinisherAutocomplete extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      Autocomplete<MapEntry<String, String>>(
+      // Inherits the design-system overlay (full field width, one look
+      // everywhere) instead of hand-rolling an options view.
+      AppFullWidthAutocomplete<MapEntry<String, String>>(
         initialValue: TextEditingValue(text: nameController.text),
         displayStringForOption: (person) => person.value,
         optionsBuilder: (value) {
@@ -193,31 +206,26 @@ class _FinisherAutocomplete extends StatelessWidget {
           idController.text = person.key;
         },
         fieldViewBuilder: (context, controller, focusNode, onSubmitted) =>
-            TextField(
+            AppField(
+              label: AppText.t('الاسم', 'Name'),
               controller: controller,
               focusNode: focusNode,
-              decoration: InputDecoration(
-                labelText: AppText.t('الاسم', 'Name'),
-                helperText: AppText.t(
-                  'اختر الاسم لربطه بالمعرّف الصحيح',
-                  'Select a name to bind its matching ID',
-                ),
+              hint: AppText.t(
+                'اختر الاسم لربطه بالمعرّف الصحيح',
+                'Select a name to bind its matching ID',
               ),
               onChanged: (value) {
                 nameController.text = value;
                 idController.clear();
               },
-              onSubmitted: (_) => onSubmitted(),
+              onFieldSubmitted: (_) => onSubmitted(),
             ),
       ),
       const SizedBox(height: AppSpacing.xs),
-      TextField(
+      AppField(
+        label: AppText.t('المعرّف', 'ID'),
         controller: idController,
-        readOnly: true,
-        decoration: InputDecoration(
-          labelText: AppText.t('المعرّف', 'ID'),
-          border: const OutlineInputBorder(),
-        ),
+        enabled: false,
       ),
     ],
   );
@@ -293,8 +301,9 @@ class _AutocompleteTextField extends StatelessWidget {
   final ValueChanged<String>? onChanged;
 
   @override
-  Widget build(BuildContext context) => Autocomplete<String>(
+  Widget build(BuildContext context) => AppFullWidthAutocomplete<String>(
     initialValue: TextEditingValue(text: controller.text),
+    displayStringForOption: (option) => option,
     optionsBuilder: (value) {
       final query = value.text.trim().toLowerCase();
       return options.where(
@@ -312,11 +321,11 @@ class _AutocompleteTextField extends StatelessWidget {
           selection: TextSelection.collapsed(offset: controller.text.length),
         );
       }
-      return TextFormField(
+      return AppField(
+        label: label,
         controller: fieldController,
         focusNode: focusNode,
         maxLines: maxLines,
-        decoration: InputDecoration(labelText: label),
         validator: required
             ? (value) => value == null || value.trim().isEmpty
                   ? AppText.t('هذا الحقل مطلوب', 'This field is required')
@@ -407,26 +416,45 @@ class _OverviewTab extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Simplified (plan §4): code auto, no KPIs/type/site in UI.
               _Field(
                 AppText.t('الرمز', 'Code'),
                 goal.code.isEmpty ? '-' : goal.code,
               ),
+              _Field(
+                AppText.t('النوع', 'Type'),
+                goal.goalType.isEmpty ? '-' : goal.goalType,
+              ),
+              _Field(AppText.t('الأولوية', 'Priority'), goal.priority),
               _Field(
                 AppText.t('المسؤول', 'Owner'),
                 goal.ownerName.isNotEmpty
                     ? goal.ownerName
                     : (goal.ownerId.isNotEmpty ? goal.ownerId : '-'),
               ),
+              if (goal.dept.isNotEmpty)
+                _Field(AppText.t('القسم', 'Department'), goal.dept),
+              if (goal.site.isNotEmpty)
+                _Field(AppText.t('الموقع', 'Site'), goal.site),
+              _Field(
+                AppText.t('البداية', 'Start'),
+                _dateLabel(goal.startDate),
+              ),
               _Field(
                 AppText.t('الموعد', 'Due'),
                 _dateLabel(goal.dueDate),
                 danger: goal.isOverdue,
               ),
+              if (goal.targetValue != null)
+                _Field(
+                  AppText.t('المستهدف', 'Target'),
+                  '${goal.currentValue ?? '-'} / ${goal.targetValue} ${goal.targetUnit}',
+                ),
               if (goal.description.isNotEmpty) ...[
                 const Divider(),
                 Text(goal.description),
               ],
+              const SizedBox(height: AppSpacing.md),
+              _GoalEditDeleteRow(goal: goal),
             ],
           ),
         ),
@@ -501,10 +529,11 @@ class _OverviewTab extends StatelessWidget {
                       ),
                     ),
                   ),
-                FilledButton.icon(
-                  onPressed: () => _completeDialog(context, goal),
+                AppButton(
+                  label: AppText.t('إكمال الهدف', 'Complete goal'),
                   icon: const Icon(Icons.task_alt),
-                  label: Text(AppText.t('إكمال الهدف', 'Complete goal')),
+                  expanded: true,
+                  onPressed: () => _completeDialog(context, goal),
                 ),
               ],
             ),
@@ -538,13 +567,14 @@ class _OverviewTab extends StatelessWidget {
       icon: Icons.flag_outlined,
       size: AppWindowSize.sm,
       actions: [
-        TextButton(
+        AppButton(
+          label: AppText.t('إلغاء', 'Cancel'),
+          style: AppButtonStyle.secondary,
           onPressed: () => Navigator.of(context).pop(false),
-          child: Text(AppText.t('إلغاء', 'Cancel')),
         ),
-        FilledButton(
+        AppButton(
+          label: AppText.t('تأكيد', 'Confirm'),
           onPressed: () => Navigator.of(context).pop(true),
-          child: Text(AppText.t('تأكيد', 'Confirm')),
         ),
       ],
       builder: (context, close) => StatefulBuilder(
@@ -746,13 +776,14 @@ class _AssignmentsTab extends StatelessWidget {
       icon: Icons.person_add_alt_outlined,
       size: AppWindowSize.sm,
       actions: [
-        TextButton(
+        AppButton(
+          label: AppText.t('إلغاء', 'Cancel'),
+          style: AppButtonStyle.secondary,
           onPressed: () => Navigator.of(context).pop(false),
-          child: Text(AppText.t('إلغاء', 'Cancel')),
         ),
-        FilledButton(
+        AppButton(
+          label: AppText.t('تأكيد', 'Confirm'),
           onPressed: () => Navigator.of(context).pop(true),
-          child: Text(AppText.t('تأكيد', 'Confirm')),
         ),
       ],
       builder: (context, close) => Column(
@@ -800,7 +831,10 @@ class _ActionsTab extends StatelessWidget {
         if (state.actions.isEmpty)
           AppEmptyState(
             icon: Icons.checklist,
-            title: AppText.t('لا توجد خطوات — أضف أول خطوة', 'No steps — add one'),
+            title: AppText.t(
+              'لا توجد خطوات — أضف أول خطوة',
+              'No steps — add one',
+            ),
           )
         else
           for (var i = 0; i < state.actions.length; i++) ...[
@@ -810,7 +844,6 @@ class _ActionsTab extends StatelessWidget {
       ],
     );
   }
-
 }
 
 /// Quick-add row: "[+ إضافة خطوة]" per plan §4.
@@ -837,30 +870,30 @@ class _AddStepRowState extends State<_AddStepRow> {
   Widget build(BuildContext context) {
     final cubit = context.read<QcGoalDetailCubit>();
     if (!_open) {
-      return OutlinedButton.icon(
-        onPressed: () => setState(() => _open = true),
+      return AppButton(
+        label: AppText.t('+ إضافة خطوة', '+ Add step'),
         icon: const Icon(Icons.add, size: 18),
-        label: Text(AppText.t('+ إضافة خطوة', '+ Add step')),
+        style: AppButtonStyle.secondary,
+        expanded: true,
+        onPressed: () => setState(() => _open = true),
       );
     }
     return Row(
       children: [
         Expanded(
-          child: TextField(
+          child: AppField(
+            label: AppText.t('نص الخطوة...', 'Step text...'),
             controller: _controller,
+            hint: AppText.t('نص الخطوة...', 'Step text...'),
             autofocus: true,
-            decoration: InputDecoration(
-              hintText: AppText.t('نص الخطوة...', 'Step text...'),
-              border: const OutlineInputBorder(),
-              isDense: true,
-            ),
-            onSubmitted: (_) => _submit(cubit),
+            onFieldSubmitted: (_) => _submit(cubit),
           ),
         ),
         const SizedBox(width: AppSpacing.sm),
-        FilledButton(
+        AppButton(
+          label: AppText.t('إضافة', 'Add'),
+          small: true,
           onPressed: widget.state.saving ? null : () => _submit(cubit),
-          child: Text(AppText.t('إضافة', 'Add')),
         ),
       ],
     );
@@ -943,8 +976,7 @@ class _ActionTile extends StatelessWidget {
             ),
           ),
           GoalPill.actionStatus(action.status),
-          if (!action.isDone &&
-              action.status != QcGoalActionStatus.cancelled)
+          if (!action.isDone && action.status != QcGoalActionStatus.cancelled)
             IconButton(
               icon: const Icon(Icons.check_circle_outline, size: 20),
               tooltip: AppText.t('إنجاز', 'Complete'),
@@ -967,13 +999,14 @@ class _ActionTile extends StatelessWidget {
       icon: Icons.check_circle_outline,
       size: AppWindowSize.sm,
       actions: [
-        TextButton(
+        AppButton(
+          label: AppText.t('إلغاء', 'Cancel'),
+          style: AppButtonStyle.secondary,
           onPressed: () => Navigator.of(context).pop(false),
-          child: Text(AppText.t('إلغاء', 'Cancel')),
         ),
-        FilledButton(
+        AppButton(
+          label: AppText.t('تأكيد', 'Confirm'),
           onPressed: () => Navigator.of(context).pop(true),
-          child: Text(AppText.t('تأكيد', 'Confirm')),
         ),
       ],
       builder: (context, close) => Column(
@@ -1037,11 +1070,13 @@ class _KpisTab extends StatelessWidget {
       icon: Icons.track_changes_outlined,
       size: AppWindowSize.md,
       actions: [
-        TextButton(
+        AppButton(
+          label: AppText.t('إلغاء', 'Cancel'),
+          style: AppButtonStyle.secondary,
           onPressed: () => Navigator.of(context).pop(false),
-          child: Text(AppText.t('إلغاء', 'Cancel')),
         ),
-        FilledButton(
+        AppButton(
+          label: AppText.t('حفظ', 'Save'),
           onPressed: () {
             final isExistingName = state.kpis.any(
               (kpi) => kpi.name == name.text.trim(),
@@ -1070,7 +1105,6 @@ class _KpisTab extends StatelessWidget {
               );
             }
           },
-          child: Text(AppText.t('حفظ', 'Save')),
         ),
       ],
       builder: (context, close) => StatefulBuilder(
@@ -1126,13 +1160,11 @@ class _KpisTab extends StatelessWidget {
                   });
                 },
               ),
-              TextFormField(
+              AppField(
+                label: AppText.t('المستهدف', 'Target'),
                 controller: target,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
-                ),
-                decoration: InputDecoration(
-                  labelText: AppText.t('المستهدف', 'Target'),
                 ),
                 validator: (value) {
                   final parsed = double.tryParse(value?.trim() ?? '');
@@ -1144,16 +1176,14 @@ class _KpisTab extends StatelessWidget {
                       : null;
                 },
               ),
-              TextFormField(
+              AppField(
+                label: AppText.t(
+                  'القيمة الحالية (اختياري)',
+                  'Actual (optional)',
+                ),
                 controller: actual,
                 keyboardType: const TextInputType.numberWithOptions(
                   decimal: true,
-                ),
-                decoration: InputDecoration(
-                  labelText: AppText.t(
-                    'القيمة الحالية (اختياري)',
-                    'Actual (optional)',
-                  ),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) return null;
@@ -1549,6 +1579,86 @@ class _Field extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Edit + delete for one goal, `qcWrite`-gated and DS-confirmed.
+///
+/// Edit reuses the full [QcGoalFormScreen] with a short-lived list cubit;
+/// delete calls the repository directly (the detail cubit owns completion,
+/// not lifecycle) and pops the detail on success.
+class _GoalEditDeleteRow extends StatelessWidget {
+  const _GoalEditDeleteRow({required this.goal});
+
+  final QcGoal goal;
+
+  static bool get canWrite {
+    try {
+      return getIt<AuthGate>().canWrite(Permission.qcWrite);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> _edit(BuildContext context) async {
+    final repo = getIt<QcGoalRepository>();
+    final listCubit = QcGoalsCubit(repo: repo)..load();
+    await showAppWindow<void>(
+      context,
+      title: AppText.t('تعديل الهدف', 'Edit goal'),
+      icon: Icons.flag_outlined,
+      size: AppWindowSize.lg,
+      child: BlocProvider.value(
+        value: listCubit,
+        child: QcGoalFormScreen(goal: goal),
+      ),
+    );
+    await listCubit.close();
+    if (context.mounted) context.read<QcGoalDetailCubit>().load();
+  }
+
+  Future<void> _delete(BuildContext context) async {
+    final confirmed = await AppDeleteConfirmDialog.show(
+      context,
+      title: AppText.t('حذف الهدف', 'Delete goal'),
+      name: goal.title.isNotEmpty ? goal.title : goal.code,
+    );
+    if (!confirmed || !context.mounted) return;
+    try {
+      await getIt<QcGoalRepository>().deleteGoal(goal.goalId ?? 0);
+    } catch (e) {
+      if (context.mounted) AppFeedback.error(context, '$e');
+      return;
+    }
+    if (context.mounted) {
+      AppFeedback.success(context, AppText.t('تم حذف الهدف', 'Goal deleted'));
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!canWrite) return const SizedBox.shrink();
+    return Wrap(
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
+      children: [
+        AppButton(
+          small: true,
+          style: AppButtonStyle.secondary,
+          icon: const Icon(Icons.edit_outlined, size: 16),
+          label: AppText.t('تعديل', 'Edit'),
+          onPressed: () => _edit(context),
+        ),
+        AppButton(
+          small: true,
+          style: AppButtonStyle.danger,
+          icon: const Icon(Icons.delete_outline, size: 16),
+          label: AppText.t('حذف', 'Delete'),
+          onPressed: () => _delete(context),
+        ),
+      ],
     );
   }
 }

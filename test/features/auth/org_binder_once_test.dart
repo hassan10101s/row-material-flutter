@@ -144,12 +144,14 @@ void main() {
     expect(bound, ['org_abc', 'org_abc']);
   });
 
-  test('a no-profile session binds nothing at all', () async {
+  test('a no-profile session binds no company at all', () async {
     when(() => remote.loadProfile(any())).thenAnswer((_) async => null);
     final auth = build();
 
     expect(await auth.resolveProfile(), AuthState.noProfile);
     expect(bound, isEmpty);
-    verifyNever(() => db.bindOrg(any()));
+    // Unbinding (null) is allowed: it only guarantees no company database
+    // stays open. Binding a company id is what must never happen here.
+    verifyNever(() => db.bindOrg('org_abc'));
   });
 }

@@ -3,7 +3,20 @@
 /// so the semantics match the Web reference exactly.
 library;
 
-const int thPageSize = 50;
+import '../../../core/constants/app_strings.dart';
+
+const int thPageSize = 200;
+
+/// Stable selection key for a history row. The database id when present,
+/// otherwise the entry-code/time/analysis triple (two unsaved rows never
+/// share all three). Used by the long-press multi-select: the UI stores keys,
+/// never row indexes, so paging and filtering cannot shift the selection.
+String thRowKey(Map<String, dynamic> row) {
+  final id = '${row['id'] ?? ''}'.trim();
+  if (id.isNotEmpty && id != 'null') return 'id:$id';
+  return 'ec:${row['entry_code'] ?? ''}_${row['tested_at'] ?? ''}'
+      '_${row['analysis_name'] ?? ''}';
+}
 
 String thNormalizeText(Object? value) {
   return '${value ?? ''}'
@@ -17,13 +30,15 @@ String thNormalizeText(Object? value) {
 }
 
 String thRangeLabel(String state) {
-  if (state == 'out') return 'خارج النطاق';
-  if (state == 'in') return 'ضمن النطاق';
-  return 'بدون نطاق';
+  if (state == 'out') return AppText.t('خارج النطاق', 'Out of range');
+  if (state == 'in') return AppText.t('ضمن النطاق', 'Within range');
+  return AppText.t('بدون نطاق', 'No range');
 }
 
 String thSourceLabel(String sourceType) {
-  return sourceType == 'product' ? 'منتج' : 'خام';
+  return sourceType == 'product'
+      ? AppText.t('منتج', 'Product')
+      : AppText.t('خام', 'Raw');
 }
 
 int thCoerceRecordLimit(Object? raw) {
@@ -304,18 +319,29 @@ List<({String key, String label})> thBuildChips({
   final chips = <({String key, String label})>[];
   switch (filterMode) {
     case 'last24h':
-      chips.add((key: 'mode', label: 'آخر 24 ساعة'));
+      chips.add((key: 'mode', label: AppText.t('آخر 24 ساعة', 'Last 24 hours')));
     case 'specific-date':
-      chips.add((key: 'mode', label: 'بتاريخ: ${specificDate.isEmpty ? '—' : specificDate}'));
+      chips.add((
+        key: 'mode',
+        label: AppText.t(
+          'بتاريخ: ${specificDate.isEmpty ? '—' : specificDate}',
+          'On date: ${specificDate.isEmpty ? '—' : specificDate}',
+        ),
+      ));
     default:
-      chips.add((key: 'mode', label: 'كل السجلات'));
+      chips.add((key: 'mode', label: AppText.t('كل السجلات', 'All records')));
   }
   if (analysisId.isNotEmpty) {
     final a = analyses.cast<Map<String, dynamic>?>().firstWhere(
           (x) => '${x?['id'] ?? ''}' == analysisId,
           orElse: () => null,
         );
-    chips.add((key: 'analysis', label: a == null ? 'تحليل #$analysisId' : '${a['name']}'));
+    chips.add((
+      key: 'analysis',
+      label: a == null
+          ? AppText.t('تحليل #$analysisId', 'Analysis #$analysisId')
+          : '${a['name']}',
+    ));
   }
   if (sourceType.isNotEmpty) {
     chips.add((key: 'source', label: thSourceLabel(sourceType)));
@@ -325,7 +351,10 @@ List<({String key, String label})> thBuildChips({
           (o) => o!.value == chemicalId,
           orElse: () => null,
         );
-    chips.add((key: 'chemical', label: opt?.label ?? 'مادة #$chemicalId'));
+    chips.add((
+      key: 'chemical',
+      label: opt?.label ?? AppText.t('مادة #$chemicalId', 'Material #$chemicalId'),
+    ));
   }
   if (rangeState.isNotEmpty) {
     chips.add((key: 'range', label: thRangeLabel(rangeState)));

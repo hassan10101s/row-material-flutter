@@ -2,15 +2,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
+import '../../../../../di/service_locator.dart';
 import '../../domain/qc_enums.dart';
 import '../../domain/qc_sop.dart';
 import '../cubit/qc_sop_detail_cubit.dart';
@@ -23,6 +30,34 @@ import '../widgets/sop_pill.dart';
 /// The lifecycle buttons are generated from [SopStatus.transitions] rather than
 /// hard-coded, so the screen offers exactly the moves the domain permits and a
 /// fourth state cannot leave a stale button behind.
+bool get _canDelete {
+  try {
+    return getIt<AuthGate>().canWrite(Permission.qcWrite);
+  } catch (_) {
+    return true;
+  }
+}
+
+Future<void> _confirmDelete(BuildContext context, QcSop sop) async {
+  final confirmed = await AppDeleteConfirmDialog.show(
+    context,
+    title: AppText.t('حذف الإجراء', 'Delete procedure'),
+    name: sop.title.isNotEmpty ? sop.title : sop.code,
+  );
+  if (!confirmed || !context.mounted) return;
+  final sops = context.read<QcSopsCubit>();
+  await sops.deleteSop(sop.sopId ?? 0);
+  if (!context.mounted) return;
+  final error = sops.state.error;
+  if (error != null && error.isNotEmpty) {
+    AppFeedback.error(context, error);
+    sops.clearError();
+  } else {
+    AppFeedback.success(context, AppText.t('تم حذف الإجراء', 'SOP deleted'));
+    Navigator.of(context).pop();
+  }
+}
+
 class QcSopDetailScreen extends StatelessWidget {
   const QcSopDetailScreen({super.key});
 
@@ -80,10 +115,19 @@ class QcSopDetailScreen extends StatelessWidget {
                   ),
                   icon: const Icon(Icons.edit_outlined),
                 ),
+              if (sop != null && _canDelete)
+                IconButton(
+                  tooltip: AppText.t('حذف', 'Delete'),
+                  onPressed: () => _confirmDelete(context, sop),
+                  icon: Icon(
+                    Icons.delete_outline,
+                    color: AppColors.danger,
+                  ),
+                ),
             ],
           ),
           body: state.loading && sop == null
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList(rows: 4, height: 320)
               : sop == null
               ? AppEmptyState(
                   icon: Icons.search_off,
@@ -250,9 +294,12 @@ class _LifecycleRow extends StatelessWidget {
         // a *revision* is a separate action and lives with the history, because
         // it is a different operation with a different reason attached.
         for (final move in moves)
-          OutlinedButton(
+          AppButton(
+            small: true,
+            style: AppButtonStyle.secondary,
+            label: AppText.t(_labels[move]!, _english[move]!),
+            loading: state.saving,
             onPressed: state.saving ? null : () => cubit.advance(move),
-            child: Text(AppText.t(_labels[move]!, _english[move]!)),
           ),
       ],
     );
@@ -310,18 +357,36 @@ class _AcknowledgeCard extends StatelessWidget {
   }
 }
 
-class _AckButton extends StatelessWidget {
+class _AckButton extends StatefulWidget {
   const _AckButton({required this.state, required this.sop});
 
   final QcSopDetailState state;
   final QcSop sop;
 
   @override
+  State<_AckButton> createState() => _AckButtonState();
+}
+
+class _AckButtonState extends State<_AckButton> {
+  late final TextEditingController _who = TextEditingController();
+  late final TextEditingController _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _who.dispose();
+    _name.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final cubit = context.read<QcSopDetailCubit>();
-    final who = TextEditingController();
-    final name = TextEditingController();
-    return FilledButton.tonal(
+    final state = widget.state;
+    return AppButton(
+      small: true,
+      style: AppButtonStyle.secondary,
+      label: AppText.t('تسجيل القراءة', 'Acknowledge read'),
+      loading: state.saving,
       onPressed: state.saving
           ? null
           : () async {
@@ -336,40 +401,39 @@ class _AckButton extends StatelessWidget {
                 icon: Icons.mark_email_read_outlined,
                 size: AppWindowSize.sm,
                 actions: [
-                  TextButton(
+                  AppButton(
+                    small: true,
+                    style: AppButtonStyle.secondary,
+                    label: AppText.t('إلغاء', 'Cancel'),
                     onPressed: () => Navigator.of(context).pop(false),
-                    child: Text(AppText.t('إلغاء', 'Cancel')),
                   ),
-                  FilledButton(
+                  AppButton(
+                    small: true,
+                    label: AppText.t('تأكيد', 'Confirm'),
                     onPressed: () => Navigator.of(context).pop(true),
-                    child: Text(AppText.t('تأكيد', 'Confirm')),
                   ),
                 ],
                 builder: (context, close) => Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextField(
-                      controller: name,
-                      decoration: InputDecoration(
-                        labelText: AppText.t('الاسم', 'Name'),
-                      ),
+                    AppField(
+                      label: AppText.t('الاسم', 'Name'),
+                      controller: _name,
                     ),
-                    TextField(
-                      controller: who,
-                      decoration: InputDecoration(
-                        labelText: AppText.t('المعرّف', 'User id'),
-                      ),
+                    const SizedBox(height: AppSpacing.sm),
+                    AppField(
+                      label: AppText.t('المعرّف', 'User id'),
+                      controller: _who,
                     ),
                   ],
                 ),
               );
               if (submitted != true) return;
               await cubit.acknowledge(
-                userId: who.text.trim(),
-                userName: name.text.trim(),
+                userId: _who.text.trim(),
+                userName: _name.text.trim(),
               );
             },
-      child: Text(AppText.t('تسجيل القراءة', 'Acknowledge read')),
     );
   }
 }
@@ -436,7 +500,12 @@ class _RevisionsCard extends StatelessWidget {
               ),
           if (sop.isPublished || sop.status == SopStatus.approved) ...[
             const Divider(),
-            OutlinedButton.icon(
+            AppButton(
+              small: true,
+              style: AppButtonStyle.secondary,
+              icon: const Icon(Icons.note_add_outlined, size: 18),
+              label: AppText.t('إصدار مراجعة', 'Cut a revision'),
+              loading: state.saving,
               onPressed: state.saving
                   ? null
                   : () async {
@@ -447,32 +516,28 @@ class _RevisionsCard extends StatelessWidget {
                         icon: Icons.note_add_outlined,
                         size: AppWindowSize.sm,
                         actions: [
-                          TextButton(
+                          AppButton(
+                            small: true,
+                            style: AppButtonStyle.secondary,
+                            label: AppText.t('إلغاء', 'Cancel'),
                             onPressed: () =>
                                 Navigator.of(context).pop(false),
-                            child: Text(AppText.t('إلغاء', 'Cancel')),
                           ),
-                          FilledButton(
+                          AppButton(
+                            small: true,
+                            label: AppText.t('حفظ', 'Save'),
                             onPressed: () =>
                                 Navigator.of(context).pop(true),
-                            child: Text(AppText.t('حفظ', 'Save')),
                           ),
                         ],
-                        builder: (context, close) => TextField(
+                        builder: (context, close) => AppField(
+                          label: AppText.t('سبب التغيير', 'Change summary'),
                           controller: reason,
-                          decoration: InputDecoration(
-                            labelText: AppText.t(
-                              'سبب التغيير',
-                              'Change summary',
-                            ),
-                          ),
                         ),
                       );
                       if (ok != true) return;
                       await cubit.publishRevision(changeSummary: reason.text);
                     },
-              icon: const Icon(Icons.note_add_outlined, size: 18),
-              label: Text(AppText.t('إصدار مراجعة', 'Cut a revision')),
             ),
           ],
         ],

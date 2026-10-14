@@ -72,11 +72,17 @@ class SettingsRepo implements SettingsRepository {
       existing.add('${r['key']}');
     }
     final batch = db.batch();
+    var pending = 0;
     for (final e in defaults.entries) {
       if (!existing.contains(e.key)) {
         batch.insert('settings', {'key': e.key, 'value': e.value});
+        pending++;
       }
     }
+    // An empty batch still opens a transaction (BEGIN EXCLUSIVE) and waits on
+    // the file lock: on a device where a workmanager isolate holds the DB,
+    // that wait is the full busy_timeout (~5s) for zero work. Skip it.
+    if (pending == 0) return;
     await batch.commit(noResult: true);
   }
 

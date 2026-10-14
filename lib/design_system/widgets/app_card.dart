@@ -9,6 +9,7 @@ class AppCard extends StatefulWidget {
   final EdgeInsetsGeometry? margin;
   final Color? color;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final bool enableHover;
 
   const AppCard({
@@ -18,6 +19,7 @@ class AppCard extends StatefulWidget {
     this.margin,
     this.color,
     this.onTap,
+    this.onLongPress,
     this.enableHover = true,
   });
 
@@ -36,7 +38,7 @@ class _AppCardState extends State<AppCard> {
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(AppRadii.md);
-    final isInteractive = widget.onTap != null;
+    final isInteractive = widget.onTap != null || widget.onLongPress != null;
     final activeHover = widget.enableHover && (isInteractive || _isHovered);
 
     final content = Material(
@@ -46,6 +48,7 @@ class _AppCardState extends State<AppCard> {
       child: isInteractive
           ? InkWell(
               onTap: widget.onTap,
+              onLongPress: widget.onLongPress,
               borderRadius: radius,
               mouseCursor: SystemMouseCursors.click,
               child: widget.child,

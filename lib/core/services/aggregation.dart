@@ -1,3 +1,4 @@
+import '../constants/app_strings.dart';
 import '../domain/rules.dart' as rules;
 import '../utils/app_format.dart';
 
@@ -27,9 +28,14 @@ final Map<String, String> decisionLabels = {
 ///
 /// An unrecognised status falls back to the raw code, so it stays visible
 /// rather than being silently blanked.
+///
+/// The wording follows the active UI language (`decisionLabels` below stays
+/// the Arabic map the PDFs pin; this entry point picks ar/en per locale).
 String decisionLabel(String? status) {
   if (status == null || status.isEmpty) return '-';
-  return decisionLabels[status] ?? status;
+  final entry = rules.decisionLabels[status];
+  if (entry == null) return status;
+  return AppText.t(entry['ar']!, entry['en']!);
 }
 
 double _safeQty(Object? value, double fallback) {
@@ -40,8 +46,10 @@ double _safeQty(Object? value, double fallback) {
 Map<String, List<Map<String, dynamic>>> groupByMaterial(
     List<Map<String, dynamic>> inspections) {
   final materials = <String, List<Map<String, dynamic>>>{};
+  final unknown = AppText.t('غير معروف', 'Unknown');
   for (final insp in inspections) {
-    final name = '${insp['material_name'] ?? 'Unknown'}';
+    final raw = '${insp['material_name'] ?? ''}'.trim();
+    final name = raw.isEmpty ? unknown : raw;
     materials.putIfAbsent(name, () => []).add(insp);
   }
   return materials;

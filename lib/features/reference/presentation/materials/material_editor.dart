@@ -11,6 +11,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_required_toggle.dart';
 import '../../../lab/domain/lab_result_repository.dart';
 import '../../domain/parameter_type.dart';
@@ -570,19 +571,13 @@ class MaterialEditorState extends State<MaterialEditor> {
     const SizedBox(height: AppSpacing.md),
     SizedBox(
       width: _compact ? null : 360.w,
-      child: _labeled(
-        AppText.t('كود الخامة', 'Material Code'),
-        TextField(
-          controller: _code,
-          onChanged: (_) => setState(() => _codeError = null),
-          enabled: !_saving,
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: 'e.g. APL',
-            errorText: _codeError,
-            border: const OutlineInputBorder(),
-          ),
-        ),
+      child: AppField(
+        label: AppText.t('كود الخامة', 'Material Code'),
+        controller: _code,
+        onChanged: (_) => setState(() => _codeError = null),
+        hint: 'e.g. APL',
+        error: _codeError,
+        enabled: !_saving,
       ),
     ),
     const SizedBox(height: AppSpacing.lg),
@@ -646,32 +641,20 @@ class MaterialEditorState extends State<MaterialEditor> {
   /// English and Arabic name side by side on desktop, stacked on a phone —
   /// two 200dp fields across a 400dp grid leaves neither usable.
   Widget _nameFields() {
-    final en = _labeled(
-      AppText.t('الاسم بالإنجليزية', 'English Name'),
-      TextField(
-        controller: _nameEn,
-        onChanged: (_) => setState(() => _nameError = null),
-        enabled: !_saving,
-        decoration: InputDecoration(
-          isDense: true,
-          hintText: 'e.g. Apple Pomace',
-          errorText: _nameError,
-          border: const OutlineInputBorder(),
-        ),
-      ),
+    final en = AppField(
+      label: AppText.t('الاسم بالإنجليزية', 'English Name'),
+      controller: _nameEn,
+      onChanged: (_) => setState(() => _nameError = null),
+      hint: 'e.g. Apple Pomace',
+      error: _nameError,
+      enabled: !_saving,
     );
-    final ar = _labeled(
-      AppText.t('الاسم بالعربية', 'Arabic Name'),
-      TextField(
-        controller: _nameAr,
-        onChanged: (_) => setState(() => _nameError = null),
-        enabled: !_saving,
-        decoration: const InputDecoration(
-          isDense: true,
-          hintText: 'مثال: تفل تفاح',
-          border: OutlineInputBorder(),
-        ),
-      ),
+    final ar = AppField(
+      label: AppText.t('الاسم بالعربية', 'Arabic Name'),
+      controller: _nameAr,
+      onChanged: (_) => setState(() => _nameError = null),
+      hint: 'مثال: تفل تفاح',
+      enabled: !_saving,
     );
     if (_compact) {
       return Column(
@@ -692,18 +675,6 @@ class MaterialEditorState extends State<MaterialEditor> {
       ],
     );
   }
-
-  Widget _labeled(String label, Widget child) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text(
-        label,
-        style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
-      ),
-      const SizedBox(height: AppSpacing.xs),
-      child,
-    ],
-  );
 
   Widget _sectionTitle(String ar, String en) => Row(
     children: [
@@ -752,21 +723,18 @@ class MaterialEditorState extends State<MaterialEditor> {
     final requirement = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextField(
+        AppField(
+          label: AppText.t('الاشتراط', 'Requirement'),
           controller: row.reqCtrl,
-          enabled: !_saving,
           onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            isDense: true,
-            hintText: AppText.t('مثال: عادي', 'e.g. Normal'),
-            border: const OutlineInputBorder(),
-          ),
+          hint: AppText.t('مثال: عادي', 'e.g. Normal'),
+          enabled: !_saving,
         ),
         if (_suggestionChips(row.reqCtrl.text).isNotEmpty) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: AppSpacing.xs),
           Wrap(
-            spacing: 4,
-            runSpacing: 4,
+            spacing: AppSpacing.xs,
+            runSpacing: AppSpacing.xs,
             children: [
               for (final chip in _suggestionChips(row.reqCtrl.text))
                 _requirementChip(chip),
@@ -826,10 +794,13 @@ class MaterialEditorState extends State<MaterialEditor> {
     final reject = _isRejectWord(word);
     final color = reject ? AppColors.danger : AppColors.success;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(AppRadii.sm),
       ),
       child: Text(
         word,
@@ -865,34 +836,22 @@ class MaterialEditorState extends State<MaterialEditor> {
               _onParameterChange(row);
             },
     );
-    final min = TextField(
+    final min = AppField(
+      label: AppText.t('الحد الأدنى', 'Min'),
       controller: row.minCtrl,
       enabled: enabled,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        isDense: true,
-        labelText: AppText.t('الحد الأدنى', 'Min'),
-        border: const OutlineInputBorder(),
-      ),
     );
-    final max = TextField(
+    final max = AppField(
+      label: AppText.t('الحد الأقصى', 'Max'),
       controller: row.maxCtrl,
       enabled: enabled,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      decoration: InputDecoration(
-        isDense: true,
-        labelText: AppText.t('الحد الأقصى', 'Max'),
-        border: const OutlineInputBorder(),
-      ),
     );
-    final unit = TextField(
+    final unit = AppField(
+      label: AppText.t('الوحدة الموروثة', 'Inherited unit'),
       controller: row.unitCtrl,
       enabled: false,
-      decoration: InputDecoration(
-        isDense: true,
-        labelText: AppText.t('الوحدة الموروثة', 'Inherited unit'),
-        border: const OutlineInputBorder(),
-      ),
     );
     final remove = IconButton(
       tooltip: AppStrings.delete,

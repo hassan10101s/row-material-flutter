@@ -7,8 +7,11 @@ import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_page_size.dart';
 import '../../../core/test_history_logic.dart';
+import '../../../core/lab_result_format.dart';
 import '../../cubit/test_history_state.dart';
+import '../test_history_print.dart';
 import '../test_history_scope.dart';
 
 /// Small widgets composing the test-history tab on both experiences.
@@ -26,12 +29,17 @@ class TestHistoryToolbar extends StatelessWidget {
     required this.hasQuery,
     required this.onOpenFilters,
     required this.onClearAll,
+    this.trailing,
   });
 
   final List<({String key, String label})> chips;
   final bool hasQuery;
   final VoidCallback onOpenFilters;
   final VoidCallback onClearAll;
+
+  /// Extra action sharing the search row (desktop "New test" button), so
+  /// search and actions sit on one level instead of stacking rows.
+  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
@@ -45,6 +53,7 @@ class TestHistoryToolbar extends StatelessWidget {
             ? null
             : IconButton(
                 tooltip: AppText.t('مسح البحث', 'Clear search'),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 icon: Icon(Icons.close, size: 18.r),
                 onPressed: scope.clearQuery,
               ),
@@ -65,6 +74,7 @@ class TestHistoryToolbar extends StatelessWidget {
         small: true,
         onPressed: chips.isEmpty && !hasQuery ? null : onClearAll,
       ),
+      ?trailing,
     ];
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -82,7 +92,12 @@ class TestHistoryToolbar extends StatelessWidget {
           children: [
             search,
             const SizedBox(height: AppSpacing.sm),
-            Wrap(spacing: AppSpacing.sm, children: actions),
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: actions,
+            ),
           ],
         );
       },
@@ -111,10 +126,7 @@ class TestHistoryChips extends StatelessWidget {
   Widget build(BuildContext context) {
     final scope = TestHistoryScope.of(context);
     final count = Text(
-      AppText.t(
-        'يتم عرض $showing من أصل $total',
-        'Showing $showing of $total',
-      ),
+      AppText.t('يتم عرض $showing من أصل $total', 'Showing $showing of $total'),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
@@ -138,7 +150,12 @@ class TestHistoryChips extends StatelessWidget {
         ),
     ];
     if (chips.isEmpty) {
-      return Row(children: [Expanded(child: count), ...badges]);
+      return Row(
+        children: [
+          Expanded(child: count),
+          ...badges,
+        ],
+      );
     }
     // Narrow phones: the trailing count + badges collapse below the chips
     // instead of squeezing them into an overflowing Row.
@@ -151,10 +168,7 @@ class TestHistoryChips extends StatelessWidget {
           children: [
             Text(
               AppText.t('الفلاتر:', 'Filters:'),
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12.spMax,
-              ),
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
             ),
             for (final chip in chips)
               InputChip(
@@ -185,11 +199,7 @@ class TestHistoryChips extends StatelessWidget {
         if (constraints.maxWidth < 480) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              chipsWrap,
-              const SizedBox(height: 4),
-              trailing,
-            ],
+            children: [chipsWrap, const SizedBox(height: 4), trailing],
           );
         }
         return Row(
@@ -207,6 +217,8 @@ class TestHistoryChips extends StatelessWidget {
 /// Desktop ten-column sortable table, verbatim from the pre-split screen.
 ///
 /// Tapping a row opens its detail/edit screen ([onOpen] receives the row).
+/// Long-pressing a row enters multi-select mode ([onLongPressRow]); while
+/// [selecting], checkboxes appear and tapping toggles instead of opening.
 class TestHistoryTable extends StatelessWidget {
   const TestHistoryTable({
     super.key,
@@ -214,12 +226,28 @@ class TestHistoryTable extends StatelessWidget {
     required this.start,
     required this.isEmpty,
     this.onOpen,
+    this.selecting = false,
+    this.selectedIds = const <String>{},
+    this.onToggleSelect,
+    this.onLongPressRow,
+    this.onToggleSelectAll,
+    this.allOnPageSelected = false,
   });
 
   final List<Map<String, dynamic>> slice;
   final int start;
   final bool isEmpty;
   final ValueChanged<Map<String, dynamic>>? onOpen;
+
+  /// True once the user long-pressed: selection checkboxes are shown.
+  final bool selecting;
+
+  /// Keys ([thRowKey]) of the selected rows.
+  final Set<String> selectedIds;
+  final ValueChanged<Map<String, dynamic>>? onToggleSelect;
+  final ValueChanged<Map<String, dynamic>>? onLongPressRow;
+  final VoidCallback? onToggleSelectAll;
+  final bool allOnPageSelected;
 
   @override
   Widget build(BuildContext context) {
@@ -240,7 +268,22 @@ class TestHistoryTable extends StatelessWidget {
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           child: DataTable(
+            // No built-in checkbox column: its boxes would open the editor
+            // on tap (onSelectChanged doubles as the row opener). Selection
+            // has exactly one UI — the explicit first column below, shown
+            // only in select mode after a long-press.
+            showCheckboxColumn: false,
             columns: [
+              if (selecting)
+                DataColumn(
+                  label: Checkbox(
+                    value: allOnPageSelected,
+                    tristate: true,
+                    onChanged: onToggleSelectAll == null
+                        ? null
+                        : (_) => onToggleSelectAll!(),
+                  ),
+                ),
               const DataColumn(label: Text('#')),
               sortable(AppText.t('التوقيت', 'Time'), 'tested_at'),
               sortable(AppText.t('التحليل', 'Analysis'), 'analysis_name'),
@@ -256,6 +299,7 @@ class TestHistoryTable extends StatelessWidget {
               if (slice.isEmpty)
                 DataRow(
                   cells: [
+                    if (selecting) const DataCell(SizedBox()),
                     for (var i = 0; i < 10; i++)
                       DataCell(
                         i == 0
@@ -269,9 +313,7 @@ class TestHistoryTable extends StatelessWidget {
                                         'لا توجد نتائج مطابقة للفلاتر الحالية.',
                                         'No results match the current filters.',
                                       ),
-                                style: TextStyle(
-                                  color: AppColors.textMuted,
-                                ),
+                                style: TextStyle(color: AppColors.textMuted),
                               )
                             : const SizedBox(),
                       ),
@@ -282,9 +324,15 @@ class TestHistoryTable extends StatelessWidget {
                   historyRow(
                     slice[i],
                     start + i + 1,
-                    onTap: onOpen == null
+                    onTap: onOpen == null ? null : () => onOpen!(slice[i]),
+                    selected: selectedIds.contains(thRowKey(slice[i])),
+                    showSelect: selecting,
+                    onToggleSelect: onToggleSelect == null
                         ? null
-                        : () => onOpen!(slice[i]),
+                        : () => onToggleSelect!(slice[i]),
+                    onLongPress: onLongPressRow == null
+                        ? null
+                        : () => onLongPressRow!(slice[i]),
                   ),
             ],
           ),
@@ -295,8 +343,18 @@ class TestHistoryTable extends StatelessWidget {
 }
 
 /// One history row (desktop tint + cells), shared by the table.
-/// [onTap] opens the row's detail/edit screen.
-DataRow historyRow(Map<String, dynamic> r, int index, {VoidCallback? onTap}) {
+/// [onTap] opens the row's detail/edit screen. In select mode the checkbox
+/// cell toggles ([onToggleSelect]) and a long-press ([onLongPress]) is what
+/// enters the mode in the first place.
+DataRow historyRow(
+  Map<String, dynamic> r,
+  int index, {
+  VoidCallback? onTap,
+  bool selected = false,
+  bool showSelect = false,
+  VoidCallback? onToggleSelect,
+  VoidCallback? onLongPress,
+}) {
   final out = '${r['range_state'] ?? ''}' == 'out';
   final inn = '${r['range_state'] ?? ''}' == 'in';
   final stateColor = out
@@ -309,13 +367,24 @@ DataRow historyRow(Map<String, dynamic> r, int index, {VoidCallback? onTap}) {
       : '${r['min'] ?? ''} – ${r['max'] ?? ''} '
             '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
   return DataRow(
+    selected: selected,
     color: out
         ? WidgetStatePropertyAll(AppColors.danger.withValues(alpha: 0.06))
         : inn
         ? WidgetStatePropertyAll(AppColors.success.withValues(alpha: 0.06))
         : null,
-    onSelectChanged: onTap == null ? null : (_) => onTap(),
+    onSelectChanged: showSelect
+        ? (onToggleSelect == null ? null : (_) => onToggleSelect())
+        : (onTap == null ? null : (_) => onTap()),
+    onLongPress: onLongPress,
     cells: [
+      if (showSelect)
+        DataCell(
+          Checkbox(
+            value: selected,
+            onChanged: onToggleSelect == null ? null : (_) => onToggleSelect(),
+          ),
+        ),
       DataCell(Text('$index')),
       DataCell(
         Text(
@@ -356,7 +425,7 @@ DataRow historyRow(Map<String, dynamic> r, int index, {VoidCallback? onTap}) {
       ),
       DataCell(
         Text(
-          '${r['result_text'] ?? '-'}',
+          formatLabResult(r['result_text']),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -397,18 +466,29 @@ DataRow historyRow(Map<String, dynamic> r, int index, {VoidCallback? onTap}) {
 }
 
 /// Mobile card list: one card per result (a ten-column table at 400dp
-/// would be unusable). Tapping a card opens its detail/edit screen.
+/// would be unusable). Tapping a card opens its detail/edit screen, unless
+/// select mode is on (long-press enters it) — then tapping toggles.
 class TestHistoryCards extends StatelessWidget {
   const TestHistoryCards({
     super.key,
     required this.slice,
     required this.start,
     this.onOpen,
+    this.selecting = false,
+    this.selectedIds = const <String>{},
+    this.onToggleSelect,
+    this.onLongPressRow,
   });
 
   final List<Map<String, dynamic>> slice;
   final int start;
   final ValueChanged<Map<String, dynamic>>? onOpen;
+
+  /// True once the user long-pressed: checkboxes are shown.
+  final bool selecting;
+  final Set<String> selectedIds;
+  final ValueChanged<Map<String, dynamic>>? onToggleSelect;
+  final ValueChanged<Map<String, dynamic>>? onLongPressRow;
 
   @override
   Widget build(BuildContext context) {
@@ -422,8 +502,15 @@ class TestHistoryCards extends StatelessWidget {
       itemBuilder: (context, i) => TestHistoryCard(
         row: slice[i],
         index: start + i + 1,
-        onTap:
-            onOpen == null ? null : () => onOpen!(slice[i]),
+        onTap: onOpen == null ? null : () => onOpen!(slice[i]),
+        selected: selectedIds.contains(thRowKey(slice[i])),
+        showSelect: selecting,
+        onToggleSelect: onToggleSelect == null
+            ? null
+            : () => onToggleSelect!(slice[i]),
+        onLongPress: onLongPressRow == null
+            ? null
+            : () => onLongPressRow!(slice[i]),
       ),
     );
   }
@@ -435,11 +522,19 @@ class TestHistoryCard extends StatelessWidget {
     required this.row,
     required this.index,
     this.onTap,
+    this.selected = false,
+    this.showSelect = false,
+    this.onToggleSelect,
+    this.onLongPress,
   });
 
   final Map<String, dynamic> row;
   final int index;
   final VoidCallback? onTap;
+  final bool selected;
+  final bool showSelect;
+  final VoidCallback? onToggleSelect;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
@@ -454,14 +549,28 @@ class TestHistoryCard extends StatelessWidget {
     return AppCard(
       // AppCard (border + radius + shadow) replaces the raw Card so every
       // row has the same surface as the rest of the app; the tap ripple
-      // comes free with onTap.
-      onTap: onTap,
+      // comes free with onTap. In select mode a tap toggles the checkbox
+      // instead of opening the editor, so a stray tap can never land the
+      // user in the edit screen while selecting.
+      onTap: showSelect ? onToggleSelect : onTap,
+      onLongPress: onLongPress,
+      color: selected ? AppColors.primary.withValues(alpha: 0.06) : null,
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
+              if (showSelect) ...[
+                Checkbox(
+                  value: selected,
+                  visualDensity: VisualDensity.compact,
+                  onChanged: onToggleSelect == null
+                      ? null
+                      : (_) => onToggleSelect!(),
+                ),
+                const SizedBox(width: AppSpacing.xs),
+              ],
               Container(
                 width: 30.r,
                 height: 30.r,
@@ -494,10 +603,7 @@ class TestHistoryCard extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.sm),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: stateColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -517,15 +623,9 @@ class TestHistoryCard extends StatelessWidget {
           // One fact per line with its own icon: the old single-line
           // "time • sample • source" ellipsis swallowed two of the three
           // values on a 360dp phone.
-          _metaLine(
-            Icons.science_outlined,
-            '${row['sample_name'] ?? '-'}',
-          ),
+          _metaLine(Icons.science_outlined, '${row['sample_name'] ?? '-'}'),
           const SizedBox(height: AppSpacing.xs),
-          _metaLine(
-            Icons.inventory_2_outlined,
-            '${row['source_name'] ?? '-'}',
-          ),
+          _metaLine(Icons.inventory_2_outlined, '${row['source_name'] ?? '-'}'),
           const SizedBox(height: AppSpacing.xs),
           _metaLine(
             Icons.schedule_outlined,
@@ -547,7 +647,7 @@ class TestHistoryCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   text: TextSpan(
-                    text: '${row['result_text'] ?? '-'}',
+                    text: formatLabResult(row['result_text']),
                     style: TextStyle(
                       fontSize: 16.spMax,
                       fontWeight: FontWeight.w700,
@@ -567,12 +667,90 @@ class TestHistoryCard extends StatelessWidget {
                 ),
               ),
               // Affordance: the whole card opens the detail/edit screen.
-              Icon(
-                Icons.chevron_left,
-                size: 22.r,
-                color: AppColors.textMuted,
-              ),
+              Icon(Icons.chevron_left, size: 22.r, color: AppColors.textMuted),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bar shown only while selecting (desktop + mobile): how many records are
+/// picked, print-them-as-HTML, and exit selection mode. Owns the printing
+/// spinner so the hosting tabs stay stateless.
+class TestHistorySelectionBar extends StatefulWidget {
+  const TestHistorySelectionBar({
+    super.key,
+    required this.rows,
+    required this.onClear,
+  });
+
+  /// The selected rows (resolved by the tab against the current list).
+  final List<Map<String, dynamic>> rows;
+  final VoidCallback onClear;
+
+  @override
+  State<TestHistorySelectionBar> createState() =>
+      _TestHistorySelectionBarState();
+}
+
+class _TestHistorySelectionBarState extends State<TestHistorySelectionBar> {
+  bool _printing = false;
+
+  Future<void> _print() async {
+    if (_printing) return;
+    setState(() => _printing = true);
+    try {
+      await TestHistoryPrinter.printRows(context, widget.rows);
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppCard(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.md,
+        vertical: AppSpacing.sm,
+      ),
+      color: AppColors.primary.withValues(alpha: 0.06),
+      child: Row(
+        children: [
+          Icon(Icons.checklist_outlined, size: 20.r, color: AppColors.primary),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              AppText.t(
+                'محدد: ${widget.rows.length}',
+                'Selected: ${widget.rows.length}',
+              ),
+              style: TextStyle(
+                fontSize: 13.spMax,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+          AppButton(
+            small: true,
+            label: AppText.t('طباعة HTML', 'Print HTML'),
+            icon: _printing
+                ? SizedBox(
+                    width: 16.r,
+                    height: 16.r,
+                    child: const CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(Icons.print_outlined, size: 16.r),
+            onPressed: _printing ? null : _print,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          IconButton(
+            tooltip: AppText.t('إلغاء تحديد الكل', 'Clear selection'),
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            onPressed: widget.onClear,
+            icon: Icon(Icons.close, size: 18.r),
           ),
         ],
       ),
@@ -591,10 +769,7 @@ Widget _metaLine(IconData icon, String text, {bool mono = false}) {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           textDirection: mono ? TextDirection.ltr : null,
-          style: TextStyle(
-            fontSize: 12.spMax,
-            color: AppColors.textMuted,
-          ),
+          style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
         ),
       ),
     ],
@@ -615,49 +790,63 @@ class TestHistoryPagination extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scope = TestHistoryScope.of(context);
-    if (pageCount <= 1) return const SizedBox.shrink();
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Wrap(
+      crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: WrapAlignment.center,
+      spacing: 8,
+      runSpacing: 4,
       children: [
-        IconButton(
-          tooltip: 'السابق',
-          onPressed: page <= 1 ? null : scope.prevPage,
-          icon: const Icon(Icons.chevron_left),
+        AppPageSizeSelector(
+          value: scope.pageSize,
+          onChanged: scope.setPageSize,
         ),
-        for (var p = 1; p <= pageCount; p++)
-          if (p == 1 || p == pageCount || (p - page).abs() <= 2)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: p == page
-                  ? Container(
-                      width: 30,
-                      height: 30,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        '$p',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 13.spMax,
-                        ),
-                      ),
-                    )
-                  : TextButton(
-                      onPressed: () => scope.setPage(p),
-                      child: Text(
-                        '$p',
-                        style: TextStyle(fontSize: 13.spMax),
-                      ),
-                    ),
-            ),
-        IconButton(
-          tooltip: 'التالي',
-          onPressed: page >= pageCount ? null : scope.nextPage,
-          icon: const Icon(Icons.chevron_right),
-        ),
+        if (pageCount > 1)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: AppText.t('السابق', 'Previous'),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                onPressed: page <= 1 ? null : scope.prevPage,
+                icon: const Icon(Icons.chevron_left),
+              ),
+              for (var p = 1; p <= pageCount; p++)
+                if (p == 1 || p == pageCount || (p - page).abs() <= 2)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: p == page
+                        ? Container(
+                            width: 30,
+                            height: 30,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              '$p',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 13.spMax,
+                              ),
+                            ),
+                          )
+                        : TextButton(
+                            onPressed: () => scope.setPage(p),
+                            child: Text(
+                              '$p',
+                              style: TextStyle(fontSize: 13.spMax),
+                            ),
+                          ),
+                  ),
+              IconButton(
+                tooltip: AppText.t('التالي', 'Next'),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                onPressed: page >= pageCount ? null : scope.nextPage,
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
       ],
     );
   }
@@ -667,7 +856,11 @@ class FilterButton extends StatelessWidget {
   final int activeCount;
   final VoidCallback onPressed;
 
-  const FilterButton({super.key, required this.activeCount, required this.onPressed});
+  const FilterButton({
+    super.key,
+    required this.activeCount,
+    required this.onPressed,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -799,6 +992,7 @@ Widget testHistoryFilterGrid(
           child: DropdownButtonFormField<String>(
             initialValue: recordLimit,
             isExpanded: true,
+            menuMaxHeight: 320,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               isDense: true,
@@ -815,6 +1009,7 @@ Widget testHistoryFilterGrid(
           child: DropdownButtonFormField<String>(
             initialValue: analysisId,
             isExpanded: true,
+            menuMaxHeight: 320,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               isDense: true,
@@ -827,10 +1022,7 @@ Widget testHistoryFilterGrid(
               for (final a in state.analyses)
                 DropdownMenuItem(
                   value: '${a['id']}',
-                  child: Text(
-                    '${a['name']}',
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  child: Text('${a['name']}', overflow: TextOverflow.ellipsis),
                 ),
             ],
             onChanged: (v) => onAnalysis(v ?? ''),
@@ -841,6 +1033,7 @@ Widget testHistoryFilterGrid(
           child: DropdownButtonFormField<String>(
             initialValue: sourceType,
             isExpanded: true,
+            menuMaxHeight: 320,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               isDense: true,
@@ -867,6 +1060,7 @@ Widget testHistoryFilterGrid(
           child: DropdownButtonFormField<String>(
             initialValue: chemicalId,
             isExpanded: true,
+            menuMaxHeight: 320,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               isDense: true,
@@ -887,6 +1081,7 @@ Widget testHistoryFilterGrid(
           child: DropdownButtonFormField<String>(
             initialValue: rangeState,
             isExpanded: true,
+            menuMaxHeight: 320,
             decoration: const InputDecoration(
               border: OutlineInputBorder(),
               isDense: true,

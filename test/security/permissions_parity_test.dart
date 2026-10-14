@@ -23,7 +23,7 @@ void main() {
     ruleMatrix = _parseRuleMatrix(rules);
   });
 
-  test('the rules file declares all four roles', () {
+  test('the rules file declares all roles', () {
     expect(ruleMatrix.keys.toSet(), AppRoles.all.toSet());
   });
 
@@ -77,6 +77,16 @@ void main() {
       'labConfig',
       'devices',
       'auditLogs',
+      // Comprehensive sync (plan §7).
+      'inventoryItems',
+      'inventoryTransactions',
+      'consumption',
+      'stockAdjustments',
+      'equipment',
+      'equipmentEvents',
+      'worksheets',
+      'referenceMaterials',
+      'productBatchSamples',
     };
     expect(allowedCollections.difference(expected), isEmpty);
   });
