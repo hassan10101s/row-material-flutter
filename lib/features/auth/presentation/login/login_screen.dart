@@ -110,9 +110,7 @@ class LoginScreen extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 if (state.needsConfiguration)
-                                  _ConfigurationHint(
-                                    missing: state.missingConfiguration,
-                                  )
+                                  const _ConfigurationHint()
                                 else ...[
                                   _GoogleButton(
                                     busy: state.busy,
@@ -298,7 +296,7 @@ class _MobileLoginViewState extends State<_MobileLoginView> {
               ),
               const SizedBox(height: AppSpacing.xxxl),
               if (state.needsConfiguration)
-                _ConfigurationHint(missing: state.missingConfiguration)
+                const _ConfigurationHint()
               else ...[
                 AppField(
                   label: AppText.t('البريد الإلكتروني', 'Email'),
@@ -456,12 +454,12 @@ class _EmailPasswordDialogState extends State<_EmailPasswordDialog> {
             Text(
               widget.create
                   ? AppText.t(
-                      'سيتم حفظ الحساب في Firebase ويمكن استخدامه لاحقًا على أي جهاز.',
-                      'The account is saved in Firebase and can be used later on any device.',
+                      'سيتم حفظ الحساب ويمكن استخدامه لاحقًا على أي جهاز.',
+                      'The account is saved and can be used later on any device.',
                     )
                   : AppText.t(
-                      'استخدم البريد وكلمة المرور المحفوظين في Firebase.',
-                      'Use the email and password saved in Firebase.',
+                      'استخدم البريد وكلمة المرور المحفوظين لحسابك.',
+                      'Use the email and password saved for your account.',
                     ),
               style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
             ),
@@ -547,11 +545,9 @@ class _GoogleLogo extends StatelessWidget {
   );
 }
 
-/// Shown instead of the button when `firebase_options.dart` has no values.
+/// Shown instead of the sign-in options when the remote service is unavailable.
 class _ConfigurationHint extends StatelessWidget {
-  const _ConfigurationHint({required this.missing});
-
-  final List<String> missing;
+  const _ConfigurationHint();
 
   @override
   Widget build(BuildContext context) {
@@ -569,10 +565,7 @@ class _ConfigurationHint extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                AppText.t(
-                  'إعداد Firebase غير مكتمل',
-                  'Firebase is not configured',
-                ),
+                AppText.t('الخدمة غير متاحة حاليًا', 'Service unavailable'),
                 style: TextStyle(
                   color: AppColors.danger,
                   fontWeight: FontWeight.w700,
@@ -581,13 +574,10 @@ class _ConfigurationHint extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                missing.isEmpty
-                    ? AppText.t(
-                        'أضف القيم عبر --dart-define أو ملف assets/firebase/firebase.local.json',
-                        'Pass the values with --dart-define or add '
-                            'assets/firebase/firebase.local.json',
-                      )
-                    : missing.join('\n'),
+                AppText.t(
+                  'تعذر الاتصال بالخدمة. تحقق من اتصالك بالإنترنت ثم أعد المحاولة.',
+                  'Could not reach the service. Check your internet connection and try again.',
+                ),
                 style: TextStyle(
                   fontSize: 12.spMax,
                   color: AppColors.textMuted,

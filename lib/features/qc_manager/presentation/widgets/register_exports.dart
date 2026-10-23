@@ -2,85 +2,52 @@ import 'package:flutter/material.dart';
 
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/export/table_html_export.dart';
-import '../../domain/qc_goal.dart';
 import '../../domain/qc_inspection.dart';
 import '../../domain/qc_sop.dart';
 import '../../domain/qc_template.dart';
 
-/// HTML table exports for the QC card registers (goals / inspections / SOPs /
+/// HTML table exports for the QC card registers (inspections / SOPs /
 /// templates). These screens are card lists, not `AppPaginatedTable`s, so
 /// they cannot reuse the table's selection bar — but the exported file is the
 /// same shared HTML table document every other register produces.
 class RegisterExports {
   RegisterExports._();
 
-  static Future<void> goals(
-    BuildContext context,
-    List<QcGoal> goals,
-  ) =>
-      TableHtmlExport.export(
-        context,
-        filePrefix: 'qc_goals',
-        title: AppText.t('أهداف الجودة', 'Quality goals'),
-        headers: [
-          AppText.t('الهدف', 'Goal'),
-          AppText.t('الكود', 'Code'),
-          AppText.t('الحالة', 'Status'),
-          AppText.t('الأولوية', 'Priority'),
-          AppText.t('المسؤول', 'Owner'),
-          AppText.t('القسم', 'Dept'),
-          AppText.t('الاستحقاق', 'Due'),
-        ],
-        rows: [
-          for (final g in goals)
-            [
-              g.title,
-              g.code.isEmpty ? '-' : g.code,
-              g.status,
-              g.priority,
-              g.ownerName.isNotEmpty ? g.ownerName : g.ownerId,
-              g.dept,
-              g.dueDate.isEmpty ? '-' : g.dueDate.substring(0, 10),
-            ],
-        ],
-      );
-
   static Future<void> inspections(
     BuildContext context,
     List<QcInspection> rows,
-  ) =>
-      TableHtmlExport.export(
-        context,
-        filePrefix: 'qc_inspections',
-        title: AppText.t('فحوصات الجودة', 'Quality inspections'),
-        headers: [
-          AppText.t('الرقم', 'ID'),
-          AppText.t('المرجع', 'Ref'),
-          AppText.t('المخزون', 'Lot / batch'),
-          AppText.t('القسم', 'Dept'),
-          AppText.t('الفاحص', 'Inspector'),
-          AppText.t('التاريخ', 'Date'),
-          AppText.t('الحالة', 'Status'),
-          AppText.t('النتيجة', 'Result'),
+  ) => TableHtmlExport.export(
+    context,
+    filePrefix: 'qc_inspections',
+    title: AppText.t('فحوصات الجودة', 'Quality inspections'),
+    headers: [
+      AppText.t('الرقم', 'ID'),
+      AppText.t('المرجع', 'Ref'),
+      AppText.t('المخزون', 'Lot / batch'),
+      AppText.t('القسم', 'Dept'),
+      AppText.t('الفاحص', 'Inspector'),
+      AppText.t('التاريخ', 'Date'),
+      AppText.t('الحالة', 'Status'),
+      AppText.t('النتيجة', 'Result'),
+    ],
+    rows: [
+      for (final i in rows)
+        [
+          '${i.inspectionId ?? '-'}',
+          i.refId.isEmpty ? i.refType : i.refId,
+          i.lotNo.isNotEmpty
+              ? i.lotNo
+              : i.batchNo.isNotEmpty
+              ? i.batchNo
+              : '—',
+          i.dept,
+          i.inspectorName.isEmpty ? '—' : i.inspectorName,
+          i.inspectionDate.isEmpty ? '-' : i.inspectionDate.substring(0, 10),
+          i.status,
+          i.resultOverall.isEmpty ? '-' : i.resultOverall,
         ],
-        rows: [
-          for (final i in rows)
-            [
-              '${i.inspectionId ?? '-'}',
-              i.refId.isEmpty ? i.refType : i.refId,
-              i.lotNo.isNotEmpty
-                  ? i.lotNo
-                  : i.batchNo.isNotEmpty
-                      ? i.batchNo
-                      : '—',
-              i.dept,
-              i.inspectorName.isEmpty ? '—' : i.inspectorName,
-              i.inspectionDate.isEmpty ? '-' : i.inspectionDate.substring(0, 10),
-              i.status,
-              i.resultOverall.isEmpty ? '-' : i.resultOverall,
-            ],
-        ],
-      );
+    ],
+  );
 
   static Future<void> sops(BuildContext context, List<QcSop> rows) =>
       TableHtmlExport.export(
@@ -110,10 +77,7 @@ class RegisterExports {
         ],
       );
 
-  static Future<void> templates(
-    BuildContext context,
-    List<QcTemplate> rows,
-  ) =>
+  static Future<void> templates(BuildContext context, List<QcTemplate> rows) =>
       TableHtmlExport.export(
         context,
         filePrefix: 'qc_templates',
@@ -134,9 +98,7 @@ class RegisterExports {
               t.type,
               t.dept,
               '${t.version}',
-              t.isPublished
-                  ? AppText.t('نعم', 'Yes')
-                  : AppText.t('لا', 'No'),
+              t.isPublished ? AppText.t('نعم', 'Yes') : AppText.t('لا', 'No'),
             ],
         ],
       );

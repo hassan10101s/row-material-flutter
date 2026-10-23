@@ -20,16 +20,10 @@ class AnalysesCubit extends AppCubit<AnalysesState> {
 
   Future<void> load() async {
     final token = ++_token;
-    safeEmit(
-      state.copyWith(loading: true, error: null, errorMore: null),
-    );
+    safeEmit(state.copyWith(loading: true, error: null, errorMore: null));
     try {
       final settled = await Future.wait([
-        repo.listAnalysesPaged(
-          query: state.query,
-          limit: pageSize,
-          offset: 0,
-        ),
+        repo.listAnalysesPaged(query: state.query, limit: pageSize, offset: 0),
         repo.countAnalyses(query: state.query),
       ]);
       if (token != _token) return;
@@ -48,7 +42,7 @@ class AnalysesCubit extends AppCubit<AnalysesState> {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 

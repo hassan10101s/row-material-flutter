@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import '../../../core/auth/app_session.dart';
 import '../../../core/auth/permissions.dart';
 import '../../../core/auth/session_store.dart';
+import '../../../core/auth/trial_policy.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/firebase/firebase_bootstrap.dart';
 import '../../../core/network/connectivity_service.dart';
@@ -100,6 +101,21 @@ class OfflineFirstAuthRepository implements AuthRepository {
       // No local leak (plan §8): only an `active` member binds the company
       // database and starts the sync cycle. Anything else unbinds.
       if (_session.isActiveMember) {
+        // Trial expiry also applies offline: a cached trial whose window has
+        // passed stays locked even without connectivity. Legacy caches without
+        // an organization status are left untouched (never lock on parse).
+        if (_session.organizationStatus.isNotEmpty &&
+            TrialPolicy.shouldBlock(
+              status: _session.organizationStatus,
+              manuallyActivated: _session.manuallyActivated,
+              trialEndsAt: _session.trialEndsAt,
+              now: DateTime.now(),
+            )) {
+          _session = _session.copyWith(organizationStatus: OrgStatus.suspended);
+          await _persistSession();
+          await dbHelper.bindOrg(null);
+          return _set(AuthState.awaitingActivation);
+        }
         await _bindOrganization(_session.organizationId);
         return _set(AuthState.ready);
       }
@@ -150,8 +166,8 @@ class OfflineFirstAuthRepository implements AuthRepository {
     if (!remote.isConfigured) {
       throw AuthFailure(
         AppText.t(
-          'Firebase غير مضبوط. أكمل إعداد Firebase أولاً.',
-          'Firebase is not configured. Complete the Firebase setup first.',
+          'الخدمة غير متاحة حاليًا. تحقق من اتصالك ثم أعد المحاولة.',
+          'The service is unavailable right now. Check your connection and try again.',
         ),
         code: 'missing_config',
       );
@@ -162,8 +178,8 @@ class OfflineFirstAuthRepository implements AuthRepository {
       if (user == null) {
         throw AuthFailure(
           AppText.t(
-            'تعذر استعادة حساب Firebase بعد تسجيل الدخول.',
-            'Could not restore the Firebase account after sign-in.',
+            'تعذر استعادة الحساب بعد تسجيل الدخول.',
+            'Could not restore your account after sign-in.',
           ),
         );
       }
@@ -181,8 +197,8 @@ class OfflineFirstAuthRepository implements AuthRepository {
     if (!remote.isConfigured) {
       throw AuthFailure(
         AppText.t(
-          'Firebase غير مضبوط. أكمل إعداد Firebase أولاً.',
-          'Firebase is not configured. Complete the Firebase setup first.',
+          'الخدمة غير متاحة حاليًا. تحقق من اتصالك ثم أعد المحاولة.',
+          'The service is unavailable right now. Check your connection and try again.',
         ),
         code: 'missing_config',
       );
@@ -192,10 +208,7 @@ class OfflineFirstAuthRepository implements AuthRepository {
       final user = await remote.currentUser();
       if (user == null) {
         throw AuthFailure(
-          AppText.t(
-            'تعذر إنشاء حساب Firebase.',
-            'Could not create the Firebase account.',
-          ),
+          AppText.t('تعذر إنشاء الحساب.', 'Could not create the account.'),
         );
       }
       await resolveProfile(user: user);
@@ -228,6 +241,21 @@ class OfflineFirstAuthRepository implements AuthRepository {
             await dbHelper.bindOrg(null);
             return _set(AuthState.awaitingActivation);
           }
+          // Offline trial-expiry lock (same rule as restoreSession).
+          if (_session.organizationStatus.isNotEmpty &&
+              TrialPolicy.shouldBlock(
+                status: _session.organizationStatus,
+                manuallyActivated: _session.manuallyActivated,
+                trialEndsAt: _session.trialEndsAt,
+                now: DateTime.now(),
+              )) {
+            _session = _session.copyWith(
+              organizationStatus: OrgStatus.suspended,
+            );
+            await _persistSession();
+            await dbHelper.bindOrg(null);
+            return _set(AuthState.awaitingActivation);
+          }
           await _bindOrganization(_session.organizationId);
           return _set(AuthState.ready);
         }
@@ -257,6 +285,38 @@ class OfflineFirstAuthRepository implements AuthRepository {
     }
 
     final readOnly = roleIsReadOnly(normalizeRole(profile.role));
+    // Organization-level gate: a suspended company (trial finished, waiting
+    // for manual activation) never opens the dashboard, even though the member
+    // row itself is still `active`. A trial whose 30-day window has passed is
+    // treated as suspended locally too, so there is no gap before the server
+    // cron flips the document. Manually activated companies are never blocked
+    // (TrialPolicy.shouldBlock returns false for them, at any date).
+    String orgStatus = '';
+    String? trialEndsAt;
+    var manuallyActivated = false;
+    if (profile.organizationId.isNotEmpty) {
+      try {
+        final org = await remote.loadOrganization(profile.organizationId);
+        if (org != null) {
+          orgStatus = org.status;
+          trialEndsAt = org.trialEndsAt;
+          manuallyActivated = org.manuallyActivated;
+          if (TrialPolicy.shouldBlock(
+            status: org.status,
+            manuallyActivated: org.manuallyActivated,
+            trialEndsAt: org.trialEndsAt,
+            now: DateTime.now(),
+          )) {
+            orgStatus = OrgStatus.suspended;
+          }
+        }
+      } on Object catch (e) {
+        // Loading the org must never sign the user out or crash login: if the
+        // read fails (offline blip, revoked member), fall through with an
+        // unknown org status and let the member-level state decide.
+        debugPrint('[auth] org gate skipped: $e');
+      }
+    }
     _session = AppSession(
       uid: profile.uid,
       email: profile.email,
@@ -271,11 +331,15 @@ class OfflineFirstAuthRepository implements AuthRepository {
       deviceId: _deviceId,
       readOnlyDevice: readOnly,
       signedInAt: DateTime.now(),
+      organizationStatus: orgStatus,
+      trialEndsAt: trialEndsAt,
+      manuallyActivated: manuallyActivated,
     );
     // Plan §8: the company database opens and the sync cycle starts for
-    // `active` members only. Anything else (invited/pending_activation /
-    // disabled) unbinds locally and waits on the activation screen.
-    if (!_session.isActiveMember) {
+    // `active` members of a usable company only. Anything else
+    // (invited/pending_activation/disabled member, or suspended company)
+    // unbinds locally and waits on the activation screen.
+    if (!_session.isActiveMember || _session.isOrgSuspended) {
       await dbHelper.bindOrg(null);
       await _persistSession();
       return _set(AuthState.awaitingActivation);
@@ -321,6 +385,86 @@ class OfflineFirstAuthRepository implements AuthRepository {
     await _bindOrganization(organizationId);
     await _persistSession();
     _set(AuthState.ready);
+  }
+
+  @override
+  Future<void> updateDisplayName(String displayName) async {
+    final name = displayName.trim();
+    if (name.isEmpty) {
+      throw AuthFailure(
+        AppText.t('أدخل اسمًا صحيحًا.', 'Enter a valid name.'),
+        code: 'invalid_name',
+      );
+    }
+    final uid = _session.uid;
+    if (uid.isEmpty) {
+      throw AuthFailure(
+        AppText.t('لا يوجد حساب مسجل الدخول.', 'No signed-in account.'),
+        code: 'signed_out',
+      );
+    }
+    // `users/{uid}` is the session's display-name source and the one document
+    // the member may edit about themselves; it must succeed for the name to
+    // reach the other devices. Offline is a real failure here, not a silent
+    // no-op the UI could misreport as saved.
+    try {
+      await remote.updateUserDisplayName(uid: uid, displayName: name);
+    } on RemoteAuthException catch (e) {
+      throw AuthFailure(_emailMessage(e.code, e.message), code: e.code);
+    } on Object {
+      throw AuthFailure(
+        AppText.t(
+          'تعذر حفظ الاسم. تحقق من الاتصال بالإنترنت وحاول مرة أخرى.',
+          'Could not save the name. Check your connection and try again.',
+        ),
+        code: 'network_failed',
+      );
+    }
+    // Keep the local roster in step so the lab "بواسطة" (By) column shows the
+    // new name immediately on this device, then move the session so the shell
+    // (identity card) reflects it without a restart.
+    try {
+      final db = await dbHelper.database;
+      await db.update(
+        'users',
+        {'display_name': name, 'full_name': name},
+        where: 'uid = ?',
+        whereArgs: [uid],
+      );
+    } on Object catch (e) {
+      // A missing local roster row (never synced) must not fail the save: the
+      // remote write already happened and the session below carries the name.
+      debugPrint('[auth] local name mirror skipped: $e');
+    }
+    _session = _session.copyWith(displayName: name);
+    await _persistSession();
+    _emit();
+  }
+
+  @override
+  Future<void> sendPasswordResetEmail(String email) async {
+    if (!remote.isConfigured) {
+      throw AuthFailure(
+        AppText.t(
+          'إعادة تعيين كلمة المرور تحتاج اتصالاً بالإنترنت.',
+          'Changing the password needs an internet connection.',
+        ),
+        code: 'offline',
+      );
+    }
+    try {
+      await remote.sendPasswordResetEmail(email);
+    } on RemoteAuthException catch (e) {
+      throw AuthFailure(_emailMessage(e.code, e.message), code: e.code);
+    } on Object {
+      throw AuthFailure(
+        AppText.t(
+          'تعذر إرسال رابط تغيير كلمة المرور. تحقق من الاتصال وحاول مرة أخرى.',
+          'Could not send the password reset link. Check your connection and try again.',
+        ),
+        code: 'network_failed',
+      );
+    }
   }
 
   @override
@@ -467,19 +611,18 @@ class OfflineFirstAuthRepository implements AuthRepository {
         'أدخل بريدًا إلكترونيًا صحيحًا.',
         'Enter a valid email address.',
       ),
-    'member_exists' => AppText.t(
-      'هذا البريد عضو نشط بالفعل في الشركة.',
-      'This email is already an active company member.',
-    ),
+      'member_exists' => AppText.t(
+        'هذا البريد عضو نشط بالفعل في الشركة.',
+        'This email is already an active company member.',
+      ),
       'email_already_in_use' || 'credential_already_in_use' => AppText.t(
         'البريد مرتبط بحساب آخر. سجّل الدخول بالبريد أو Google أولًا.',
         'This email is already linked to another account. Sign in first.',
       ),
-      'user_not_found' || 'wrong_password' || 'invalid_credential' =>
-        AppText.t(
-          'البريد أو كلمة المرور غير صحيحة.',
-          'The email or password is incorrect.',
-        ),
+      'user_not_found' || 'wrong_password' || 'invalid_credential' => AppText.t(
+        'البريد أو كلمة المرور غير صحيحة.',
+        'The email or password is incorrect.',
+      ),
       'weak_password' => AppText.t(
         'اختر كلمة مرور أقوى من 6 أحرف.',
         'Choose a stronger password.',

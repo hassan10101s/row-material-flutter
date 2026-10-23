@@ -2,6 +2,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart' show immutable;
 
 import '../../../../core/state/app_cubit.dart';
+import '../../../../core/utils/app_exceptions.dart';
 import '../../domain/ncr_filters.dart';
 import '../../domain/ncr_kpis.dart';
 import '../../domain/ncr_report_repository.dart';
@@ -216,7 +217,7 @@ class QcNcrCubit extends AppCubit<QcNcrState> {
       safeEmit(
         state.copyWith(
           loading: false,
-          error: '$e',
+          error: AppError.friendly(e),
           rows: const [],
           kpis: NcrKpis.empty,
           aging: const [],
@@ -246,7 +247,22 @@ class QcNcrCubit extends AppCubit<QcNcrState> {
     await load();
   }
 
+  /// Seeds the filter set before the first load — URL deep-link
+  /// (`/qc-ncr/list?status=Open&overdue=1`) from dashboard drill-down. Unlike
+  /// [applyFilters] it does not reload: the route's following `load()` reads it.
+  void seedFilters(NcrFilters filters) {
+    safeEmit(state.copyWith(filters: filters));
+  }
+
   Future<void> clearFilters() => applyFilters(const NcrFilters());
+
+  /// Free-text search. The search box debounces keystrokes; every call resets
+  /// paging (through [NcrFilters.copyWith]) and reloads the same population the
+  /// KPI cards count.
+  Future<void> setQuery(String query) {
+    if (query == state.filters.query) return Future<void>.value();
+    return applyFilters(state.filters.copyWith(query: query));
+  }
 
   Future<void> toggleFilter(String field, String value) async {
     final f = state.filters;

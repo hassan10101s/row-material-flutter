@@ -60,6 +60,13 @@ class SyncMetadata {
   static String lastFullSyncAtKey = 'last_full_sync_at';
   static String syncEnabledKey = 'sync_enabled';
 
+  /// Receiving-side parity sweep state (plan §9.3-cross): `parity_pending`
+  /// gates, `parity_index` walks the stable entity order one entity per
+  /// cycle, each clearing that entity's pull cursor so the next pass
+  /// re-verifies the whole collection against the server.
+  static String parityPendingKey = 'parity_pending';
+  static String parityIndexKey = 'parity_index';
+
   /// Mobile-only notification watermarks: highest seen row per table.
   /// Id-based (not timestamps) because pulled rows are inserted with fresh
   /// local ids and `lab_sample_tests` predates `created_at`.

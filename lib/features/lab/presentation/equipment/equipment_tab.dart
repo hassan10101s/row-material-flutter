@@ -1,8 +1,13 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/constants/report_form_keys.dart';
+import '../../../../core/utils/app_exceptions.dart';
+import '../../../../design_system/animations/app_animations.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
+import '../../../../design_system/feedback/app_feedback_export.dart';
 import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
@@ -10,12 +15,15 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../design_system/widgets/app_export_button.dart';
 import '../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../design_system/widgets/app_selection.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../design_system/export/table_html_export.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../di/service_locator.dart';
+import '../../../inspections/presentation/qr/qr_scan_screen.dart';
+import '../../../reports/domain/report_repository.dart';
 import '../../domain/lab_local_repository.dart';
 import 'equipment_dialogs.dart';
 
@@ -83,7 +91,8 @@ class _EquipmentTabState extends State<EquipmentTab> {
       for (final r in _rows)
         if ('${r['name'] ?? ''}'.toLowerCase().contains(q) ||
             '${r['code'] ?? ''}'.toLowerCase().contains(q) ||
-            '${r['manufacturer'] ?? ''}'.toLowerCase().contains(q))
+            '${r['manufacturer'] ?? ''}'.toLowerCase().contains(q) ||
+            '${r['serial_number'] ?? ''}'.toLowerCase().contains(q))
           r,
     ];
   }
@@ -232,18 +241,50 @@ class _MasterListState extends State<EquipmentMasterList> {
     }
   }
 
+  /// Device stickers for the picked rows (one PDF, N-up on A4 — like the
+  /// inspections batch labels). Selection clears on success only; the file is
+  /// then handed to the delivery sheet (open/share), never a path-only banner.
+  Future<void> _exportSelectedLabels() async {
+    final ids = [
+      for (var i = 0; i < widget.rows.length; i++)
+        if (_selected.contains(i)) (widget.rows[i]['id'] as num).toInt(),
+    ];
+    try {
+      final reports = getIt<ReportRepository>();
+      final doc = await reports.equipmentLabelsPdf(ids);
+      final file = await reports.saveReport(doc, asLabel: true);
+      if (!mounted) return;
+      setState(_selected.clear);
+      await AppFeedbackExport.actions(
+        context,
+        filePath: file.path,
+        documentName: file.uri.pathSegments.last,
+      );
+    } on AppError catch (e) {
+      if (mounted) AppFeedback.error(context, e.message);
+    } catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = widget.rows;
     final query = widget.query;
     final wide = widget.wide;
-    // Desktop title lives in the shell topbar; the narrow (phone) title stays.
-    final title = wide
-        ? const SizedBox.shrink()
-        : Text(
-            AppText.t('معدات المعمل', 'Lab equipment'),
-            style: Theme.of(context).textTheme.titleLarge,
-          );
+    // Same platform guard as the inspections scan entry points: the camera
+    // scanner is Android-only (QrScanScreen itself degrades to manual search
+    // elsewhere, but the button is never built outside Android).
+    final scanAvailable =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    // Pairs with AppExportIconButton in the narrow search row.
+    final scanButton = IconButton.outlined(
+      tooltip: AppText.t('مسح رمز', 'Scan QR'),
+      onPressed: () => Navigator.of(context).push(
+        AppPageRoute(builder: (_) => const QrScanScreen()),
+      ),
+      icon: Icon(Icons.qr_code_scanner_outlined, size: 20.r),
+    );
     final search = TextField(
       controller: query,
       onChanged: (_) {
@@ -295,6 +336,17 @@ class _MasterListState extends State<EquipmentMasterList> {
               Expanded(child: search),
               const SizedBox(width: AppSpacing.sm),
               exportButton,
+              if (scanAvailable) ...[
+                AppButton(
+                  icon: Icon(Icons.qr_code_scanner_outlined, size: 18.r),
+                  label: AppText.t('مسح رمز', 'Scan QR'),
+                  style: AppButtonStyle.secondary,
+                  onPressed: () => Navigator.of(context).push(
+                    AppPageRoute(builder: (_) => const QrScanScreen()),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+              ],
               AppButton(
                 small: true,
                 label: AppText.t('إضافة جهاز', 'Add equipment'),
@@ -304,16 +356,34 @@ class _MasterListState extends State<EquipmentMasterList> {
             ],
           )
         else ...[
-          title,
-          const SizedBox(height: AppSpacing.sm),
+          // Compact top row like the other lab registers: search takes the
+          // width, export sits beside it — no big title, no end-aligned
+          // row that wastes a whole line on small phones.
           // Add floats (FAB on the host Scaffold) like the raw-material
-          // register; only the export icon stays inline.
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [exportButton],
+          // register.
+          AppSearchRow(
+            search: search,
+            export: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (scanAvailable) ...[
+                  scanButton,
+                  const SizedBox(width: AppSpacing.sm),
+                ],
+                AppExportIconButton(
+                  onPressed: rows.isEmpty
+                      ? null
+                      : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'equipment',
+                          title: EquipmentMasterList.exportTitle(),
+                          headers: EquipmentMasterList.exportHeaders(),
+                          rows: EquipmentMasterList.exportRows(rows),
+                        ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: AppSpacing.md),
-          search,
         ],
         const SizedBox(height: AppSpacing.md),
         // The tab area is bounded (Expanded ← IndexedStack in lab_screen), so
@@ -324,6 +394,7 @@ class _MasterListState extends State<EquipmentMasterList> {
           TableSelectionBar(
             selectedCount: _selected.length,
             onExportTable: _exportSelected,
+            onExportLabels: _exportSelectedLabels,
             onClear: () => setState(_selected.clear),
           ),
           const SizedBox(height: AppSpacing.md),
@@ -578,6 +649,18 @@ class _EquipmentDetailRoute extends StatelessWidget {
   }
 }
 
+/// Public entry to the device file (device card + event log), used by the
+/// QR scanner: a scan opens this route directly by equipment id.
+class EquipmentDetailScreen extends StatelessWidget {
+  final int equipmentId;
+  const EquipmentDetailScreen({super.key, required this.equipmentId});
+
+  @override
+  Widget build(BuildContext context) {
+    return _EquipmentDetailRoute(equipmentId: equipmentId);
+  }
+}
+
 /// Detail: header card + editable event log.
 ///
 /// [pushed] is true only when shown as its own route (phones): after a
@@ -598,6 +681,7 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
   Map<String, dynamic>? _equipment;
   List<Map<String, dynamic>> _events = const [];
   bool _loading = true;
+  bool _printing = false;
 
   @override
   void initState() {
@@ -668,6 +752,44 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
     if (saved && mounted) _refresh();
   }
 
+  /// Opens the QA form-number editor (gear): the `Form No:` line printed
+  /// on this equipment's label only.
+  Future<void> _editFormNo() async {
+    await showQaFormNoDialog(
+      context,
+      key: ReportFormKeys.equipmentLabel,
+      title: AppText.t('رقم فورم ملصق المعدة', 'Equipment label form no.'),
+    );
+  }
+
+  /// Prints the 10×5cm device sticker (same flow as the sample label):
+  /// PDF bytes from the reports repository, then the delivery sheet
+  /// (open on desktop, open/share on a phone) via `AppFeedbackExport`.
+  Future<void> _printLabel() async {
+    if (_printing || _equipment == null) return;
+    setState(() => _printing = true);
+    try {
+      final reports = getIt<ReportRepository>();
+      final doc = await reports.equipmentLabelPdf(widget.equipmentId);
+      final file = await reports.saveReport(doc, asLabel: true);
+      if (!mounted) return;
+      setState(() => _printing = false);
+      await AppFeedbackExport.actions(
+        context,
+        filePath: file.path,
+        documentName: file.uri.pathSegments.last,
+      );
+    } on AppError catch (e) {
+      if (!mounted) return;
+      setState(() => _printing = false);
+      AppFeedback.error(context, e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _printing = false);
+      AppFeedback.errorFrom(context, e);
+    }
+  }
+
   Future<void> _editEvent(Map<String, dynamic> event) async {
     final saved = await showEquipmentEventForm(
       context,
@@ -732,6 +854,34 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
                     ),
                   ),
                   IconButton(
+                    tooltip: AppText.t('طباعة الليبل', 'Print label'),
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
+                    onPressed: _printing ? null : _printLabel,
+                    icon: _printing
+                        ? SizedBox(
+                            width: 20.r,
+                            height: 20.r,
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : Icon(Icons.print_outlined, size: 20.r),
+                  ),
+                  IconButton(
+                    tooltip: AppText.t(
+                      'رقم فورم الجودة',
+                      'QA form number',
+                    ),
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
+                    onPressed: _editFormNo,
+                    icon: Icon(Icons.settings_outlined, size: 20.r),
+                  ),                  IconButton(
                     tooltip: AppText.t('تعديل', 'Edit'),
                     constraints: const BoxConstraints(
                       minWidth: 48,
@@ -770,6 +920,12 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
                       icon: Icons.factory_outlined,
                       text: '${equipment['manufacturer']}',
                     ),
+                  if ('${equipment['serial_number'] ?? ''}'.trim().isNotEmpty)
+                    _Chip(
+                      icon: Icons.confirmation_number_outlined,
+                      text: '${equipment['serial_number']}',
+                      mono: true,
+                    ),
                   _Chip(
                     icon: Icons.event_available_outlined,
                     text: calibration.isEmpty
@@ -779,6 +935,18 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
                           )
                         : '${AppText.t('آخر معايرة', 'Last calibration')}: $calibration',
                   ),
+                  if ('${equipment['next_calibration_date'] ?? ''}'
+                      .trim()
+                      .isNotEmpty)
+                    _Chip(
+                      icon: Icons.event_repeat_outlined,
+                      text:
+                          '${AppText.t('المعايرة القادمة', 'Next calibration')}: '
+                          '${equipment['next_calibration_date']}',
+                      danger: _isOverdue(
+                        '${equipment['next_calibration_date']}',
+                      ),
+                    ),
                 ],
               ),
               if ('${equipment['description'] ?? ''}'.trim().isNotEmpty) ...[
@@ -857,21 +1025,28 @@ class _Chip extends StatelessWidget {
   final IconData icon;
   final String text;
   final bool mono;
+  final bool danger;
 
-  const _Chip({required this.icon, required this.text, this.mono = false});
+  const _Chip({
+    required this.icon,
+    required this.text,
+    this.mono = false,
+    this.danger = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final color = danger ? AppColors.danger : AppColors.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: AppColors.primary.withValues(alpha: 0.08),
+        color: color.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14.r, color: AppColors.primary),
+          Icon(icon, size: 14.r, color: color),
           const SizedBox(width: 4),
           Flexible(
             child: Text(
@@ -880,7 +1055,7 @@ class _Chip extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12.spMax,
                 fontWeight: FontWeight.w600,
-                color: AppColors.primary,
+                color: color,
               ),
             ),
           ),
@@ -888,6 +1063,15 @@ class _Chip extends StatelessWidget {
       ),
     );
   }
+}
+
+/// True when a bare `yyyy-MM-dd` date is before today (overdue calibration).
+bool _isOverdue(String date) {
+  final day = date.trim().length >= 10
+      ? date.trim().substring(0, 10)
+      : date.trim();
+  if (day.isEmpty) return false;
+  return day.compareTo(DateTime.now().toString().substring(0, 10)) < 0;
 }
 
 class _EventRow extends StatelessWidget {

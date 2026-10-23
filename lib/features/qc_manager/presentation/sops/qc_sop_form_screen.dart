@@ -24,7 +24,12 @@ import '../cubit/qc_sops_cubit.dart';
 /// guarded repository, so the only thing this widget decides is which cubit it
 /// hands the result to.
 class QcSopFormScreen extends StatefulWidget {
-  const QcSopFormScreen({super.key, this.sop, this.detail, this.embedded = false});
+  const QcSopFormScreen({
+    super.key,
+    this.sop,
+    this.detail,
+    this.embedded = false,
+  });
 
   final QcSop? sop;
   final QcSopDetailCubit? detail;
@@ -134,7 +139,10 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
                 onPressed: () => setState(() => _readMode = !_readMode),
               ),
             ),
-            Form(key: _form, child: Column(children: _formFields(sop))),
+            Form(
+              key: _form,
+              child: Column(children: _formFields(sop)),
+            ),
           ],
         ),
       );
@@ -151,7 +159,9 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
               tooltip: _readMode
                   ? AppText.t('تحرير', 'Edit')
                   : AppText.t('عرض للقراءة', 'Read view'),
-              icon: Icon(_readMode ? Icons.edit_outlined : Icons.menu_book_outlined),
+              icon: Icon(
+                _readMode ? Icons.edit_outlined : Icons.menu_book_outlined,
+              ),
               onPressed: () => setState(() => _readMode = !_readMode),
             ),
           ],
@@ -170,82 +180,82 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
   /// The form fields shared by the route (scrolls itself) and the dialog
   /// (the window scrolls, so no ListView/Expanded here).
   List<Widget> _formFields(QcSop? sop) => [
-        // Title — editable on create; identity is fixed after (copyWith
-        // cannot carry it, so an editable field would silently drop).
-        _field(
-          _title,
-          AppText.t('إجراء: عنوان الإجراء', 'Procedure title'),
-          required: true,
-          enabled: !widget.isEdit || !_readMode,
+    // Title — editable on create; identity is fixed after (copyWith
+    // cannot carry it, so an editable field would silently drop).
+    _field(
+      _title,
+      AppText.t('إجراء: عنوان الإجراء', 'Procedure title'),
+      required: true,
+      enabled: !widget.isEdit || !_readMode,
+    ),
+    _field(
+      _category,
+      AppText.t('الفئة', 'Category'),
+      enabled: !widget.isEdit || !_readMode,
+    ),
+    if (sop != null && sop.code.isNotEmpty)
+      Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+        child: Text(
+          '${sop.code}  •  rev ${sop.revNo}',
+          style: const TextStyle(fontSize: 12),
         ),
-        _field(
-          _category,
-          AppText.t('الفئة', 'Category'),
-          enabled: !widget.isEdit || !_readMode,
+      ),
+    const Divider(),
+    Text(
+      AppText.t('─── المحتوى ───', '─── Body ───'),
+      style: const TextStyle(fontWeight: FontWeight.w600),
+    ),
+    const SizedBox(height: AppSpacing.sm),
+    if (_readMode)
+      Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          border: Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
         ),
-        if (sop != null && sop.code.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Text(
-              '${sop.code}  •  rev ${sop.revNo}',
-              style: const TextStyle(fontSize: 12),
-            ),
+        child: Text(
+          _body.text.isEmpty
+              ? AppText.t('(لا يوجد محتوى بعد)', '(Empty)')
+              : _body.text,
+          style: const TextStyle(fontSize: 14, height: 1.7),
+        ),
+      )
+    else
+      AppField(
+        label: AppText.t('المحتوى', 'Body'),
+        controller: _body,
+        hint: AppText.t(
+          '1. أوقف الماكينة قبل التنظيف\n2. استخدم المنظف المعتمد\n3. امسح جميع الأسطح',
+          '1. Stop the machine\n2. Use the approved cleaner\n3. Wipe all surfaces',
+        ),
+        maxLines: 12,
+      ),
+    const SizedBox(height: AppSpacing.lg),
+    Row(
+      children: [
+        Expanded(
+          child: AppButton(
+            label: AppText.t('💾 حفظ', 'Save'),
+            icon: const Icon(Icons.save_outlined, size: 18),
+            expanded: true,
+            onPressed: _save,
           ),
-        const Divider(),
-        Text(
-          AppText.t('─── المحتوى ───', '─── Body ───'),
-          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
-        const SizedBox(height: AppSpacing.sm),
-        if (_readMode)
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              border: Border.all(color: AppColors.border),
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-            ),
-            child: Text(
-              _body.text.isEmpty
-                  ? AppText.t('(لا يوجد محتوى بعد)', '(Empty)')
-                  : _body.text,
-              style: const TextStyle(fontSize: 14, height: 1.7),
-            ),
-          )
-        else
-          AppField(
-            label: AppText.t('المحتوى', 'Body'),
-            controller: _body,
-            hint: AppText.t(
-              '1. أوقف الماكينة قبل التنظيف\n2. استخدم المنظف المعتمد\n3. امسح جميع الأسطح',
-              '1. Stop the machine\n2. Use the approved cleaner\n3. Wipe all surfaces',
-            ),
-            maxLines: 12,
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: AppButton(
+            label: AppText.t('📖 عرض للقراءة', 'Read view'),
+            icon: const Icon(Icons.menu_book_outlined, size: 18),
+            style: AppButtonStyle.secondary,
+            expanded: true,
+            onPressed: () => setState(() => _readMode = !_readMode),
           ),
-        const SizedBox(height: AppSpacing.lg),
-        Row(
-          children: [
-            Expanded(
-              child: AppButton(
-                label: AppText.t('💾 حفظ', 'Save'),
-                icon: const Icon(Icons.save_outlined, size: 18),
-                expanded: true,
-                onPressed: _save,
-              ),
-            ),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: AppButton(
-                label: AppText.t('📖 عرض للقراءة', 'Read view'),
-                icon: const Icon(Icons.menu_book_outlined, size: 18),
-                style: AppButtonStyle.secondary,
-                expanded: true,
-                onPressed: () => setState(() => _readMode = !_readMode),
-              ),
-            ),
-          ],
         ),
-      ];
+      ],
+    ),
+  ];
 
   /// Surfaces whichever cubit owns the write.
   ///
@@ -312,20 +322,21 @@ class _QcSopFormScreenState extends State<QcSopFormScreen> {
     final existing = widget.sop;
     // Simplified: only the body is editable after creation; identity fields
     // are fixed. Hidden fields keep DB defaults.
-    final next = (existing ??
-            QcSop(
-              code: _autoCode(),
-              title: _title.text.trim(),
-              category: _category.text.trim(),
-              status: SopStatus.draft,
-              createdAt: now,
+    final next =
+        (existing ??
+                QcSop(
+                  code: _autoCode(),
+                  title: _title.text.trim(),
+                  category: _category.text.trim(),
+                  status: SopStatus.draft,
+                  createdAt: now,
+                  updatedAt: now,
+                ))
+            .copyWith(
+              contentType: SopContentType.text,
+              contentText: _body.text.trim(),
               updatedAt: now,
-            ))
-        .copyWith(
-      contentType: SopContentType.text,
-      contentText: _body.text.trim(),
-      updatedAt: now,
-    );
+            );
 
     if (widget.isEdit) {
       final detail = context.read<QcSopDetailCubit>();

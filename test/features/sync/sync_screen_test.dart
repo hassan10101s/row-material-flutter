@@ -31,6 +31,11 @@ class _MockGate extends Mock implements AuthGate {}
 /// These pin the fixed contract: a failure in any handler reaches the user as a
 /// banner, and a successful load produces no banner.
 void main() {
+  // The banner never leads with driver internals: any error that is not a
+  // `UserFacingError` collapses to the generic message (`AppFeedback._userText`
+  // -> `_unexpected`), with the detail going to the log only. These suites pin
+  // that *a* banner reached the user, not the exact driver text.
+  const unexpectedBanner = 'حدث خطأ غير متوقع';
   const clean = SyncStatusSnapshot(
     online: true,
     syncing: false,
@@ -108,9 +113,9 @@ void main() {
 
     await pump(tester);
 
-    // The driver-specific text is flattened, but the cause survives, so the
-    // user learns *what* failed rather than only that something did.
-    expect(find.textContaining('database_closed'), findsOneWidget);
+    // A banner reached the user (the flattened generic text); the raw driver
+    // detail stays in the log by design.
+    expect(find.textContaining(unexpectedBanner), findsOneWidget);
   });
 
   testWidgets('the error banner is not an unhandled async exception',
@@ -135,7 +140,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.textContaining('permission-denied'), findsOneWidget);
+    expect(find.textContaining(unexpectedBanner), findsOneWidget);
     // The spinner has to stop, or the button stays permanently "working".
     final button = tester.widget<Text>(find.text('مزامنة الآن'));
     expect(button.data, 'مزامنة الآن');
@@ -151,7 +156,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.textContaining('pull-failed'), findsOneWidget);
+    expect(find.textContaining(unexpectedBanner), findsOneWidget);
   });
 
   testWidgets('a failed retry-all is reported', (tester) async {
@@ -171,7 +176,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
 
-    expect(find.textContaining('retry-failed'), findsOneWidget);
+    expect(find.textContaining(unexpectedBanner), findsOneWidget);
   });
 
   testWidgets('a successful load shows counters and no banner', (tester) async {

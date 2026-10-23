@@ -288,7 +288,10 @@ void main() {
         source.failWith = StateError('db gone');
         await cubit.load();
 
-        expect(cubit.state.error, contains('db gone'));
+        expect(
+          cubit.state.error,
+          'حدث خطأ غير متوقع. حاول مرة أخرى.',
+        );
         expect(cubit.state.loading, isFalse);
         expect(cubit.state.rows, isEmpty);
         expect(cubit.state.kpis.total, 0);

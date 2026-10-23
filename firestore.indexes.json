@@ -20,6 +20,71 @@
       "collectionGroup": "labConfig",
       "fieldPath": "updatedAt",
       "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "productBatchSamples",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "inventoryItems",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "inventoryTransactions",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "inventoryLots",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "consumption",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "stockAdjustments",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "equipment",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "equipmentEvents",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "worksheets",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "referenceMaterials",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "qcCustomTables",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "qcCustomTableFields",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "qcCustomTableRows",
+      "fieldPath": "updatedAt",
+      "indexes": [{ "order": "ASCENDING" }]
     }
   ]
 }

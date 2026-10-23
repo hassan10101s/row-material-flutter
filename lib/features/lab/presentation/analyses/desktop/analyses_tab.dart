@@ -9,6 +9,7 @@ import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
+import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../design_system/export/table_html_export.dart';
@@ -95,6 +96,11 @@ class DesktopAnalysesTab extends StatelessWidget {
               headers: AnalysesTable.exportHeaders(),
               rows: AnalysesTable.exportRows(state.rows),
             ),
+            search: DebouncedSearchField(
+              hint: AppText.t('بحث بالاسم', 'Search by name...'),
+              initialValue: state.query,
+              onChanged: (v) => context.read<AnalysesCubit>().setQuery(v),
+            ),
           ),
           const SizedBox(height: AppSpacing.md),
           if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
@@ -120,8 +126,7 @@ class DesktopAnalysesTab extends StatelessWidget {
                         errorMore: state.errorMore,
                         onLoadMore: () =>
                             context.read<AnalysesCubit>().loadMore(),
-                        onRetry: () =>
-                            context.read<AnalysesCubit>().loadMore(),
+                        onRetry: () => context.read<AnalysesCubit>().loadMore(),
                       ),
                     ],
                   ),

@@ -19,6 +19,8 @@ import '../../cubit/test_history_cubit.dart';
 import '../../cubit/test_history_state.dart';
 import '../../run_test/run_test_tab.dart';
 import '../test_history_detail_screen.dart';
+import '../test_history_linked_report.dart';
+import '../test_history_pdf.dart';
 import '../test_history_scope.dart';
 import '../widgets/test_history_parts.dart';
 
@@ -69,6 +71,7 @@ class DesktopTestHistoryTab extends StatelessWidget {
     var dSource = scope.sourceType;
     var dChemical = scope.chemicalId;
     var dRange = scope.rangeState;
+    var dReason = scope.reasonState;
     var dLimit = scope.recordLimit;
 
     await showAppWindow<void>(
@@ -105,6 +108,7 @@ class DesktopTestHistoryTab extends StatelessWidget {
                     sourceType: dSource,
                     chemicalId: dChemical,
                     rangeState: dRange,
+                    reasonState: dReason,
                     recordLimit: dLimit,
                     onMode: (v) => setDraft(() {
                       dMode = v;
@@ -119,6 +123,7 @@ class DesktopTestHistoryTab extends StatelessWidget {
                     onSource: (v) => setDraft(() => dSource = v),
                     onChemical: (v) => setDraft(() => dChemical = v),
                     onRange: (v) => setDraft(() => dRange = v),
+                    onReason: (v) => setDraft(() => dReason = v),
                     onLimit: (v) => setDraft(() => dLimit = v),
                   ),
                 ),
@@ -146,6 +151,7 @@ class DesktopTestHistoryTab extends StatelessWidget {
                         dSource = '';
                         dChemical = '';
                         dRange = '';
+                        dReason = '';
                       }),
                     ),
                     const Spacer(),
@@ -168,6 +174,7 @@ class DesktopTestHistoryTab extends StatelessWidget {
                           source: dSource,
                           chemical: dChemical,
                           range: dRange,
+                          reason: dReason,
                           limit: dLimit,
                         );
                         Navigator.of(dialogContext).pop();
@@ -196,54 +203,53 @@ class DesktopTestHistoryTab extends StatelessWidget {
         }
         return AppErrorFeedback<TestHistoryCubit, TestHistoryState>(
           selector: (s) => s.error,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AppCard(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // New test shares the search row (same level, no extra
-                      // row); the title lives in the shell topbar.
-                      TestHistoryToolbar(
-                        chips: d.chips,
-                        hasQuery: scope.query.text.isNotEmpty,
-                        onOpenFilters: () => _openFilterDialog(
-                          context,
-                          scope,
-                          state,
-                          d.chemOptions,
-                        ),
-                        onClearAll: scope.clearAllFilters,
-                        trailing: AppButton(
-                          label: AppText.t('اختبار جديد', 'New test'),
-                          icon: Icon(Icons.add_circle_outline, size: 18.r),
-                          small: true,
-                          onPressed: () => _openNewTest(context),
-                        ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              AppCard(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // New test shares the search row (same level, no extra
+                    // row); the title lives in the shell topbar.
+                    TestHistoryToolbar(
+                      chips: d.chips,
+                      hasQuery: scope.query.text.isNotEmpty,
+                      onOpenFilters: () =>
+                          _openFilterDialog(context, scope, state, d.chemOptions),
+                      onClearAll: scope.clearAllFilters,
+                      onExportPdf: d.sorted.isEmpty
+                          ? null
+                          : () => TestHistoryPdf.export(context, d.sorted),
+                      trailing: AppButton(
+                        label: AppText.t('اختبار جديد', 'New test'),
+                        icon: Icon(Icons.add_circle_outline, size: 18.r),
+                        small: true,
+                        onPressed: () => _openNewTest(context),
                       ),
-                      const SizedBox(height: AppSpacing.sm),
-                      TestHistoryChips(
-                        chips: d.chips,
-                        showing: d.paged.slice.length,
-                        total: d.sorted.length,
-                        summary: d.summary,
-                        onClearAll: scope.clearAllFilters,
-                      ),
-                    ],
-                  ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    TestHistoryChips(
+                      chips: d.chips,
+                      showing: d.paged.slice.length,
+                      total: d.sorted.length,
+                      summary: d.summary,
+                      onClearAll: scope.clearAllFilters,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              if (scope.selecting) ...[
+                TestHistorySelectionBar(
+                  rows: scope.selectedRows(d.sorted),
+                  onClear: scope.clearSelection,
                 ),
                 const SizedBox(height: AppSpacing.md),
-                if (scope.selecting) ...[
-                  TestHistorySelectionBar(
-                    rows: scope.selectedRows(d.sorted),
-                    onClear: scope.clearSelection,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                ],
-                TestHistoryTable(
+              ],
+              Expanded(
+                child: TestHistoryTable(
                   slice: d.paged.slice,
                   start: d.paged.start,
                   isEmpty: state.rows.isEmpty,
@@ -259,6 +265,13 @@ class DesktopTestHistoryTab extends StatelessWidget {
                       d.paged.slice.every(
                         (r) => scope.selectedIds.contains(thRowKey(r)),
                       ),
+                  // Server-driven paging: the scope owns page/pageSize, the
+                  // shared table only renders the slice and reports changes.
+                  total: d.sorted.length,
+                  page: scope.page - 1,
+                  rowsPerPage: scope.pageSize,
+                  onPageChanged: (p) async => scope.setPage(p + 1),
+                  onPageSizeChanged: (size) async => scope.setPageSize(size),
                   onOpen: (row) async {
                     // In select mode a tap toggles the checkbox instead of
                     // opening the editor for the whole table.
@@ -274,14 +287,12 @@ class DesktopTestHistoryTab extends StatelessWidget {
                       context.read<TestHistoryCubit>().load();
                     }
                   },
+                  // The merged source+code cell opens the linked inspection:
+                  // the same window the inspections ledger opens on a row tap.
+                  onOpenReport: (row) => openLinkedInspection(context, row),
                 ),
-                const SizedBox(height: AppSpacing.md),
-                TestHistoryPagination(
-                  page: scope.page,
-                  pageCount: d.paged.pageCount,
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         );
       },

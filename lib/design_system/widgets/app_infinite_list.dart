@@ -19,7 +19,7 @@ const double kInfiniteAutoLoadThreshold = 300;
 /// explicit "load more" button as fallback (no auto-load / a11y), and an
 /// end-of-list label so the user knows the register is complete.
 ///
-/// Ported from `QcInspectionsScreen._LoadMoreRow` into the design system so
+/// Ported from the old QC inspections `_LoadMoreRow` into the design system so
 /// every mobile list shares one surface.
 class AppLoadMoreFooter extends StatelessWidget {
   const AppLoadMoreFooter({

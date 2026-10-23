@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/constants/report_form_keys.dart';
 import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_exceptions.dart';
@@ -10,9 +11,11 @@ import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_date_field.dart';
 import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
+import '../../../settings/domain/settings_repository.dart';
 import '../../domain/lab_local_repository.dart';
 
 /// Arabic/English label for an equipment event type.
@@ -60,6 +63,168 @@ Future<bool> showEquipmentForm(
     ),
   );
   return saved ?? false;
+}
+
+/// One editable form-number line: its settings [key] and the [label]
+/// describing which document the number belongs to.
+class FormNoField {
+  const FormNoField({required this.key, required this.label});
+
+  final String key;
+  final String label;
+}
+
+/// Shows the QA form-number editor for a single document [key] (the gear
+/// next to a print/export action). Returns true when saved.
+Future<bool> showQaFormNoDialog(
+  BuildContext context, {
+  String key = ReportFormKeys.global,
+  String title = '',
+}) {
+  return showFormNumbersDialog(
+    context,
+    title: title,
+    fields: [
+      FormNoField(key: key, label: AppText.t('رقم الفورم', 'Form number')),
+    ],
+  );
+}
+
+/// Shows the QA form-number editor with one field per [fields] entry — each
+/// printed document (report, label, ...) keeps its own number.
+/// Returns true when saved.
+Future<bool> showFormNumbersDialog(
+  BuildContext context, {
+  required List<FormNoField> fields,
+  String title = '',
+}) async {
+  final saved = await showAppWindow<bool>(
+    context,
+    title: title.isEmpty
+        ? AppText.t('رقم فورم الجودة', 'QA form number')
+        : title,
+    icon: Icons.settings_outlined,
+    maxWidth: 440,
+    child: _FormNoForm(fields: fields),
+  );
+  return saved ?? false;
+}
+
+/// One editable line per document; each is stored under its own settings key
+/// and printed only on that document's form/report.
+class _FormNoForm extends StatefulWidget {
+  const _FormNoForm({required this.fields});
+
+  final List<FormNoField> fields;
+
+  @override
+  State<_FormNoForm> createState() => _FormNoFormState();
+}
+
+class _FormNoFormState extends State<_FormNoForm> {
+  late final Map<String, TextEditingController> _controllers = {
+    for (final field in widget.fields) field.key: TextEditingController(),
+  };
+  bool _loading = true;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    try {
+      final repo = getIt<SettingsRepository>();
+      for (final field in widget.fields) {
+        _controllers[field.key]!.text =
+            await repo.getSettingValue(field.key) ?? '';
+      }
+      if (!mounted) return;
+      setState(() => _loading = false);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      AppFeedback.errorFrom(context, e);
+    }
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    try {
+      await getIt<SettingsRepository>().updateSettings({
+        for (final field in widget.fields)
+          field.key: _controllers[field.key]!.text.trim(),
+      });
+      if (mounted) {
+        // The dialog closing with the list refreshed is the confirmation;
+        // a transient "Saved." toast right before the pop was pure noise.
+        Navigator.of(context).pop(true);
+      }
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) AppFeedback.errorFrom(context, e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const AppSkeletonList(rows: 3, height: 120, padding: EdgeInsets.zero);
+    }
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final field in widget.fields) ...[
+          AppField(
+            label: field.label,
+            controller: _controllers[field.key]!,
+            enabled: !_saving,
+            hint: AppText.t('مثال: QA-F-07', 'e.g. QA-F-07'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+        Text(
+          AppText.t(
+            'لكل نموذج رقم مستقل يُطبع في تقريره فقط.',
+            'Each form keeps its own number, printed on that document only.',
+          ),
+          style: TextStyle(color: Colors.grey, fontSize: 12.spMax),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Row(
+          children: [
+            Expanded(
+              child: AppButton(
+                label: AppText.t('حفظ', 'Save'),
+                icon: Icon(Icons.check, size: 18.r),
+                loading: _saving,
+                onPressed: _saving ? null : _save,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            AppButton(
+              style: AppButtonStyle.secondary,
+              label: AppText.t('إلغاء', 'Cancel'),
+              onPressed: _saving
+                  ? null
+                  : () => Navigator.of(context).pop(false),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 /// Shows the event form for [equipmentId]: dialog window on desktop,
@@ -121,20 +286,40 @@ class _EquipmentFormState extends State<_EquipmentForm> {
   late final TextEditingController _manufacturer = TextEditingController(
     text: '${widget.item?['manufacturer'] ?? ''}',
   );
+  late final TextEditingController _serial = TextEditingController(
+    text: '${widget.item?['serial_number'] ?? ''}',
+  );
   late final TextEditingController _description = TextEditingController(
     text: '${widget.item?['description'] ?? ''}',
   );
   late final TextEditingController _calibration = TextEditingController(
     text: '${widget.item?['last_calibration_date'] ?? ''}',
   );
+  late final TextEditingController _nextCalibration = TextEditingController(
+    text: '${widget.item?['next_calibration_date'] ?? ''}',
+  );
+  // True once the user types a next date by hand: auto-suggest (last + 1
+  // year) must never overwrite an explicit choice afterwards.
+  bool _nextTouched = false;
   bool _saving = false;
+
+  /// Suggests next = last + 1 year while the field is still untouched.
+  void _suggestNext() {
+    if (_nextTouched) return;
+    final suggestion = plusOneYearIso(_calibration.text.trim());
+    if (suggestion.isEmpty) return;
+    if (_nextCalibration.text.trim() == suggestion) return;
+    _nextCalibration.text = suggestion;
+  }
 
   @override
   void dispose() {
     _name.dispose();
     _manufacturer.dispose();
+    _serial.dispose();
     _description.dispose();
     _calibration.dispose();
+    _nextCalibration.dispose();
     super.dispose();
   }
 
@@ -153,19 +338,24 @@ class _EquipmentFormState extends State<_EquipmentForm> {
         await repo.createEquipment(
           name: _name.text.trim(),
           manufacturer: _manufacturer.text.trim(),
+          serialNumber: _serial.text.trim(),
           description: _description.text.trim(),
           lastCalibrationDate: _calibration.text.trim(),
+          nextCalibrationDate: _nextCalibration.text.trim(),
         );
       } else {
         await repo.updateEquipment((widget.item!['id'] as num).toInt(), {
           'name': _name.text.trim(),
           'manufacturer': _manufacturer.text.trim(),
+          'serial_number': _serial.text.trim(),
           'description': _description.text.trim(),
           'last_calibration_date': _calibration.text.trim(),
+          'next_calibration_date': _nextCalibration.text.trim(),
         });
       }
       if (mounted) {
-        AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved.'));
+        // The dialog closing with the list refreshed is the confirmation;
+        // a transient "Saved." toast right before the pop was pure noise.
         Navigator.of(context).pop(true);
       }
     } on AppError catch (e) {
@@ -202,6 +392,13 @@ class _EquipmentFormState extends State<_EquipmentForm> {
         ),
         const SizedBox(height: AppSpacing.md),
         AppField(
+          label: AppText.t('السيريال نمبر', 'Serial number'),
+          controller: _serial,
+          enabled: !_saving,
+          hint: AppText.t('مثال: SN-2024-001', 'e.g. SN-2024-001'),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppField(
           label: AppText.t('وصف الجهاز', 'Description'),
           controller: _description,
           enabled: !_saving,
@@ -212,6 +409,14 @@ class _EquipmentFormState extends State<_EquipmentForm> {
           label: AppText.t('تاريخ آخر معايرة', 'Last calibration date'),
           controller: _calibration,
           enabled: !_saving,
+          onChanged: (_) => _suggestNext(),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppDateField(
+          label: AppText.t('المعايرة القادمة', 'Next calibration'),
+          controller: _nextCalibration,
+          enabled: !_saving,
+          onChanged: (_) => _nextTouched = true,
         ),
         const SizedBox(height: AppSpacing.lg),
         Row(
@@ -325,7 +530,8 @@ class _EquipmentEventFormState extends State<_EquipmentEventForm> {
         });
       }
       if (mounted) {
-        AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved.'));
+        // The dialog closing with the list refreshed is the confirmation;
+        // a transient "Saved." toast right before the pop was pure noise.
         Navigator.of(context).pop(true);
       }
     } on AppError catch (e) {

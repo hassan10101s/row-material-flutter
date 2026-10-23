@@ -42,7 +42,7 @@ class InspectionRepo {
     if (names.length > 3) {
       throw ValidationError(AppErrors.inspectionMaxSamples);
     }
-    if (names.isEmpty) names = ['Result'];
+    if (names.isEmpty) names = [''];
     return names;
   }
 
@@ -582,6 +582,7 @@ class InspectionRepo {
   Future<List<Map<String, dynamic>>> list({
     String query = '',
     String status = '',
+    String reason = '',
     int limit = 50,
     int offset = 0,
     String orderBy = 'id DESC',
@@ -589,6 +590,7 @@ class InspectionRepo {
     String kind = '',
     String dateFrom = '',
     String dateTo = '',
+    String supplier = '',
     int? materialId,
     int? productId,
   }) async {
@@ -616,6 +618,13 @@ class InspectionRepo {
       conditions.add('decision_status = ?');
       args.add(status.trim());
     }
+    // Reason (decision_reason) is searchable but never shown as a column:
+    // a substring match lets the register answer "كل الفحوصات اللي سببها سوس".
+    final reasonText = reason.trim();
+    if (reasonText.isNotEmpty) {
+      conditions.add('decision_reason LIKE ?');
+      args.add('%$reasonText%');
+    }
     // Raw register filters by material, product register by product. Both
     // columns are indexed (`idx_inspections_material_id`,
     // `idx_inspections_product`), so this stays an index seek.
@@ -626,6 +635,13 @@ class InspectionRepo {
     if (productId != null) {
       conditions.add('product_id = ?');
       args.add(productId);
+    }
+    // Supplier is stored trimmed at write time, so exact equality matches
+    // without a TRIM scan (dashboard drill-down passes the row's value).
+    final supplierText = supplier.trim();
+    if (supplierText.isNotEmpty) {
+      conditions.add('supplier = ?');
+      args.add(supplierText);
     }
     // `inspection_date` is stored as ISO text (`yyyy-MM-dd...`), so a
     // `substr(...,1,10)` comparison is a chronological comparison. Short or
@@ -759,10 +775,12 @@ class InspectionRepo {
   Future<int> count({
     String query = '',
     String status = '',
+    String reason = '',
     bool includeDeleted = false,
     String kind = '',
     String dateFrom = '',
     String dateTo = '',
+    String supplier = '',
     int? materialId,
     int? productId,
   }) async {
@@ -788,6 +806,11 @@ class InspectionRepo {
       conditions.add('decision_status = ?');
       args.add(status.trim());
     }
+    final reasonText = reason.trim();
+    if (reasonText.isNotEmpty) {
+      conditions.add('decision_reason LIKE ?');
+      args.add('%$reasonText%');
+    }
     if (materialId != null) {
       conditions.add('material_id = ?');
       args.add(materialId);
@@ -795,6 +818,11 @@ class InspectionRepo {
     if (productId != null) {
       conditions.add('product_id = ?');
       args.add(productId);
+    }
+    final supplierText = supplier.trim();
+    if (supplierText.isNotEmpty) {
+      conditions.add('supplier = ?');
+      args.add(supplierText);
     }
     final fromDay = _dayBound(dateFrom);
     if (fromDay != null) {

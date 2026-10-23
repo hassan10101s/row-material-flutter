@@ -71,6 +71,15 @@ String validateNonNegativeNumericText(
 /// format_quantity: port of core/utils.py — `{:.3f}` with thousands grouping.
 final NumberFormat _qtyFormatter = NumberFormat('#,##0.000');
 
+/// Thousands-separated integer count for dashboard hero tiles (all-time
+/// totals; today's counts stay plain digits).
+final NumberFormat _countFormatter = NumberFormat('#,##0');
+
+String formatCount(Object? value) {
+  final n = (value is num) ? value : (safeFloat(value) ?? 0);
+  return _countFormatter.format(n);
+}
+
 String formatQuantity(Object? value) {
   if (value == null) return '-';
   final s = value.toString().trim();

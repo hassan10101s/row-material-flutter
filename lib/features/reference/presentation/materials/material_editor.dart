@@ -13,6 +13,7 @@ import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_required_toggle.dart';
+import '../../../../design_system/widgets/app_skeleton.dart';
 import '../../../lab/domain/lab_result_repository.dart';
 import '../../domain/parameter_type.dart';
 import '../../domain/reference_repository.dart';
@@ -113,11 +114,8 @@ class _ChemicalParamRow {
   }
 }
 
-typedef _NameParts = ({String en, String ar});
-
 class MaterialEditorState extends State<MaterialEditor> {
-  late final TextEditingController _nameEn;
-  late final TextEditingController _nameAr;
+  late final TextEditingController _name;
   late final TextEditingController _code;
 
   final _physical = <_PhysicalParamRow>[];
@@ -156,16 +154,14 @@ class MaterialEditorState extends State<MaterialEditor> {
   @override
   void initState() {
     super.initState();
-    _nameEn = TextEditingController();
-    _nameAr = TextEditingController();
+    _name = TextEditingController();
     _code = TextEditingController();
     _load();
   }
 
   @override
   void dispose() {
-    _nameEn.dispose();
-    _nameAr.dispose();
+    _name.dispose();
     _code.dispose();
     for (final r in _physical) {
       r.dispose();
@@ -174,14 +170,6 @@ class MaterialEditorState extends State<MaterialEditor> {
       r.dispose();
     }
     super.dispose();
-  }
-
-  _NameParts _splitName(Object? raw) {
-    final parts = '${raw ?? ''}'.split(RegExp(r'\s*\|\s*'));
-    return (
-      en: parts.isNotEmpty ? parts[0] : '',
-      ar: parts.length > 1 ? parts[1] : '',
-    );
   }
 
   ({String min, String max}) _parseRangeText(String text) {
@@ -290,14 +278,12 @@ class MaterialEditorState extends State<MaterialEditor> {
         chemicalRows = chemicalByName.values.toList();
       }
 
-      final parts = _splitName(initialName);
       if (!mounted) return;
       setState(() {
         _parameters = parameters;
         _physical.addAll(physicalRows);
         _chemical.addAll(chemicalRows);
-        _nameEn.text = parts.en;
-        _nameAr.text = parts.ar;
+        _name.text = initialName;
         _code.text = initialCode;
         _loading = false;
       });
@@ -397,22 +383,17 @@ class MaterialEditorState extends State<MaterialEditor> {
   ];
 
   bool _validate() {
-    final nameEn = _nameEn.text.trim();
-    final nameAr = _nameAr.text.trim();
+    final name = _name.text.trim();
     final code = _code.text.trim();
     setState(() {
-      _nameError = (nameEn.isEmpty && nameAr.isEmpty)
-          ? AppText.t(
-              'الاسم مطلوب بالإنجليزية أو العربية',
-              'Name is required (EN or AR).',
-            )
+      _nameError = name.isEmpty
+          ? AppText.t('اسم الخامة مطلوب', 'Material name is required.')
           : null;
       _codeError = code.isEmpty
           ? AppText.t('كود الخامة مطلوب', 'Material code is required.')
           : null;
     });
-    if (_nameError == null || _codeError == null) return true;
-    return (_nameError == null) && (_codeError == null);
+    return _nameError == null && _codeError == null;
   }
 
   Future<void> _save() async {
@@ -480,10 +461,7 @@ class MaterialEditorState extends State<MaterialEditor> {
         units[name] = unit;
       }
 
-      final combinedName = [
-        _nameEn.text.trim(),
-        _nameAr.text.trim(),
-      ].where((s) => s.isNotEmpty).join(' | ');
+      final name = _name.text.trim();
       final code = _code.text.trim();
 
       final boundsPayload = <Map<String, dynamic>>[
@@ -513,7 +491,7 @@ class MaterialEditorState extends State<MaterialEditor> {
 
       if (widget.materialId == null) {
         final id = await _refRepo.createMaterial(
-          materialName: combinedName,
+          materialName: name,
           materialCode: code,
           physicalReference: physicalReference,
           chemicalReference: chemicalReference,
@@ -523,7 +501,7 @@ class MaterialEditorState extends State<MaterialEditor> {
       } else {
         await _refRepo.updateMaterial(
           widget.materialId!,
-          materialName: combinedName,
+          materialName: name,
           materialCode: code,
           physicalReference: physicalReference,
           chemicalReference: chemicalReference,
@@ -549,7 +527,7 @@ class MaterialEditorState extends State<MaterialEditor> {
       children: [
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList(rows: 4, height: 320, padding: EdgeInsets.zero)
               : SingleChildScrollView(
                   padding: EdgeInsets.symmetric(
                     horizontal: _compact ? 0 : AppSpacing.lg,
@@ -638,41 +616,22 @@ class MaterialEditorState extends State<MaterialEditor> {
     const SizedBox(height: AppSpacing.lg),
   ];
 
-  /// English and Arabic name side by side on desktop, stacked on a phone —
-  /// two 200dp fields across a 400dp grid leaves neither usable.
+  /// A single material-name field, typed as-is (Arabic, English, or both).
+  /// One field, one DB column (`reference_materials.material_name`).
   Widget _nameFields() {
-    final en = AppField(
-      label: AppText.t('الاسم بالإنجليزية', 'English Name'),
-      controller: _nameEn,
-      onChanged: (_) => setState(() => _nameError = null),
-      hint: 'e.g. Apple Pomace',
-      error: _nameError,
-      enabled: !_saving,
-    );
-    final ar = AppField(
-      label: AppText.t('الاسم بالعربية', 'Arabic Name'),
-      controller: _nameAr,
-      onChanged: (_) => setState(() => _nameError = null),
-      hint: 'مثال: تفل تفاح',
-      enabled: !_saving,
-    );
-    if (_compact) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          en,
-          const SizedBox(height: AppSpacing.md),
-          ar,
-        ],
-      );
-    }
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: en),
-        const SizedBox(width: AppSpacing.md),
-        Expanded(child: ar),
-      ],
+    return SizedBox(
+      width: _compact ? null : 360.w,
+      child: AppField(
+        label: AppText.t('اسم الخامة', 'Material Name'),
+        controller: _name,
+        onChanged: (_) => setState(() => _nameError = null),
+        hint: AppText.t(
+          'مثال: تفل تفاح / Apple Pomace',
+          'e.g. Apple Pomace / تفل تفاح',
+        ),
+        error: _nameError,
+        enabled: !_saving,
+      ),
     );
   }
 

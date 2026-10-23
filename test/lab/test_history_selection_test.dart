@@ -59,7 +59,10 @@ void main() {
     when(() => config.listAnalyses()).thenAnswer((_) async => []);
   });
 
-  Future<void> pumpTable(WidgetTester tester) async {
+  Future<void> pumpTable(
+    WidgetTester tester, {
+    ValueChanged<Map<String, dynamic>>? onOpenReport,
+  }) async {
     final cubit = TestHistoryCubit(
       results: results,
       local: local,
@@ -80,24 +83,30 @@ void main() {
                       rows: scope.selectedRows(d.sorted),
                       onClear: scope.clearSelection,
                     ),
-                  TestHistoryTable(
-                    slice: d.paged.slice,
-                    start: d.paged.start,
-                    isEmpty: false,
-                    selecting: scope.selecting,
-                    selectedIds: scope.selectedIds,
-                    onToggleSelect: (r) =>
-                        scope.toggleSelected(thRowKey(r)),
-                    onLongPressRow: (r) =>
-                        scope.toggleSelected(thRowKey(r)),
-                    onToggleSelectAll: () => scope.toggleSelectAll(
-                      [for (final r in d.paged.slice) thRowKey(r)],
+                  // The rebuilt table fills the space it is given (the shared
+                  // AppPaginatedTable resolves its own height), so it needs a
+                  // bounded parent here exactly like the desktop tab gives it.
+                  Expanded(
+                    child: TestHistoryTable(
+                      slice: d.paged.slice,
+                      start: d.paged.start,
+                      isEmpty: false,
+                      selecting: scope.selecting,
+                      selectedIds: scope.selectedIds,
+                      onToggleSelect: (r) =>
+                          scope.toggleSelected(thRowKey(r)),
+                      onLongPressRow: (r) =>
+                          scope.toggleSelected(thRowKey(r)),
+                      onToggleSelectAll: () => scope.toggleSelectAll(
+                        [for (final r in d.paged.slice) thRowKey(r)],
+                      ),
+                      allOnPageSelected: d.paged.slice.isNotEmpty &&
+                          d.paged.slice.every(
+                            (r) => scope.selectedIds.contains(thRowKey(r)),
+                          ),
+                      onOpen: opened.add,
+                      onOpenReport: onOpenReport,
                     ),
-                    allOnPageSelected: d.paged.slice.isNotEmpty &&
-                        d.paged.slice.every(
-                          (r) => scope.selectedIds.contains(thRowKey(r)),
-                        ),
-                    onOpen: opened.add,
                   ),
                 ],
               ),
@@ -147,6 +156,20 @@ void main() {
     await tester.pumpAndSettle();
     expect(opened, hasLength(1));
     expect(opened.single['id'], 2);
+  });
+
+  testWidgets('tapping the merged source+code cell opens the linked report',
+      (tester) async {
+    final reported = <Map<String, dynamic>>[];
+    await pumpTable(tester, onOpenReport: reported.add);
+
+    // The entry code now lives inside the Source cell; tapping it opens the
+    // linked inspection (المحضر), never the lab-test editor.
+    await tester.tap(find.text('EC-1'));
+    await tester.pumpAndSettle();
+    expect(reported, hasLength(1));
+    expect(reported.single['id'], 1);
+    expect(opened, isEmpty);
   });
 
   testWidgets('cards: long-press selects, tap toggles, never opens', (

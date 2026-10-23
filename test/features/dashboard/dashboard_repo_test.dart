@@ -815,7 +815,7 @@ void main() {
           (await repo.summary(period: 'all'))['comparison'] as Map;
       expect(comparison['approvalDeltaSign'], '');
       expect(comparison['approvalDelta'], '100.0');
-      expect(comparison['label'], 'أقل من الشهر اللي فات (-100.0%)');
+      expect(comparison['label'], 'أقل من الشهر السابق (-100.0%)');
     });
 
     test('the month-over-month insight card fires on real movement', () async {
@@ -840,9 +840,9 @@ void main() {
       }
 
       final cards = (await repo.summary(period: 'all'))['insightCards'] as List;
-      expect(cards.map((c) => '${c['title']}'), contains('الوضع بيتحسن'));
+      expect(cards.map((c) => '${c['title']}'), contains('الأداء يتحسن'));
       expect(cards.map((c) => '${c['title']}'),
-          isNot(contains('الوضع بينزل')));
+          isNot(contains('الأداء يتراجع')));
     });
 
     test('recommendations fire on the documented thresholds', () async {

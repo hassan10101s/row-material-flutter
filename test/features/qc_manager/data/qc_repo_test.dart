@@ -5,7 +5,6 @@ import 'package:material_lab/core/app_paths.dart';
 import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/features/qc_manager/data/qc_repo.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
-import 'package:material_lab/features/qc_manager/domain/qc_goal.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_inspection.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_nc_capa.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_sop.dart';
@@ -20,7 +19,7 @@ class _FakeAppPaths extends AppPaths {
   Future<Directory> appSupportRoot() async => Directory('$base/MaterialLab');
 }
 
-/// The local SQL layer on its own (plan V6_ENHANCED §24 P3).
+/// The local SQL layer on its own (plan V6_ENHANCED Â§24 P3).
 ///
 /// These tests deliberately bypass every facade, session and permission check so
 /// that a failure here means "the SQL is wrong", not "a guard rejected me". The
@@ -39,7 +38,6 @@ void main() {
   late QcTemplateRepo templates;
   late QcInspectionRepo inspections;
   late QcNcCapaRepo ncs;
-  late QcGoalRepo goals;
 
   const t0 = '2026-01-05T08:00:00Z';
   const t1 = '2026-01-06T09:00:00Z';
@@ -80,7 +78,6 @@ void main() {
     templates = QcTemplateRepo(helper);
     inspections = QcInspectionRepo(helper);
     ncs = QcNcCapaRepo(helper);
-    goals = QcGoalRepo(helper);
   });
 
   tearDown(() async {
@@ -600,8 +597,6 @@ void main() {
       templates = QcTemplateRepo(helper);
       inspections = QcInspectionRepo(helper);
       ncs = QcNcCapaRepo(helper);
-      goals = QcGoalRepo(helper);
-
       expect((await inspections.getInspection(inspectionId))!.scorePct, 100);
     });
 
@@ -657,6 +652,22 @@ void main() {
       expect(stored.majorNcCount, 1);
       expect(stored.minorNcCount, 1);
       expect(stored.criticalNcCount, 0);
+    });
+
+    test('a standalone finding survives the FK with a NULL linkage', () async {
+      // The create-NCR form raises findings with no inspection attached. The
+      // FK to qc_inspections is satisfied by a NULL child key only - a 0
+      // sentinel would fail on every save. The repository stores NULL, reads
+      // it back as 0, and takes no sheet out of recompute (there is none).
+      final findingId = await ncs.createFinding(
+        finding(0, severity: NcSeverity.critical),
+      );
+      expect(findingId, greaterThan(0));
+
+      final stored = (await ncs.listFindings(limit: 50)).single;
+      expect(stored.findingId, findingId);
+      expect(stored.inspectionId, 0);
+      expect(stored.severity, NcSeverity.critical);
     });
 
     test('one CAPA per finding, enforced by the repository', () async {
@@ -780,323 +791,6 @@ void main() {
       expect(stored.criticalNcCount, 0);
       expect(stored.resultOverall, QcOverallResult.conditional);
       expect(await ncs.getFinding(keep), isNotNull);
-    });
-  });
-
-  group('goals', () {
-    QcGoal goal() => QcGoal(
-      code: 'G-1',
-      title: 'Reduce scrap',
-      startDate: '2026-01-01',
-      createdAt: t0,
-      updatedAt: t0,
-    );
-
-    test(
-      'the bundle assembles goal, assignments, actions, KPIs and links',
-      () async {
-        final goalId = await goals.createGoal(goal());
-        await goals.assignGoal(
-          QcGoalAssignment(
-            goalId: goalId,
-            assigneeId: 'u1',
-            assignedAt: t0,
-            createdAt: t0,
-            updatedAt: t0,
-          ),
-        );
-        await goals.addAction(
-          QcGoalAction(
-            goalId: goalId,
-            actionText: 'Audit the press line',
-            createdAt: t0,
-            updatedAt: t0,
-          ),
-        );
-        await goals.addKpi(
-          QcGoalKpi(
-            goalId: goalId,
-            name: 'Scrap rate',
-            target: 2.0,
-            createdAt: t0,
-            updatedAt: t0,
-          ),
-        );
-        await goals.addLink(
-          QcGoalLink(
-            goalId: goalId,
-            linkType: QcGoalLinkType.finding,
-            refId: '42',
-            createdAt: t0,
-          ),
-        );
-
-        final bundle = (await goals.getGoalBundle(goalId))!;
-        expect(bundle.goal.goalId, goalId);
-        expect(bundle.assignments, hasLength(1));
-        expect(bundle.actions, hasLength(1));
-        expect(bundle.kpis, hasLength(1));
-        expect(bundle.kpis.single.target, 2);
-        expect(bundle.links, hasLength(1));
-        expect(bundle.links.single.refId, '42');
-      },
-    );
-
-    test(
-      're-assigning the same person updates instead of double counting',
-      () async {
-        final goalId = await goals.createGoal(goal());
-        QcGoalAssignment assign(String role) => QcGoalAssignment(
-          goalId: goalId,
-          assigneeId: 'u1',
-          role: role,
-          assignedAt: t0,
-          createdAt: t0,
-          updatedAt: t0,
-        );
-
-        await goals.assignGoal(assign(QcGoalRole.member));
-        await goals.assignGoal(assign(QcGoalRole.owner));
-
-        final assignments = await goals.listAssignments(goalId);
-        expect(assignments, hasLength(1));
-        expect(assignments.single.role, QcGoalRole.owner);
-      },
-    );
-
-    test('an unassigned action is a tombstone, not a hole', () async {
-      final goalId = await goals.createGoal(goal());
-      await goals.assignGoal(
-        QcGoalAssignment(
-          goalId: goalId,
-          assigneeId: 'u1',
-          assignedAt: t0,
-          createdAt: t0,
-          updatedAt: t0,
-        ),
-      );
-      final assignId = (await goals.listAssignments(goalId)).single.assignId!;
-
-      await goals.removeAssignment(assignId);
-
-      expect(await goals.listAssignments(goalId), isEmpty);
-      final raw = await db.query(
-        'qc_goal_assignments',
-        where: 'assign_id = ?',
-        whereArgs: [assignId],
-      );
-      expect(raw.single['deleted_at'], isNotNull);
-    });
-
-    test('a removed KPI and link fall out of the bundle', () async {
-      final goalId = await goals.createGoal(goal());
-      final kpiId = await goals.addKpi(
-        QcGoalKpi(
-          goalId: goalId,
-          name: 'Scrap',
-          target: 1.0,
-          createdAt: t0,
-          updatedAt: t0,
-        ),
-      );
-      final linkId = await goals.addLink(
-        QcGoalLink(
-          goalId: goalId,
-          linkType: QcGoalLinkType.sop,
-          refId: '7',
-          createdAt: t0,
-        ),
-      );
-
-      await goals.deleteKpi(kpiId);
-      await goals.deleteLink(linkId);
-
-      final bundle = (await goals.getGoalBundle(goalId))!;
-      expect(bundle.kpis, isEmpty);
-      expect(bundle.links, isEmpty);
-    });
-
-    test('completing a goal records who finished it', () async {
-      final goalId = await goals.createGoal(goal());
-
-      await goals.saveGoal(
-        QcGoal(
-          goalId: goalId,
-          code: 'G-1',
-          title: 'Reduce scrap',
-          startDate: '2026-01-01',
-          status: QcGoalStatus.completed,
-          completedAt: t1,
-          completedBy: 'u1',
-          createdAt: t0,
-          updatedAt: t1,
-        ),
-      );
-
-      final stored = (await goals.getGoalBundle(goalId))!.goal;
-      expect(stored.status, QcGoalStatus.completed);
-      expect(stored.completedAt, t1);
-      expect(stored.completedBy, 'u1');
-    });
-
-    test('a fresh goal starts at version 1', () async {
-      final goalId = await goals.createGoal(goal());
-
-      expect((await goals.getGoal(goalId))!.version, 1);
-    });
-
-    test('every save bumps the version by one', () async {
-      final goalId = await goals.createGoal(goal());
-      QcGoal edit(String title) => QcGoal(
-        goalId: goalId,
-        code: 'G-1',
-        title: title,
-        startDate: '2026-01-01',
-        createdAt: t0,
-        updatedAt: t0,
-      );
-
-      await goals.saveGoal(edit('Scrap down'));
-      expect((await goals.getGoal(goalId))!.version, 2);
-      await goals.saveGoal(edit('Scrap down again'));
-      expect((await goals.getGoal(goalId))!.version, 3);
-    });
-
-    test('a caller cannot forge the version it saves', () async {
-      final goalId = await goals.createGoal(goal());
-
-      // Sent version 99 must not stick: the counter is maintained by the
-      // statement, so optimistic concurrency stays meaningful.
-      await goals.saveGoal(
-        QcGoal(
-          goalId: goalId,
-          code: 'G-1',
-          title: 'Reduce scrap',
-          startDate: '2026-01-01',
-          version: 99,
-          createdAt: t0,
-          updatedAt: t0,
-        ),
-      );
-
-      expect((await goals.getGoal(goalId))!.version, 2);
-    });
-
-    test('the version survives a reopen of the database', () async {
-      final goalId = await goals.createGoal(goal());
-      await goals.saveGoal(
-        QcGoal(
-          goalId: goalId,
-          code: 'G-1',
-          title: 'Reduce scrap',
-          startDate: '2026-01-01',
-          createdAt: t0,
-          updatedAt: t0,
-        ),
-      );
-
-      await db.close();
-      // A second helper over the same directory, which is what a cold app start
-      // after a crash sees: the column has to come back from the schema itself,
-      // not from the object that happened to be open.
-      final coldHelper = DatabaseHelper(_FakeAppPaths(tmp.path));
-      final reopened = QcGoalRepo(coldHelper);
-
-      expect((await reopened.getGoal(goalId))!.version, 2);
-      expect((await coldHelper.database).isOpen, isTrue);
-      // The cold handle has to go too, or the temp dir stays locked.
-      await (await coldHelper.database).close();
-    });
-
-    test('a recorded finisher cannot be swapped by a later save', () async {
-      final goalId = await goals.createGoal(goal());
-      QcGoal completed(String by, String name) => QcGoal(
-        goalId: goalId,
-        code: 'G-1',
-        title: 'Reduce scrap',
-        startDate: '2026-01-01',
-        status: QcGoalStatus.completed,
-        completedAt: t1,
-        completedBy: by,
-        completedByName: name,
-        createdAt: t0,
-        updatedAt: t1,
-      );
-      await goals.saveGoal(completed('u1', 'Hana'));
-
-      // Re-saving as the same finisher is a no-op edit, not an error.
-      await goals.saveGoal(completed('u1', 'Hana'));
-      await expectLater(
-        goals.saveGoal(completed('u2', 'Omar')),
-        throwsA(isA<StateError>()),
-      );
-
-      final stored = (await goals.getGoal(goalId))!;
-      expect(stored.completedBy, 'u1');
-      expect(stored.completedByName, 'Hana');
-    });
-
-    test('a rejected finisher swap leaves the whole row untouched', () async {
-      final goalId = await goals.createGoal(goal());
-      await goals.saveGoal(
-        QcGoal(
-          goalId: goalId,
-          code: 'G-1',
-          title: 'Reduce scrap',
-          startDate: '2026-01-01',
-          status: QcGoalStatus.completed,
-          completedAt: t1,
-          completedBy: 'u1',
-          createdAt: t0,
-          updatedAt: t1,
-        ),
-      );
-
-      await expectLater(
-        goals.saveGoal(
-          QcGoal(
-            goalId: goalId,
-            code: 'G-1',
-            title: 'Retitled and re-signed',
-            startDate: '2026-01-01',
-            status: QcGoalStatus.completed,
-            completedAt: t1,
-            completedBy: 'u2',
-            createdAt: t0,
-            updatedAt: t1,
-          ),
-        ),
-        throwsA(isA<StateError>()),
-      );
-
-      // A partial write here would leave the title changed under a signature
-      // that says somebody else finished it.
-      final stored = (await goals.getGoal(goalId))!;
-      expect(stored.title, 'Reduce scrap');
-      expect(stored.completedBy, 'u1');
-      expect(stored.version, 2);
-    });
-
-    test('saving a goal with no id is refused', () async {
-      await expectLater(goals.saveGoal(goal()), throwsA(isA<StateError>()));
-    });
-
-    test('saving a goal that does not exist is refused', () async {
-      await expectLater(
-        // `copyWith` cannot set the id, so the row is rebuilt with it - the
-        // point is that the *store* refuses an update matching nothing.
-        goals.saveGoal(
-          QcGoal(
-            goalId: 4242,
-            code: 'G-404',
-            title: 'Does not exist',
-            startDate: '2026-01-01',
-            createdAt: t0,
-            updatedAt: t0,
-          ),
-        ),
-        throwsA(isA<StateError>()),
-      );
     });
   });
 

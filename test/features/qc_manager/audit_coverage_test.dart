@@ -8,7 +8,6 @@ import 'package:material_lab/features/organizations/data/member_write_guard.dart
 import 'package:material_lab/features/qc_manager/data/offline_first_qc_repository.dart';
 import 'package:material_lab/features/qc_manager/data/qc_audit_repo.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
-import 'package:material_lab/features/qc_manager/domain/qc_goal.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_inspection.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_nc_capa.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_sop.dart';
@@ -118,16 +117,6 @@ void main() {
     templateId: templateId,
     inspectionDate: t0,
     status: QcInspectionStatus.inProgress,
-    createdAt: t0,
-    updatedAt: t0,
-  );
-
-  QcGoal goal() => QcGoal(
-    code: 'GOAL-1',
-    title: 'Cut weld defects',
-    goalType: QcGoalType.kpi,
-    startDate: t0,
-    status: QcGoalStatus.draft,
     createdAt: t0,
     updatedAt: t0,
   );
@@ -302,8 +291,8 @@ void main() {
 
         final newId = await r.templates.duplicateTemplate(
           templateId,
-          'TPL-1-v2',
           'Daily weld check v2',
+          newCode: 'TPL-1-v2',
         );
 
         final dup = (await r.audit.list(
@@ -631,78 +620,6 @@ void main() {
     });
   });
 
-  group('goal completion', () {
-    test('records completed_by alongside the completion event', () async {
-      final r = repos();
-      final goalId = await r.goals.createGoal(goal());
-
-      await r.goals.saveGoal(
-        QcGoal(
-          goalId: goalId,
-          code: 'GOAL-1',
-          title: 'Cut weld defects',
-          goalType: QcGoalType.kpi,
-          startDate: t0,
-          status: QcGoalStatus.completed,
-          completedBy: 'shift-lead',
-          completedByName: 'Shift Lead',
-          completedAt: t1,
-          completionEvidenceJson: '{"photo":"weld-7.png"}',
-          createdAt: t0,
-          updatedAt: t1,
-        ),
-      );
-
-      final stored = await r.goals.getGoal(goalId);
-      expect(stored!.completedBy, 'shift-lead');
-      expect(stored.completedByName, 'Shift Lead');
-      expect(stored.completedAt, t1);
-
-      final complete = (await r.audit.list(
-        action: QcAuditAction.goalCompleted,
-      )).single;
-      expect(complete.entityId, '$goalId');
-      expect(complete.after['completed_by'], 'shift-lead');
-      expect(complete.after['completed_at'], t1);
-      expect(
-        complete.after['completion_evidence_json'],
-        contains('weld-7.png'),
-      );
-    });
-
-    test('assignment and action tracking are audited too', () async {
-      final r = repos();
-      await r.goals.createGoal(goal());
-
-      await r.goals.assignGoal(
-        QcGoalAssignment(
-          goalId: 1,
-          assigneeId: 'analyst-3',
-          assigneeName: 'Analyst Three',
-          assignedAt: t0,
-          assignedBy: 'u1',
-          createdAt: t0,
-          updatedAt: t0,
-        ),
-      );
-      await r.goals.addAction(
-        QcGoalAction(
-          goalId: 1,
-          actionText: 'Chart the defect Pareto',
-          createdAt: t0,
-          updatedAt: t0,
-        ),
-      );
-
-      expect(await actionsFor(r, QcAuditEntity.goalAssignment), [
-        QcAuditAction.goalAssigned,
-      ]);
-      expect(await actionsFor(r, QcAuditEntity.goalAction), [
-        QcAuditAction.goalActionAdded,
-      ]);
-    });
-  });
-
   group('the chain covers all of it', () {
     test('a full pass over every entity still verifies', () async {
       // The point of the coverage above is worthless if the resulting log does
@@ -716,7 +633,6 @@ void main() {
         finding(inspectionId: inspectionId, severity: NcSeverity.critical),
       );
       await r.ncCapa.createCapa(capa(findingId: findingId));
-      await r.goals.createGoal(goal());
       final sopId = await r.sops.createSop(sop());
       await r.sops.publishSopRevision(sopId, changeSummary: 'first');
       await r.templates.publishTemplate(templateId, publishedBy: 'u1');
@@ -724,7 +640,7 @@ void main() {
       final verification = await r.audit.verifyChain();
 
       expect(verification.isValid, isTrue, reason: verification.reason ?? '');
-      expect(verification.checked, greaterThanOrEqualTo(6));
+      expect(verification.checked, greaterThanOrEqualTo(5));
       // Every entity the module owns contributed to one chain.
       final types = (await r.audit.list()).map((a) => a.entityType).toSet();
       expect(
@@ -736,7 +652,6 @@ void main() {
           QcAuditEntity.inspection,
           QcAuditEntity.finding,
           QcAuditEntity.capa,
-          QcAuditEntity.goal,
         ]),
       );
     });

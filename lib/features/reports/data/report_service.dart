@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -6,11 +7,13 @@ import 'package:path/path.dart' as p;
 
 import '../../../core/constants/app_errors.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/constants/report_form_keys.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
+import '../../../design_system/export/table_html_export.dart';
 import '../../inspections/data/inspection_repo.dart';
 import '../../lab/data/lab_repo.dart';
 import '../../reference/data/reference_repo.dart';
@@ -58,7 +61,8 @@ class ReportService implements ReportRepository {
       id, entry_code, inspection_kind, product_id, formula_number, batch_number,
       material_name, material_code, inspection_date, expiry_date, supplier, quantity,
       sample_taken_by, specialist_name, decision_status, decision_reason, follow_up_note,
-      rejected_quantity, created_by_name, created_at, updated_at
+      rejected_quantity, created_by_name, created_at, updated_at,
+      sample_names_json, physical_results_json, chemical_results_json
   ''';
 
   Future<Map<String, dynamic>> _settings() => settingsRepo.getSettings();
@@ -73,12 +77,19 @@ class ReportService implements ReportRepository {
   /// `lab_sample_tests` lookup happens here.
   Future<Map<String, dynamic>> _loadForReport(int inspectionId) async {
     final inspection = await inspectionRepo.getById(inspectionId);
-    await labRepo.injectLabTests(inspection);
+    // Perf: batch samples only need the id, so they load concurrently with
+    // the lab-test injection instead of a second serial DB round-trip.
     if ('${inspection['inspection_kind'] ?? 'raw'}' == 'product') {
-      final samples = await labRepo.listBatchSamples(inspectionId);
+      final samples = await Future.wait([
+        labRepo.injectLabTests(inspection),
+        labRepo.listBatchSamples(inspectionId),
+      ]);
       inspection['batch_samples'] = [
-        for (final s in samples) Map<String, dynamic>.from(s),
+        for (final s in samples[1] as List<Map<String, dynamic>>)
+          Map<String, dynamic>.from(s),
       ];
+    } else {
+      await labRepo.injectLabTests(inspection);
     }
     return inspection;
   }
@@ -144,6 +155,7 @@ class ReportService implements ReportRepository {
     String templateName,
     Map<String, dynamic> context,
   ) async {
+    context['is_en'] = !AppText.arabic;
     final template = await _readAssetText('assets/templates/$templateName');
     return tinyJinjaRender(template, context);
   }
@@ -175,6 +187,20 @@ class ReportService implements ReportRepository {
     required Future<Uint8List> Function() fallback,
   }) async {
     final html = await _renderHtmlTemplate(templateName, context);
+    return _pdfFromHtml(
+      html,
+      noPageOverride: noPageOverride,
+      fallback: fallback,
+    );
+  }
+
+  /// Convert a ready [html] document to PDF, falling back to [fallback] when
+  /// no headless browser is available or the conversion fails.
+  Future<Uint8List> _pdfFromHtml(
+    String html, {
+    bool noPageOverride = false,
+    required Future<Uint8List> Function() fallback,
+  }) async {
     try {
       return await _htmlPdf.exportPdf(html, noPageOverride: noPageOverride);
     } on HtmlToPdfUnavailableException {
@@ -186,20 +212,29 @@ class ReportService implements ReportRepository {
 
   /// Attach the QR PNG data-URI (label templates render it via
   /// `{{ qr_image_data_uri }}`).
-  Map<String, dynamic> _withQrImageUris(Map<String, dynamic> context) {
-    final uri = generateQrDataUri(
-      '${context['qr_payload_text'] ?? ''}',
-    ).dataUri;
-    context['qr_image_data_uri'] = uri;
-    final labels = context['labels'] as List<Map<String, dynamic>>?;
-    if (labels != null) {
-      for (final label in labels) {
-        label['qr_image_data_uri'] = generateQrDataUri(
-          '${label['qr_payload_text'] ?? ''}',
-        ).dataUri;
+  ///
+  /// QR encode → per-module paint → PNG encode → base64 runs 1..100 times per
+  /// label export; this runs in a worker isolate so a batch export cannot
+  /// freeze the UI while the context is being prepared. The mutation happens
+  /// on the isolate's copy, so the returned map replaces the caller's.
+  Future<Map<String, dynamic>> _withQrImageUris(
+    Map<String, dynamic> context,
+  ) {
+    return Isolate.run(() {
+      final uri = generateQrDataUri(
+        '${context['qr_payload_text'] ?? ''}',
+      ).dataUri;
+      context['qr_image_data_uri'] = uri;
+      final labels = context['labels'] as List<Map<String, dynamic>>?;
+      if (labels != null) {
+        for (final label in labels) {
+          label['qr_image_data_uri'] = generateQrDataUri(
+            '${label['qr_payload_text'] ?? ''}',
+          ).dataUri;
+        }
       }
-    }
-    return context;
+      return context;
+    });
   }
 
   // ── Inspection report (single record) ─────────────────────────
@@ -216,12 +251,25 @@ class ReportService implements ReportRepository {
       settings: settings,
       encryptionSecret: await _secretBytes(),
     );
+    // Perf: the native renderer is the mobile path (no headless browser) and
+    // the desktop fallback; Arabic shaping + layout over the full context is
+    // seconds of main-thread work, so it runs in an isolate. If the context
+    // ever carries non-sendable data, the on-thread renderer keeps the
+    // export working (correct bytes, just jankier).
+    Future<Uint8List> nativeRender() async {
+      try {
+        return await PdfRenderer.renderInspectionInIsolate(ctx);
+      } on Object {
+        return PdfRenderer.renderInspection(ctx);
+      }
+    }
+
     final bytes = htmlBuilder == null
-        ? await PdfRenderer.renderInspection(ctx)
+        ? await nativeRender()
         : await _exportHtmlPdf(
             'report_template.html',
             await htmlBuilder!.buildContext(inspection),
-            fallback: () => PdfRenderer.renderInspection(ctx),
+            fallback: nativeRender,
           );
     final mat = sanitizeFilename('${inspection['material_name'] ?? ''}');
     final code = sanitizeFilename('${inspection['entry_code'] ?? ''}');
@@ -239,7 +287,7 @@ class ReportService implements ReportRepository {
   Future<ReportDoc> sampleLabelPdf(int inspectionId) async {
     final inspection = await _loadForReport(inspectionId);
     final settings = await _settings();
-    final ctx = _withQrImageUris(
+    final ctx = await _withQrImageUris(
       buildLabelContext(
         inspection,
         settings: settings,
@@ -250,7 +298,13 @@ class ReportService implements ReportRepository {
       'label_template.html',
       ctx,
       noPageOverride: true,
-      fallback: () => PdfRenderer.renderLabel(ctx),
+      fallback: () async {
+        try {
+          return await PdfRenderer.renderLabelInIsolate(ctx);
+        } on Object {
+          return PdfRenderer.renderLabel(ctx);
+        }
+      },
     );
     final entryCode = '${inspection['entry_code'] ?? ''}';
     return ReportDoc(
@@ -259,6 +313,85 @@ class ReportService implements ReportRepository {
       title: 'Label_$entryCode',
     );
   }
+
+  // ── Equipment label ─────────────────────────────────────────────
+
+  /// Port of the sample-label flow for lab equipment: 10×5cm device sticker.
+  /// Same reference approach as the sample label — HTML template → headless
+  /// Edge/Chrome, with the native [PdfRenderer] sticker as the fallback
+  /// (which is also the whole mobile path: phones have no desktop browser).
+  @override
+  Future<ReportDoc> equipmentLabelPdf(int equipmentId) async {
+    final equipment = await labRepo.getEquipment(equipmentId);
+    final settings = await _settings();
+    final ctx = await _withQrImageUris(
+      buildEquipmentLabelContext(
+        equipment,
+        settings: settings,
+        encryptionSecret: await _secretBytes(),
+      ),
+    );
+    final bytes = await _exportHtmlPdf(
+      'equipment_label_template.html',
+      ctx,
+      noPageOverride: true,
+      fallback: () async {
+        try {
+          return await PdfRenderer.renderEquipmentLabelInIsolate(ctx);
+        } on Object {
+          return PdfRenderer.renderEquipmentLabel(ctx);
+        }
+      },
+    );
+    final code = sanitizeFilename('${equipment['code'] ?? equipmentId}');
+    return ReportDoc(
+      filename: 'EquipmentLabel_${code}_${fileTimestamp()}.pdf',
+      bytes: bytes,
+      title: 'EquipmentLabel_$code',
+    );
+  }
+
+  /// Selected lab equipment as N stickers per A4 page — the same reference
+  /// approach and page packing as [batchLabelsPdf] (10×5cm cells, 2×5 grid).
+  @override
+  Future<ReportDoc> equipmentLabelsPdf(List<int> equipmentIds) async {
+    final ids = equipmentIds.toSet().toList();
+    if (ids.isEmpty) {
+      throw ValidationError(AppErrors.batchLabelsSelectAtLeastOne);
+    }
+    if (ids.length > 100) {
+      throw ValidationError(AppErrors.batchLabelsMax100);
+    }
+    final equipments = [
+      for (final id in ids) await labRepo.getEquipment(id),
+    ];
+    final settings = await _settings();
+    final ctx = await _withQrImageUris(
+      buildEquipmentLabelsContext(
+        equipments,
+        settings: settings,
+        encryptionSecret: await _secretBytes(),
+      ),
+    );
+    final bytes = await _exportHtmlPdf(
+      'equipment_batch_label_template.html',
+      ctx,
+      noPageOverride: true,
+      fallback: () async {
+        try {
+          return await PdfRenderer.renderBatchEquipmentLabelsInIsolate(ctx);
+        } on Object {
+          return PdfRenderer.renderBatchEquipmentLabels(ctx);
+        }
+      },
+    );
+    return ReportDoc(
+      filename: 'EquipmentLabels_${equipments.length}_${fileTimestamp()}.pdf',
+      bytes: bytes,
+      title: 'EquipmentLabels_${equipments.length}',
+    );
+  }
+  // ── Batch labels ──────────────────────────────────────────────────
 
   /// Port of export_batch_labels: up to 100 labels on A4 pages.
   @override
@@ -274,7 +407,7 @@ class ReportService implements ReportRepository {
       inspections.add(await _loadForReport(id));
     }
     final settings = await _settings();
-    final ctx = _withQrImageUris(
+    final ctx = await _withQrImageUris(
       buildBatchLabelsContext(
         inspections,
         settings: settings,
@@ -285,7 +418,13 @@ class ReportService implements ReportRepository {
       'batch_label_template.html',
       ctx,
       noPageOverride: true,
-      fallback: () => PdfRenderer.renderBatchLabels(ctx),
+      fallback: () async {
+        try {
+          return await PdfRenderer.renderBatchLabelsInIsolate(ctx);
+        } on Object {
+          return PdfRenderer.renderBatchLabels(ctx);
+        }
+      },
     );
     return ReportDoc(
       filename: 'BatchLabels_${inspections.length}_${fileTimestamp()}.pdf',
@@ -326,7 +465,7 @@ class ReportService implements ReportRepository {
       fallback: () => PdfRenderer.renderDaily(ctx),
     );
     return ReportDoc(
-      filename: 'تقرير_اليومي_$day.pdf',
+      filename: AppText.t('تقرير_اليومي_$day.pdf', 'Daily_Report_$day.pdf'),
       bytes: bytes,
       title: AppText.t('التقرير اليومي - $day', 'Daily report - $day'),
     );
@@ -364,7 +503,10 @@ class ReportService implements ReportRepository {
     final period =
         '${year.toString().padLeft(4, '0')}${month.toString().padLeft(2, '0')}';
     return ReportDoc(
-      filename: 'تقرير_الشهري_$period.pdf',
+      filename: AppText.t(
+        'تقرير_الشهري_$period.pdf',
+        'Monthly_Report_$period.pdf',
+      ),
       bytes: bytes,
       title: AppText.t(
         'التقرير الشهري - $month/$year',
@@ -391,7 +533,7 @@ class ReportService implements ReportRepository {
       fallback: () => PdfRenderer.renderYearly(ctx),
     );
     return ReportDoc(
-      filename: 'تقرير_السنوي_$year.pdf',
+      filename: AppText.t('تقرير_السنوي_$year.pdf', 'Yearly_Report_$year.pdf'),
       bytes: bytes,
       title: AppText.t('التقرير السنوي - $year', 'Yearly report - $year'),
     );
@@ -427,7 +569,10 @@ class ReportService implements ReportRepository {
       fallback: () => PdfRenderer.renderFollowUp(ctx),
     );
     return ReportDoc(
-      filename: 'تقرير_المتابعة_${day}_${fileTimestamp()}.pdf',
+      filename: AppText.t(
+        'تقرير_المتابعة_${day}_${fileTimestamp()}.pdf',
+        'Follow_Up_Report_${day}_${fileTimestamp()}.pdf',
+      ),
       bytes: bytes,
       title: AppText.t('التقرير اليومي - $day', 'Daily report - $day'),
     );
@@ -469,6 +614,11 @@ class ReportService implements ReportRepository {
       settings: settings,
       title: '${data['title']}',
       periodLabel: '${data['period_label']}',
+      formNoKey: switch (type) {
+        'monthly' => ReportFormKeys.labMonthlyReport,
+        'yearly' => ReportFormKeys.labYearlyReport,
+        _ => ReportFormKeys.labDailyReport,
+      },
     );
     final bytes = await _exportHtmlPdf(
       'lab_report_template.html',
@@ -485,10 +635,44 @@ class ReportService implements ReportRepository {
       }
     }
     return ReportDoc(
-      filename: 'تقرير_المعمل_${type}_$period.pdf',
+      filename: AppText.t(
+        'تقرير_المعمل_${type}_$period.pdf',
+        'Lab_Report_${type}_$period.pdf',
+      ),
       bytes: bytes,
       title: '${data['title']}',
     );
+  }
+
+  /// Generic register table (e.g. the test log) as a PDF. The same HTML
+  /// document the register's "print" action would write, converted through the
+  /// shared HTML→PDF pipeline on desktop and drawn by [PdfRenderer.renderTable]
+  /// on phones (or any machine without a headless browser).
+  @override
+  Future<ReportDoc> tableReport({
+    required String filename,
+    required String title,
+    required List<String> headers,
+    required List<List<String>> rows,
+  }) async {
+    if (rows.isEmpty) {
+      throw ValidationError(
+        AppText.t('لا توجد سجلات للتصدير.', 'No records to export.'),
+      );
+    }
+    final bytes = await _pdfFromHtml(
+      TableHtmlExport.buildHtml(
+        title: title,
+        headers: headers,
+        rows: rows,
+      ),
+      fallback: () => PdfRenderer.renderTable(
+        title: title,
+        headers: headers,
+        rows: rows,
+      ),
+    );
+    return ReportDoc(filename: filename, bytes: bytes, title: title);
   }
 
   // ── Disk output (parity with controller._get_export_dir) ────────

@@ -88,21 +88,22 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
 
   /// Bilingual mapping for the remote creation errors: raw technical English
   /// must never reach the UI, while the code stays for debugging.
-  static String _remoteCreateMessage(RemoteAuthException error) =>
-      switch (error.code) {
-        'member_exists' => AppText.t(
-          'هذا الحساب مرتبط بشركة حالية. غادر الشركة الحالية أولًا لإنشاء شركة جديدة.',
-          'This account is already linked to a company. Leave the current company first to create a new one.',
-        ),
-        'organization_exists' => AppText.t(
-          'الشركة موجودة بالفعل.',
-          'Organization already exists.',
-        ),
-        _ => AppText.t(
-          'تعذر إنشاء الشركة. حاول مرة أخرى.',
-          'Could not create the company. Try again.',
-        ),
-      };
+  static String _remoteCreateMessage(
+    RemoteAuthException error,
+  ) => switch (error.code) {
+    'member_exists' => AppText.t(
+      'هذا الحساب مرتبط بشركة حالية. غادر الشركة الحالية أولًا لإنشاء شركة جديدة.',
+      'This account is already linked to a company. Leave the current company first to create a new one.',
+    ),
+    'organization_exists' => AppText.t(
+      'الشركة موجودة بالفعل.',
+      'Organization already exists.',
+    ),
+    _ => AppText.t(
+      'تعذر إنشاء الشركة. حاول مرة أخرى.',
+      'Could not create the company. Try again.',
+    ),
+  };
 
   @override
   Future<void> joinWithInvite({required String organizationId}) async {
@@ -175,6 +176,10 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
       ownerUid: profile.ownerUid,
       status: profile.status,
       schemaVersion: profile.schemaVersion,
+      trialStartedAt: profile.trialStartedAt,
+      trialEndsAt: profile.trialEndsAt,
+      trialConsumed: profile.trialConsumed,
+      manuallyActivated: profile.manuallyActivated,
     );
   }
 
@@ -483,6 +488,10 @@ class _Members implements MemberRepository {
 
   /// Self-service departure. No `_require(...)` on purpose: leaving has to be
   /// possible for a `lab` or `viewer` member, who holds no `users.*` permission.
+  ///
+  /// The one exception is the company owner: the company must never be left
+  /// without an active owner, so an `admin` who is the last active owner is
+  /// refused until a co-owner has been invited **and activated**.
   @override
   Future<void> leave() async {
     final uid = _guard.uid;
@@ -496,6 +505,7 @@ class _Members implements MemberRepository {
         code: 'signed_out',
       );
     }
+    await _requireSuccessorOwner(uid: uid, memberId: memberId);
     await _remote.leaveOrganization(
       organizationId: _orgId,
       memberId: memberId,
@@ -510,6 +520,55 @@ class _Members implements MemberRepository {
     );
     // `onRosterChanged` is intentionally not fired: the caller unbinds the
     // organization and signs out immediately afterwards.
+  }
+
+  /// Refuses to let the last active owner leave.
+  ///
+  /// A company must always keep at least one active owner, otherwise it becomes
+  /// ownerless and unmanageable (`ownerUid` is immutable in the rules, so there
+  /// is no way to appoint one afterwards). The check only applies to the
+  /// `admin` role — a `trial_owner` is a single-user trial and cannot invite
+  /// anyone, so blocking the departure would trap them.
+  ///
+  /// Best-effort by design: if the roster cannot be read (offline / denied) the
+  /// member is not trapped; the UI blocks the button in the normal path.
+  Future<void> _requireSuccessorOwner({
+    required String uid,
+    required String memberId,
+  }) async {
+    late final List<Member> members;
+    try {
+      members = await listMembers();
+    } on Object {
+      return;
+    }
+    Member? self;
+    for (final member in members) {
+      if (member.id == memberId ||
+          (member.uid.isNotEmpty && member.uid == uid)) {
+        self = member;
+        break;
+      }
+    }
+    final owner = self;
+    if (owner == null || owner.role != AppRoles.admin) return;
+    final hasSuccessor = members.any(
+      (member) =>
+          member.isActive &&
+          member.role == AppRoles.admin &&
+          member.id != owner.id,
+    );
+    if (!hasSuccessor) {
+      throw OrganizationFailure(
+        AppText.t(
+          'لا يمكنك مغادرة الشركة إلا بعد إضافة مالك آخر وتفعيله. '
+              'استخدم «دعوة مالك آخر» ثم فعّل الدعوة أولاً.',
+          'You cannot leave the company until another owner is added and '
+              'activated. Use "Invite co-owner" first, then activate it.',
+        ),
+        code: 'last_owner',
+      );
+    }
   }
 
   /// Active first, then invited/pending, then disabled.

@@ -24,6 +24,13 @@ abstract final class AuditAction {
   static const String backupRestored = 'BACKUP_RESTORED';
   static const String settingsUpdated = 'SETTINGS_UPDATED';
   static const String deviceRegistered = 'DEVICE_REGISTERED';
+  // QC user-authored tables (the QC settings feature). These writes go
+  // through the sync write contract and the shared audit outbox rather than
+  // `qc_audits`, whose schema CHECK does not know the new entity kinds.
+  static const String customTableSaved = 'CUSTOM_TABLE_SAVED';
+  static const String customTableDeleted = 'CUSTOM_TABLE_DELETED';
+  static const String customRowRecorded = 'CUSTOM_ROW_RECORDED';
+  static const String customRowDeleted = 'CUSTOM_ROW_DELETED';
 }
 
 /// Writes `audit_logs` **in the same transaction** as the business write

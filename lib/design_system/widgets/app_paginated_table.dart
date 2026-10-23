@@ -63,6 +63,24 @@ class AppPaginatedTable extends StatefulWidget {
   /// variant passes a larger value for a finger-sized target.
   final double rowHeight;
 
+  /// Optional per-column sort keys, aligned with [headers]. A non-null entry
+  /// turns that header into a tap target that calls [onSortChanged]; a null (or
+  /// missing) entry leaves the header plain. Opt-in: every existing call site
+  /// passes nothing and keeps its static headers.
+  final List<String?>? headerSortKeys;
+
+  /// The column currently driving the sort (one of [headerSortKeys]) and the
+  /// direction, so the header can show the ▲/▼ mark. Ignored when
+  /// [headerSortKeys] is null.
+  final String? sortKey;
+  final bool sortAscending;
+  final ValueChanged<String>? onSortChanged;
+
+  /// Optional per-row background tint, aligned with [rows] (page-aligned in
+  /// server mode). A null entry leaves the row on the card surface. Used by the
+  /// test log to keep its out-of-range / in-range highlight.
+  final List<Color?>? rowBackgrounds;
+
   /// Multi-row selection (the Vue register's checkbox column). The column
   /// appears iff [onToggleIndex] is set; indices are table indices — the
   /// owner maps them to ids (e.g. `visible[index]['id']`). [selectedIndices]
@@ -105,6 +123,11 @@ class AppPaginatedTable extends StatefulWidget {
     this.selectAllValue,
     this.onToggleAll,
     this.selectHidden = false,
+    this.headerSortKeys,
+    this.sortKey,
+    this.sortAscending = true,
+    this.onSortChanged,
+    this.rowBackgrounds,
   });
 
   /// Fixed width of the selection column (Vue uses 44px).
@@ -358,20 +381,41 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
                 child: Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: Text(
-                    widget.headers[i],
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12.spMax,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.textMuted,
-                    ),
-                  ),
+                  child: _headerCell(i),
                 ),
               ),
             ),
           if (widget.headerTrailing != null) widget.headerTrailing!,
         ],
+      ),
+    );
+  }
+
+  /// One header label, optionally a sort target ([headerSortKeys]) that shows
+  /// the ▲/▼ mark for the active [sortKey].
+  Widget _headerCell(int i) {
+    final label = widget.headers[i];
+    final key = widget.headerSortKeys != null &&
+            i < widget.headerSortKeys!.length
+        ? widget.headerSortKeys![i]
+        : null;
+    final active = key != null && key == widget.sortKey;
+    final text = Text(
+      active ? '$label${widget.sortAscending ? ' ▲' : ' ▼'}' : label,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        fontSize: 12.spMax,
+        fontWeight: FontWeight.w700,
+        color: AppColors.textMuted,
+      ),
+    );
+    if (key == null || widget.onSortChanged == null) return text;
+    return InkWell(
+      onTap: () => widget.onSortChanged!(key),
+      borderRadius: BorderRadius.circular(4),
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: text,
       ),
     );
   }
@@ -387,55 +431,62 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
         (inSelectMode && widget.onToggleIndex != null) ||
         widget.onRowTap != null ||
         (!inSelectMode && widget.selectable && widget.selectHidden);
-    return MouseRegion(
-      cursor: interactive
-          ? SystemMouseCursors.click
-          : MouseCursor.defer,
-      child: InkWell(
-        onTap: inSelectMode && widget.onToggleIndex != null
-            ? () => widget.onToggleIndex!(realIndex)
-            : widget.onRowTap == null
-                ? null
-                : () => widget.onRowTap!(realIndex),
-        onLongPress: !inSelectMode && widget.selectable && widget.selectHidden
-            ? () => _enterSelectMode(realIndex)
-            : null,
-        hoverColor: AppColors.primary.withValues(alpha: 0.06),
-        highlightColor: AppColors.primary.withValues(alpha: 0.10),
-        child: SizedBox(
-          height: widget.rowHeight,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-            child: Row(
-              children: [
-                if (_showSelectColumn)
-                  SizedBox(
-                    width: AppPaginatedTable.selectionWidth,
-                    child: _selectBox(
-                      value:
-                          widget.selectedIndices?.contains(realIndex) ?? false,
-                      onChanged: (_) => widget.onToggleIndex!(realIndex),
+    final bg = widget.rowBackgrounds != null &&
+            realIndex < widget.rowBackgrounds!.length
+        ? widget.rowBackgrounds![realIndex]
+        : null;
+    final content = InkWell(
+      onTap: inSelectMode && widget.onToggleIndex != null
+          ? () => widget.onToggleIndex!(realIndex)
+          : widget.onRowTap == null
+              ? null
+              : () => widget.onRowTap!(realIndex),
+      onLongPress: !inSelectMode && widget.selectable && widget.selectHidden
+          ? () => _enterSelectMode(realIndex)
+          : null,
+      hoverColor: AppColors.primary.withValues(alpha: 0.06),
+      highlightColor: AppColors.primary.withValues(alpha: 0.10),
+      child: SizedBox(
+        height: widget.rowHeight,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+          child: Row(
+            children: [
+              if (_showSelectColumn)
+                SizedBox(
+                  width: AppPaginatedTable.selectionWidth,
+                  child: _selectBox(
+                    value:
+                        widget.selectedIndices?.contains(realIndex) ?? false,
+                    onChanged: (_) => widget.onToggleIndex!(realIndex),
+                  ),
+                ),
+              for (var i = 0; i < row.length; i++)
+                SizedBox(
+                  width: i < widths.length ? widths[i] : 120,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: 4,
+                    ),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: row[i],
                     ),
                   ),
-                for (var i = 0; i < row.length; i++)
-                  SizedBox(
-                    width: i < widths.length ? widths[i] : 120,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.sm,
-                        vertical: 4,
-                      ),
-                      child: Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: row[i],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),
+    );
+    return MouseRegion(
+      cursor: interactive ? SystemMouseCursors.click : MouseCursor.defer,
+      // A tinted row needs its own opaque Material so the ink ripple paints
+      // on top of the tint instead of being hidden behind it.
+      child: bg == null
+          ? content
+          : Material(color: bg, child: content),
     );
   }
 

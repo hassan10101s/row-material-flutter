@@ -32,19 +32,24 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
       // History already included; only the lab enrichment is extra.
       List<Map<String, dynamic>> chemicalAnalyses = const [];
       if (entryCode.isNotEmpty && labResults != null) {
-        chemicalAnalyses =
-            await labResults!.listSampleTestsForEntryCode(entryCode);
+        chemicalAnalyses = await labResults!.listSampleTestsForEntryCode(
+          entryCode,
+        );
       }
-      safeEmit(state.copyWith(
-        loading: false,
-        inspection: inspection,
-        history: List<Map<String, dynamic>>.from(inspection['status_history'] ?? []),
-        chemicalAnalyses: chemicalAnalyses,
-      ));
+      safeEmit(
+        state.copyWith(
+          loading: false,
+          inspection: inspection,
+          history: List<Map<String, dynamic>>.from(
+            inspection['status_history'] ?? [],
+          ),
+          chemicalAnalyses: chemicalAnalyses,
+        ),
+      );
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 
@@ -56,7 +61,9 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
       final doc = kind == 'label'
           ? await reports.sampleLabelPdf(inspectionId)
           : await reports.inspectionReport(inspectionId);
-      final date = parseIsoDate('${state.inspection?['inspection_date'] ?? ''}');
+      final date = parseIsoDate(
+        '${state.inspection?['inspection_date'] ?? ''}',
+      );
       final file = await reports.saveReport(doc, date: date);
       return file.path;
     } finally {

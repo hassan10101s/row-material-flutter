@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/app_paths.dart';
 import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_audit.dart';
-import 'package:material_lab/features/qc_manager/domain/qc_goal.dart';
+import 'package:material_lab/features/qc_manager/domain/qc_custom_table.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_inspection.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_nc_capa.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_sop.dart';
@@ -99,26 +99,20 @@ void main() {
       pk: 'id',
     ),
     'QcAudit': (fromMap: QcAudit.fromMap, table: 'qc_audits', pk: 'id'),
-    'QcGoal': (fromMap: QcGoal.fromMap, table: 'qc_goals', pk: 'goal_id'),
-    'QcGoalAssignment': (
-      fromMap: QcGoalAssignment.fromMap,
-      table: 'qc_goal_assignments',
-      pk: 'assign_id',
+    'QcCustomTable': (
+      fromMap: QcCustomTable.fromMap,
+      table: 'qc_custom_tables',
+      pk: 'table_id',
     ),
-    'QcGoalAction': (
-      fromMap: QcGoalAction.fromMap,
-      table: 'qc_goal_actions',
-      pk: 'action_id',
+    'QcCustomTableField': (
+      fromMap: QcCustomTableField.fromMap,
+      table: 'qc_custom_table_fields',
+      pk: 'field_id',
     ),
-    'QcGoalKpi': (
-      fromMap: QcGoalKpi.fromMap,
-      table: 'qc_goal_kpis',
-      pk: 'kpi_id',
-    ),
-    'QcGoalLink': (
-      fromMap: QcGoalLink.fromMap,
-      table: 'qc_goal_links',
-      pk: 'link_id',
+    'QcCustomTableRow': (
+      fromMap: QcCustomTableRow.fromMap,
+      table: 'qc_custom_table_rows',
+      pk: 'row_id',
     ),
   };
 
@@ -163,7 +157,7 @@ void main() {
       hasLength(tables.length),
       reason: 'two models are pointed at the same table',
     );
-    expect(bindings, hasLength(18), reason: 'a QC model was left unbound');
+    expect(bindings, hasLength(16), reason: 'a QC model was left unbound');
   });
 
   for (final entry in bindings.entries) {

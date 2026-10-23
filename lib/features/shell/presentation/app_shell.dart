@@ -16,7 +16,7 @@ import '../../../design_system/feedback/app_feedback.dart';
 import '../../../design_system/widgets/app_adaptive.dart';
 import '../../auth/domain/user.dart';
 import '../../../di/service_locator.dart';
-import '../../notifications/data/notification_service.dart';
+import '../../notifications/domain/notifications_port.dart';
 import '../../settings/domain/export_root_service.dart';
 import '../../sync/presentation/sync_status_controller.dart';
 import 'desktop/app_shell.dart';
@@ -83,18 +83,16 @@ class _AppShellState extends State<AppShell> {
     connectivityChanges: widget.connectivity.onStatusChange,
   )..start();
 
-  bool _consumedNotifTap = false;
-
   @override
   void initState() {
     super.initState();
     // Killed-app OS notification tap: the payload was stashed by
-    // NotificationService.initOs before the router existed. Consume once.
+    // NotificationService.initOs before the router existed. Consume it once
+    // (the field is cleared as part of routing, so re-runs are no-ops).
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_consumedNotifTap || !mounted) return;
-      _consumedNotifTap = true;
+      if (!mounted) return;
       try {
-        final service = getIt<NotificationService>();
+        final service = getIt<NotificationsPort>();
         final payload = service.pendingPayload;
         if (payload == null || payload.isEmpty) return;
         service.pendingPayload = null;
@@ -104,6 +102,19 @@ class _AppShellState extends State<AppShell> {
         // Best effort: stay on the current page (unregistered in tests).
       }
     });
+    // Later taps (app foregrounded, pushes arriving mid-session): the payload
+    // listener keeps working. The previous one-shot latch meant every OS
+    // notification tap beyond the first silently opened nothing.
+    try {
+      getIt<NotificationsPort>().addPayloadListener(_openPayload);
+    } on Object {
+      // NotificationService is not registered (tests, harnesses): skip.
+    }
+  }
+
+  void _openPayload(String payload) {
+    final target = _routeForPayload(payload);
+    if (target != null && mounted) context.go(target);
   }
 
   static String? _routeForPayload(String payload) {
@@ -116,6 +127,13 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    // The services are process-lifetime singletons: a listener left attached
+    // to a disposed shell would route through context.go on a defunct node.
+    try {
+      getIt<NotificationsPort>().removePayloadListener(_openPayload);
+    } on Object {
+      // getIt may be torn down in tests before the shell disposes.
+    }
     _syncStatus.dispose();
     super.dispose();
   }

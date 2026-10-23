@@ -409,10 +409,10 @@ class DashboardRepo implements DashboardRepository {
         'approvalDelta': delta.abs().toStringAsFixed(1),
         'label': delta >= 0
             ? AppText.t(
-                'أحسن من الشهر اللي فات (+${delta.abs().toStringAsFixed(1)}%)',
+                'أفضل من الشهر السابق (+${delta.abs().toStringAsFixed(1)}%)',
                 'Better than last month (+${delta.abs().toStringAsFixed(1)}%)')
             : AppText.t(
-                'أقل من الشهر اللي فات (${delta.toStringAsFixed(1)}%)',
+                'أقل من الشهر السابق (${delta.toStringAsFixed(1)}%)',
                 'Lower than last month (${delta.toStringAsFixed(1)}%)'),
       };
     } else if (sorted.length == 1) {
@@ -483,7 +483,7 @@ class DashboardRepo implements DashboardRepository {
       cards.add({
         'title': AppText.t('قبول ممتاز', 'Excellent acceptance'),
         'description': AppText.t(
-            'القبول $approvalRate% — شغل عالي، حافظ عليه.',
+            'القبول $approvalRate% — أداء ممتاز، حافظ عليه.',
             'Acceptance is $approvalRate% — great work, keep it up.'),
         'tone': 'success',
       });
@@ -491,7 +491,7 @@ class DashboardRepo implements DashboardRepository {
       cards.add({
         'title': AppText.t('قبول معقول', 'Fair acceptance'),
         'description': AppText.t(
-            'القبول $approvalRate% — بص على حالات الرفض وحسّنها.',
+            'القبول $approvalRate% — راجع حالات الرفض وحسّنها.',
             'Acceptance is $approvalRate% — look at rejections and improve.'),
         'tone': 'warning',
       });
@@ -499,7 +499,7 @@ class DashboardRepo implements DashboardRepository {
       cards.add({
         'title': AppText.t('قبول ضعيف', 'Weak acceptance'),
         'description': AppText.t(
-            'القبول $approvalRate% بس — لازم تتدخل بسرعة وتراجع الموردين.',
+            'القبول $approvalRate% فقط — يلزم تدخّل سريع ومراجعة الموردين.',
             'Acceptance is only $approvalRate% — act fast and review suppliers.'),
         'tone': 'danger',
       });
@@ -509,14 +509,14 @@ class DashboardRepo implements DashboardRepository {
       cards.add({
         'title': AppText.t('رفض عالي', 'High rejection'),
         'description': AppText.t(
-            'الرفض $rejectionRate% — شوف إيه الأسباب الأساسية.',
+            'الرفض $rejectionRate% — راجع الأسباب الأساسية.',
             'Rejection is $rejectionRate% — find the main causes.'),
         'tone': 'danger',
       });
     } else if (rejectPct > 5) {
       cards.add({
         'title': AppText.t('رفض تحت السيطرة', 'Rejection under control'),
-        'description': AppText.t('الرفض $rejectionRate% — مقبول بس تابع على طول.',
+        'description': AppText.t('الرفض $rejectionRate% — مقبول، لكن تابع باستمرار.',
             'Rejection is $rejectionRate% — okay but keep watching.'),
         'tone': 'warning',
       });
@@ -527,17 +527,17 @@ class DashboardRepo implements DashboardRepository {
           double.parse('${lastTwo[0]['approvalRate']}');
       if (trend > 5) {
         cards.add({
-          'title': AppText.t('الوضع بيتحسن', 'Getting better'),
+          'title': AppText.t('الأداء يتحسن', 'Getting better'),
           'description': AppText.t(
-              'القبول زاد ${trend.abs().toStringAsFixed(1)}% عن الشهر اللي فات.',
+              'ارتفع القبول ${trend.abs().toStringAsFixed(1)}% مقارنة بالشهر السابق.',
               'Acceptance rose ${trend.abs().toStringAsFixed(1)}% vs last month.'),
           'tone': 'success',
         });
       } else if (trend < -5) {
         cards.add({
-          'title': AppText.t('الوضع بينزل', 'Going down'),
+          'title': AppText.t('الأداء يتراجع', 'Going down'),
           'description': AppText.t(
-              'القبول نزل ${trend.abs().toStringAsFixed(1)}% عن الشهر اللي فات.',
+              'انخفض القبول ${trend.abs().toStringAsFixed(1)}% مقارنة بالشهر السابق.',
               'Acceptance dropped ${trend.abs().toStringAsFixed(1)}% vs last month.'),
           'tone': 'danger',
         });
@@ -606,7 +606,7 @@ class DashboardRepo implements DashboardRepository {
       _labKpis(db, period),
       _qcCheckKpis(db, period),
       _ncrSummary(db),
-      _sopGoalKpis(db),
+      _sopKpis(db),
       _inventoryKpis(db),
       _trendPoints(db, period),
     ]);
@@ -614,7 +614,7 @@ class DashboardRepo implements DashboardRepository {
     final lab = settled[1] as LabKpis;
     final qc = settled[2] as QcCheckKpis;
     final ncr = settled[3] as NcrKpisSummary;
-    final sopGoals = settled[4] as SopGoalKpis;
+    final sopGoals = settled[4] as SopKpis;
     final inventory = settled[5] as InventoryKpis;
     final trend = settled[6] as List<TrendPoint>;
     // ── Data-science layer (pure, filter-aware, never throws) ──────
@@ -1105,11 +1105,8 @@ GROUP BY label ORDER BY cnt DESC LIMIT 8''');
     }
   }
 
-  Future<SopGoalKpis> _sopGoalKpis(Database db) async {
+  Future<SopKpis> _sopKpis(Database db) async {
     var sopTotal = 0, pub = 0, exp = 0, expSoon = 0, pend = 0;
-    var gTotal = 0, gActive = 0, gOver = 0, gDone = 0, gOverActions = 0;
-    var progressSum = 0.0;
-    var progressN = 0;
     try {
       if (await _hasTable(db, 'qc_sops')) {
         final today = _today();
@@ -1128,62 +1125,12 @@ FROM qc_sops WHERE COALESCE(deleted_at,'') = '' ''', [today, today, soon])).firs
         pend = _int(r['q']);
       }
     } catch (_) {}
-    try {
-      if (await _hasTable(db, 'qc_goals')) {
-        final today = _today();
-        final r = (await db.rawQuery('''
-SELECT COUNT(*) AS t,
- SUM(CASE WHEN status='Active' THEN 1 ELSE 0 END) AS a,
- SUM(CASE WHEN status NOT IN ('Completed','Cancelled','Archived') AND COALESCE(due_date,'') <> '' AND substr(due_date,1,10) < ? THEN 1 ELSE 0 END) AS o,
- SUM(CASE WHEN status='Completed' THEN 1 ELSE 0 END) AS d
-FROM qc_goals WHERE COALESCE(deleted_at,'') = '' ''', [today])).first;
-        gTotal = _int(r['t']);
-        gActive = _int(r['a']);
-        gOver = _int(r['o']);
-        gDone = _int(r['d']);
-        try {
-          // Single SQL AVG with clamp (was: fetch all rows + Dart loop).
-          final pr = (await db.rawQuery('''
-SELECT AVG(
-  CASE WHEN (target_value - baseline_value) = 0 THEN NULL
-  ELSE MIN(1.0, MAX(0.0,
-    (current_value - baseline_value) * 1.0 / (target_value - baseline_value)))
-  END) AS avg_p,
-  COUNT(
-  CASE WHEN (target_value - baseline_value) IS NOT NULL
-    AND (target_value - baseline_value) <> 0 THEN 1 ELSE NULL END) AS n
-FROM qc_goals WHERE COALESCE(deleted_at,'') = ''
-  AND baseline_value IS NOT NULL AND target_value IS NOT NULL AND current_value IS NOT NULL''')).first;
-          final n = _int(pr['n']);
-          if (n > 0 && pr['avg_p'] != null) {
-            progressSum = _num(pr['avg_p']) * n;
-            progressN = n;
-          }
-        } catch (_) {}
-        if (await _hasTable(db, 'qc_goal_actions')) {
-          try {
-            gOverActions = Sqflite.firstIntValue(await db.rawQuery(
-                    "SELECT COUNT(*) AS c FROM qc_goal_actions WHERE COALESCE(deleted_at,'') = '' AND status NOT IN ('Done','Cancelled') AND COALESCE(due_date,'') <> '' AND substr(due_date,1,10) < ?",
-                    [today])) ??
-                0;
-          } catch (_) {}
-        }
-      }
-    } catch (_) {}
-    return SopGoalKpis(
+    return SopKpis(
       sopTotal: sopTotal,
       sopPublished: pub,
       sopExpired: exp,
       sopExpiring: expSoon,
       sopPending: pend,
-      goalTotal: gTotal,
-      goalActive: gActive,
-      goalOverdue: gOver,
-      goalCompleted: gDone,
-      goalAvgProgress:
-          progressN == 0 ? 0.0 : _round1(progressSum / progressN * 100),
-      goalKpiMetRate: 0.0,
-      goalOverdueActions: gOverActions,
     );
   }
 

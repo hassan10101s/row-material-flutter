@@ -116,32 +116,35 @@ class _MobileUnitsTabState extends State<MobileUnitsTab> {
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppPageHeader(
-              title: AppText.t('إعدادات الوحدات', 'Units Settings'),
-              subtitle: '$countLabel ${AppText.t('وحدة', 'units')}',
-              icon: Icons.straighten_outlined,
-              actions: [
-                IconButton(
-                  tooltip: AppText.t('تصدير جدول', 'Export table'),
-                  constraints: const BoxConstraints(
-                    minWidth: 48,
-                    minHeight: 48,
-                  ),
-                  onPressed: state.rows.isEmpty
-                      ? null
-                      : () => TableHtmlExport.export(
-                          context,
-                          filePrefix: 'units',
-                          title: DesktopUnitsTab.exportTitle(),
-                          headers: DesktopUnitsTab.exportHeaders(),
-                          rows: DesktopUnitsTab.exportRows(
-                            state.rows,
-                            state.usage,
+            // Header entrance only (see params_tab for the rationale).
+            AppEntrance(
+              child: AppPageHeader(
+                title: AppText.t('إعدادات الوحدات', 'Units Settings'),
+                subtitle: '$countLabel ${AppText.t('وحدة', 'units')}',
+                icon: Icons.straighten_outlined,
+                actions: [
+                  IconButton(
+                    tooltip: AppText.t('تصدير جدول', 'Export table'),
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
+                    onPressed: state.rows.isEmpty
+                        ? null
+                        : () => TableHtmlExport.export(
+                            context,
+                            filePrefix: 'units',
+                            title: DesktopUnitsTab.exportTitle(),
+                            headers: DesktopUnitsTab.exportHeaders(),
+                            rows: DesktopUnitsTab.exportRows(
+                              state.rows,
+                              state.usage,
+                            ),
                           ),
-                        ),
-                  icon: const Icon(Icons.table_view_outlined),
-                ),
-              ],
+                    icon: const Icon(Icons.table_view_outlined),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             AppField(

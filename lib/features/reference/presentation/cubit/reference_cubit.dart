@@ -6,7 +6,7 @@ import 'reference_state.dart';
 
 /// Loads the reference materials catalog for the Materials tab.
 ///
-/// Mobile infinite-scroll model (mirrors `QcInspectionsCubit`): the DB does
+/// Mobile infinite-scroll model (mirrors the routine history cubit): the DB does
 /// the search + `LIMIT/OFFSET`, the cubit holds the accumulated rows.
 /// Desktop callers keep working — `load()` resets to the first page and
 /// `state.materials` still holds everything loaded so far.
@@ -26,11 +26,7 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
     );
     try {
       final settled = await Future.wait([
-        repo.listMaterialsPaged(
-          query: state.query,
-          limit: pageSize,
-          offset: 0,
-        ),
+        repo.listMaterialsPaged(query: state.query, limit: pageSize, offset: 0),
         repo.countMaterials(query: state.query),
       ]);
       if (token != _token) return;
@@ -49,7 +45,7 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 

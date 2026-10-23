@@ -125,36 +125,40 @@ class _MobileParamsTabState extends State<MobileParamsTab> {
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppPageHeader(
-              title: _isChemical
-                  ? AppText.t('التحليل الكيميائي', 'Chemical Analysis')
-                  : AppText.t('الفحص الظاهري', 'Physical Aspects'),
-              subtitle: '$countLabel ${AppText.t('بارامتر', 'parameters')}',
-              icon: Icons.tag_outlined,
-              actions: [
-                IconButton(
-                  tooltip: AppText.t('تصدير جدول', 'Export table'),
-                  constraints: const BoxConstraints(
-                    minWidth: 48,
-                    minHeight: 48,
+            // Header entrance only (per-card entrances would keep timers
+            // alive while scrolling — see analyses_tab).
+            AppEntrance(
+              child: AppPageHeader(
+                title: _isChemical
+                    ? AppText.t('التحليل الكيميائي', 'Chemical Analysis')
+                    : AppText.t('الفحص الظاهري', 'Physical Aspects'),
+                subtitle: '$countLabel ${AppText.t('بارامتر', 'parameters')}',
+                icon: Icons.tag_outlined,
+                actions: [
+                  IconButton(
+                    tooltip: AppText.t('تصدير جدول', 'Export table'),
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
+                    onPressed: state.rows.isEmpty
+                        ? null
+                        : () => TableHtmlExport.export(
+                            context,
+                            filePrefix: 'params',
+                            title: _isChemical
+                                ? AppText.t(
+                                    'التحليل الكيميائي',
+                                    'Parameter Chemical Analysis',
+                                  )
+                                : AppText.t('الفحص الظاهري', 'Physical Aspects'),
+                            headers: DesktopParamsTab.exportHeaders(),
+                            rows: DesktopParamsTab.exportRows(state.rows),
+                          ),
+                    icon: const Icon(Icons.table_view_outlined),
                   ),
-                  onPressed: state.rows.isEmpty
-                      ? null
-                      : () => TableHtmlExport.export(
-                          context,
-                          filePrefix: 'params',
-                          title: _isChemical
-                              ? AppText.t(
-                                  'التحليل الكيميائي',
-                                  'Parameter Chemical Analysis',
-                                )
-                              : AppText.t('الفحص الظاهري', 'Physical Aspects'),
-                          headers: DesktopParamsTab.exportHeaders(),
-                          rows: DesktopParamsTab.exportRows(state.rows),
-                        ),
-                  icon: const Icon(Icons.table_view_outlined),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             AppField(

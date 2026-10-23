@@ -435,7 +435,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
         'localId': id,
         'version': nextVersion,
         'operation': operation,
-        'actor': guard.email,
+        'actor': guard.actorName,
       },
     );
   }

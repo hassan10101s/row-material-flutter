@@ -62,6 +62,41 @@ abstract interface class LabLocalRepository {
     String description = '',
     Map<String, dynamic>? user,
     DatabaseExecutor? executor,
+    String expiryDate = '',
+  });
+
+  /// Receives a quantity as a new lot (expiry mandatory). Returns the lot row.
+  Future<Map<String, dynamic>> receiveLot({
+    required int inventoryId,
+    required double qty,
+    required String expiryDate,
+    String supplier = '',
+    String note = '',
+    Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
+  });
+
+  /// Lots of one item, FEFO order. Empty lots excluded unless asked.
+  Future<List<Map<String, dynamic>>> listInventoryLots(
+    int inventoryId, {
+    bool includeEmpty = false,
+    DatabaseExecutor? executor,
+  });
+
+  /// Zeroes every expired lot with remaining quantity. Returns the disposed
+  /// quantity.
+  Future<double> disposeExpiredLots(
+    int inventoryId, {
+    Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
+  });
+
+  /// Unified per-item log: lots, receipts, consumptions, adjustments and
+  /// disposals, newest first — what the log button shows.
+  Future<List<Map<String, dynamic>>> itemStockLog(
+    int inventoryId, {
+    int limit = 200,
+    DatabaseExecutor? executor,
   });
 
   Future<Map<String, dynamic>> updateInventoryItem(
@@ -127,8 +162,10 @@ abstract interface class LabLocalRepository {
   Future<Map<String, dynamic>> createEquipment({
     required String name,
     String manufacturer = '',
+    String serialNumber = '',
     String description = '',
     String lastCalibrationDate = '',
+    String nextCalibrationDate = '',
     DatabaseExecutor? executor,
   });
 

@@ -92,6 +92,26 @@ class PullWorker {
       if (e.collection == SyncCollection.referenceMaterials) return 1;
       if (e.collection == SyncCollection.labConfig) return 2;
       if (e.type == 'sample') return 3;
+      // QC custom tables: the definition must land before its typed
+      // columns, which must land before the rows whose `values_json` keys
+      // name those columns (rows would otherwise render against an empty
+      // field list until the next cycle).
+      if (e.localTable == 'qc_custom_tables') return 4;
+      if (e.localTable == 'qc_custom_table_fields') return 5;
+      if (e.localTable == 'qc_custom_table_rows') return 6;
+      // QC checklists + execution + NCR/CAPA (plan P8): strict parent-first
+      // order — templates → sections → items → inspections → responses →
+      // task logs → findings → capa. A child without its parent throws a
+      // transient `MissingParentException`, so explaining here saves whole
+      // retry rounds.
+      if (e.localTable == 'qc_templates') return 7;
+      if (e.localTable == 'qc_sections') return 8;
+      if (e.localTable == 'qc_items') return 9;
+      if (e.localTable == 'qc_inspections') return 10;
+      if (e.localTable == 'qc_task_log') return 11;
+      if (e.localTable == 'qc_responses') return 12;
+      if (e.localTable == 'qc_findings_nc') return 13;
+      if (e.localTable == 'qc_capa') return 14;
       return 4;
     }
     final indexed = [for (var i = 0; i < input.length; i++) (i, input[i])];
@@ -127,22 +147,51 @@ class PullWorker {
     // the cycle instead of being dropped by the advancing cursor.
     final failedDocs = <({SyncEntity entity, RemoteDocument doc})>[];
 
+    // Several lab-settings entities share the remote `labConfig` collection.
+    // Walking it once per *entity* used to download the whole collection nine
+    // times per cycle, each walk discarding the documents belonging to the
+    // other eight tables. Each collection is now walked once per cycle and the
+    // same pages are fanned out to every entity positioned on it (plan §9.3);
+    // per-entity dependency order is preserved by the groups' first-appearance
+    // order (see `_dependenciesFirst`).
+    final db = await queue.dbHelper.database;
+    final groups = <String, List<SyncEntity>>{};
     for (final entity in entities) {
+      groups.putIfAbsent(entity.collection.name, () => []).add(entity);
+    }
+
+    for (final members in groups.values) {
+      // The per-page fetch reads the *earliest* member cursor so a member that
+      // lags behind cannot lose stream positions the others have advanced
+      // past. Cursors are cached per cycle (not re-read per page) and
+      // refreshed whenever an advance writes them.
+      final cursors = <String, PullCursor>{};
+      Future<PullCursor> cursorOf(SyncEntity entity) async =>
+          cursors[entity.type] ??= await metadata.cursor(entity.type);
+
       for (var page = 0; page < maxPagesPerCycle; page++) {
-        final cursor = await metadata.cursor(entity.type);
+        // The fetch position is purely the earliest member cursor — never the
+        // ('', '') seed, which would be "earlier than everything" and would
+        // pin every page to the head of the stream.
+        PullCursor? walk;
+        for (final member in members) {
+          final current = await cursorOf(member);
+          if (walk == null || _cursorEarlier(current, walk)) walk = current;
+        }
+        final walkCursor = walk ?? const PullCursor('', '');
         late RemotePage result;
         try {
           result = await remote.listSince(
             organizationId: organizationId,
-            collection: entity.collection,
-            startAtTs: cursor.timestamp,
-            startAtId: cursor.documentId,
+            collection: members.first.collection,
+            startAtTs: walkCursor.timestamp,
+            startAtId: walkCursor.documentId,
             limit: pageSize,
           );
         } on Object catch (e) {
           if (quietPermissionErrors && _isPermissionDenied(e)) {
-            // Nothing to do for this entity on this device: stop walking it and
-            // keep the cursor where it is.
+            // No permission for this collection on this device: stop walking
+            // it and keep every cursor where it is.
             break;
           }
           error = '$e';
@@ -152,46 +201,70 @@ class PullWorker {
           hasMore = hasMore || result.hasMore;
           break;
         }
-        // One transaction for the whole page instead of one per document.
-        // A page is at most `pageSize` (300) rows, so a single commit is
-        // bounded work, and the page either lands completely or not at all --
-        // which is what the cursor below assumes when it advances.
-        final outcomes = await tracedTransaction(
-          await queue.dbHelper.database,
-          'pull.applyPage(${entity.type})',
-          (txn) => _applyPage(txn, entity, result.documents, organizationId),
-        );
-        for (var i = 0; i < outcomes.length; i++) {
-          switch (outcomes[i]) {
-            case _ApplyOutcome.applied:
-              applied++;
-            case _ApplyOutcome.skipped:
-              skipped++;
-            case _ApplyOutcome.pushedBack:
-              pushedBack++;
-            case _ApplyOutcome.failed:
-              failed++;
-              failedDocs.add((entity: entity, doc: result.documents[i]));
+
+        for (final member in members) {
+          final memberCursor = await cursorOf(member);
+          final accepts = member.accepts;
+          final memberDocs = [
+            for (final document in result.documents)
+              if ((accepts == null || accepts(document)) &&
+                  _cursorEarlier(memberCursor, _cursorOf(document)))
+                document,
+          ];
+          // Documents another member owns are not re-downloaded here anymore;
+          // they count as skipped exactly as the per-entity walk did.
+          skipped += result.documents.length - memberDocs.length;
+          if (memberDocs.isEmpty) {
+            // Nothing of this page belongs to this member; the old walk
+            // advanced its cursor across the whole page anyway.
+            await _advanceCursor(
+              cursors,
+              member,
+              _cursorOf(result.documents.last),
+            );
+            continue;
           }
-        }
-        // Advance the cursor only past the contiguous successful prefix.
-        // Advancing past a failed document would skip it forever (until its
-        // version bumps): the retry below re-fetches verbatim, but if the
-        // retry also fails the cursor must still point before it so the next
-        // cycle re-attempts it.
-        final firstFailed = outcomes.indexWhere((o) => o == _ApplyOutcome.failed);
-        if (firstFailed == -1) {
-          final last = result.documents.last;
-          await metadata.setCursor(
-            entity.type,
-            PullCursor(last.updatedAt ?? '', last.id),
+          // One transaction for the whole page instead of one per document.
+          // A page is at most `pageSize` (300) rows, so a single commit is
+          // bounded work, and the page either lands completely or not at all --
+          // which is what the cursor below assumes when it advances.
+          final outcomes = await tracedTransaction(
+            db,
+            'pull.applyPage(${member.type})',
+            (txn) => _applyPage(txn, member, memberDocs, organizationId),
           );
-        } else if (firstFailed > 0) {
-          final lastGood = result.documents[firstFailed - 1];
-          await metadata.setCursor(
-            entity.type,
-            PullCursor(lastGood.updatedAt ?? '', lastGood.id),
+          for (var i = 0; i < outcomes.length; i++) {
+            switch (outcomes[i]) {
+              case _ApplyOutcome.applied:
+                applied++;
+              case _ApplyOutcome.skipped:
+                skipped++;
+              case _ApplyOutcome.pushedBack:
+                pushedBack++;
+              case _ApplyOutcome.failed:
+                failed++;
+                failedDocs.add((entity: member, doc: memberDocs[i]));
+            }
+          }
+          // Advance the cursor only past the contiguous successful prefix.
+          // Advancing past a failed document would skip it forever (until its
+          // version bumps): the retry below re-fetches verbatim, but if the
+          // retry also fails the cursor must still point before it so the next
+          // cycle re-attempts it. Cursors never move backwards: a member whose
+          // own walk had already advanced past this page simply keeps its
+          // position.
+          final firstFailed = outcomes.indexWhere(
+            (o) => o == _ApplyOutcome.failed,
           );
+          if (firstFailed == -1) {
+            await _advanceCursor(cursors, member, _cursorOf(memberDocs.last));
+          } else if (firstFailed > 0) {
+            await _advanceCursor(
+              cursors,
+              member,
+              _cursorOf(memberDocs[firstFailed - 1]),
+            );
+          }
         }
         if (!result.hasMore) break;
         hasMore = true;
@@ -200,8 +273,10 @@ class PullWorker {
 
     if (failedDocs.isNotEmpty) {
       // Dependencies pulled later in this same cycle (materials, products,
-      // members) unblock the failures above: re-fetch each verbatim and
-      // re-apply. Bounded (200) so a poisoned batch cannot stall the cycle.
+      // members) unblock the failures above: the documents are already in
+      // hand, so they are re-applied verbatim before any network round trip
+      // is spent on them. Anything still failing is re-fetched live (bounded,
+      // 200) in case the remote copy moved on during the cycle.
       final retried = await _retryFailedDocs(organizationId, failedDocs);
       applied += retried.applied;
       failed -= retried.resolved;
@@ -228,12 +303,43 @@ class PullWorker {
     );
   }
 
-  /// Re-applies documents that failed mid-cycle, one verbatim re-fetch each.
+  PullCursor _cursorOf(RemoteDocument document) =>
+      PullCursor(document.updatedAt ?? '', document.id);
+
+  /// Writes [target] into the per-cycle cache and the persistent store, never
+  /// moving a member cursor backwards over its own history.
+  Future<void> _advanceCursor(
+    Map<String, PullCursor> cursors,
+    SyncEntity member,
+    PullCursor target,
+  ) async {
+    final current = cursors[member.type];
+    if (current != null && !_cursorEarlier(current, target)) return;
+    cursors[member.type] = target;
+    await metadata.setCursor(member.type, target);
+  }
+
+  /// Cursor-stream order: `(updatedAt, documentId)`, the same (ts, id) key
+  /// `listSince` walks by; ISO timestamps compare lexicographically.
+  bool _cursorEarlier(PullCursor a, PullCursor b) {
+    if (a.timestamp != b.timestamp) {
+      return a.timestamp.compareTo(b.timestamp) < 0;
+    }
+    return a.documentId.compareTo(b.documentId) < 0;
+  }
+
+  /// Re-applies documents that failed mid-cycle.
   ///
-  /// Runs after every entity walked, so a sample that failed on a missing
-  /// material succeeds once the material entity landed. Returns how many were
-  /// applied vs stopped failing (skipped/pushed-back also count as resolved:
-  /// the row is now coherent with the server).
+  /// Runs after every collection was walked, so a sample that failed on a
+  /// missing material succeeds once the material entity landed. The verbatim
+  /// in-hand copy is reused first: this same cycle just downloaded it, so a
+  /// network round trip per document buys nothing when the failure was a
+  /// local dependency order problem (the usual case). Only documents still
+  /// failing after the in-hand pass are re-fetched live (so a remote copy
+  /// that moved on during the cycle is honoured).
+  ///
+  /// Returns how many were applied vs stopped failing (skipped/pushed-back
+  /// also count as resolved: the row is now coherent with the server).
   Future<({int applied, int resolved})> _retryFailedDocs(
     String organizationId,
     List<({SyncEntity entity, RemoteDocument doc})> docs,
@@ -241,7 +347,43 @@ class PullWorker {
     var applied = 0;
     var resolved = 0;
     final db = await queue.dbHelper.database;
-    for (final entry in docs.take(200)) {
+    final stillFailing = <({SyncEntity entity, RemoteDocument doc})>[];
+
+    // Pass 1 — in-hand reruns, one transaction for the whole batch.
+    if (docs.isNotEmpty) {
+      try {
+        final outcomes = await tracedTransaction(
+          db,
+          'pull.retryInHand(${docs.length})',
+          (txn) async => [
+            for (final entry in docs.take(200))
+              await _applyDocument(txn, entry.entity, entry.doc, organizationId),
+          ],
+        );
+        for (var i = 0; i < outcomes.length; i++) {
+          switch (outcomes[i]) {
+            case _ApplyOutcome.applied:
+              applied++;
+              resolved++;
+            case _ApplyOutcome.skipped:
+            case _ApplyOutcome.pushedBack:
+              resolved++;
+            case _ApplyOutcome.failed:
+              stillFailing.add(docs[i]);
+          }
+        }
+      } on Object catch (_) {
+        // The batch transaction failed wholesale (schema/lock edge): every
+        // in-hand entry goes through the live pass below, which contains
+        // per-document failures one row at a time.
+        for (var i = 0; i < docs.length; i++) {
+          stillFailing.add(docs[i]);
+        }
+      }
+    }
+
+    // Pass 2 — verbatim live re-fetch for whatever still fails.
+    for (final entry in stillFailing.take(200)) {
       RemoteDocument current;
       try {
         current = await remote.getDocument(
@@ -253,25 +395,23 @@ class PullWorker {
         continue;
       }
       if (!current.exists) continue;
-      try {
-        final outcome = await tracedTransaction(
-          db,
-          'pull.retry(${entry.entity.type})',
-          (txn) => _applyDocument(txn, entry.entity, current, organizationId),
-        );
-        switch (outcome) {
-          case _ApplyOutcome.applied:
-            applied++;
-            resolved++;
-          case _ApplyOutcome.skipped:
-          case _ApplyOutcome.pushedBack:
-            resolved++;
-          case _ApplyOutcome.failed:
-            break;
-        }
-      } on Object catch (e) {
-        // ignore: avoid_print
-        print('[sync] pull retry skipped ${entry.entity.type}/${entry.doc.id}: $e');
+      final outcome = await _applyRetryDoc(
+        db,
+        organizationId,
+        entry.entity,
+        entry.doc.id,
+        current,
+      );
+      if (outcome == null) continue;
+      switch (outcome) {
+        case _ApplyOutcome.applied:
+          applied++;
+          resolved++;
+        case _ApplyOutcome.skipped:
+        case _ApplyOutcome.pushedBack:
+          resolved++;
+        case _ApplyOutcome.failed:
+          break; // unreachable: _applyDocument reports failures by throwing
       }
     }
     return (applied: applied, resolved: resolved);
@@ -340,7 +480,7 @@ class PullWorker {
           ? const <Map<String, Object?>>[]
           : await txn.query(
               entity.localTable,
-              where: 'id = ?',
+              where: '${entity.pkColumn} = ?',
               whereArgs: [localRef],
               limit: 1,
             );
@@ -356,7 +496,7 @@ class PullWorker {
           document.data['deletedAt'] ?? document.data['deleted_at'];
       if (deletedAt != null) {
         if (existing.isNotEmpty) {
-          final localId = existing.first['id'];
+          final localId = existing.first[entity.pkColumn];
           final patch = <String, Object?>{
             'deleted_at': '$deletedAt',
             'sync_state': 'synced',
@@ -374,7 +514,7 @@ class PullWorker {
           await txn.update(
             entity.localTable,
             patch,
-            where: 'id = ?',
+            where: '${entity.pkColumn} = ?',
             whereArgs: [localId],
           );
         }
@@ -417,21 +557,23 @@ class PullWorker {
           (localVersion > syncedVersion && syncedVersion > 0);
 
       if (remoteVersion == syncedVersion) {
+        await _healDivergentIdentity(txn, entity, document, local);
         return _ApplyOutcome.skipped;
       }
       if (remoteVersion < localVersion && hasLocalEdits) {
         // Local is newer: keep the local edit and push it on top of the remote.
+        final localId = (local[entity.pkColumn] as num?)?.toInt();
         await txn.update(
           entity.localTable,
           {'sync_state': 'queued'},
-          where: 'id = ?',
-          whereArgs: [local['id']],
+          where: '${entity.pkColumn} = ?',
+          whereArgs: [localId],
         );
         await queue.enqueue(
           txn,
           entityType: entity.type,
           entityId: entity.docId(local),
-          localRef: (local['id'] as num?)?.toInt(),
+          localRef: localId,
           operation: local['deleted_at'] == null ? 'update' : 'tombstone',
           payload: buildRemotePayload(
             entity,
@@ -459,12 +601,121 @@ class PullWorker {
       await txn.update(
         entity.localTable,
         _withDefaults(entity, row, await _availableColumns(txn, entity))
-          ..remove('id'),
-        where: 'id = ?',
-        whereArgs: [local['id']],
+          ..remove(entity.pkColumn),
+        where: '${entity.pkColumn} = ?',
+        whereArgs: [local[entity.pkColumn]],
       );
       await _repointAfterMaterialApply(txn, entity, document);
       return _ApplyOutcome.applied;
+    }
+  }
+
+  /// Adopts the document's cross-device identity on a natural-key match.
+  ///
+  /// A document and a local row can describe the same business row while
+  /// carrying different `remote_id`s (two devices that both created "the same"
+  /// item before the organization was bound; the natural key names both). The
+  /// version rule above then skips the update — and the local row keeps an
+  /// identity no other device knows, so every child pointing at the
+  /// document's identity (inventory lots of that item, equipment events)
+  /// fails its parent remap in `entity_registry` on every cycle, forever.
+  ///
+  /// When the document's own payload proves the identity is the doc id
+  /// (`remoteId == document.id`, what the `remoteIdDocId` writers stamp), the
+  /// skipped row adopts it: one column, no version bump, idempotent.
+  Future<void> _healDivergentIdentity(
+    DatabaseExecutor txn,
+    SyncEntity entity,
+    RemoteDocument document,
+    Map<String, Object?> local,
+  ) async {
+    if (!entity.naturalKeyIdentity) return;
+    final docRemoteId = '${document.data['remoteId'] ?? ''}';
+    if (docRemoteId.isEmpty || docRemoteId != document.id) return;
+    final current = '${local['remote_id'] ?? ''}';
+    if (current == document.id) return;
+    final cols = await _availableColumns(txn, entity);
+    if (!cols.contains('remote_id')) return;
+    await txn.update(
+      entity.localTable,
+      {'remote_id': document.id},
+      where: '${entity.pkColumn} = ?',
+      whereArgs: [local[entity.pkColumn]],
+    );
+  }
+
+  /// One live retry application of [document], with the missing-parent heal.
+  ///
+  /// Returns the outcome, or null when the document must stay failed (its
+  /// local schema refused it, or the named parent has no remote copy either).
+  Future<_ApplyOutcome?> _applyRetryDoc(
+    Database db,
+    String organizationId,
+    SyncEntity entity,
+    String docId,
+    RemoteDocument document,
+  ) async {
+    try {
+      return await tracedTransaction(
+        db,
+        'pull.retry(${entity.type})',
+        (txn) => _applyDocument(txn, entity, document, organizationId),
+      );
+    } on MissingParentException catch (e) {
+      // "Transient" only holds while the parent can still arrive on its own.
+      // When it never landed, fetch it by its remote id (its document id for
+      // the remoteIdDocId parents), apply it, and re-apply the child on top.
+      if (!await _applyMissingParent(organizationId, e)) {
+        // ignore: avoid_print
+        print('[sync] pull retry skipped ${entity.type}/$docId: $e');
+        return null;
+      }
+      try {
+        return await tracedTransaction(
+          db,
+          'pull.retryAfterParent(${entity.type})',
+          (txn) => _applyDocument(txn, entity, document, organizationId),
+        );
+      } on Object catch (e2) {
+        // ignore: avoid_print
+        print('[sync] pull retry skipped ${entity.type}/$docId: $e2');
+        return null;
+      }
+    } on Object catch (e) {
+      // ignore: avoid_print
+      print('[sync] pull retry skipped ${entity.type}/$docId: $e');
+      return null;
+    }
+  }
+
+  /// Fetches the parent document named by [error] and applies it locally.
+  ///
+  /// One level deep: the parents handled here (inventory items, equipment,
+  /// QC custom tables) have no parent rule of their own, so their apply
+  /// cannot recurse. "Skipped" still counts as success — the
+  /// [_healDivergentIdentity] above runs on that path, aligning the row's
+  /// identity so the child's remap finds it.
+  Future<bool> _applyMissingParent(
+    String organizationId,
+    MissingParentException error,
+  ) async {
+    final parent = SyncEntity.byType(error.parentEntity);
+    if (parent == null) return false;
+    try {
+      final doc = await remote.getDocument(
+        organizationId: organizationId,
+        collection: parent.collection,
+        documentId: error.parentRemoteId,
+      );
+      if (!doc.exists) return false;
+      final outcome = await tracedTransaction(
+        await queue.dbHelper.database,
+        'pull.parent(${parent.type})',
+        (txn) => _applyDocument(txn, parent, doc, organizationId),
+      );
+      return outcome != _ApplyOutcome.failed;
+    } on Object {
+      return false;
     }
   }
 

@@ -112,7 +112,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   }) async {
     final auth = _auth;
     if (auth == null) {
-      throw const RemoteAuthException('FirebaseAuth is not initialized');
+      throw const RemoteAuthException('The account service is not available.');
     }
     try {
       await auth.signInWithEmailAndPassword(
@@ -131,7 +131,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   }) async {
     final auth = _auth;
     if (auth == null) {
-      throw const RemoteAuthException('FirebaseAuth is not initialized');
+      throw const RemoteAuthException('The account service is not available.');
     }
     final normalized = email.trim().toLowerCase();
     final credential = EmailAuthProvider.credential(
@@ -159,6 +159,57 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     }
   }
 
+  @override
+  Future<void> updateUserDisplayName({
+    required String uid,
+    required String displayName,
+  }) async {
+    final auth = _auth;
+    if (auth == null) {
+      throw const RemoteAuthException('The account service is not available.');
+    }
+    final name = displayName.trim();
+    if (name.isEmpty) {
+      throw const RemoteAuthException(
+        'The name cannot be empty.',
+        code: 'invalid_name',
+      );
+    }
+    try {
+      // Self-service profile write: the rules allow the signed-in member to
+      // change only `displayName`/`photoUrl`/`lastSeenAt`/`lastDeviceId` on
+      // their own `users/{uid}` document. Adding `updatedAt`/`version` here
+      // would break the `hasOnly(...)` allow-list, so the payload stays to the
+      // single affected key.
+      await firestore.userDoc(uid).set(<String, dynamic>{
+        'displayName': name,
+      }, SetOptions(merge: true));
+      await auth.currentUser?.updateDisplayName(name);
+    } on FirebaseException catch (e) {
+      throw RemoteAuthException(_emailAuthMessage(e.code), code: e.code);
+    }
+  }
+
+  @override
+  Future<void> sendPasswordResetEmail(String email) async {
+    final auth = _auth;
+    if (auth == null) {
+      throw const RemoteAuthException('The account service is not available.');
+    }
+    final normalized = email.trim().toLowerCase();
+    if (normalized.isEmpty || !normalized.contains('@')) {
+      throw const RemoteAuthException(
+        'Enter a valid email address.',
+        code: 'invalid-email',
+      );
+    }
+    try {
+      await auth.sendPasswordResetEmail(email: normalized);
+    } on FirebaseAuthException catch (e) {
+      throw RemoteAuthException(_emailAuthMessage(e.code), code: e.code);
+    }
+  }
+
   static String _emailAuthMessage(String code) => switch (code) {
     'invalid-email' => 'The email address is not valid.',
     'user-not-found' => 'No account was found for this email.',
@@ -172,7 +223,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     'too-many-requests' => 'Too many attempts. Try again later.',
     'network-request-failed' =>
       'No internet connection. Check the network and try again.',
-    _ => 'Unable to complete the Firebase account operation.',
+    _ => 'Unable to complete the account operation.',
   };
 
   @override
@@ -291,9 +342,10 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     final memberId = memberIdFor(email);
     // Single-company policy (§2): a bound account (invited/pending/active)
     // cannot create a second company. Sign-out alone never unblocks this.
-    final existingProfile = await firestore.userDoc(uid).get().then(
-      (s) => s.data(),
-    );
+    final existingProfile = await firestore
+        .userDoc(uid)
+        .get()
+        .then((s) => s.data());
     final boundOrg = '${existingProfile?['organizationId'] ?? ''}';
     final boundStatus = '${existingProfile?['status'] ?? ''}';
     if (boundOrg.isNotEmpty &&
@@ -314,10 +366,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         existing.exists && existing.data()?['ownerUid'] == uid;
     if (existing.exists && !ownedByCaller) {
       throw RemoteAuthException(
-        AppText.t(
-          'الشركة موجودة بالفعل.',
-          'Organization already exists.',
-        ),
+        AppText.t('الشركة موجودة بالفعل.', 'Organization already exists.'),
         code: 'organization_exists',
       );
     }
@@ -326,17 +375,26 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       // Step 1 - the organization itself, in its own commit so the rules can
       // authorize the founder profile with `get(org).data.ownerUid == uid`
       // instead of trusting a self-asserted `status: 'active'`.
-      // New companies start as `trial` (plan §4); promotion to `active` is a
-      // separate approval action by a system admin.
+      // New companies start as `trial` with a one-time 30-day window
+      // (trialStartedAt/trialEndsAt); expiry flips the org to `suspended`
+      // via the server cron, and manual activation by support is permanent
+      // (manuallyActivated=true is never auto-suspended again).
+      final now = DateTime.now().toUtc();
+      final trialEndsAt = now.add(const Duration(days: 30));
       final orgBatch = firestore.newBatch();
       orgBatch.set(orgRef, <String, dynamic>{
         'name': organizationName,
         'ownerUid': uid,
         'status': 'trial',
         'schemaVersion': 2,
+        'trialStartedAt': Timestamp.fromDate(now),
+        'trialEndsAt': Timestamp.fromDate(trialEndsAt),
+        'trialConsumed': false,
+        'manuallyActivated': false,
         'createdAt': firestore.serverTimestamp(),
         'createdBy': uid,
         'updatedBy': uid,
+        'updatedAt': firestore.serverTimestamp(),
         'version': 1,
       });
       orgBatch.set(firestore.organizationMetaRef(orgId), <String, dynamic>{
@@ -527,10 +585,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       'trial_owner',
     };
     if (!validRoles.contains(role)) {
-      throw const RemoteAuthException(
-        'Invalid role.',
-        code: 'invalid_role',
-      );
+      throw const RemoteAuthException('Invalid role.', code: 'invalid_role');
     }
     // `member_<localUserId>` — generated by the admin device (plan §8.3) and
     // stable across retries because it is derived from the organization and the
@@ -605,8 +660,14 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     required String memberId,
     required Map<String, dynamic> data,
   }) async {
+    // Perf: member read is needed for uid/version; user read is deferred until
+    // uid is known, but the version bump below reuses the same snapshot shape
+    // so a future parallel prefetch can land here without semantic change.
     final member = await firestore.memberRef(organizationId, memberId).get();
     final uid = '${member.data()?['uid'] ?? ''}';
+    // Prefetch the user doc concurrently with payload building where possible.
+    // When uid is empty this stays a no-op (no extra RTT).
+    final userFuture = uid.isNotEmpty ? firestore.userDoc(uid).get() : null;
     final now = firestore.serverTimestamp();
     final activating = data['status'] == RemoteMemberStatus.active;
     final payload = <String, dynamic>{
@@ -632,8 +693,9 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       // `users/{uid}` is the authorization source: it must never drift from the
       // member document. Activation audit (plan §6) lands in the same batch:
       // status + activatedAt + activatedBy + version bump together.
+      // Perf: user snapshot was prefetched concurrently above (1 RTT saved).
       final userDoc = firestore.userDoc(uid);
-      final user = await userDoc.get();
+      final user = await userFuture!;
       final userFields = _userFieldsFrom(data);
       if (activating) {
         userFields['activatedAt'] = now;
@@ -693,7 +755,13 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     final batch = firestore.newBatch();
 
     final memberDoc = firestore.memberRef(organizationId, memberId);
-    final member = await memberDoc.get();
+    final userDoc = firestore.userDoc(uid);
+    // Perf: uid is a parameter here (unlike update/delete where it must be
+    // read from the member doc first), so both snapshots load concurrently —
+    // 1 RTT instead of 2 serial RTTs. Same snapshots, same batch semantics.
+    final results = await Future.wait([memberDoc.get(), userDoc.get()]);
+    final member = results[0];
+    final user = results[1];
     final memberData = member.data() ?? const <String, dynamic>{};
     batch.set(memberDoc, <String, dynamic>{
       'status': RemoteMemberStatus.disabled,
@@ -708,8 +776,6 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     // `memberId` is dropped too so the account returns to `no_company` and may
     // create a trial company or join with a new invite (plan §3). The member
     // row itself is kept as `disabled` audit history, never hard-deleted.
-    final userDoc = firestore.userDoc(uid);
-    final user = await userDoc.get();
     batch.set(userDoc, <String, dynamic>{
       'status': RemoteMemberStatus.disabled,
       'organizationId': FieldValue.delete(),

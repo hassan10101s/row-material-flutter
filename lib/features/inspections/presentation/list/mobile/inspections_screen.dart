@@ -99,10 +99,15 @@ class MobileInspectionsScreen extends StatelessWidget {
       ref: getIt<ReferenceRepository>(),
       isProduct: isProduct,
     );
+    final supplierOptions = await loadInspectionSupplierOptions(
+      getIt<InspectionRepository>(),
+    );
     if (!context.mounted) return;
     var dStatus = cubit.state.status;
+    var dReason = cubit.state.reason;
     var dFrom = cubit.state.dateFrom;
     var dTo = cubit.state.dateTo;
+    var dSupplier = cubit.state.supplier;
     int? dMaterial = cubit.state.materialId;
 
     await showAppOverlay<void>(
@@ -143,6 +148,8 @@ class MobileInspectionsScreen extends StatelessWidget {
                     child: InspectionFilterGrid(
                       isProduct: isProduct,
                       status: dStatus,
+                      reason: dReason,
+                      onReason: (v) => setDraft(() => dReason = v),
                       dateFrom: dFrom,
                       dateTo: dTo,
                       onStatus: (v) => setDraft(() => dStatus = v),
@@ -155,6 +162,9 @@ class MobileInspectionsScreen extends StatelessWidget {
                       materialOptions: materialOptions,
                       selectedMaterialId: dMaterial,
                       onMaterial: (v) => setDraft(() => dMaterial = v),
+                      supplierOptions: supplierOptions,
+                      selectedSupplier: dSupplier,
+                      onSupplier: (v) => setDraft(() => dSupplier = v ?? ''),
                     ),
                   ),
                 ),
@@ -181,8 +191,10 @@ class MobileInspectionsScreen extends StatelessWidget {
                           onPressed: () {
                             cubit.applyFilters(
                               status: dStatus,
+                              reason: dReason,
                               dateFrom: dFrom,
                               dateTo: dTo,
+                              supplier: dSupplier,
                               materialId: dMaterial,
                               materialName: inspectionMaterialNameFor(
                                 materialOptions,
@@ -257,7 +269,7 @@ class MobileInspectionsScreen extends StatelessWidget {
     final state = context.watch<InspectionsCubit>().state;
     final cubit = context.read<InspectionsCubit>();
     // Safety net for cubits born with the desktop default (200): phones never
-    // page more than `kMobileMaxPageSize`. The router/center already pass 50
+    // page more than `kMobileMaxPageSize`. The router/center already pass 25
     // via `initialPageSize`, so this fires at most once per cubit lifetime.
     if (state.pageSize > kMobileMaxPageSize) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -288,21 +300,28 @@ class MobileInspectionsScreen extends StatelessWidget {
             : null,
         body: RefreshIndicator(
           onRefresh: () => cubit.load(),
-          child: SingleChildScrollView(
+          // Perf: page cards can fill more than one screen (kMobileMaxPageSize
+          // up to 25); the old eager Column built and laid out every card at
+          // once. A CustomScrollView keeps the card list virtualized.
+          child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.all(AppSpacing.pageMobile),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                AppPageHeader(
-                  title: isProduct
-                      ? AppText.t('فحص المنتجات', 'Product inspections')
-                      : AppStrings.inspections,
-                  subtitle: '${state.total} ${AppText.t('فحص', 'inspections')}',
-                  icon: isProduct
-                      ? Icons.factory_outlined
-                      : Icons.inventory_2_outlined,
-                ),
+            slivers: [
+              SliverPadding(
+                padding: const EdgeInsets.all(AppSpacing.pageMobile),
+                sliver: SliverToBoxAdapter(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      AppPageHeader(
+                        title: isProduct
+                            ? AppText.t('فحص المنتجات', 'Product inspections')
+                            : AppStrings.inspections,
+                        subtitle:
+                            '${state.total} ${AppText.t('فحص', 'inspections')}',
+                        icon: isProduct
+                            ? Icons.factory_outlined
+                            : Icons.inventory_2_outlined,
+                      ),
                 const SizedBox(height: AppSpacing.md),
                 // ── Compact filter row (mobile only) ───────────────────
                 // One ~48dp row: the search takes the width, everything else
@@ -328,6 +347,15 @@ class MobileInspectionsScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
+                    // Quick period access (الفترة) beside the filter sheet —
+                    // اليوم / آخر ٧ / آخر ٣٠ / الكل, and نطاق مخصص opens
+                    // the filter sheet where the date pickers live.
+                    InspectionPeriodButton(
+                      dateFrom: state.dateFrom,
+                      dateTo: state.dateTo,
+                      onPreset: (from, to) => cubit.setDateRange(from, to),
+                      onCustom: () => _openFilterSheet(context),
+                    ),
                     Badge(
                       isLabelVisible: activeFilterCount > 0,
                       label: Text('$activeFilterCount'),
@@ -404,116 +432,141 @@ class MobileInspectionsScreen extends StatelessWidget {
                   onClearChip: (key) => cubit.clearChip(key),
                   onClearAll: () => cubit.clearFilters(),
                 ),
-                const SizedBox(height: AppSpacing.md),
-                if (state.loading && state.visible.isNotEmpty)
-                  const AppRefreshBar(),
-                if (state.loading && state.visible.isEmpty) ...[
-                  const AppSkeletonList(rows: 6, lines: 2, height: 120),
-                ] else if (state.visible.isEmpty) ...[
-                  AppEmptyState(
-                    icon: isProduct
-                        ? Icons.factory_outlined
-                        : Icons.inventory_2_outlined,
-                    title: isProduct
-                        ? AppText.t(
-                            'لا توجد فحوصات منتجات',
-                            'No product inspections',
-                          )
-                        : AppText.t('لا توجد فحوصات', 'No inspections'),
-                    subtitle: AppText.t(
-                      'ابدأ بفحص جديد أو عدّل معايير البحث.',
-                      'Start a new inspection or adjust the search.',
-                    ),
+                      const SizedBox(height: AppSpacing.md),
+                      if (state.loading && state.visible.isNotEmpty)
+                        const AppRefreshBar(),
+                      if (state.loading && state.visible.isEmpty) ...[
+                        const AppSkeletonList(rows: 6, lines: 2, height: 120),
+                      ] else if (state.visible.isEmpty) ...[
+                        AppEmptyState(
+                          icon: isProduct
+                              ? Icons.factory_outlined
+                              : Icons.inventory_2_outlined,
+                          title: isProduct
+                              ? AppText.t(
+                                  'لا توجد فحوصات منتجات',
+                                  'No product inspections',
+                                )
+                              : AppText.t('لا توجد فحوصات', 'No inspections'),
+                          subtitle: AppText.t(
+                            'ابدأ بفحص جديد أو عدّل معايير البحث.',
+                            'Start a new inspection or adjust the search.',
+                          ),
+                        ),
+                      ] else if (selectedCount > 0) ...[
+                        SelectionActionBar(
+                          selectedCount: selectedCount,
+                          onExportReports: () => exportSelectedReports(context),
+                          onExportLabels: () => exportSelectedLabels(context),
+                          onExportTable: () => exportSelectedTable(context),
+                          onClear: cubit.clearSelection,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
+                    ],
                   ),
-                ] else ...[
-                  if (selectedCount > 0) ...[
-                    SelectionActionBar(
-                      selectedCount: selectedCount,
-                      onExportReports: () => exportSelectedReports(context),
-                      onExportLabels: () => exportSelectedLabels(context),
-                      onExportTable: () => exportSelectedTable(context),
-                      onClear: cubit.clearSelection,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
+                ),
+              ),
+              if (!(state.loading && state.visible.isEmpty) &&
+                  state.visible.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.pageMobile,
+                  ),
+                  sliver: SliverList.builder(
                     itemCount: state.visible.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: AppSpacing.sm),
                     itemBuilder: (context, index) {
                       final r = state.visible[index];
                       final id = (r['id'] as num).toInt();
-                      return _InspectionCard(
-                        entry: '${r['entry_code']}',
-                        date:
-                            parseIsoToDisplay('${r['inspection_date']}') ?? '',
-                        material: '${r['material_name']}',
-                        supplier: isProduct
-                            ? '${r['formula_number'] ?? ''} • ${r['batch_number'] ?? ''}'
-                            : '${r['supplier']}',
-                        qty: '${r['quantity']}',
-                        // Products carry no header decision (per-sample only).
-                        decision: isProduct ? '' : '${r['decision_status']}',
-                        selected: state.selectedIds.contains(id),
-                        onSelectChanged: (_) => cubit.toggleSelect(id),
-                        onTap: () => _pushDetail(context, id),
-                        onPdf: () => _exportOne(context, r, 'report'),
-                        onLabel: () => _exportOne(context, r, 'label'),
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                        child: _InspectionCard(
+                          key: ValueKey('insp_$id'),
+                          entry: '${r['entry_code']}',
+                          date:
+                              parseIsoToDisplay('${r['inspection_date']}') ??
+                              '',
+                          material: '${r['material_name']}',
+                          supplier: isProduct
+                              ? '${r['formula_number'] ?? ''} • ${r['batch_number'] ?? ''}'
+                              : '${r['supplier']}',
+                          qty: '${r['quantity']}',
+                          // Products carry no header decision (per-sample only).
+                          decision: isProduct ? '' : '${r['decision_status']}',
+                          selected: state.selectedIds.contains(id),
+                          onSelectChanged: (_) => cubit.toggleSelect(id),
+                          onTap: () => _pushDetail(context, id),
+                          onPdf: () => _exportOne(context, r, 'report'),
+                          onLabel: () => _exportOne(context, r, 'label'),
+                        ),
                       );
                     },
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  Wrap(
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    alignment: WrapAlignment.spaceBetween,
-                    spacing: AppSpacing.sm,
-                    runSpacing: 4,
-                    children: [
-                      AppPageSizeSelector(
-                        value: state.pageSize > kMobileMaxPageSize
-                            ? kMobileMaxPageSize
-                            : state.pageSize,
-                        options: kMobilePageSizeOptions,
-                        onChanged: (v) => cubit.setPageSize(v),
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          AppButton(
-                            small: true,
-                            style: AppButtonStyle.ghost,
-                            label: AppText.t('السابق', 'Previous'),
-                            onPressed: state.page > 0
-                                ? () => cubit.setPage(state.page - 1)
-                                : null,
-                          ),
-                          Text(
-                            '${AppText.t('صفحة', 'Page')} ${state.page + 1}'
-                            ' · ${state.total}',
-                            style: TextStyle(
-                              fontSize: 12.spMax,
-                              color: AppColors.textMuted,
-                            ),
-                          ),
-                          AppButton(
-                            small: true,
-                            style: AppButtonStyle.ghost,
-                            label: AppText.t('التالي', 'Next'),
-                            onPressed:
-                                (state.page + 1) * state.pageSize < state.total
-                                ? () => cubit.setPage(state.page + 1)
-                                : null,
-                          ),
-                        ],
-                      ),
-                    ],
+                ),
+              if (!(state.loading && state.visible.isEmpty) &&
+                  state.visible.isNotEmpty)
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.pageMobile,
                   ),
-                ],
-                const SizedBox(height: 80),
-              ],
-            ),
+                  sliver: SliverToBoxAdapter(
+                    child: Column(
+                      children: [
+                        const SizedBox(height: AppSpacing.md),
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          alignment: WrapAlignment.spaceBetween,
+                          spacing: AppSpacing.sm,
+                          runSpacing: 4,
+                          children: [
+                            AppPageSizeSelector(
+                              value: state.pageSize > kMobileMaxPageSize
+                                  ? kMobileMaxPageSize
+                                  : state.pageSize,
+                              options: kMobilePageSizeOptions,
+                              onChanged: (v) => cubit.setPageSize(v),
+                            ),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                AppButton(
+                                  small: true,
+                                  style: AppButtonStyle.ghost,
+                                  label: AppText.t('السابق', 'Previous'),
+                                  onPressed: state.page > 0
+                                      ? () => cubit.setPage(state.page - 1)
+                                      : null,
+                                ),
+                                Text(
+                                  '${AppText.t('صفحة', 'Page')} ${state.page + 1}'
+                                  ' · ${state.total}',
+                                  style: TextStyle(
+                                    fontSize: 12.spMax,
+                                    color: AppColors.textMuted,
+                                  ),
+                                ),
+                                AppButton(
+                                  small: true,
+                                  style: AppButtonStyle.ghost,
+                                  label: AppText.t('التالي', 'Next'),
+                                  onPressed:
+                                      (state.page + 1) * state.pageSize <
+                                          state.total
+                                      ? () => cubit.setPage(state.page + 1)
+                                      : null,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 80),
+                      ],
+                    ),
+                  ),
+                ),
+              if (state.visible.isEmpty)
+                const SliverToBoxAdapter(child: SizedBox(height: 80)),
+            ],
           ),
         ),
       ),
@@ -530,6 +583,7 @@ class MobileInspectionsScreen extends StatelessWidget {
 /// touch equivalent of the desktop hover tooltip.
 class _InspectionCard extends StatelessWidget {
   const _InspectionCard({
+    super.key,
     required this.entry,
     required this.date,
     required this.material,
@@ -708,7 +762,7 @@ class _InspectionCard extends StatelessWidget {
                 icon: Icon(Icons.picture_as_pdf_outlined, size: 20.r),
               ),
               IconButton(
-                tooltip: AppText.t('ملصق', 'Label'),
+                tooltip: AppText.t('QR', 'QR'),
                 constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 visualDensity: VisualDensity.compact,
                 onPressed: onLabel,

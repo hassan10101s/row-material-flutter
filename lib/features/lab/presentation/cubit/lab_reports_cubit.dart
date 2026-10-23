@@ -31,7 +31,7 @@ class LabReportsCubit extends AppCubit<LabReportsState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(busy: '', error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(busy: '', error: '$e'));
+      safeEmit(state.copyWith(busy: '', error: AppError.friendly(e)));
     }
   }
 }

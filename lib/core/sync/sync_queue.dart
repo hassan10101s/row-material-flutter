@@ -19,6 +19,7 @@ class QueueEntry {
     required this.baseVersion,
     required this.retryCount,
     required this.status,
+    this.revision = 0,
     this.localRef,
     this.lastError,
   });
@@ -31,6 +32,14 @@ class QueueEntry {
   final int baseVersion;
   final int retryCount;
   final String status;
+
+  /// Optimistic-concurrency token (plan §9.6).
+  ///
+  /// Bumped by every [enqueue], [claim] and [recoverStalled] write. A claim
+  /// captures the value it saw and the settlement only applies when the row
+  /// still carries it, so a settlement whose entity was re-edited while the
+  /// push was in flight cannot delete that newer edit.
+  final int revision;
   final int? localRef;
   final String? lastError;
 
@@ -45,8 +54,25 @@ class QueueEntry {
     baseVersion: (row['base_version'] as num?)?.toInt() ?? 0,
     retryCount: (row['retry_count'] as num?)?.toInt() ?? 0,
     status: '${row['status']}',
+    revision: (row['revision'] as num?)?.toInt() ?? 0,
     localRef: (row['local_ref'] as num?)?.toInt(),
     lastError: row['last_error'] as String?,
+  );
+
+  /// A copy carrying [revision], used by [SyncQueue.claim] to stamp the token
+  /// it wrote so the settlement can match it.
+  QueueEntry withRevision(int revision) => QueueEntry(
+    id: id,
+    entityType: entityType,
+    entityId: entityId,
+    operation: operation,
+    payload: payload,
+    baseVersion: baseVersion,
+    retryCount: retryCount,
+    status: status,
+    revision: revision,
+    localRef: localRef,
+    lastError: lastError,
   );
 }
 
@@ -157,6 +183,12 @@ class SyncQueue {
   /// The partial unique index `idx_sync_queue_entity` means one row per entity;
   /// consecutive offline edits collapse into a single push (`create` wins over
   /// `update`, and `tombstone` over both).
+  ///
+  /// A merge into a row that is currently `in_flight` is deliberate and safe:
+  /// the running push settles against the revision *it* claimed (see
+  /// `QueueEntry.revision`), so resetting the row to `pending` here keeps the
+  /// newer edit queued instead of letting the older push's `markDone` delete it
+  /// (the lost-update race).
   Future<void> enqueue(
     DatabaseExecutor txn, {
     required String entityType,
@@ -191,6 +223,7 @@ class SyncQueue {
         'next_attempt_at': null,
         'status': 'pending',
         'last_error': null,
+        'revision': 0,
       });
       _notifyEnqueued();
       return;
@@ -212,6 +245,8 @@ class SyncQueue {
         'next_attempt_at': null,
         'last_error': null,
         'retry_count': 0,
+        // Supersedes any settlement still in flight for the previous claim.
+        'revision': ((row['revision'] as num?)?.toInt() ?? 0) + 1,
       },
       where: 'id = ?',
       whereArgs: [row['id']],
@@ -229,6 +264,10 @@ class SyncQueue {
   }
 
   /// Take up to [limit] ready rows, marking them `in_flight` (single-flight).
+  ///
+  /// Each claim bumps `revision` and returns the bump it wrote, so the
+  /// settlement that follows only lands while the row is untouched (see
+  /// [QueueEntry.revision]).
   Future<List<QueueEntry>> claim({int limit = 400}) async {
     return _withDb(
       'queue.claim',
@@ -246,13 +285,20 @@ class SyncQueue {
         final claimed = <QueueEntry>[];
         for (final row in rows) {
           final id = (row['id'] as num).toInt();
+          final revision = ((row['revision'] as num?)?.toInt() ?? 0) + 1;
           final updated = await txn.update(
             'sync_queue',
-            {'status': 'in_flight', 'updated_at': nowIso()},
+            {
+              'status': 'in_flight',
+              'updated_at': nowIso(),
+              'revision': revision,
+            },
             where: "id = ? AND status = 'pending'",
             whereArgs: [id],
           );
-          if (updated > 0) claimed.add(QueueEntry.fromRow(row));
+          if (updated > 0) {
+            claimed.add(QueueEntry.fromRow(row).withRevision(revision));
+          }
         }
         return claimed;
       }),
@@ -284,7 +330,7 @@ class SyncQueue {
       return tracedTransaction(db, 'queue.recoverStalled', (txn) async {
         final rows = await txn.query(
           'sync_queue',
-          columns: ['id', 'retry_count'],
+          columns: ['id', 'retry_count', 'revision'],
           where: "status = 'in_flight'",
         );
         final now = nowIso();
@@ -303,6 +349,9 @@ class SyncQueue {
               ),
               'last_error': 'interrupted mid-push',
               'updated_at': now,
+              // Bumps past whatever the dead claim captured, so a settlement
+              // that somehow survived the crash cannot clobber the requeue.
+              'revision': ((row['revision'] as num?)?.toInt() ?? 0) + 1,
             },
             where: "id = ? AND status = 'in_flight'",
             whereArgs: [(row['id'] as num).toInt()],
@@ -325,12 +374,22 @@ class SyncQueue {
   }
 
   /// [markDone] on an existing transaction.
+  ///
+  /// Guarded by the claimed [QueueEntry.revision]: if the entity was re-edited
+  /// (its queue row re-`enqueue`d, which bumps the revision) while this push was
+  /// in flight, the settlement matches nothing and the newer `pending` row is
+  /// left intact - the fix for the lost-update race.
   Future<void> _markDone(
     DatabaseExecutor txn,
     QueueEntry entry,
     int remoteVersion,
   ) async {
-    await txn.delete('sync_queue', where: 'id = ?', whereArgs: [entry.id]);
+    final deleted = await txn.delete(
+      'sync_queue',
+      where: 'id = ? AND revision = ?',
+      whereArgs: [entry.id, entry.revision],
+    );
+    if (deleted == 0) return;
     final entity = entry.entity;
     if (entity == null) return;
     await txn.update(
@@ -340,7 +399,7 @@ class SyncQueue {
         'remote_synced_at': nowIso(),
         'sync_state': 'synced',
       },
-      where: 'id = ?',
+      where: '${entity.pkColumn} = ?',
       whereArgs: [entry.localRef],
     );
   }
@@ -395,13 +454,17 @@ class SyncQueue {
   }
 
   /// [markRetry] on an existing transaction.
+  ///
+  /// Revision-guarded: a fresher edit that superseded this claim owns the row
+  /// now, so this backoff must not overwrite it (or stamp the local row back to
+  /// `queued` on the stale entry's behalf).
   Future<void> _markRetry(
     DatabaseExecutor txn,
     QueueEntry entry,
     String error,
   ) async {
     final attempts = entry.retryCount + 1;
-    await txn.update(
+    final updated = await txn.update(
       'sync_queue',
       {
         'status': 'pending',
@@ -411,16 +474,18 @@ class SyncQueue {
         ),
         'last_error': error,
         'updated_at': nowIso(),
+        'revision': entry.revision + 1,
       },
-      where: 'id = ?',
-      whereArgs: [entry.id],
+      where: 'id = ? AND revision = ?',
+      whereArgs: [entry.id, entry.revision],
     );
+    if (updated == 0) return;
     final entity = entry.entity;
     if (entity != null && entry.localRef != null) {
       await txn.update(
         entity.localTable,
         {'sync_state': 'queued'},
-        where: 'id = ?',
+        where: '${entity.pkColumn} = ?',
         whereArgs: [entry.localRef],
       );
     }
@@ -457,6 +522,11 @@ class SyncQueue {
   }
 
   /// [markConflict] on an existing transaction.
+  ///
+  /// Revision-guarded: if the entity was re-edited while the push that produced
+  /// this conflict was in flight, the stale conflict is **not** parked - the
+  /// newer `pending` row keeps draining and the user is never asked to resolve a
+  /// conflict against a payload that no longer reflects the local row.
   Future<void> _markConflict(
     DatabaseExecutor txn,
     QueueEntry entry, {
@@ -464,17 +534,19 @@ class SyncQueue {
     String? remotePayload,
     String? error,
   }) async {
-    await txn.update(
+    final updated = await txn.update(
       'sync_queue',
       {
         'status': 'conflict',
         'last_error': error,
         'updated_at': nowIso(),
         'next_attempt_at': null,
+        'revision': entry.revision + 1,
       },
-      where: 'id = ?',
-      whereArgs: [entry.id],
+      where: 'id = ? AND revision = ?',
+      whereArgs: [entry.id, entry.revision],
     );
+    if (updated == 0) return;
     await txn.insert('sync_conflicts', {
       'entity_type': entry.entityType,
       'entity_id': entry.entityId,
@@ -490,7 +562,7 @@ class SyncQueue {
       await txn.update(
         entity.localTable,
         {'sync_state': 'conflict'},
-        where: 'id = ?',
+        where: '${entity.pkColumn} = ?',
         whereArgs: [entry.localRef],
       );
     }
@@ -584,7 +656,7 @@ class SyncQueue {
     final args = entityType == null ? null : [entityType];
     return (await _db).rawUpdate(
       "UPDATE sync_queue SET status = 'pending', retry_count = 0, next_attempt_at = NULL, "
-      "last_error = NULL, updated_at = ? WHERE $where",
+      "last_error = NULL, updated_at = ?, revision = revision + 1 WHERE $where",
       [nowIso(), ...?args],
     );
   }
@@ -592,17 +664,11 @@ class SyncQueue {
   /// Manual retry of a single row from the Sync screen: `failed`/`conflict` →
   /// `pending`, with the backoff counter cleared.
   Future<int> retryRow(int id) async {
-    return (await _db).update(
-      'sync_queue',
-      {
-        'status': 'pending',
-        'retry_count': 0,
-        'next_attempt_at': null,
-        'last_error': null,
-        'updated_at': nowIso(),
-      },
-      where: 'id = ?',
-      whereArgs: [id],
+    return (await _db).rawUpdate(
+      "UPDATE sync_queue SET status = 'pending', retry_count = 0, "
+      "next_attempt_at = NULL, last_error = NULL, updated_at = ?, "
+      "revision = revision + 1 WHERE id = ?",
+      [nowIso(), id],
     );
   }
 
@@ -631,7 +697,7 @@ class SyncQueue {
       final orphaned = await db.rawQuery('''
         SELECT q.id
         FROM sync_queue q
-        LEFT JOIN ${entity.localTable} local ON local.id = q.local_ref
+        LEFT JOIN ${entity.localTable} local ON local.${entity.pkColumn} = q.local_ref
         WHERE q.id IN (${List.filled(entry.value.length, '?').join(',')})
           AND local.id IS NULL
       ''', entry.value);

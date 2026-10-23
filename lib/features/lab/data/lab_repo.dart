@@ -9,6 +9,7 @@ import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
 import '../core/formula_engine.dart';
+import '../core/lab_result_format.dart';
 import '../domain/product_batch_repository.dart'
     show encodeBatchChemical, encodeBatchPhysical;
 
@@ -206,14 +207,38 @@ class LabRepo {
       ''',
       [productId],
     );
+    if (rows.isEmpty) return [];
+    // A product inspection's real sample list lives in `product_batch_samples`
+    // (the inspector adds them one by one); `sample_names_json` only carries
+    // the header's own list. Load them in one query so the run-test sample
+    // picker offers every registered sample instead of just the fallback
+    // default ('Result').
+    final ids = [for (final r in rows) (r['id'] as num).toInt()];
+    final marks = List.filled(ids.length, '?').join(',');
+    final samples = await fetchAll(
+      null,
+      'SELECT batch_id, sample_name FROM product_batch_samples '
+      'WHERE batch_id IN ($marks) AND deleted_at IS NULL '
+      'ORDER BY batch_id ASC, sample_no ASC, id ASC',
+      ids,
+    );
+    final namesByBatch = <int, List<String>>{};
+    for (final s in samples) {
+      final name = '${s['sample_name'] ?? ''}'.trim();
+      if (name.isEmpty) continue;
+      final batchId = (s['batch_id'] as num?)?.toInt();
+      if (batchId == null) continue;
+      namesByBatch.putIfAbsent(batchId, () => <String>[]).add(name);
+    }
     return [
       for (final row in rows)
         {
           ...row,
-          'sample_names': jsonLoadsList(
-            '${row['sample_names_json'] ?? ''}',
-            const ['Result'],
-          ),
+          'sample_names': namesByBatch[(row['id'] as num).toInt()] ??
+              jsonLoadsList(
+                '${row['sample_names_json'] ?? ''}',
+                const ['Result'],
+              ),
         },
     ];
   }
@@ -250,10 +275,23 @@ class LabRepo {
     }
     final whereSql = where.isEmpty ? '' : ' WHERE ${where.join(' AND ')}';
     args.addAll([limit, offset]);
+    final today = todayIso();
     return fetchAll(
       null,
-      'SELECT * FROM lab_inventory$whereSql ORDER BY name ASC LIMIT ? OFFSET ?',
-      args,
+      '''
+        SELECT i.*,
+          (SELECT COUNT(*) FROM inventory_lots l
+            WHERE l.inventory_id = i.id AND l.qty_remaining > 0) AS lots_count,
+          (SELECT COALESCE(SUM(l.qty_remaining),0) FROM inventory_lots l
+            WHERE l.inventory_id = i.id AND l.qty_remaining > 0
+            AND l.expiry_date != ''
+            AND substr(l.expiry_date,1,10) < ?) AS expired_qty,
+          (SELECT MIN(substr(l.expiry_date,1,10)) FROM inventory_lots l
+            WHERE l.inventory_id = i.id AND l.qty_remaining > 0
+            AND l.expiry_date != '') AS nearest_expiry
+        FROM lab_inventory i$whereSql ORDER BY name ASC LIMIT ? OFFSET ?
+      ''',
+      [today, ...args],
     );
   }
 
@@ -300,6 +338,7 @@ class LabRepo {
     String description = '',
     Map<String, dynamic>? user,
     DatabaseExecutor? executor,
+    String expiryDate = '',
   }) async {
     final cleanName = name.trim();
     if (cleanName.isEmpty)
@@ -351,6 +390,37 @@ class LabRepo {
         timestamp,
       ],
     );
+    // An opening balance lives in one lot so FEFO always has something to
+    // draw. A supplied expiry is kept; otherwise the lot stays undated
+    // (sorts last) — receipts afterwards always require one.
+    if (finalQty > 1e-9) {
+      final db = executor ?? await _db;
+      final day = expiryDate.trim();
+      final cleanDay = day.isEmpty ? '' : cleanLotExpiry(day);
+      final lotId = await executeReturnId(
+        db,
+        '''
+          INSERT INTO inventory_lots (
+              inventory_id, lot_no, qty_received, qty_remaining,
+              expiry_date, received_at, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ''',
+        [
+          id,
+          'PENDING',
+          finalQty,
+          finalQty,
+          cleanDay,
+          timestamp,
+          timestamp,
+        ],
+      );
+      await execute(
+        db,
+        'UPDATE inventory_lots SET lot_no = ? WHERE id = ?',
+        ['L-${lotId.toString().padLeft(4, '0')}', lotId],
+      );
+    }
     return getInventoryItem(id, executor);
   }
 
@@ -432,15 +502,20 @@ class LabRepo {
     String reason = '',
     Map<String, dynamic>? user,
     double? deltaQty,
+    String expiryDate = '',
     DatabaseExecutor? executor,
   }) async {
-    final existing = await getInventoryItem(itemId, executor);
+    final db = executor ?? await _db;
+    final existing = await getInventoryItem(itemId, db);
     if (deltaQty != null) {
       newQty =
           (safeFloat(existing['current_qty']) ?? 0.0) +
           (safeFloat(deltaQty) ?? 0.0);
     }
-    final finalQty = (safeFloat(newQty) ?? 0.0).clamp(0.0, double.infinity);
+    final currentQty = (safeFloat(existing['current_qty']) ?? 0.0);
+    final finalQty = (safeFloat(newQty) ?? currentQty)
+        .clamp(0.0, double.infinity)
+        .toDouble();
     final cleanReason = reason.trim();
     final trimmedReason = cleanReason.isEmpty
         ? ''
@@ -448,13 +523,28 @@ class LabRepo {
             0,
             cleanReason.length > 300 ? 300 : cleanReason.length,
           );
+    final delta = finalQty - currentQty;
+    int? lotId;
+    if (delta > 1e-9) {
+      // An increase is a receipt: it must arrive as a lot with an expiry,
+      // never as an anonymous pool bump.
+      final lot = await receiveLot(
+        inventoryId: itemId,
+        qty: delta,
+        expiryDate: expiryDate,
+        note: trimmedReason,
+        user: user,
+        executor: db,
+      );
+      lotId = (lot['id'] as num).toInt();
+    } else if (delta < -1e-9) {
+      // A manual decrease draws FEFO (capped at what exists) so the lots
+      // stay the truth behind the pool.
+      await drawLotsFefo(db, itemId, -delta);
+      await refreshInventoryCache(db, itemId);
+    }
     await execute(
-      executor,
-      'UPDATE lab_inventory SET current_qty = ?, updated_at = ? WHERE id = ?',
-      [finalQty, nowIso(), itemId],
-    );
-    await execute(
-      executor,
+      db,
       '''
             INSERT INTO lab_stock_adjustments (
                 inventory_id, old_qty, new_qty, reason, adjusted_by, adjusted_at
@@ -469,7 +559,433 @@ class LabRepo {
         nowIso(),
       ],
     );
-    return getInventoryItem(itemId, executor);
+    final item = await getInventoryItem(itemId, db);
+    if (lotId != null) item['lot_id'] = lotId;
+    return item;
+  }
+
+  // ── Lot-tracked inventory (FEFO) ─────────────────────────────────────
+  //
+  // Every receipt is its own lot with a mandatory expiry. Consumption draws
+  // earliest-expiry-first (ties: oldest receipt first, then lowest id);
+  // undated legacy lots sort last. `current_qty` stays as a cache and is
+  // ALWAYS recomputed as SUM(lots) after a move — never incremented in
+  // place — so a repeated or reordered write can never drift the pool.
+
+  /// Validates an expiry for a receipt: non-empty and a real date.
+  /// Stored as a bare `yyyy-MM-dd` day. Past dates are allowed (recording
+  /// reality); consuming from them only warns.
+  static String cleanLotExpiry(Object? value) {
+    final raw = '$value'.trim();
+    if (raw.isEmpty) throw ValidationError(AppErrors.lotExpiryRequired);
+    final day = raw.length >= 10 ? raw.substring(0, 10) : raw;
+    if (DateTime.tryParse(day) == null) {
+      throw ValidationError(AppErrors.lotExpiryInvalid);
+    }
+    return day;
+  }
+
+  static bool lotIsExpired(String expiryDay) {
+    final day = expiryDay.trim();
+    if (day.isEmpty) return false;
+    return day.substring(0, 10).compareTo(todayIso()) < 0;
+  }
+
+  Future<double> lotBalance(DatabaseExecutor txn, int inventoryId) async {
+    final rows = await txn.rawQuery(
+      'SELECT COALESCE(SUM(qty_remaining),0) AS balance FROM inventory_lots '
+      'WHERE inventory_id = ?',
+      [inventoryId],
+    );
+    return ((rows.first['balance'] as num?)?.toDouble() ?? 0.0);
+  }
+
+  /// Recomputes the `current_qty` cache from the lots. Call after every lot
+  /// move instead of adjusting the pool arithmetically.
+  Future<void> refreshInventoryCache(
+    DatabaseExecutor txn,
+    int inventoryId,
+  ) async {
+    final balance = await lotBalance(txn, inventoryId);
+    await txn.rawUpdate(
+      'UPDATE lab_inventory SET current_qty = ?, updated_at = ? WHERE id = ?',
+      [balance, nowIso(), inventoryId],
+    );
+  }
+
+  /// Receives a quantity as a new lot. Expiry is mandatory for every
+  /// category (decision: all receipts carry one).
+  Future<Map<String, dynamic>> receiveLot({
+    required int inventoryId,
+    required double qty,
+    required String expiryDate,
+    String supplier = '',
+    String note = '',
+    Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await _db;
+    final item = await getInventoryItem(inventoryId, db);
+    final cleanQty = (safeFloat(qty) ?? 0.0);
+    if (cleanQty <= 0) throw ValidationError(AppErrors.lotQtyRequired);
+    final day = cleanLotExpiry(expiryDate);
+    final timestamp = nowIso();
+    final parentRemote = '${item['remote_id'] ?? ''}';
+    final lotId = await executeReturnId(
+      db,
+      '''
+        INSERT INTO inventory_lots (
+            inventory_id, inventory_remote_id, lot_no, qty_received,
+            qty_remaining, expiry_date, supplier, note, received_by,
+            received_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+      [
+        inventoryId,
+        parentRemote,
+        'PENDING',
+        cleanQty,
+        cleanQty,
+        day,
+        supplier.trim(),
+        note.trim(),
+        _userId(user),
+        timestamp,
+        timestamp,
+      ],
+    );
+    final lotNo = 'L-${lotId.toString().padLeft(4, '0')}';
+    await execute(
+      db,
+      'UPDATE inventory_lots SET lot_no = ? WHERE id = ?',
+      [lotNo, lotId],
+    );
+    await refreshInventoryCache(db, inventoryId);
+    final rows = await fetchAll(
+      db,
+      'SELECT * FROM inventory_lots WHERE id = ?',
+      [lotId],
+    );
+    return rows.first;
+  }
+
+  /// Lots of one item, FEFO order (undated last). Empty lots excluded unless
+  /// [includeEmpty] is set (log/history views).
+  Future<List<Map<String, dynamic>>> listInventoryLots(
+    int inventoryId, {
+    bool includeEmpty = false,
+    DatabaseExecutor? executor,
+  }) async {
+    return fetchAll(
+      executor,
+      '''
+        SELECT * FROM inventory_lots WHERE inventory_id = ?
+        ${includeEmpty ? '' : 'AND qty_remaining > 0'}
+        ORDER BY CASE WHEN expiry_date IS NULL OR expiry_date = ''
+          THEN 1 ELSE 0 END,
+          expiry_date ASC, received_at ASC, id ASC
+      ''',
+      [inventoryId],
+    );
+  }
+
+  /// Draws [qty] across lots in FEFO order, decrementing each lot.
+  /// Returns one take per touched lot:
+  /// `{lot_id, lot_no, lot_remote_id, qty, expired}`.
+  /// Never throws on shortfall: it takes what exists and the caller records
+  /// `requested - taken` as shortfall (warn-only expired policy: expired
+  /// lots participate, flagged per take).
+  Future<List<Map<String, dynamic>>> drawLotsFefo(
+    DatabaseExecutor txn,
+    int inventoryId,
+    double qty,
+  ) async {
+    var need = (safeFloat(qty) ?? 0.0);
+    if (need <= 1e-9) return const [];
+    var lots = await listInventoryLots(inventoryId, executor: txn);
+    if (lots.isEmpty) {
+      // Self-healing: pool rows written without lots (legacy installs
+      // mid-migration, hand-built test databases, direct pool writes) become
+      // one undated legacy lot on first draw, so every path keeps working.
+      final itemRows = await txn.query(
+        'lab_inventory',
+        columns: ['current_qty'],
+        where: 'id = ?',
+        whereArgs: [inventoryId],
+        limit: 1,
+      );
+      final pool = itemRows.isEmpty
+          ? 0.0
+          : (((itemRows.first['current_qty'] as num?)?.toDouble() ?? 0.0));
+      if (pool > 1e-9) {
+        final stamp = nowIso();
+        final lotId = await txn.rawInsert(
+          'INSERT INTO inventory_lots (inventory_id, lot_no, qty_received, '
+          'qty_remaining, expiry_date, received_at, created_at) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?)',
+          [inventoryId, 'PENDING', pool, pool, '', stamp, stamp],
+        );
+        await txn.rawUpdate(
+          'UPDATE inventory_lots SET lot_no = ? WHERE id = ?',
+          ['L-${lotId.toString().padLeft(4, '0')}', lotId],
+        );
+        lots = await listInventoryLots(inventoryId, executor: txn);
+      }
+    }
+    final takes = <Map<String, dynamic>>[];
+    for (final lot in lots) {
+      if (need <= 1e-9) break;
+      final lotId = (lot['id'] as num).toInt();
+      final remaining = ((lot['qty_remaining'] as num?)?.toDouble() ?? 0.0);
+      if (remaining <= 1e-9) continue;
+      final take = remaining < need ? remaining : need;
+      await txn.rawUpdate(
+        'UPDATE inventory_lots SET qty_remaining = qty_remaining - ?, '
+        'updated_at = ? WHERE id = ?',
+        [take, nowIso(), lotId],
+      );
+      final expiry = '${lot['expiry_date'] ?? ''}';
+      takes.add({
+        'lot_id': lotId,
+        'lot_no': '${lot['lot_no'] ?? ''}',
+        'lot_remote_id': '${lot['remote_id'] ?? ''}',
+        'qty': take,
+        'expired': lotIsExpired(expiry),
+      });
+      need -= take;
+    }
+    return takes;
+  }
+
+  /// Credits [qty] back to one lot (reversals return to source).
+  Future<void> creditLot(
+    DatabaseExecutor txn,
+    int lotId,
+    double qty,
+  ) async {
+    final clean = (safeFloat(qty) ?? 0.0);
+    if (clean <= 1e-9) return;
+    await txn.rawUpdate(
+      'UPDATE inventory_lots SET qty_remaining = qty_remaining + ?, '
+      'updated_at = ? WHERE id = ?',
+      [clean, nowIso(), lotId],
+    );
+  }
+
+  /// Returns [qty] to the lots one test drew from, newest draw first (so the
+  /// oldest consumption stays intact). Lines without a lot (pre-lot rows)
+  /// resolve to the oldest lot. A remainder beyond everything the test took
+  /// (caller bug — deltas are diffs) lands on the oldest lot so the books
+  /// still balance. Returns takes in the same shape as [drawLotsFefo].
+  Future<List<Map<String, dynamic>>> returnLotsToSource(
+    DatabaseExecutor txn,
+    int sampleTestId,
+    int inventoryId,
+    double qty,
+  ) async {
+    var need = (safeFloat(qty) ?? 0.0);
+    if (need <= 1e-9) return const [];
+    final lines = await fetchAll(
+      txn,
+      '''
+        SELECT l.*, c.applied_qty AS took FROM lab_consumption_log c
+        JOIN inventory_lots l ON l.id = c.lot_id
+        WHERE c.sample_test_id = ? AND c.inventory_id = ?
+          AND c.event_type = 'CONSUMPTION' AND c.lot_id IS NOT NULL
+        ORDER BY c.id DESC
+      ''',
+      [sampleTestId, inventoryId],
+    );
+    final takes = <Map<String, dynamic>>[];
+    for (final line in lines) {
+      if (need <= 1e-9) break;
+      final lotId = (line['id'] as num).toInt();
+      final took = ((line['took'] as num?)?.toDouble() ?? 0.0);
+      if (took <= 1e-9) continue;
+      final back = took < need ? took : need;
+      await creditLot(txn, lotId, back);
+      takes.add({
+        'lot_id': lotId,
+        'lot_no': '${line['lot_no'] ?? ''}',
+        'lot_remote_id': '${line['remote_id'] ?? ''}',
+        'qty': back,
+        'expired': lotIsExpired('${line['expiry_date'] ?? ''}'),
+      });
+      need -= back;
+    }
+    if (need > 1e-9) {
+      final oldest = await fetchOne(
+        txn,
+        'SELECT id, lot_no, COALESCE(remote_id,\'\') AS remote_id, '
+        'expiry_date FROM inventory_lots WHERE inventory_id = ? '
+        'ORDER BY received_at ASC, id ASC LIMIT 1',
+        [inventoryId],
+      );
+      if (oldest != null) {
+        final lotId = (oldest['id'] as num).toInt();
+        await creditLot(txn, lotId, need);
+        takes.add({
+          'lot_id': lotId,
+          'lot_no': '${oldest['lot_no'] ?? ''}',
+          'lot_remote_id': '${oldest['remote_id'] ?? ''}',
+          'qty': need,
+          'expired': lotIsExpired('${oldest['expiry_date'] ?? ''}'),
+        });
+      }
+    }
+    return takes;
+  }
+
+  /// One consumption detail row carrying its lot pointer (nullable for
+  /// pre-lot legacy rows) plus the human-readable `lot_no` snapshot and the
+  /// cross-device `lot_remote_id`.
+  Future<void> insertConsumptionLine(
+    DatabaseExecutor txn, {
+    required int sampleTestId,
+    required int inventoryId,
+    required double qtyUsed,
+    required double requestedQty,
+    required double appliedQty,
+    required double shortfallQty,
+    required String eventType,
+    int? reversalOfLogId,
+    int? lotId,
+    String lotNo = '',
+    String lotRemoteId = '',
+    required String timestamp,
+  }) async {
+    await txn.rawInsert(
+      '''
+        INSERT INTO lab_consumption_log (
+            sample_test_id, inventory_id, qty_used, requested_qty,
+            applied_qty, shortfall_qty, event_type, reversal_of_log_id,
+            lot_id, lot_no, lot_remote_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''',
+      [
+        sampleTestId,
+        inventoryId,
+        qtyUsed,
+        requestedQty,
+        appliedQty,
+        shortfallQty,
+        eventType,
+        reversalOfLogId,
+        lotId,
+        lotNo,
+        lotRemoteId,
+        timestamp,
+      ],
+    );
+  }
+
+  /// Reverses every unreversed CONSUMPTION row of one test back into its
+  /// source lots (oldest-drawn credit order is irrelevant here: each line
+  /// carries its own lot). Lines without a lot (pre-lot rows) credit the
+  /// oldest lot so the pool still balances. Returns the reversed count.
+  Future<int> reverseConsumptionToLots(
+    DatabaseExecutor txn,
+    int testId, {
+    required String timestamp,
+  }) async {
+    final logs = await fetchAll(
+      txn,
+      '''
+        SELECT * FROM lab_consumption_log
+        WHERE sample_test_id = ? AND event_type = 'CONSUMPTION'
+      ''',
+      [testId],
+    );
+    var reversedCount = 0;
+    for (final log in logs) {
+      final logId = (log['id'] as num).toInt();
+      final alreadyReversed = await fetchOne(
+        txn,
+        'SELECT id FROM lab_consumption_log WHERE reversal_of_log_id = ?',
+        [logId],
+      );
+      if (alreadyReversed != null) continue;
+      final applied = (safeFloat(log['applied_qty'] ?? log['qty_used']) ?? 0.0)
+          .clamp(0.0, double.infinity)
+          .toDouble();
+      if (applied <= 0) continue;
+      final inventoryId = (log['inventory_id'] as num).toInt();
+      var lotId = (log['lot_id'] as num?)?.toInt();
+      var lotNo = '${log['lot_no'] ?? ''}';
+      var lotRemoteId = '${log['lot_remote_id'] ?? ''}';
+      if (lotId == null) {
+        // Pre-lot row: credit the oldest lot so books still balance.
+        final oldest = await fetchOne(
+          txn,
+          'SELECT id, lot_no, COALESCE(remote_id,\'\') AS remote_id '
+          'FROM inventory_lots WHERE inventory_id = ? '
+          'ORDER BY received_at ASC, id ASC LIMIT 1',
+          [inventoryId],
+        );
+        if (oldest == null) continue;
+        lotId = (oldest['id'] as num).toInt();
+        lotNo = '${oldest['lot_no'] ?? ''}';
+        lotRemoteId = '${oldest['remote_id'] ?? ''}';
+      }
+      await creditLot(txn, lotId, applied);
+      await insertConsumptionLine(
+        txn,
+        sampleTestId: testId,
+        inventoryId: inventoryId,
+        qtyUsed: -applied,
+        requestedQty: applied,
+        appliedQty: applied,
+        shortfallQty: 0,
+        eventType: 'REVERSAL',
+        reversalOfLogId: logId,
+        lotId: lotId,
+        lotNo: lotNo,
+        lotRemoteId: lotRemoteId,
+        timestamp: timestamp,
+      );
+      await refreshInventoryCache(txn, inventoryId);
+      reversedCount++;
+    }
+    return reversedCount;
+  }
+
+  /// Zeroes every expired lot with remaining quantity (warn-only policy keeps
+  /// them consumable, so disposal is an explicit, ledger-backed act).
+  /// Returns the disposed quantity.
+  Future<double> disposeExpiredLots(
+    int inventoryId, {
+    Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await _db;
+    await getInventoryItem(inventoryId, db);
+    final today = todayIso();
+    final lots = await fetchAll(
+      db,
+      '''
+        SELECT * FROM inventory_lots WHERE inventory_id = ?
+        AND qty_remaining > 0 AND expiry_date != ''
+        AND substr(expiry_date,1,10) < ?
+      ''',
+      [inventoryId, today],
+    );
+    var disposed = 0.0;
+    final timestamp = nowIso();
+    for (final lot in lots) {
+      final lotId = (lot['id'] as num).toInt();
+      final remaining = ((lot['qty_remaining'] as num?)?.toDouble() ?? 0.0);
+      if (remaining <= 1e-9) continue;
+      await db.rawUpdate(
+        'UPDATE inventory_lots SET qty_remaining = 0, updated_at = ? '
+        'WHERE id = ?',
+        [timestamp, lotId],
+      );
+      disposed += remaining;
+    }
+    if (disposed > 1e-9) {
+      await refreshInventoryCache(db, inventoryId);
+    }
+    return disposed;
   }
 
   Future<List<Map<String, dynamic>>> getLowStockItems() async {
@@ -542,8 +1058,10 @@ class LabRepo {
   Future<Map<String, dynamic>> createEquipment({
     required String name,
     String manufacturer = '',
+    String serialNumber = '',
     String description = '',
     String lastCalibrationDate = '',
+    String nextCalibrationDate = '',
     DatabaseExecutor? executor,
   }) async {
     final cleanName = name.trim();
@@ -562,16 +1080,18 @@ class LabRepo {
       db,
       '''
         INSERT INTO lab_equipment (
-            name, code, manufacturer, description,
-            last_calibration_date, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            name, code, manufacturer, serial_number, description,
+            last_calibration_date, next_calibration_date, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''',
       [
         cleanName,
         await _nextEquipmentCode(db),
         manufacturer.trim(),
+        serialNumber.trim(),
         description.trim(),
         lastCalibrationDate.trim(),
+        nextCalibrationDate.trim(),
         timestamp,
         timestamp,
       ],
@@ -600,8 +1120,10 @@ class LabRepo {
     }
     for (final key in [
       'manufacturer',
+      'serial_number',
       'description',
       'last_calibration_date',
+      'next_calibration_date',
     ]) {
       if (fields.containsKey(key)) updates[key] = '${fields[key] ?? ''}'.trim();
     }
@@ -668,6 +1190,22 @@ class LabRepo {
         'WHERE id = ? AND last_calibration_date < ?',
         [date, nowIso(), equipmentId, date],
       );
+      // Roll the next calibration forward only when it is missing or stale:
+      // an explicit future date the user set stays untouched.
+      final next = plusOneYearIso(date);
+      if (next.isNotEmpty) {
+        try {
+          await db.rawUpdate(
+            'UPDATE lab_equipment SET next_calibration_date = ?, '
+            'updated_at = ? WHERE id = ? AND (next_calibration_date IS NULL '
+            "OR next_calibration_date = '' OR next_calibration_date <= ?)",
+            [next, nowIso(), equipmentId, date],
+          );
+        } catch (_) {
+          // Column absent on a hand-built database: the migration adds it on
+          // the next open; the event itself already committed.
+        }
+      }
     }
     final rows = await db.rawQuery(
       'SELECT * FROM lab_equipment_events WHERE id = ?',
@@ -1998,6 +2536,7 @@ class LabRepo {
   Future<Map<String, dynamic>> createAnalysis({
     required String name,
     String description = '',
+    String reference = '',
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String unit = '%',
@@ -2050,13 +2589,14 @@ class LabRepo {
       executor,
       '''
             INSERT INTO lab_analyses
-                (name, unit, description, dynamic_fields_json, formula_json, parameter_id, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (name, unit, description, reference, dynamic_fields_json, formula_json, parameter_id, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ''',
       [
         finalName,
         finalUnit,
         description.trim(),
+        reference.trim(),
         jsonDumps(fields),
         jsonDumps(formulaData),
         parameterId,
@@ -2093,6 +2633,7 @@ class LabRepo {
     required int analysisId,
     String? name,
     String? description,
+    String? reference,
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String? unit,
@@ -2162,6 +2703,13 @@ class LabRepo {
         executor,
         'UPDATE lab_analyses SET description = ? WHERE id = ?',
         [description.trim(), analysisId],
+      );
+    }
+    if (reference != null) {
+      await execute(
+        executor,
+        'UPDATE lab_analyses SET reference = ? WHERE id = ?',
+        [reference.trim(), analysisId],
       );
     }
     if (unit != null && parameterId == null) {
@@ -2731,7 +3279,7 @@ class LabRepo {
             constants: _mapOf(formulaData['constants']),
             targetUnit: '${analysis['unit'] ?? ''}',
           );
-          resultText = '$resultValue';
+          resultText = labResultText(resultValue);
           computed = {
             'expression': formulaExpr,
             'value': resultValue,
@@ -2854,43 +3402,50 @@ class LabRepo {
 
       // Batched writes: collect UPDATE + INSERT pairs, commit via Batch
       // (single round-trip) instead of 2*N sequential statements.
-      final batch = (txn as dynamic).batch() as dynamic;
       final pendingWrites = <Map<String, dynamic>>[];
       for (final entry in requested.entries) {
         final requestedQty = entry.value;
         if (requestedQty <= 0) continue;
         final inventory = invMap[entry.key]!;
-        final availableQty = (safeFloat(inventory['current_qty']) ?? 0.0)
-            .clamp(0.0, double.infinity)
-            .toDouble();
-        final appliedQty = availableQty < requestedQty
-            ? availableQty
-            : requestedQty;
+        // FEFO draw across the item's lots (warn-only expired policy, so
+        // expired lots participate and are flagged per take). The pre-check
+        // above already threw on any shortfall, so takes cover the request.
+        final takes = await drawLotsFefo(txn, entry.key, requestedQty);
+        final appliedQty = takes.fold<double>(
+          0.0,
+          (sum, t) => sum + ((t['qty'] as num?)?.toDouble() ?? 0.0),
+        );
+        final expiredQty = takes.fold<double>(
+          0.0,
+          (sum, t) =>
+              sum +
+              ((t['expired'] == true ? (t['qty'] as num?)?.toDouble() : 0.0) ??
+                  0.0),
+        );
         final shortfallQty = requestedQty - appliedQty > 0
             ? requestedQty - appliedQty
             : 0.0;
-        final newQty = availableQty - appliedQty;
-        batch.rawUpdate(
-          'UPDATE lab_inventory SET current_qty = ?, updated_at = ? WHERE id = ?',
-          [newQty, timestamp, entry.key],
-        );
-        batch.rawInsert(
-          '''
-                    INSERT INTO lab_consumption_log (
-                        sample_test_id, inventory_id, qty_used, requested_qty, applied_qty,
-                        shortfall_qty, event_type, created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, 'CONSUMPTION', ?)
-                    ''',
-          [
-            testId,
-            entry.key,
-            appliedQty,
-            requestedQty,
-            appliedQty,
-            shortfallQty,
-            timestamp,
-          ],
-        );
+        await refreshInventoryCache(txn, entry.key);
+        for (var i = 0; i < takes.length; i++) {
+          final take = takes[i];
+          final takeQty = ((take['qty'] as num?)?.toDouble() ?? 0.0);
+          await insertConsumptionLine(
+            txn,
+            sampleTestId: testId,
+            inventoryId: entry.key,
+            qtyUsed: takeQty,
+            requestedQty: requestedQty,
+            appliedQty: takeQty,
+            // The unmet tail is recorded once, on the last lot line.
+            shortfallQty: i == takes.length - 1 ? shortfallQty : 0.0,
+            eventType: 'CONSUMPTION',
+            lotId: (take['lot_id'] as num?)?.toInt(),
+            lotNo: '${take['lot_no'] ?? ''}',
+            lotRemoteId: '${take['lot_remote_id'] ?? ''}',
+            timestamp: timestamp,
+          );
+        }
+        final newQty = await lotBalance(txn, entry.key);
         pendingWrites.add({
           'inventory_id': entry.key,
           'inventory_name': inventory['name'],
@@ -2899,11 +3454,11 @@ class LabRepo {
           'requested_qty': requestedQty,
           'applied_qty': appliedQty,
           'shortfall_qty': shortfallQty,
+          'expired_qty': expiredQty,
           'new_qty': newQty,
           'min_qty': inventory['min_qty'],
         });
       }
-      await batch.commit(noResult: true);
       for (final w in pendingWrites) {
         consumption.add({
           'inventory_id': w['inventory_id'],
@@ -2913,16 +3468,20 @@ class LabRepo {
           'requested_qty': w['requested_qty'],
           'applied_qty': w['applied_qty'],
           'shortfall_qty': w['shortfall_qty'],
+          'expired_qty': w['expired_qty'],
           'new_qty': w['new_qty'],
         });
+        final expiredQty = (w['expired_qty'] as double?) ?? 0.0;
         if ((w['new_qty'] as double) < (safeFloat(w['min_qty']) ?? 0.0) ||
-            (w['shortfall_qty'] as double) > 0) {
+            (w['shortfall_qty'] as double) > 0 ||
+            expiredQty > 0) {
           lowStock.add({
             'inventory_id': w['inventory_id'],
             'inventory_name': w['inventory_name'],
             'current_qty': w['new_qty'],
             'min_qty': w['min_qty'],
             'shortfall_qty': w['shortfall_qty'],
+            'expired_qty': expiredQty,
           });
         }
       }
@@ -3280,46 +3839,10 @@ class LabRepo {
     if (row == null) throw NotFoundError(AppErrors.testNotFound);
     // Deleting a result must also undo the stock consumption created by it;
     // otherwise the inventory would remain understated after the result is gone.
-    final logs = await fetchAll(
-      db,
-      '''
-        SELECT * FROM lab_consumption_log
-        WHERE sample_test_id = ? AND event_type = 'CONSUMPTION'
-      ''',
-      [testId],
-    );
-    final timestamp = nowIso();
-    for (final log in logs) {
-      final logId = int.parse('${log['id']}');
-      final reversed = await fetchOne(
-        db,
-        'SELECT id FROM lab_consumption_log WHERE reversal_of_log_id = ?',
-        [logId],
-      );
-      if (reversed != null) continue;
-      final applied = (safeFloat(log['applied_qty'] ?? log['qty_used']) ?? 0.0)
-          .clamp(0.0, double.infinity)
-          .toDouble();
-      if (applied <= 0) continue;
-      final inventoryId = int.parse('${log['inventory_id']}');
-      final inventory = await getInventoryItemTx(db, inventoryId);
-      final restored = (safeFloat(inventory['current_qty']) ?? 0.0) + applied;
-      await execute(
-        db,
-        'UPDATE lab_inventory SET current_qty = ?, updated_at = ? WHERE id = ?',
-        [restored, timestamp, inventoryId],
-      );
-      await execute(
-        db,
-        '''
-          INSERT INTO lab_consumption_log (
-            sample_test_id, inventory_id, qty_used, requested_qty, applied_qty,
-            shortfall_qty, event_type, reversal_of_log_id, created_at
-          ) VALUES (?, ?, ?, ?, ?, 0, 'REVERSAL', ?, ?)
-        ''',
-        [testId, inventoryId, -applied, applied, applied, logId, timestamp],
-      );
-    }
+    // Each CONSUMPTION line carries its lot: the reversal credits the same
+    // lot back (never the pool arithmetically), and the cache is recomputed
+    // as SUM(lots) so a repeated reversal can never drift the balance.
+    await reverseConsumptionToLots(db, testId, timestamp: nowIso());
     await db.delete('lab_sample_tests', where: 'id = ?', whereArgs: [testId]);
   }
 
@@ -3327,14 +3850,25 @@ class LabRepo {
     String? sourceType,
     int? sourceRefId,
   }) async {
+    // `entry_code` is UNIQUE across both inspection kinds (raw + product),
+    // so this join is 1:1 with the محضر of the test; the reason filter needs
+    // it (a rejection search like "جودة" lives on the inspection header).
     var query = '''
             SELECT 
                 t.*, a.name AS analysis_name, a.description AS analysis_description,
                 a.unit AS analysis_unit,
-                COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''), u.email, '-') AS tested_by_name
+                a.reference AS analysis_reference,
+                COALESCE(
+                    NULLIF(ut.full_name, ''), NULLIF(ut.display_name, ''), ut.email,
+                    NULLIF(uc.full_name, ''), NULLIF(uc.display_name, ''), uc.email,
+                    '-'
+                ) AS tested_by_name,
+                i.decision_status, i.decision_reason
             FROM lab_sample_tests t
             JOIN lab_analyses a ON a.id = t.analysis_id
-            LEFT JOIN users u ON u.id = t.tested_by
+            LEFT JOIN users ut ON ut.id = t.tested_by OR ut.uid = t.tested_by
+            LEFT JOIN users uc ON uc.id = t.created_by OR uc.uid = t.created_by
+            LEFT JOIN inspections i ON i.entry_code = t.entry_code
             WHERE 1 = 1
         ''';
     final params = <Object?>[];
@@ -3581,10 +4115,16 @@ class LabRepo {
             SELECT 
                 t.*, a.name AS analysis_name, a.description AS analysis_description,
                 a.unit AS analysis_unit,
-                u.full_name AS tested_by_name
+                a.reference AS analysis_reference,
+                COALESCE(
+                    NULLIF(ut.full_name, ''), NULLIF(ut.display_name, ''), ut.email,
+                    NULLIF(uc.full_name, ''), NULLIF(uc.display_name, ''), uc.email,
+                    '-'
+                ) AS tested_by_name
             FROM lab_sample_tests t
             JOIN lab_analyses a ON a.id = t.analysis_id
-            LEFT JOIN users u ON u.id = t.tested_by
+            LEFT JOIN users ut ON ut.id = t.tested_by OR ut.uid = t.tested_by
+            LEFT JOIN users uc ON uc.id = t.created_by OR uc.uid = t.created_by
             WHERE ${where.join(' AND ')}
             ORDER BY t.tested_at ASC, t.id ASC
         ''';
@@ -3603,6 +4143,114 @@ class LabRepo {
 
   // ── Consumption log / adjustments / activity ──────────────────
 
+  /// Unified per-item stock log (what the log button shows): lots, ledger
+  /// moves, consumption lines and manual adjustments, newest first. Each
+  /// entry carries `kind` (lot/ledger/consumption/adjustment), `at`
+  /// (timestamp), `qty` (signed where it applies) and `detail` text.
+  Future<List<Map<String, dynamic>>> itemStockLog(
+    int inventoryId, {
+    int limit = 200,
+    DatabaseExecutor? executor,
+  }) async {
+    final db = executor ?? await _db;
+    final out = <Map<String, dynamic>>[];
+    final lots = await fetchAll(
+      db,
+      'SELECT * FROM inventory_lots WHERE inventory_id = ? '
+      'ORDER BY received_at DESC, id DESC LIMIT ?',
+      [inventoryId, limit],
+    );
+    for (final l in lots) {
+      out.add({
+        'kind': 'lot',
+        'at': '${l['received_at'] ?? ''}',
+        'qty': (l['qty_received'] as num?)?.toDouble() ?? 0.0,
+        'remaining': (l['qty_remaining'] as num?)?.toDouble() ?? 0.0,
+        'lot_no': '${l['lot_no'] ?? ''}',
+        'expiry_date': '${l['expiry_date'] ?? ''}',
+        'supplier': '${l['supplier'] ?? ''}',
+        'note': '${l['note'] ?? ''}',
+        'detail':
+            '${l['lot_no'] ?? ''} · ${AppText.t('استلام', 'Receipt')}: ${l['qty_received'] ?? 0}',
+      });
+    }
+    try {
+      final ledger = await fetchAll(
+        db,
+        'SELECT * FROM inventory_transactions WHERE inventory_id = ? '
+        'ORDER BY created_at DESC, id DESC LIMIT ?',
+        [inventoryId, limit],
+      );
+      for (final t in ledger) {
+        out.add({
+          'kind': 'ledger',
+          'at': '${t['created_at'] ?? ''}',
+          'qty': (t['quantity_delta'] as num?)?.toDouble() ?? 0.0,
+          'type': '${t['transaction_type'] ?? ''}',
+          'reason': '${t['reason'] ?? ''}',
+          'detail':
+              '${t['transaction_type'] ?? ''}: ${t['quantity_delta'] ?? 0}',
+        });
+      }
+    } on Object {
+      // Ledger table missing on a hand-built database: skip it.
+    }
+    final lines = await fetchAll(
+      db,
+      '''
+        SELECT lc.*, t.sample_name AS sample_name, a.name AS analysis_name
+        FROM lab_consumption_log lc
+        LEFT JOIN lab_sample_tests t ON t.id = lc.sample_test_id
+        LEFT JOIN lab_analyses a ON a.id = t.analysis_id
+        WHERE lc.inventory_id = ?
+        ORDER BY lc.created_at DESC, lc.id DESC LIMIT ?
+      ''',
+      [inventoryId, limit],
+    );
+    for (final l in lines) {
+      out.add({
+        'kind': 'consumption',
+        'at': '${l['created_at'] ?? ''}',
+        'qty': (l['qty_used'] as num?)?.toDouble() ?? 0.0,
+        'type': '${l['event_type'] ?? ''}',
+        'lot_no': '${l['lot_no'] ?? ''}',
+        'sample_name': '${l['sample_name'] ?? ''}',
+        'analysis_name': '${l['analysis_name'] ?? ''}',
+        'detail':
+            '${l['event_type'] ?? ''}: ${l['qty_used'] ?? 0}'
+            '${'${l['lot_no'] ?? ''}'.isEmpty ? '' : ' (${l['lot_no']})'}',
+      });
+    }
+    try {
+      final adjustments = await fetchAll(
+        db,
+        'SELECT * FROM lab_stock_adjustments WHERE inventory_id = ? '
+        'ORDER BY adjusted_at DESC, id DESC LIMIT ?',
+        [inventoryId, limit],
+      );
+      for (final a in adjustments) {
+        out.add({
+          'kind': 'adjustment',
+          'at': '${a['adjusted_at'] ?? ''}',
+          'qty':
+              ((a['new_qty'] as num?)?.toDouble() ?? 0.0) -
+              ((a['old_qty'] as num?)?.toDouble() ?? 0.0),
+          'reason': '${a['reason'] ?? ''}',
+          'detail':
+              '${AppText.t('تسوية', 'Adjustment')}: ${a['old_qty'] ?? 0} → ${a['new_qty'] ?? 0}',
+        });
+      }
+    } on Object {
+      // Adjustments table missing on a hand-built database: skip it.
+    }
+    out.sort((a, b) {
+      final cmp = '${b['at'] ?? ''}'.compareTo('${a['at'] ?? ''}');
+      if (cmp != 0) return cmp;
+      return '${b['kind'] ?? ''}'.compareTo('${a['kind'] ?? ''}');
+    });
+    return out.length <= limit ? out : out.sublist(0, limit);
+  }
+
   Future<List<Map<String, dynamic>>> listConsumptionLog() async {
     return fetchAll(null, '''
             SELECT 
@@ -3610,12 +4258,17 @@ class LabRepo {
                 t.sample_name, t.source_name, t.source_type, t.result_text,
                 t.tested_by, t.tested_at,
                 a.name AS analysis_name,
-                u.full_name AS tested_by_name
+                COALESCE(
+                    NULLIF(ut.full_name, ''), NULLIF(ut.display_name, ''), ut.email,
+                    NULLIF(uc.full_name, ''), NULLIF(uc.display_name, ''), uc.email,
+                    '-'
+                ) AS tested_by_name
             FROM lab_consumption_log lc
             JOIN lab_inventory inv ON inv.id = lc.inventory_id
             JOIN lab_sample_tests t ON t.id = lc.sample_test_id
             JOIN lab_analyses a ON a.id = t.analysis_id
-            LEFT JOIN users u ON u.id = t.tested_by
+            LEFT JOIN users ut ON ut.id = t.tested_by OR ut.uid = t.tested_by
+            LEFT JOIN users uc ON uc.id = t.created_by OR uc.uid = t.created_by
             ORDER BY lc.created_at DESC, lc.id DESC
             ''');
   }
@@ -3731,6 +4384,28 @@ class LabRepo {
     return keys.reversed.toList();
   }
 
+  /// Minimal column projection for [dashboardSummary]: only what
+  /// [enrichTestSync] needs to compute `range_state` (result text, source
+  /// ref, analysis id, tested_at). ISO timestamps sort lexicographically, so
+  /// `tested_at >= cutoffKey` equals the Dart-side date-prefix comparison
+  /// that used to re-read the whole table.
+  Future<List<Map<String, dynamic>>> _dashboardTests(String? cutoffKey) async {
+    final rows = await fetchAll(
+      null,
+      '''
+      SELECT t.id, t.source_type, t.source_ref_id, t.analysis_id,
+             t.result_text, t.tested_at
+      FROM lab_sample_tests t
+      ${cutoffKey == null ? '' : 'WHERE t.tested_at >= ?'}
+      ''',
+      cutoffKey == null ? const <Object?>[] : <Object?>[cutoffKey],
+    );
+    await buildRangesCache();
+    return [
+      for (final row in rows) enrichTestSync(Map<String, dynamic>.from(row)),
+    ];
+  }
+
   Future<Map<String, dynamic>> dashboardSummary({String period = 'all'}) async {
     final cleanPeriod = period.trim().toLowerCase();
     DateTime? cutoff;
@@ -3750,15 +4425,12 @@ class LabRepo {
           '${cutoff.year.toString().padLeft(4, '0')}-${cutoff.month.toString().padLeft(2, '0')}-${cutoff.day.toString().padLeft(2, '0')}';
     }
 
-    final tests = <Map<String, dynamic>>[];
-    for (final test in await listSampleTests()) {
-      final dateKey = '${test['tested_at'] ?? ''}';
-      if (cutoffKey == null ||
-          dateKey.length >= 10 &&
-              dateKey.substring(0, 10).compareTo(cutoffKey) >= 0) {
-        tests.add(test);
-      }
-    }
+    // Lightweight period pushdown: the summary only needs the range state of
+    // every test in the window, so the query carries just those columns (an
+    // index seek on tested_at replaces the old full-table 7-way join — whose
+    // NULL-aware users OR-joins ran a scan per row — plus a Dart-side cutoff
+    // filter that re-read every row on every period change).
+    final tests = await _dashboardTests(cutoffKey);
     final inRange = [
       for (final t in tests)
         if (t['range_state'] == 'in') t,
@@ -3903,14 +4575,19 @@ class LabRepo {
     Map<String, dynamic>? dynamicValues,
     Map<int, Map<String, dynamic>>? inventoryMap,
   ) async {
+    // Perf: one batched `WHERE id IN (...)` instead of a SELECT per item /
+    // per dynamic link. Same NotFoundError semantics as the per-row path
+    // (loadInventoryMap throws inventoryItemNotFound for missing ids).
+    final effectiveMap = inventoryMap ??
+        await _consumptionInventoryMap(analysis, dynamicValues);
+    final providedMap = inventoryMap != null;
     final consumed = <int, double>{};
     for (final item in analysis['items'] as List? ?? []) {
       final m = item as Map<String, dynamic>;
       final inventoryId = int.parse('${m['inventory_id']}');
-      final inventory = await inventoryForConsumption(
-        inventoryId,
-        inventoryMap,
-      );
+      final inventory = providedMap
+          ? await inventoryForConsumption(inventoryId, effectiveMap)
+          : inventoryForConsumptionSync(inventoryId, effectiveMap);
       final qty = convertQuantity(
         safeFloat(m['qty_per_sample']) ?? 0.0,
         '${m['unit']}',
@@ -3927,14 +4604,45 @@ class LabRepo {
       final fieldVal = safeFloat(dyn[dynamicField]);
       final linkUnit = '${lm['unit'] ?? ''}'.trim();
       if (fieldVal == null || fieldVal <= 0) continue;
-      final inventory = await inventoryForConsumption(
-        inventoryId,
-        inventoryMap,
-      );
+      final inventory = providedMap
+          ? await inventoryForConsumption(inventoryId, effectiveMap)
+          : inventoryForConsumptionSync(inventoryId, effectiveMap);
       final qty = convertQuantity(fieldVal, linkUnit, '${inventory['unit']}');
       consumed[inventoryId] = (consumed[inventoryId] ?? 0.0) + qty;
     }
     return consumed;
+  }
+
+  /// Batch-loads every inventory row the analysis needs (items + dynamic
+  /// links) in one query. Raises the same error the per-row fallback raised.
+  Future<Map<int, Map<String, dynamic>>> _consumptionInventoryMap(
+    Map<String, dynamic> analysis,
+    Map<String, dynamic>? dynamicValues,
+  ) async {
+    final ids = <int>{};
+    for (final item in analysis['items'] as List? ?? []) {
+      ids.add(int.parse('${(item as Map<String, dynamic>)['inventory_id']}'));
+    }
+    for (final link in analysis['field_chemical_links'] as List? ?? []) {
+      final lm = link as Map<String, dynamic>;
+      final id = int.tryParse('${lm['inventory_id'] ?? 0}') ?? 0;
+      if (id != 0) ids.add(id);
+    }
+    if (ids.isEmpty) return {};
+    return loadInventoryMap(null, ids);
+  }
+
+  /// Map-backed [inventoryForConsumption]; the map is pre-resolved, so this
+  /// never hits the database.
+  Map<String, dynamic> inventoryForConsumptionSync(
+    int inventoryId,
+    Map<int, Map<String, dynamic>> inventoryMap,
+  ) {
+    final inventory = inventoryMap[inventoryId];
+    if (inventory == null) {
+      throw NotFoundError(AppErrors.inventoryItemNotFound);
+    }
+    return inventory;
   }
 
   Future<Map<String, dynamic>> inventoryForConsumption(
@@ -3973,7 +4681,7 @@ class LabRepo {
         constants: _mapOf(formulaData['constants']),
         targetUnit: '${analysis['unit'] ?? ''}',
       );
-      return '$value';
+      return labResultText(value);
     } on ValidationError {
       return '';
     } on FormatException {
@@ -4007,48 +4715,53 @@ class LabRepo {
     final consumption = <Map<String, dynamic>>[];
     final lowStock = <Map<String, dynamic>>[];
     final timestamp = nowIso();
-    final batch = (txn as dynamic).batch() as dynamic;
     final pending = <Map<String, dynamic>>[];
     for (final entry in deltas.entries) {
       final inventoryId = entry.key;
       final delta = entry.value;
       final inventory = loaded[inventoryId]!;
-      final currentQty = (safeFloat(inventory['current_qty']) ?? 0.0)
-          .clamp(0.0, double.infinity)
-          .toDouble();
       final requestedQty = delta.abs();
       final isReversal = delta < 0;
-      final appliedQty = isReversal
-          ? requestedQty
-          : (currentQty < requestedQty ? currentQty : requestedQty);
+      // FEFO draw (consume) or return-to-source (edit reduced the need).
+      // Warn-only expired policy: expired lots participate, flagged per take.
+      final takes = isReversal
+          ? await returnLotsToSource(txn, sampleTestId, inventoryId, requestedQty)
+          : await drawLotsFefo(txn, inventoryId, requestedQty);
+      final appliedQty = takes.fold<double>(
+        0.0,
+        (sum, t) => sum + ((t['qty'] as num?)?.toDouble() ?? 0.0),
+      );
+      final expiredQty = takes.fold<double>(
+        0.0,
+        (sum, t) =>
+            sum +
+            ((t['expired'] == true ? (t['qty'] as num?)?.toDouble() : 0.0) ??
+                0.0),
+      );
       final shortfallQty = isReversal
           ? 0.0
           : (requestedQty - appliedQty > 0 ? requestedQty - appliedQty : 0.0);
-      final newQty = isReversal
-          ? currentQty + appliedQty
-          : currentQty - appliedQty;
-      batch.rawUpdate(
-        'UPDATE lab_inventory SET current_qty = ?, updated_at = ? WHERE id = ?',
-        [newQty, timestamp, inventoryId],
-      );
-      batch.rawInsert(
-        '''
-                INSERT INTO lab_consumption_log (
-                    sample_test_id, inventory_id, qty_used, requested_qty, applied_qty,
-                    shortfall_qty, event_type, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''',
-        [
-          sampleTestId,
-          inventoryId,
-          isReversal ? -appliedQty : appliedQty,
-          requestedQty,
-          appliedQty,
-          shortfallQty,
-          isReversal ? 'REVERSAL' : 'CONSUMPTION',
-          timestamp,
-        ],
-      );
+      await refreshInventoryCache(txn, inventoryId);
+      final newQty = await lotBalance(txn, inventoryId);
+      for (var i = 0; i < takes.length; i++) {
+        final take = takes[i];
+        final takeQty = ((take['qty'] as num?)?.toDouble() ?? 0.0);
+        await insertConsumptionLine(
+          txn,
+          sampleTestId: sampleTestId,
+          inventoryId: inventoryId,
+          qtyUsed: isReversal ? -takeQty : takeQty,
+          requestedQty: requestedQty,
+          appliedQty: takeQty,
+          // The unmet tail is recorded once, on the last lot line.
+          shortfallQty: i == takes.length - 1 ? shortfallQty : 0.0,
+          eventType: isReversal ? 'REVERSAL' : 'CONSUMPTION',
+          lotId: (take['lot_id'] as num?)?.toInt(),
+          lotNo: '${take['lot_no'] ?? ''}',
+          lotRemoteId: '${take['lot_remote_id'] ?? ''}',
+          timestamp: timestamp,
+        );
+      }
       pending.add({
         'inventory_id': inventoryId,
         'inventory_name': inventory['name'],
@@ -4057,11 +4770,11 @@ class LabRepo {
         'requested_qty': requestedQty,
         'applied_qty': appliedQty,
         'shortfall_qty': shortfallQty,
+        'expired_qty': expiredQty,
         'new_qty': newQty,
         'min_qty': inventory['min_qty'],
       });
     }
-    await batch.commit(noResult: true);
     for (final p in pending) {
       if (inventoryMap != null) {
         final cur = inventoryMap[p['inventory_id'] as int];
@@ -4080,15 +4793,20 @@ class LabRepo {
         'requested_qty': p['requested_qty'],
         'applied_qty': p['applied_qty'],
         'shortfall_qty': p['shortfall_qty'],
+        'expired_qty': p['expired_qty'],
         'new_qty': p['new_qty'],
       });
+      final expiredQty = (p['expired_qty'] as double?) ?? 0.0;
       if ((p['new_qty'] as double) < (safeFloat(p['min_qty']) ?? 0.0) ||
-          (p['shortfall_qty'] as double) > 0) {
+          (p['shortfall_qty'] as double) > 0 ||
+          expiredQty > 0) {
         lowStock.add({
           'inventory_id': p['inventory_id'],
           'inventory_name': p['inventory_name'],
           'current_qty': p['new_qty'],
           'min_qty': p['min_qty'],
+          'shortfall_qty': p['shortfall_qty'],
+          'expired_qty': expiredQty,
         });
       }
     }
@@ -4305,6 +5023,65 @@ class LabRepo {
       }
       final inventoryMap = await loadInventoryMap(txn, consumptionInventoryIds);
 
+      // Prefetch the three per-row lookups below in bounded IN queries:
+      // inspections named by entry code, existing worksheet rows, and the
+      // sample tests already attached to those rows (the per-(row, analysis)
+      // existence SELECT used to run once per cell).
+      final prefetchedInspections = <String, Map<String, dynamic>>{};
+      final existingWsRowIds = <int>{};
+      final existingTestsByRow = <int, List<Map<String, dynamic>>>{};
+      final entryCodes = <String>{
+        for (final payloadRow in rows)
+          if ('${payloadRow['source_type'] ?? 'raw_material'}'.trim() ==
+                  'raw_material' &&
+              ('${payloadRow['entry_code'] ?? ''}'.trim()).isNotEmpty)
+            '${payloadRow['entry_code']}'.trim(),
+      };
+      if (entryCodes.isNotEmpty) {
+        final codes = entryCodes.toList();
+        final placeholders = List.filled(codes.length, '?').join(',');
+        final inspectionRows = await txn.rawQuery(
+          'SELECT id, material_id, material_name, material_code, '
+          "inspection_date, entry_code FROM inspections "
+          'WHERE entry_code IN ($placeholders)',
+          codes,
+        );
+        for (final ir in inspectionRows) {
+          prefetchedInspections['${ir['entry_code']}'] =
+              Map<String, dynamic>.from(ir);
+        }
+      }
+      final wsRowIds = <int>{
+        for (final payloadRow in rows)
+          if (payloadRow['row_id'] != null &&
+              ('${payloadRow['row_id']}'.trim()).isNotEmpty)
+            int.parse('${payloadRow['row_id']}'),
+      };
+      if (wsRowIds.isNotEmpty) {
+        final ids = wsRowIds.toList();
+        final placeholders = List.filled(ids.length, '?').join(',');
+        final wsRows = await txn.rawQuery(
+          'SELECT id FROM lab_worksheet WHERE id IN ($placeholders)',
+          ids,
+        );
+        existingWsRowIds.addAll([
+          for (final w in wsRows) (w['id'] as num).toInt(),
+        ]);
+        final testRows = await txn.rawQuery(
+          'SELECT * FROM lab_sample_tests WHERE worksheet_row_id IN '
+          '($placeholders)',
+          ids,
+        );
+        for (final t in testRows) {
+          existingTestsByRow
+              .putIfAbsent(
+                (t['worksheet_row_id'] as num).toInt(),
+                () => [],
+              )
+              .add(t);
+        }
+      }
+
       final consResult = <Map<String, dynamic>>[];
       final lowResult = <Map<String, dynamic>>[];
       var created = 0;
@@ -4327,11 +5104,7 @@ class LabRepo {
         final sampleNumber = '${payloadRow['sample_number'] ?? ''}'.trim();
         final entryCode = '${payloadRow['entry_code'] ?? ''}'.trim();
         if (sourceType == 'raw_material' && entryCode.isNotEmpty) {
-          final inspection = await fetchOne(
-            txn,
-            'SELECT id, material_id, material_name, material_code, inspection_date FROM inspections WHERE entry_code = ?',
-            [entryCode],
-          );
+          final inspection = prefetchedInspections[entryCode];
           if (inspection == null) {
             throw ValidationError(AppErrors.entryCodeNotFound(entryCode));
           }
@@ -4346,13 +5119,10 @@ class LabRepo {
         final rawRowId = payloadRow['row_id'];
         final int wsId;
         if (rawRowId != null && '$rawRowId'.trim().isNotEmpty) {
-          final existing = await fetchOne(
-            txn,
-            'SELECT id FROM lab_worksheet WHERE id = ?',
-            [int.parse('$rawRowId')],
-          );
-          if (existing == null)
+          final rowIdValue = int.parse('$rawRowId');
+          if (!existingWsRowIds.contains(rowIdValue)) {
             throw NotFoundError(AppErrors.worksheetRowNotFound);
+          }
           await execute(
             txn,
             '''
@@ -4413,14 +5183,15 @@ class LabRepo {
             inventoryMap,
           );
 
-          final existingTest = await fetchOne(
-            txn,
-            '''
-                            SELECT * FROM lab_sample_tests
-                            WHERE worksheet_row_id = ? AND analysis_id = ?
-                            ''',
-            [wsId, analysisId],
-          );
+          // The one existing test (row, analysis) pair, from the batched
+          // prefetch; inserts under a fresh wsId can never match.
+          Map<String, dynamic>? existingTest;
+          for (final candidate in existingTestsByRow[wsId] ?? const <Map<String, dynamic>>[]) {
+            if ((candidate['analysis_id'] as num?)?.toInt() == analysisId) {
+              existingTest = candidate;
+              break;
+            }
+          }
           if (existingTest != null) {
             final oldDyn = jsonLoads(
               '${existingTest['dynamic_values_json'] ?? ''}',
@@ -4543,55 +5314,11 @@ class LabRepo {
       );
       for (final t in tests) {
         final testId = int.parse('${t['id']}');
-        final logs = await fetchAll(
+        reversedCount += await reverseConsumptionToLots(
           txn,
-          '''
-                    SELECT * FROM lab_consumption_log
-                    WHERE sample_test_id = ? AND event_type = 'CONSUMPTION'
-                    ''',
-          [testId],
+          testId,
+          timestamp: timestamp,
         );
-        for (final log in logs) {
-          final alreadyReversed = await fetchOne(
-            txn,
-            'SELECT id FROM lab_consumption_log WHERE reversal_of_log_id = ?',
-            [int.parse('${log['id']}')],
-          );
-          if (alreadyReversed != null) continue;
-          final appliedRaw = log['applied_qty'] ?? log['qty_used'];
-          final appliedQty = (safeFloat(appliedRaw) ?? 0.0)
-              .clamp(0.0, double.infinity)
-              .toDouble();
-          if (appliedQty <= 0) continue;
-          final inventoryId = int.parse('${log['inventory_id']}');
-          final inventory = await getInventoryItemTx(txn, inventoryId);
-          final newQty =
-              (safeFloat(inventory['current_qty']) ?? 0.0) + appliedQty;
-          await execute(
-            txn,
-            'UPDATE lab_inventory SET current_qty = ?, updated_at = ? WHERE id = ?',
-            [newQty, timestamp, inventoryId],
-          );
-          await execute(
-            txn,
-            '''
-                    INSERT INTO lab_consumption_log (
-                        sample_test_id, inventory_id, qty_used, requested_qty, applied_qty,
-                        shortfall_qty, event_type, reversal_of_log_id, created_at
-                    ) VALUES (?, ?, ?, ?, ?, 0, 'REVERSAL', ?, ?)
-                    ''',
-            [
-              testId,
-              inventoryId,
-              -appliedQty,
-              appliedQty,
-              appliedQty,
-              int.parse('${log['id']}'),
-              timestamp,
-            ],
-          );
-          reversedCount++;
-        }
       }
       await execute(
         txn,
@@ -4622,10 +5349,15 @@ class LabRepo {
       null,
       '''
       SELECT s.*,
-             COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''),
-                      u.email, s.tested_by_name, '-') AS tested_by_name_resolved
+             COALESCE(
+                 NULLIF(ut.full_name, ''), NULLIF(ut.display_name, ''), ut.email,
+                 NULLIF(s.tested_by_name, ''),
+                 NULLIF(uc.full_name, ''), NULLIF(uc.display_name, ''), uc.email,
+                 '-'
+             ) AS tested_by_name_resolved
       FROM product_batch_samples s
-      LEFT JOIN users u ON u.id = s.tested_by
+      LEFT JOIN users ut ON ut.id = s.tested_by OR ut.uid = s.tested_by
+      LEFT JOIN users uc ON uc.id = s.created_by OR uc.uid = s.created_by
       WHERE s.batch_id = ? AND s.deleted_at IS NULL
       ORDER BY s.sample_no ASC, s.id ASC
       ''',
@@ -4656,9 +5388,12 @@ class LabRepo {
     DatabaseExecutor? executor,
   }) async {
     Future<Map<String, dynamic>> insert(DatabaseExecutor exec) async {
+      // `batch_remote_id` travels with the pushed sample so a receiving
+      // device can remap `batch_id` (per-device) to its own inspections row.
       final batch = await fetchOne(
         exec,
-        "SELECT id FROM inspections WHERE id = ? AND inspection_kind = 'product'",
+        "SELECT id, remote_id FROM inspections "
+        "WHERE id = ? AND inspection_kind = 'product'",
         [batchId],
       );
       if (batch == null) throw NotFoundError(AppErrors.batchNotFound);
@@ -4679,8 +5414,8 @@ class LabRepo {
       final id = await exec.rawInsert(
         'INSERT INTO product_batch_samples (batch_id, sample_no, sample_name, '
         'sample_taker, physical_results_json, chemical_results_json, '
-        'tested_by, tested_at, created_by, created_at) '
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'tested_by, tested_at, created_by, created_at, batch_remote_id) '
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           batchId,
           nextNo,
@@ -4692,6 +5427,7 @@ class LabRepo {
           now,
           testerId,
           now,
+          '${batch['remote_id'] ?? ''}',
         ],
       );
       final created = await fetchOne(
@@ -4830,11 +5566,15 @@ class LabRepo {
       null,
       '''
       SELECT t.*, a.name AS analysis_name, a.unit AS analysis_unit,
-             COALESCE(NULLIF(u.full_name, ''), NULLIF(u.display_name, ''),
-                      u.email, '-') AS tested_by_name
+             COALESCE(
+                 NULLIF(ut.full_name, ''), NULLIF(ut.display_name, ''), ut.email,
+                 NULLIF(uc.full_name, ''), NULLIF(uc.display_name, ''), uc.email,
+                 '-'
+             ) AS tested_by_name
       FROM lab_sample_tests t
       JOIN lab_analyses a ON a.id = t.analysis_id
-      LEFT JOIN users u ON u.id = t.tested_by
+      LEFT JOIN users ut ON ut.id = t.tested_by OR ut.uid = t.tested_by
+      LEFT JOIN users uc ON uc.id = t.created_by OR uc.uid = t.created_by
       WHERE t.source_type = 'product' AND t.source_ref_id = ?
       ORDER BY t.tested_at DESC, t.id DESC
       ''',

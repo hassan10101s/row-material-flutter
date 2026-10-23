@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../core/sync/audit_trail.dart';
+import '../../../core/utils/app_exceptions.dart';
+
 /// Read-only state of the audit screen (plan §14-P9.2).
 class AuditFilter {
   const AuditFilter({this.entityType, this.action, this.from, this.to});
@@ -10,7 +12,8 @@ class AuditFilter {
   final DateTime? from;
   final DateTime? to;
 
-  bool get isEmpty => entityType == null && action == null && from == null && to == null;
+  bool get isEmpty =>
+      entityType == null && action == null && from == null && to == null;
 
   AuditFilter copyWith({
     String? entityType,
@@ -21,13 +24,12 @@ class AuditFilter {
     bool clearAction = false,
     bool clearFrom = false,
     bool clearTo = false,
-  }) =>
-      AuditFilter(
-        entityType: clearEntityType ? null : (entityType ?? this.entityType),
-        action: clearAction ? null : (action ?? this.action),
-        from: clearFrom ? null : (from ?? this.from),
-        to: clearTo ? null : (to ?? this.to),
-      );
+  }) => AuditFilter(
+    entityType: clearEntityType ? null : (entityType ?? this.entityType),
+    action: clearAction ? null : (action ?? this.action),
+    from: clearFrom ? null : (from ?? this.from),
+    to: clearTo ? null : (to ?? this.to),
+  );
 
   @override
   bool operator ==(Object other) =>
@@ -96,7 +98,7 @@ class AuditController extends ChangeNotifier {
         offset: _offset,
       );
     } on Object catch (e) {
-      _error = '$e';
+      _error = AppError.friendly(e);
       _page = AuditPage.empty;
     } finally {
       _loading = false;

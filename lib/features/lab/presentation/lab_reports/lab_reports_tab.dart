@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/constants/report_form_keys.dart';
 import '../../../../core/responsive/form_factor.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
@@ -11,6 +12,7 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_date_field.dart';
 import '../../../../design_system/widgets/app_field.dart';
+import '../equipment/equipment_dialogs.dart';
 import '../cubit/lab_reports_cubit.dart';
 import '../cubit/lab_reports_state.dart';
 
@@ -33,6 +35,32 @@ class _LabReportsTabState extends State<LabReportsTab> {
     _month.dispose();
     _year.dispose();
     super.dispose();
+  }
+
+  /// Card title with the per-report form-number gear.
+  Widget _reportTitle(String title, String formNoKey, String dialogTitle) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            style: const TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ),
+        IconButton(
+          tooltip: AppText.t(
+            'رقم فورم هذا التقرير',
+            'This report form number',
+          ),
+          onPressed: () => showQaFormNoDialog(
+            context,
+            key: formNoKey,
+            title: dialogTitle,
+          ),
+          icon: const Icon(Icons.settings_outlined),
+        ),
+      ],
+    );
   }
 
   @override
@@ -67,9 +95,13 @@ class _LabReportsTabState extends State<LabReportsTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  _reportTitle(
                     AppText.t('التقرير اليومي', 'Daily report'),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    ReportFormKeys.labDailyReport,
+                    AppText.t(
+                      'رقم فورم التقرير اليومي',
+                      'Daily lab report form no.',
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   AppDateField(
@@ -93,9 +125,13 @@ class _LabReportsTabState extends State<LabReportsTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  _reportTitle(
                     AppText.t('التقرير الشهري', 'Monthly report'),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    ReportFormKeys.labMonthlyReport,
+                    AppText.t(
+                      'رقم فورم التقرير الشهري',
+                      'Monthly lab report form no.',
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   Row(
@@ -135,9 +171,13 @@ class _LabReportsTabState extends State<LabReportsTab> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  _reportTitle(
                     AppText.t('التقرير السنوي', 'Yearly report'),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    ReportFormKeys.labYearlyReport,
+                    AppText.t(
+                      'رقم فورم التقرير السنوي',
+                      'Yearly lab report form no.',
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   AppField(

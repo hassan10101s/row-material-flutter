@@ -2,14 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_card.dart';
+import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../../di/service_locator.dart';
+import '../../../../../core/utils/app_exceptions.dart';
 import '../../domain/ncr_report_row.dart';
+import '../../domain/qc_repositories.dart';
 import '../cubit/qc_ncr_cubit.dart';
 import '../widgets/ncr_pill.dart';
+import 'qc_ncr_create_screen.dart';
 
 /// One finding with its inspection context and CAPA timeline
 /// (plan V6_ENHANCED §22.6).
@@ -29,6 +36,7 @@ class QcNcrDetailScreen extends StatefulWidget {
 
 class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
   QcNcrCubit? _cubit;
+  bool _busy = false;
 
   @override
   void didChangeDependencies() {
@@ -42,6 +50,71 @@ class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
     if (id != null) cubit.selectFinding(id);
   }
 
+  Future<void> _edit(NcrReportRow row) async {
+    final cubit = _cubit;
+    if (_busy || cubit == null) return;
+    setState(() => _busy = true);
+    try {
+      // The prefilled form needs the stored finding, not the projection:
+      // the report row drops proposed_action and the picker contexts.
+      final finding = await getIt<QcNcCapaRepository>().getFinding(
+        row.findingId,
+      );
+      if (!mounted) return;
+      if (finding == null) {
+        AppFeedback.error(
+          context,
+          AppText.t('لم يعد الحالة موجودة.', 'Finding no longer exists.'),
+        );
+        return;
+      }
+      await QcNcrCreateScreen.open(
+        context,
+        cubit,
+        finding: finding,
+        assignees: cubit.state.options.assignees,
+      );
+      if (!mounted) return;
+      await cubit.selectFinding(row.findingId);
+    } on Object catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _delete(NcrReportRow row) async {
+    final cubit = _cubit;
+    if (_busy || cubit == null) return;
+    final ok = await AppDeleteConfirmDialog.show(
+      context,
+      title: AppText.t('حذف حالة عدم المطابقة', 'Delete non-conformance'),
+      name: row.reference.isNotEmpty ? row.reference : '${row.findingId}',
+    );
+    if (!ok || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await getIt<QcNcCapaRepository>().deleteFinding(row.findingId);
+      if (!mounted) return;
+      AppFeedback.success(
+        context,
+        AppText.t('تم حذف حالة عدم المطابقة.', 'Non-conformance deleted.'),
+      );
+      // The detail now points at a tombstone: an immediate pop takes the user
+      // back to the register, whose load() shows the row already gone.
+      await cubit.clearSelection();
+      await cubit.load();
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } on AppError catch (e) {
+      if (mounted) AppFeedback.error(context, e.message);
+    } catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cubit = _cubit ?? (widget.cubit ?? context.read<QcNcrCubit>());
@@ -53,17 +126,34 @@ class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
             title: state.detail == null
                 ? AppText.t('تفاصيل الحالة', 'Finding detail')
                 : state.detail!.reference,
+            actions: state.detail == null || _busy
+                ? const []
+                : [
+                    IconButton(
+                      tooltip: AppText.t('تعديل', 'Edit'),
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () => _edit(state.detail!),
+                    ),
+                    IconButton(
+                      tooltip: AppText.t('حذف', 'Delete'),
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _delete(state.detail!),
+                    ),
+                  ],
           ),
           body: switch ((
             state.detailLoading,
             state.detailError,
             state.detail,
           )) {
-            (true, _, _) => const Center(child: CircularProgressIndicator()),
-            (_, final String error, _) => AppEmptyState(
-              icon: Icons.error_outline,
+            (true, _, _) => const AppSkeletonList(rows: 8),
+            (_, final String error, _) => AppErrorState(
               title: AppText.t('تعذر فتح الحالة', 'Finding unavailable'),
               subtitle: error,
+              onRetry: () {
+                final id = state.selectedFindingId;
+                if (id != null) cubit.selectFinding(id);
+              },
             ),
             (_, _, null) => AppEmptyState(
               icon: Icons.search_off,

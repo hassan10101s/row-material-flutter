@@ -7,9 +7,11 @@ import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_status_badge.dart'
     show statusLabel;
 import '../../../../reference/domain/reference_repository.dart';
+import '../../../domain/inspection_repository.dart';
 import '../../cubit/inspections_state.dart';
 
 /// Filter chrome for the inspection registers (raw + product share it).
@@ -59,6 +61,24 @@ Future<List<({int id, String name})>> loadInspectionMaterialOptions({
   }
 }
 
+/// Distinct supplier names for the supplier filter dropdown
+/// ([InspectionFilterGrid.supplierOptions]). Best-effort: a failure yields an
+/// empty list and the dropdown offers All only.
+Future<List<String>> loadInspectionSupplierOptions(
+  InspectionRepository repo,
+) async {
+  try {
+    final rows = await repo.listSupplierHistory();
+    return [
+      for (final r in rows)
+        if ('${r['name'] ?? ''}'.trim().isNotEmpty)
+          '${r['name'] ?? ''}'.trim(),
+    ];
+  } catch (_) {
+    return const [];
+  }
+}
+
 /// Display name for [id] from [options]. Falls back to [previous] (the option
 /// may have left the catalog since it was picked) and finally to `#id`, so
 /// the chip never renders blank.
@@ -88,16 +108,19 @@ String inspectionDaysAgoIso(int days, [DateTime? when]) {
   return inspectionDayIso(d);
 }
 
-/// How many filter groups are active (status, material/product and/or dates).
+/// How many filter groups are active (status, material/product, dates and/or
+/// supplier).
 int inspectionActiveFilterCount(InspectionsState state) {
   var count = 0;
   if (state.status.isNotEmpty) count++;
+  if (state.reason.isNotEmpty) count++;
   if (state.materialId != null) count++;
   if (state.dateFrom.isNotEmpty || state.dateTo.isNotEmpty) count++;
+  if (state.supplier.isNotEmpty) count++;
   return count;
 }
 
-/// Active-filter chips (`status`, material/product and/or `dates`),
+/// Active-filter chips (`status`, `reason`, material/product and/or `dates`),
 /// mirroring the lab chips.
 List<({String key, String label})> inspectionFilterChips(
   InspectionsState state, {
@@ -110,6 +133,12 @@ List<({String key, String label})> inspectionFilterChips(
       label: '${AppText.t('الحالة', 'Status')}: ${statusLabel(state.status)}',
     ));
   }
+  if (state.reason.isNotEmpty) {
+    chips.add((
+      key: 'reason',
+      label: '${AppText.t('السبب', 'Reason')}: ${state.reason}',
+    ));
+  }
   if (state.materialId != null) {
     final kindLabel = isProduct
         ? AppText.t('المنتج', 'Product')
@@ -118,6 +147,12 @@ List<({String key, String label})> inspectionFilterChips(
         ? '#${state.materialId}'
         : state.materialName;
     chips.add((key: 'material', label: '$kindLabel: $name'));
+  }
+  if (state.supplier.isNotEmpty) {
+    chips.add((
+      key: 'supplier',
+      label: '${AppText.t('المورد', 'Supplier')}: ${state.supplier}',
+    ));
   }
   if (state.dateFrom.isNotEmpty || state.dateTo.isNotEmpty) {
     final from = state.dateFrom.isEmpty
@@ -132,32 +167,6 @@ List<({String key, String label})> inspectionFilterChips(
     ));
   }
   return chips;
-}
-
-/// Filter button with active-count badge, same visuals as the lab table.
-class InspectionFilterButton extends StatelessWidget {
-  final int activeCount;
-  final VoidCallback onPressed;
-
-  const InspectionFilterButton({
-    super.key,
-    required this.activeCount,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final active = activeCount > 0;
-    return AppButton(
-      label: active
-          ? AppText.t('فلترة ($activeCount)', 'Filter ($activeCount)')
-          : AppText.t('فلترة', 'Filter'),
-      icon: Icon(Icons.filter_alt_outlined, size: 16.r),
-      style: active ? AppButtonStyle.primary : AppButtonStyle.secondary,
-      small: true,
-      onPressed: onPressed,
-    );
-  }
 }
 
 /// Active-filter chips + clear-all, mirroring the lab chips row.
@@ -210,11 +219,138 @@ class InspectionFilterChips extends StatelessWidget {
   }
 }
 
+/// Quick period access (الفترة): an icon-only button that opens the period
+/// presets next to the follow-up action, so a daily "show today" never
+/// requires opening the full filter dialog. `نطاق مخصص` opens that dialog —
+/// the two date pickers live only there, so the preset and the dialog stay
+/// one source of truth (the chips row reflects whatever this sets).
+class InspectionPeriodButton extends StatelessWidget {
+  final String dateFrom;
+  final String dateTo;
+  final void Function(String from, String to) onPreset;
+  final VoidCallback onCustom;
+
+  const InspectionPeriodButton({
+    super.key,
+    required this.dateFrom,
+    required this.dateTo,
+    required this.onPreset,
+    required this.onCustom,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final presets = <(String value, String from, String to)>[
+      (
+        'today',
+        inspectionDayIso(),
+        inspectionDayIso(),
+      ),
+      ('d7', inspectionDaysAgoIso(7), inspectionDayIso()),
+      ('d30', inspectionDaysAgoIso(30), inspectionDayIso()),
+    ];
+    final active = dateFrom.isNotEmpty || dateTo.isNotEmpty;
+    final presetActive = presets
+        .where(((p) => p.$2 == dateFrom && p.$3 == dateTo))
+        .isNotEmpty;
+    final style = active
+        ? IconButton.styleFrom(
+            foregroundColor: AppColors.primary,
+          )
+        : null;
+    return Badge(
+      isLabelVisible: active,
+      child: PopupMenuButton<String>(
+        tooltip: AppText.t('الفترة', 'Period'),
+        style: style,
+        icon: Icon(
+          active
+              ? Icons.date_range
+              : Icons.date_range_outlined,
+          size: 20.r,
+        ),
+        onSelected: (v) {
+          switch (v) {
+            case 'all':
+              onPreset('', '');
+            case 'custom':
+              onCustom();
+            default:
+              for (final (value, from, to) in presets) {
+                if (value == v) {
+                  onPreset(from, to);
+                  return;
+                }
+              }
+          }
+        },
+        itemBuilder: (context) => [
+          _item(
+            'all',
+            AppText.t('الكل', 'All'),
+            Icons.all_inclusive_outlined,
+            !active,
+          ),
+          _item(
+            'today',
+            AppText.t('اليوم', 'Today'),
+            Icons.today_outlined,
+            presets.any(((p) => p.$1 == 'today' && p.$2 == dateFrom && p.$3 == dateTo)),
+          ),
+          _item(
+            'd7',
+            AppText.t('آخر ٧ أيام', 'Last 7 days'),
+            Icons.date_range_outlined,
+            presets.any(((p) => p.$1 == 'd7' && p.$2 == dateFrom && p.$3 == dateTo)),
+          ),
+          _item(
+            'd30',
+            AppText.t('آخر ٣٠ يومًا', 'Last 30 days'),
+            Icons.calendar_view_month_outlined,
+            presets.any(((p) => p.$1 == 'd30' && p.$2 == dateFrom && p.$3 == dateTo)),
+          ),
+          const PopupMenuDivider(),
+          _item(
+            'custom',
+            AppText.t('نطاق مخصص…', 'Custom range…'),
+            Icons.tune_outlined,
+            active && !presetActive,
+          ),
+        ],
+      ),
+    );
+  }
+
+  PopupMenuItem<String> _item(
+    String value,
+    String label,
+    IconData icon,
+    bool selected,
+  ) {
+    return PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 18),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: Text(label)),
+          if (selected) Icon(Icons.check, size: 18, color: AppColors.primary),
+        ],
+      ),
+    );
+  }
+}
+
 /// Status + material/product + date-period grid. Width-responsive by
 /// construction (Wraps), so it renders identically in the desktop window and
 /// the mobile bottom sheet — same pattern as the lab `testHistoryFilterGrid`.
 class InspectionFilterGrid extends StatelessWidget {
   final String status;
+
+  /// Reason substring filter (`decision_reason`). Searchable here only —
+  /// the reason is never a table column.
+  final String reason;
+  final ValueChanged<String> onReason;
   final String dateFrom;
   final String dateTo;
   final ValueChanged<String> onStatus;
@@ -231,11 +367,22 @@ class InspectionFilterGrid extends StatelessWidget {
   /// Selected option id; null = all.
   final int? selectedMaterialId;
   final ValueChanged<int?> onMaterial;
+
+  /// Distinct supplier names for the supplier dropdown; empty while loading.
+  final List<String> supplierOptions;
+
+  /// Selected supplier, exact match; empty = all.
+  final String selectedSupplier;
+
+  /// `null` item value carries "All", so the callback mirrors [AppDropdown].
+  final ValueChanged<String?> onSupplier;
   final bool isProduct;
 
   const InspectionFilterGrid({
     super.key,
     required this.status,
+    this.reason = '',
+    required this.onReason,
     required this.dateFrom,
     required this.dateTo,
     required this.onStatus,
@@ -246,6 +393,9 @@ class InspectionFilterGrid extends StatelessWidget {
     this.materialOptions = const [],
     this.selectedMaterialId,
     required this.onMaterial,
+    this.supplierOptions = const [],
+    this.selectedSupplier = '',
+    required this.onSupplier,
     // Products carry no header decision, so the status row is hidden.
     this.isProduct = false,
   });
@@ -266,6 +416,29 @@ class InspectionFilterGrid extends StatelessWidget {
               AppDropdownItem(value: option.id, label: option.name),
           ],
           onChanged: onMaterial,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        _label(AppText.t('المورد', 'Supplier')),
+        const SizedBox(height: AppSpacing.xs),
+        AppDropdown<String>(
+          value: selectedSupplier,
+          items: [
+            AppDropdownItem(value: '', label: AppText.t('الكل', 'All')),
+            for (final name in supplierOptions)
+              AppDropdownItem(value: name, label: name),
+          ],
+          onChanged: (v) => onSupplier(v ?? ''),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppField(
+          label: AppText.t('سبب القرار', 'Decision reason'),
+          hint: AppText.t(
+            'ابحث في سبب القرار… (مثال: سوس)',
+            'Search the decision reason… (e.g. weevil)',
+          ),
+          initialValue: reason,
+          textInputAction: TextInputAction.search,
+          onChanged: onReason,
         ),
         // Products carry no header decision: no status filter row.
         if (!isProduct) ...[

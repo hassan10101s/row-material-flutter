@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/constants/report_form_keys.dart';
 import '../../../../core/responsive/form_factor.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
@@ -14,6 +15,7 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
+import '../../../lab/presentation/equipment/equipment_dialogs.dart';
 import '../cubit/reports_cubit.dart';
 import '../cubit/reports_state.dart';
 
@@ -125,6 +127,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
             _ReportCard(
               icon: Icons.today,
               title: AppText.t('تقرير اليومي', 'Daily report'),
+              formNoKey: ReportFormKeys.dailyReport,
+              formNoTitle: AppText.t(
+                'رقم فورم التقرير اليومي',
+                'Daily report form no.',
+              ),
               children: [
                 AppDateField(
                   controller: _date,
@@ -160,6 +167,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
             _ReportCard(
               icon: Icons.calendar_month,
               title: AppText.t('التقرير الشهري', 'Monthly report'),
+              formNoKey: ReportFormKeys.monthlyReport,
+              formNoTitle: AppText.t(
+                'رقم فورم التقرير الشهري',
+                'Monthly report form no.',
+              ),
               children: [
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -230,6 +242,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
             _ReportCard(
               icon: Icons.calendar_today,
               title: AppText.t('التقرير السنوي', 'Yearly report'),
+              formNoKey: ReportFormKeys.yearlyReport,
+              formNoTitle: AppText.t(
+                'رقم فورم التقرير السنوي',
+                'Yearly report form no.',
+              ),
               children: [
                 AppField(
                   label: AppText.t('السنة', 'Year'),
@@ -288,10 +305,14 @@ class _ReportCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final List<Widget> children;
+  final String? formNoKey;
+  final String? formNoTitle;
   const _ReportCard({
     required this.icon,
     required this.title,
     required this.children,
+    this.formNoKey,
+    this.formNoTitle,
   });
 
   @override
@@ -314,6 +335,19 @@ class _ReportCard extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
                 ),
+                if (formNoKey != null)
+                  IconButton(
+                    tooltip: AppText.t(
+                      'رقم فورم هذا التقرير',
+                      'This report form number',
+                    ),
+                    onPressed: () => showQaFormNoDialog(
+                      context,
+                      key: formNoKey!,
+                      title: formNoTitle ?? '',
+                    ),
+                    icon: const Icon(Icons.settings_outlined),
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.md),

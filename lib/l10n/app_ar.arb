@@ -138,8 +138,6 @@
   "kpi_capa_overdue": "CAPA متأخر",
   "kpi_sop_published": "SOP منشور",
   "kpi_sop_expiry": "منتهي / قريب",
-  "kpi_goals_active": "أهداف نشطة",
-  "kpi_goals_overdue_done": "متأخر / مكتمل",
   "kpi_stock_low": "منخفض",
   "kpi_stock_empty": "فارغ",
   "kpi_stock_ok": "سليم",

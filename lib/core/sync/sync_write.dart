@@ -12,11 +12,17 @@ const _uuid = Uuid();
 String newRemoteId() => _uuid.v4();
 
 /// Ensures [row] carries a `remote_id`, writing the backfill form for legacy
-/// rows and a UUID for new ones. Returns the remote id.
-String ensureRemoteId(Map<String, dynamic> row, String table) {
+/// rows and a UUID for new ones. [pkColumn] is the row's primary key ("id"
+/// everywhere except the QC family, whose pks are `template_id`,
+/// `inspection_id`, ...). Returns the remote id.
+String ensureRemoteId(
+  Map<String, dynamic> row,
+  String table, {
+  String pkColumn = 'id',
+}) {
   var remoteId = '${row['remote_id'] ?? ''}';
   if (remoteId.isEmpty) {
-    final id = row['id'];
+    final id = row[pkColumn];
     remoteId = id == null ? newRemoteId() : 'legacy_${table}_$id';
     row['remote_id'] = remoteId;
   }
@@ -51,7 +57,7 @@ Future<Map<String, dynamic>> enqueueLocalChange({
   String? uid,
   String? deviceId,
 }) async {
-  ensureRemoteId(row, entity.localTable);
+  ensureRemoteId(row, entity.localTable, pkColumn: entity.pkColumn);
   final version = operation == 'create' && ((row['version'] as num?)?.toInt() ?? 0) <= 1
       ? 1
       : nextVersion(row);
@@ -71,7 +77,7 @@ Future<Map<String, dynamic>> enqueueLocalChange({
   // Missing columns on old files are ignored — `_ensureColumn` adds them on
   // the next open, and the pull path filters by `availableColumns`.
   try {
-    final localId = (row['id'] as num?)?.toInt();
+    final localId = (row[entity.pkColumn] as num?)?.toInt();
     if (localId != null) {
       final patch = <String, Object?>{
         'version': version,
@@ -82,7 +88,7 @@ Future<Map<String, dynamic>> enqueueLocalChange({
       await executor.update(
         entity.localTable,
         patch,
-        where: 'id = ?',
+        where: '${entity.pkColumn} = ?',
         whereArgs: [localId],
       );
     }
@@ -107,7 +113,7 @@ Future<Map<String, dynamic>> enqueueLocalChange({
     executor,
     entityType: entity.type,
     entityId: entity.docId(row),
-    localRef: (row['id'] as num?)?.toInt(),
+    localRef: (row[entity.pkColumn] as num?)?.toInt(),
     operation: operation,
     payload: payload,
     baseVersion: operation == 'create' ? 0 : version - 1,
@@ -120,7 +126,7 @@ Future<Map<String, dynamic>> enqueueLocalChange({
         action: auditAction,
         entityType: entity.type,
         entityId: entity.docId(row),
-        details: {'localId': row['id'], 'remoteId': row['remote_id']},
+        details: {'localId': row[entity.pkColumn], 'remoteId': row['remote_id']},
       );
     } on Object {
       // Audit must never fail the business write.

@@ -40,7 +40,7 @@ class TestHistoryCubit extends AppCubit<TestHistoryState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 }

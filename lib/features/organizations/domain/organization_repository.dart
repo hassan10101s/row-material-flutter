@@ -28,6 +28,10 @@ class OrganizationProfile {
     required this.ownerUid,
     this.status = 'active',
     this.schemaVersion = 2,
+    this.trialStartedAt,
+    this.trialEndsAt,
+    this.trialConsumed = false,
+    this.manuallyActivated = false,
   });
 
   final String id;
@@ -35,6 +39,24 @@ class OrganizationProfile {
   final String ownerUid;
   final String status;
   final int schemaVersion;
+
+  /// ISO-8601 of when the 30-day trial started (null for legacy documents).
+  final String? trialStartedAt;
+
+  /// ISO-8601 of when the 30-day trial ends (null for legacy documents).
+  final String? trialEndsAt;
+
+  /// True once the trial has expired (server cron only). Stays true after
+  /// manual activation so the cron can never re-suspend the company.
+  final bool trialConsumed;
+
+  /// True once support manually activated the company. Permanent: such a
+  /// company must never be auto-suspended again.
+  final bool manuallyActivated;
+
+  bool get isSuspended => status == 'suspended' || status == 'disabled';
+
+  bool get isUsable => status == 'trial' || status == 'active';
 }
 
 /// Raised when an organization/member write is rejected.

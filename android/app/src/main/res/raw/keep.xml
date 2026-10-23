@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Flutter enables R8 + resource shrinking for the release build type
+  (FlutterPlugin.kt sets isMinifyEnabled = true and isShrinkResources = true).
+
+  The google-services Gradle plugin generates `default_web_client_id` from the
+  Web OAuth client in google-services.json, but google_sign_in_android reads it
+  dynamically with
+      getIdentifier("default_web_client_id", "string", packageName)
+  so static analysis sees no reference and the resource shrinker strips it from
+  release APKs. Without that string Google Sign-In cannot call requestIdToken(),
+  the returned account has no idToken, and sign-in fails only in release builds
+  ("Unable to sign in with Google right now").
+
+  Keep the resource so release builds behave like debug builds.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@string/default_web_client_id" />

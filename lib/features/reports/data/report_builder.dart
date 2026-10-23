@@ -1,11 +1,13 @@
 import 'package:intl/intl.dart';
 
 import '../../lab/core/formula_engine.dart';
+import '../../lab/core/lab_result_format.dart';
 import '../../lab/domain/product_batch_repository.dart'
     show decodeBatchChemical, decodeBatchPhysical;
 import '../../qc_manager/data/ncr_export_service.dart';
 import '../../reference/data/reference_repo.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../core/constants/report_form_keys.dart';
 import '../../../core/domain/rules.dart';
 import '../../../core/security/qr_builder.dart';
 import '../../../core/services/aggregation.dart';
@@ -82,7 +84,7 @@ List<String> resolveSampleNames(Object? sampleNames) {
   if (sampleNames is List && sampleNames.isNotEmpty) {
     return sampleNames.map((s) => '$s').toList();
   }
-  return const ['النتيجة / Result'];
+  return [AppText.t('النتيجة / Result', 'Result')];
 }
 
 /// Port of ReportService._build_physical_data.
@@ -160,7 +162,8 @@ List<Map<String, dynamic>> mergeLabTests(
         : rawUnit;
     final sampleCells = <String>[];
     for (final t in tests) {
-      sampleCells.add("${t['sample_name'] ?? ''}: ${t['result_text'] ?? '-'}");
+      final formatted = formatLabResult(t['result_text']);
+      sampleCells.add("${t['sample_name'] ?? ''}: $formatted");
     }
     var results = List<String>.from(sampleCells);
     if (results.length < sampleNames.length) {
@@ -253,6 +256,21 @@ List<Map<String, dynamic>> buildStatusTimeline(
   return timeline;
 }
 
+/// QA form number printed on a printed document
+/// (`نموذج رقم / Form No:`), editable from the gear buttons.
+///
+/// Reads the form's own [key] first; when that is empty it falls back to the
+/// legacy global `qa_form_no`, then to the legacy equipment-label key.
+String qaFormNo(Map<String, dynamic> settings, [String key = '']) {
+  if (key.isNotEmpty) {
+    final typed = '${settings[key] ?? ''}'.trim();
+    if (typed.isNotEmpty) return typed;
+  }
+  final current = '${settings[ReportFormKeys.global] ?? ''}'.trim();
+  if (current.isNotEmpty) return current;
+  return '${settings[ReportFormKeys.equipmentLabel] ?? ''}'.trim();
+}
+
 /// Port of render_html — builds the full inspection report context.
 Map<String, dynamic> buildInspectionContext(
   Map<String, dynamic> inspection, {
@@ -334,11 +352,74 @@ Map<String, dynamic> buildInspectionContext(
       'decision_status': '${s['decision_status'] ?? ''}',
       'decision_label': '${s['decision_status'] ?? ''}'.isEmpty
           ? '-'
-          : '${smeta['label_ar']} / ${smeta['label_en']}',
+          : AppText.t(
+              '${smeta['label_ar']} / ${smeta['label_en']}',
+              '${smeta['label_en']}',
+            ),
       'decision_reason': '${s['decision_reason'] ?? ''}',
       'physical_results': physical,
       'chemical_results': chemical,
     });
+  }
+  // Product-only merged view: one table carrying every operational sample —
+  // all physical (فحص ظاهري) rows on top, each sample's chemical column right
+  // beside it. The header-level physical/chemical tables stay empty for
+  // products (values live per sample), so the report renders this only.
+  final mergedSamples = <Map<String, dynamic>>[];
+  final mergedRows = <Map<String, dynamic>>[];
+  if (isProduct && batchSamples.isNotEmpty) {
+    for (final s in batchSamples) {
+      mergedSamples.add({
+        'label': '${s['sample_no'] ?? ''} • ${s['sample_name'] ?? ''}',
+        'meta':
+            '${s['sample_taker'] ?? '-'} • ${s['tested_at'] ?? ''} • ${s['decision_label'] ?? ''}',
+      });
+    }
+    final physicalNames = <String>[];
+    final chemicalNames = <String>[];
+    final physicalCells = <String, List<String>>{};
+    final chemicalCells = <String, List<String>>{};
+    for (var i = 0; i < batchSamples.length; i++) {
+      final s = batchSamples[i];
+      for (final rraw in (s['physical_results'] as List?) ?? const []) {
+        final r = Map<String, dynamic>.from(rraw as Map);
+        final name = '${r['analysis_name'] ?? ''}';
+        if (!physicalCells.containsKey(name)) {
+          physicalNames.add(name);
+          physicalCells[name] = List.filled(batchSamples.length, '');
+        }
+        physicalCells[name]![i] = '${r['result_text'] ?? ''}';
+      }
+      for (final rraw in (s['chemical_results'] as List?) ?? const []) {
+        final r = Map<String, dynamic>.from(rraw as Map);
+        final name = '${r['analysis_name'] ?? ''}';
+        if (!chemicalCells.containsKey(name)) {
+          chemicalNames.add(name);
+          chemicalCells[name] = List.filled(batchSamples.length, '');
+        }
+        final result = '${r['result_text'] ?? ''}';
+        final unit = '${r['unit'] ?? ''}'.trim();
+        chemicalCells[name]![i] = unit.isEmpty ? result : '$result $unit';
+      }
+    }
+    for (final name in physicalNames) {
+      mergedRows.add({
+        'name': name,
+        'cells': [
+          for (var i = 0; i < batchSamples.length; i++)
+            {'p': physicalCells[name]![i], 'c': ''}
+        ],
+      });
+    }
+    for (final name in chemicalNames) {
+      mergedRows.add({
+        'name': name,
+        'cells': [
+          for (var i = 0; i < batchSamples.length; i++)
+            {'p': '', 'c': chemicalCells[name]![i]}
+        ],
+      });
+    }
   }
   return {
     'inspection_id': inspection['id'] ?? '-',
@@ -359,9 +440,14 @@ Map<String, dynamic> buildInspectionContext(
     'physical_data': physicalData,
     'chemical_data': chemicalData,
     'batch_samples': batchSamples,
+    'batch_merged_samples': mergedSamples,
+    'batch_merged_rows': mergedRows,
     'show_batch_samples': isProduct && batchSamples.isNotEmpty,
     'decision_status': inspection['decision_status'],
-    'decision_label': '${meta['label_en']} / ${meta['label_ar']}',
+    'decision_label': AppText.t(
+      '${meta['label_en']} / ${meta['label_ar']}',
+      '${meta['label_en']}',
+    ),
     'decision_class': meta['css_class'],
     'decision_reason': decisionReason.isEmpty ? '-' : decisionReason,
     'show_decision_reason': decisionReason.isNotEmpty,
@@ -374,7 +460,9 @@ Map<String, dynamic> buildInspectionContext(
     'decision_version': inspection['decision_version'] ?? 1,
     'generated_at': inspection['updated_at'] ?? nowIso(),
     'department_label':
-        settings['department_label'] ?? 'Quality Assurance Department',
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.inspectionReport),
     'report_logo_data_uri': settings['report_logo_data_uri'] ?? '',
     'status_timeline': statusTimeline,
     // Decision timeline is raw-only; products decide per sample.
@@ -403,7 +491,9 @@ Map<String, dynamic> buildLabelContext(
     'height_cm': heightCm,
     'quantity_display': formatLabelQuantity(inspection['quantity']),
     'department_label':
-        settings['department_label'] ?? 'Quality Assurance Department',
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.inspectionLabel),
     'generated_at': (nowIso().substring(0, 16)).replaceAll('T', ' '),
   };
 }
@@ -445,7 +535,83 @@ Map<String, dynamic> buildBatchLabelsContext(
   return {
     'labels': labels,
     'department_label':
-        settings['department_label'] ?? 'Quality Assurance Department',
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.inspectionLabel),
+  };
+}
+
+/// Port of the equipment label context: everything the device sticker
+/// shows (name, manufacturer, serial, calibrations) plus the slim sealed
+/// device-code pointer for the QR. `overdue` is resolved here so the
+/// template never has to compare dates.
+Map<String, dynamic> buildEquipmentLabelContext(
+  Map<String, dynamic> equipment, {
+  required Map<String, dynamic> settings,
+  double widthCm = 10,
+  double heightCm = 5,
+  List<int>? encryptionSecret,
+}) {
+  final qrPayloadText = buildEquipmentQrPayloadText(
+    equipment: equipment,
+    encryptKey: encryptionSecret,
+  );
+  return {
+    'equipment': equipment,
+    'qr_payload_text': qrPayloadText,
+    'width_cm': widthCm,
+    'height_cm': heightCm,
+    'overdue': equipmentCalibrationOverdue(equipment),
+    'department_label':
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.equipmentLabel),
+    'generated_at': (nowIso().substring(0, 16)).replaceAll('T', ' '),
+  };
+}
+
+/// True when the device's next-calibration day is earlier than today.
+bool equipmentCalibrationOverdue(Map<String, dynamic> equipment) {
+  final next = '${equipment['next_calibration_date'] ?? ''}'.trim();
+  if (next.isEmpty) return false;
+  final nextDay = next.length >= 10 ? next.substring(0, 10) : next;
+  return nextDay.compareTo(nowIso().substring(0, 10)) < 0;
+}
+
+/// Context for the batch equipment-label sheet: one `labels` entry per
+/// device, mirroring [buildBatchLabelsContext] shape (plus the QR payload
+/// each label needs — the service attaches the data-URIs later), so the
+/// selected devices print N-up on A4 pages the way sample labels do.
+Map<String, dynamic> buildEquipmentLabelsContext(
+  List<Map<String, dynamic>> equipments, {
+  required Map<String, dynamic> settings,
+  List<int>? encryptionSecret,
+}) {
+  final labels = <Map<String, dynamic>>[];
+  for (final equipment in equipments) {
+    final next = '${equipment['next_calibration_date'] ?? ''}'.trim();
+    labels.add({
+      'id': equipment['id'] ?? '',
+      'code': equipment['code'] ?? '',
+      'name': equipment['name'] ?? '',
+      'manufacturer': equipment['manufacturer'] ?? '',
+      'serial_number': equipment['serial_number'] ?? '',
+      'last_calibration_date': equipment['last_calibration_date'] ?? '',
+      'next_calibration_date': next,
+      'overdue': equipmentCalibrationOverdue(equipment),
+      'qr_payload_text': buildEquipmentQrPayloadText(
+        equipment: equipment,
+        encryptKey: encryptionSecret,
+      ),
+    });
+  }
+  return {
+    'labels': labels,
+    'generated_at': (nowIso().substring(0, 16)).replaceAll('T', ' '),
+    'department_label':
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.equipmentLabel),
   };
 }
 
@@ -453,7 +619,8 @@ Map<String, dynamic> buildBatchLabelsContext(
 String _formatLongDate(String dateStr) {
   final dateObj = DateTime.tryParse(dateStr);
   if (dateObj == null) return dateStr;
-  return DateFormat('EEEE، dd MMMM yyyy', 'en_US').format(dateObj);
+  final pattern = AppText.arabic ? 'EEEE، dd MMMM yyyy' : 'EEEE, dd MMMM yyyy';
+  return DateFormat(pattern, 'en_US').format(dateObj);
 }
 
 /// Port of render_daily_report context.
@@ -489,7 +656,9 @@ Map<String, dynamic> buildDailyContext(
     'materials': groupByMaterial(inspections),
     'material_sections': materialSections,
     'department_label':
-        settings['department_label'] ?? 'Quality Assurance Department',
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.dailyReport),
     'report_logo_data_uri': settings['report_logo_data_uri'] ?? '',
     'generation_time': nowIso(),
   };
@@ -510,7 +679,26 @@ const List<String> _monthsAr = [
   'ديسمبر',
 ];
 
+const List<String> _monthsEn = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+];
+
 String _monthNameAr(int month) => _monthsAr[month - 1];
+
+/// Active-language month name for report labels.
+String _monthName(int month) =>
+    AppText.arabic ? _monthsAr[month - 1] : _monthsEn[month - 1];
 
 double _safeQty(Object? value) => safeFloat(value) ?? 0.0;
 
@@ -778,7 +966,7 @@ Map<String, dynamic> buildMonthlyContext(
     final start = DateTime(y, m, 1);
     final end = DateTime(y + (m == 12 ? 1 : 0), (m < 12 ? m + 1 : 1), 1);
     trendRanges.add({
-      'label': '${_monthNameAr(m)} $y',
+      'label': '${_monthName(m)} $y',
       'is_current': offset == 0,
       'start': start,
       'end': end,
@@ -866,7 +1054,9 @@ Map<String, dynamic> buildMonthlyContext(
     'recommendations': recommendations,
     'trend_months': trendMonths,
     'department_label':
-        settings['department_label'] ?? 'Quality Assurance Department',
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.monthlyReport),
     'report_logo_data_uri': settings['report_logo_data_uri'] ?? '',
     'now': nowIso(),
   };
@@ -1012,7 +1202,7 @@ Map<String, dynamic> buildYearlyContext(
       }
     }
     monthlyStats.add({
-      'month': _monthNameAr(m),
+      'month': _monthName(m),
       'total': monthInspections.length,
       'approved': mApp,
       'conditional': mCond,
@@ -1031,11 +1221,11 @@ Map<String, dynamic> buildYearlyContext(
     });
   }
 
-  const quarterNames = [
-    'Q1 (يناير - مارس)',
-    'Q2 (أبريل - يونيو)',
-    'Q3 (يوليو - سبتمبر)',
-    'Q4 (أكتوبر - ديسمبر)',
+  final quarterNames = [
+    AppText.t('Q1 (يناير - مارس)', 'Q1 (Jan - Mar)'),
+    AppText.t('Q2 (أبريل - يونيو)', 'Q2 (Apr - Jun)'),
+    AppText.t('Q3 (يوليو - سبتمبر)', 'Q3 (Jul - Sep)'),
+    AppText.t('Q4 (أكتوبر - ديسمبر)', 'Q4 (Oct - Dec)'),
   ];
   final quarterlyStats = <Map<String, dynamic>>[];
   for (var qi = 0; qi < 4; qi++) {
@@ -1074,20 +1264,32 @@ Map<String, dynamic> buildYearlyContext(
   final recommendations = <String>[];
   if (inspections.isEmpty) {
     recommendations.add(
-      'لا توجد بيانات كافية لإنشاء توصيات تشغيلية لهذا العام. يُوصى بضمان إدخال جميع الفحوصات بشكل منتظم.',
+      AppText.t(
+        'لا توجد بيانات كافية لإنشاء توصيات تشغيلية لهذا العام. يُوصى بضمان إدخال جميع الفحوصات بشكل منتظم.',
+        'Not enough data to generate operational recommendations for this year. Make sure all inspections are entered regularly.',
+      ),
     );
   } else {
     if (approvalRate >= 90) {
       recommendations.add(
-        'أداء متميز في الجودة خلال عام $year بمعدل قبول إجمالي ${approvalRate.toStringAsFixed(1)}% — يُوصى بتوثيق الإجراءات المتبعة كمعيار مرجعي (Benchmark) للأعوام القادمة.',
+        AppText.t(
+          'أداء متميز في الجودة خلال عام $year بمعدل قبول إجمالي ${approvalRate.toStringAsFixed(1)}% — يُوصى بتوثيق الإجراءات المتبعة كمعيار مرجعي (Benchmark) للأعوام القادمة.',
+          'Outstanding quality performance in $year with an overall acceptance rate of ${approvalRate.toStringAsFixed(1)}% — document the procedures followed as a benchmark for the coming years.',
+        ),
       );
     } else if (approvalRate >= 75) {
       recommendations.add(
-        'معدل القبول العام ${approvalRate.toStringAsFixed(1)}% ضمن المستوى الجيد — يُوصى بتحليل تفصيلي للحالات المرفوضة لتحديد الأنماط المتكررة وتنفيذ إجراءات تحسين مستهدفة.',
+        AppText.t(
+          'معدل القبول العام ${approvalRate.toStringAsFixed(1)}% ضمن المستوى الجيد — يُوصى بتحليل تفصيلي للحالات المرفوضة لتحديد الأنماط المتكررة وتنفيذ إجراءات تحسين مستهدفة.',
+          'The overall acceptance rate of ${approvalRate.toStringAsFixed(1)}% is good — run a detailed analysis of rejected cases to identify recurring patterns and apply targeted improvements.',
+        ),
       );
     } else {
       recommendations.add(
-        'معدل القبول العام منخفض (${approvalRate.toStringAsFixed(1)}%) — يتطلب تفعيل فريق جودة متخصص للتحقيق في الأسباب الجذرية وتنفيذ خطة تصحيحية شاملة.',
+        AppText.t(
+          'معدل القبول العام منخفض (${approvalRate.toStringAsFixed(1)}%) — يتطلب تفعيل فريق جودة متخصص للتحقيق في الأسباب الجذرية وتنفيذ خطة تصحيحية شاملة.',
+          'The overall acceptance rate is low (${approvalRate.toStringAsFixed(1)}%) — task a dedicated quality team to investigate root causes and apply a comprehensive corrective plan.',
+        ),
       );
     }
 
@@ -1103,7 +1305,10 @@ Map<String, dynamic> buildYearlyContext(
     }
     if (worstMaterial != null) {
       recommendations.add(
-        'خامة "${worstMaterial['name']}" سجلت أدنى معدل قبول (${(worstMaterial['approval_rate'] as num).toStringAsFixed(1)}%) من إجمالي ${worstMaterial['count']} فحص — يُوصى بتشديد معايير الفحص لهذه الخامة ومراجعة مصادر التوريد.',
+        AppText.t(
+          'خامة "${worstMaterial['name']}" سجلت أدنى معدل قبول (${(worstMaterial['approval_rate'] as num).toStringAsFixed(1)}%) من إجمالي ${worstMaterial['count']} فحص — يُوصى بتشديد معايير الفحص لهذه الخامة ومراجعة مصادر التوريد.',
+          'Material "${worstMaterial['name']}" recorded the lowest acceptance rate (${(worstMaterial['approval_rate'] as num).toStringAsFixed(1)}%) out of ${worstMaterial['count']} inspections — tighten inspection criteria for it and review supply sources.',
+        ),
       );
     }
 
@@ -1128,12 +1333,18 @@ Map<String, dynamic> buildYearlyContext(
           )
           .toList();
       recommendations.add(
-        'أقل ثلاثة موردين من حيث معدل القبول السنوي: ${names.join('، ')} — يُوصى بمراجعة اتفاقيات التوريد وتقييم البدائل المتاحة.',
+        AppText.t(
+          'أقل ثلاثة موردين من حيث معدل القبول السنوي: ${names.join('، ')} — يُوصى بمراجعة اتفاقيات التوريد وتقييم البدائل المتاحة.',
+          'The three lowest suppliers by yearly acceptance rate: ${names.join(', ')} — review supply agreements and evaluate available alternatives.',
+        ),
       );
     } else if (worstSuppliers.isNotEmpty) {
       for (final ws in worstSuppliers.take(2)) {
         recommendations.add(
-          'المورد "${ws['name']}" سجل معدل قبول ${(ws['approval_rate'] as num).toStringAsFixed(1)}% خلال ${ws['count']} فحص — يتطلب مراجعة جدية لموثوقية التوريد.',
+          AppText.t(
+            'المورد "${ws['name']}" سجل معدل قبول ${(ws['approval_rate'] as num).toStringAsFixed(1)}% خلال ${ws['count']} فحص — يتطلب مراجعة جدية لموثوقية التوريد.',
+            'Supplier "${ws['name']}" recorded an acceptance rate of ${(ws['approval_rate'] as num).toStringAsFixed(1)}% across ${ws['count']} inspections — its supply reliability needs serious review.',
+          ),
         );
       }
     }
@@ -1159,7 +1370,10 @@ Map<String, dynamic> buildYearlyContext(
           (bestQ['approval_rate'] as num) - (worstQ['approval_rate'] as num) >
               10) {
         recommendations.add(
-          'تفاوت ملحوظ في الأداء بين الأرباع: أفضل ربع ${bestQ['name']} (${(bestQ['approval_rate'] as num).toStringAsFixed(1)}%) وأضعف ربع ${worstQ['name']} (${(worstQ['approval_rate'] as num).toStringAsFixed(1)}%) — يُوصى بتحليل العوامل الموسمية المؤثرة.',
+          AppText.t(
+            'تفاوت ملحوظ في الأداء بين الأرباع: أفضل ربع ${bestQ['name']} (${(bestQ['approval_rate'] as num).toStringAsFixed(1)}%) وأضعف ربع ${worstQ['name']} (${(worstQ['approval_rate'] as num).toStringAsFixed(1)}%) — يُوصى بتحليل العوامل الموسمية المؤثرة.',
+            'Noticeable variance between quarters: best quarter ${bestQ['name']} (${(bestQ['approval_rate'] as num).toStringAsFixed(1)}%) and weakest quarter ${worstQ['name']} (${(worstQ['approval_rate'] as num).toStringAsFixed(1)}%) — analyse the seasonal factors involved.',
+          ),
         );
       }
     }
@@ -1168,14 +1382,20 @@ Map<String, dynamic> buildYearlyContext(
       final pct = roundPct(totalRejectedQty / totalQty * 100);
       if (pct > 10) {
         recommendations.add(
-          'نسبة الكمية المرفوضة السنوية تبلغ ${pct.toStringAsFixed(1)}% من إجمالي الكميات — يمثل ذلك خسارة مادية كبيرة تستوجب تنفيذ برنامج تأهيل موردين متقدم.',
+          AppText.t(
+            'نسبة الكمية المرفوضة السنوية تبلغ ${pct.toStringAsFixed(1)}% من إجمالي الكميات — يمثل ذلك خسارة مادية كبيرة تستوجب تنفيذ برنامج تأهيل موردين متقدم.',
+            'The yearly rejected quantity is ${pct.toStringAsFixed(1)}% of total quantities — a significant material loss that warrants an advanced supplier qualification program.',
+          ),
         );
       }
     }
     if (conditionalCount > 0) {
       final condPct = roundPct(conditionalCount / inspections.length * 100);
       recommendations.add(
-        'تم تسجيل $conditionalCount قبول مشروط (${condPct.toStringAsFixed(1)}% من الإجمالي) — يُوصى بمتابعة جميع الشروط المعلقة وضمان إغلاقها وفق الجدول الزمني المحدد.',
+        AppText.t(
+          'تم تسجيل $conditionalCount قبول مشروط (${condPct.toStringAsFixed(1)}% من الإجمالي) — يُوصى بمتابعة جميع الشروط المعلقة وضمان إغلاقها وفق الجدول الزمني المحدد.',
+          '$conditionalCount conditional approvals were recorded (${condPct.toStringAsFixed(1)}% of the total) — follow up on all pending conditions and close them on schedule.',
+        ),
       );
     }
   }
@@ -1202,10 +1422,73 @@ Map<String, dynamic> buildYearlyContext(
     'quarterly_stats': quarterlyStats,
     'recommendations': recommendations,
     'department_label':
-        settings['department_label'] ?? 'Quality Assurance Department',
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.yearlyReport),
     'report_logo_data_uri': settings['report_logo_data_uri'] ?? '',
     'now': nowIso(),
   };
+}
+
+/// Per-material sample tables for the follow-up report: one row per sample,
+/// a column per physical/chemical parameter, plus who took the sample and
+/// when. The column set is the union of every parameter recorded across the
+/// section's inspections, so wide parameter sets simply widen the table.
+List<Map<String, dynamic>> buildFollowUpParameterSections(
+  List<Map<String, dynamic>> inspections,
+) {
+  final sections = <Map<String, dynamic>>[];
+  groupByMaterial(inspections).forEach((materialName, items) {
+    final columns = <String>[];
+    void collect(Map<String, dynamic> results) {
+      for (final key in results.keys) {
+        if (!columns.contains(key)) columns.add(key);
+      }
+    }
+    for (final item in items) {
+      collect(jsonLoads('${item['physical_results_json'] ?? ''}'));
+      collect(jsonLoads('${item['chemical_results_json'] ?? ''}'));
+    }
+    final rows = <Map<String, dynamic>>[];
+    var index = 1;
+    for (final item in items) {
+      final physical = jsonLoads('${item['physical_results_json'] ?? ''}');
+      final chemical = jsonLoads('${item['chemical_results_json'] ?? ''}');
+      final names = [
+        for (final n in jsonLoadsList('${item['sample_names_json'] ?? ''}'))
+          if ('${n}'.trim().isNotEmpty) '${n}'.trim(),
+      ];
+      final sampleCount = names.isEmpty ? 1 : names.length;
+      final takenBy = '${item['sample_taken_by'] ?? ''}'.trim();
+      for (var s = 0; s < sampleCount; s++) {
+        final values = <String>[];
+        for (final column in columns) {
+          final raw = physical[column] ?? chemical[column];
+          final text = raw is List
+              ? (s < raw.length ? '${raw[s]}' : '-')
+              : '${raw ?? ''}';
+          values.add(text.trim().isEmpty ? '-' : text.trim());
+        }
+        rows.add({
+          'index': index++,
+          'entry_code': '${item['entry_code'] ?? '-'}',
+          'sample_name': names.isEmpty ? '-' : names[s],
+          'taken_by': takenBy.isEmpty ? '-' : takenBy,
+          'time': decisionTime(item),
+          'decision': decisionLabel('${item['decision_status'] ?? ''}'),
+          'decision_status_raw': '${item['decision_status'] ?? ''}',
+          'values': values,
+        });
+      }
+    }
+    sections.add({
+      'name': materialName,
+      'count': items.length,
+      'columns': columns,
+      'rows': rows,
+    });
+  });
+  return sections;
 }
 
 /// Port of render_follow_up_report context.
@@ -1217,12 +1500,14 @@ Map<String, dynamic> buildFollowUpContext(
 }) {
   final summary = aggregateTotals(inspections, allowBlankSuppliers: true);
   final materialSections = buildMaterialSections(inspections);
+  final parameterSections = buildFollowUpParameterSections(inspections);
   final formattedDate = _formatLongDate(dateStr);
   return {
     'date_str': dateStr,
     'formatted_date': formattedDate,
     'shift_label': shiftLabel,
     'total': inspections.length,
+    'parameter_sections': parameterSections,
     'approved': summary['approved'],
     'conditional': summary['conditional'],
     'partial': summary['partial'],
@@ -1238,7 +1523,9 @@ Map<String, dynamic> buildFollowUpContext(
     'unique_materials': summary['unique_materials'],
     'material_sections': materialSections,
     'department_label':
-        settings['department_label'] ?? 'Quality Assurance Department',
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, ReportFormKeys.followUpReport),
     'report_logo_data_uri': settings['report_logo_data_uri'] ?? '',
     'generation_time': nowIso(),
   };
@@ -1266,7 +1553,9 @@ String _rangeText(Map<String, dynamic> item) {
 }
 
 String _resultText(Map<String, dynamic> item) {
-  final resultText = '${item['result_text'] ?? ''}'.trim();
+  // Three decimals for numbers (formula results arrive with full double
+  // precision), raw text otherwise.
+  final resultText = formatLabResult('${item['result_text'] ?? ''}'.trim());
   if (resultText.isEmpty) return '-';
   if (item['value'] != null) {
     final unit = '${item['range_unit'] ?? ''}'.isNotEmpty
@@ -1285,6 +1574,7 @@ Map<String, dynamic> buildLabReportContext(
   required Map<String, dynamic> settings,
   required String title,
   required String periodLabel,
+  String formNoKey = '',
 }) {
   final sourceSections = <String, Map<String, dynamic>>{};
   for (final test in tests) {
@@ -1293,13 +1583,17 @@ Map<String, dynamic> buildLabReportContext(
         ? '${test['source_name']}'
         : ('${test['sample_name'] ?? ''}'.isNotEmpty
               ? '${test['sample_name']}'
-              : 'غير محدد');
+              : AppText.t('غير محدد', 'Unspecified'));
     final section = sourceSections.putIfAbsent(
       sourceName,
       () => {
         'name': sourceName,
         'source_type': sourceType,
-        'type_label': sourceType == 'product' ? 'منتج | Product' : 'خام | Raw',
+        'type_label': switch (sourceType) {
+          'product' => AppText.t('منتج | Product', 'Product'),
+          'sample' => AppText.t('عينة | Sample', 'Sample'),
+          _ => AppText.t('خام | Raw', 'Raw'),
+        },
         'count': 0,
         'out_count': 0,
         'rows': <Map<String, dynamic>>[],
@@ -1317,6 +1611,7 @@ Map<String, dynamic> buildLabReportContext(
       'entry_code': '${test['entry_code'] ?? '-'}',
       'analysis_name': '${test['analysis_name'] ?? '-'}',
       'analysis_unit': '${test['analysis_unit'] ?? '%'}',
+      'analysis_reference': '${test['analysis_reference'] ?? ''}',
       'dynamics': test['dynamic_values'] ?? <String, dynamic>{},
       'source_type': sourceType,
       'source_name': sourceName,
@@ -1350,7 +1645,9 @@ Map<String, dynamic> buildLabReportContext(
     'unique_sources': sections.length,
     'sections': sections,
     'department_label':
-        settings['department_label'] ?? 'Quality Assurance Department',
+        settings['department_label'] ??
+        AppText.t('قسم ضمان الجودة', 'Quality Assurance Department'),
+    'form_no': qaFormNo(settings, formNoKey),
     'report_logo_data_uri': settings['report_logo_data_uri'] ?? '',
     'generation_time': nowIso(),
   };
@@ -1364,7 +1661,10 @@ Map<String, dynamic> buildLabReportContext(
 /// exported file greps back against the database; only the pre-formatted
 /// display strings (`*_display`) are humanized. Same convention as every
 /// other `build*Context` in this file.
-Map<String, dynamic> buildNcrReportContext(NcrExportBundle bundle) {
+Map<String, dynamic> buildNcrReportContext(
+  NcrExportBundle bundle, {
+  String formNo = '',
+}) {
   final k = bundle.kpis;
   String pct(double? value) =>
       value == null ? '-' : '${value.toStringAsFixed(1)}%';
@@ -1379,7 +1679,11 @@ Map<String, dynamic> buildNcrReportContext(NcrExportBundle bundle) {
     'scope': bundle.filters.describe,
     'generated_at': nowIsoAt(bundle.generatedAt),
     'generated_by': bundle.generatedBy.isEmpty ? '-' : bundle.generatedBy,
-    'department_label': 'Quality Assurance Department',
+    'department_label': AppText.t(
+      'قسم ضمان الجودة',
+      'Quality Assurance Department',
+    ),
+    'form_no': formNo,
     'report_logo_data_uri': '',
     'total': bundle.rows.length,
     'kpis': {

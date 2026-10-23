@@ -798,8 +798,6 @@ class ReferenceRepo implements ReferenceRepository {
     ('qc_items', 'unit'),
     ('qc_inspections', 'qty_unit'),
     ('qc_findings_nc', 'qty_unit'),
-    ('qc_goals', 'target_unit'),
-    ('qc_goal_kpis', 'unit'),
   ];
 
   /// How many rows reference each unit symbol across the program — what the

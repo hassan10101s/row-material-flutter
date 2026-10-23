@@ -8,6 +8,7 @@ import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
+import '../../../../../design_system/widgets/app_date_field.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_quantity_field.dart';
@@ -56,6 +57,7 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
   late final TextEditingController _unit = TextEditingController(
     text: '${widget.item?['unit'] ?? 'mL'}',
   );
+  late final TextEditingController _expiry = TextEditingController();
   bool _saving = false;
   @override
   void dispose() {
@@ -64,6 +66,7 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
     _min.dispose();
     _description.dispose();
     _unit.dispose();
+    _expiry.dispose();
     super.dispose();
   }
 
@@ -78,6 +81,7 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
           qty: double.tryParse(_qty.text) ?? 0,
           minQty: double.tryParse(_min.text) ?? 0,
           description: _description.text,
+          expiryDate: _expiry.text.trim(),
         );
       } else {
         await _repo.updateInventoryItem((widget.item!['id'] as num).toInt(), {
@@ -138,6 +142,15 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
           AppQuantityField(
             label: AppText.t('الكمية', 'Quantity'),
             controller: _qty,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          AppDateField(
+            label: AppText.t(
+              'صلاحية الرصيد الافتتاحي',
+              'Opening balance expiry',
+            ),
+            controller: _expiry,
+            enabled: !_saving,
           ),
         ],
         const SizedBox(height: AppSpacing.md),
@@ -220,6 +233,7 @@ class InventoryItemFormState extends State<InventoryItemForm> {
   late final TextEditingController _unit = TextEditingController(
     text: '${widget.item?['unit'] ?? 'mL'}',
   );
+  late final TextEditingController _expiry = TextEditingController();
   bool _saving = false;
 
   @override
@@ -229,6 +243,7 @@ class InventoryItemFormState extends State<InventoryItemForm> {
     _min.dispose();
     _description.dispose();
     _unit.dispose();
+    _expiry.dispose();
     super.dispose();
   }
 
@@ -244,6 +259,7 @@ class InventoryItemFormState extends State<InventoryItemForm> {
           qty: double.tryParse(_qty.text) ?? 0,
           minQty: double.tryParse(_min.text) ?? 0,
           description: _description.text,
+          expiryDate: _expiry.text.trim(),
         );
       } else {
         await _repo.updateInventoryItem((widget.item!['id'] as num).toInt(), {
@@ -303,6 +319,15 @@ class InventoryItemFormState extends State<InventoryItemForm> {
             label: AppText.t('الكمية', 'Quantity'),
             controller: _qty,
           ),
+          const SizedBox(height: AppSpacing.md),
+          AppDateField(
+            label: AppText.t(
+              'صلاحية الرصيد الافتتاحي',
+              'Opening balance expiry',
+            ),
+            controller: _expiry,
+            enabled: !_saving,
+          ),
         ],
         const SizedBox(height: AppSpacing.md),
         AppQuantityField(
@@ -338,12 +363,14 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
     text: '${widget.item['current_qty'] ?? 0}',
   );
   final _reason = TextEditingController();
+  late final TextEditingController _expiry = TextEditingController();
   bool _saving = false;
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
     if (user == null) return null;
     return {
       'id': user.id,
+      'uid': user.uid,
       'username': user.username,
       'full_name': user.fullName,
     };
@@ -353,6 +380,7 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
   void dispose() {
     _delta.dispose();
     _reason.dispose();
+    _expiry.dispose();
     super.dispose();
   }
 
@@ -364,6 +392,7 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
         newQty: double.tryParse(_delta.text),
         reason: _reason.text,
         user: _currentUserMap,
+        expiryDate: _expiry.text.trim(),
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
@@ -394,6 +423,15 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
         AppQuantityField(
           label: AppText.t('الكمية الجديدة', 'New quantity'),
           controller: _delta,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppDateField(
+          label: AppText.t(
+            'الصلاحية (مطلوبة عند زيادة الكمية)',
+            'Expiry (required when increasing)',
+          ),
+          controller: _expiry,
+          enabled: !_saving,
         ),
         const SizedBox(height: AppSpacing.md),
         AppField(label: AppText.t('السبب', 'Reason'), controller: _reason),
@@ -438,12 +476,14 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
     text: '${widget.item['current_qty'] ?? 0}',
   );
   final _reason = TextEditingController();
+  late final TextEditingController _expiry = TextEditingController();
   bool _saving = false;
 
   @override
   void dispose() {
     _delta.dispose();
     _reason.dispose();
+    _expiry.dispose();
     super.dispose();
   }
 
@@ -456,10 +496,12 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
         itemId: (widget.item['id'] as num).toInt(),
         newQty: double.tryParse(_delta.text),
         reason: _reason.text,
+        expiryDate: _expiry.text.trim(),
         user: user == null
             ? null
             : {
                 'id': user.id,
+                'uid': user.uid,
                 'username': user.username,
                 'full_name': user.fullName,
               },
@@ -493,7 +535,240 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
           controller: _delta,
         ),
         const SizedBox(height: AppSpacing.md),
+        AppDateField(
+          label: AppText.t(
+            'الصلاحية (مطلوبة عند زيادة الكمية)',
+            'Expiry (required when increasing)',
+          ),
+          controller: _expiry,
+          enabled: !_saving,
+        ),
+        const SizedBox(height: AppSpacing.md),
         AppField(label: AppText.t('السبب', 'Reason'), controller: _reason),
+        const SizedBox(height: AppSpacing.lg),
+        SizedBox(
+          height: AppSpacing.mobileCtaHeight.h,
+          child: AppButton(
+            label: AppText.t('حفظ', 'Save'),
+            expanded: true,
+            loading: _saving,
+            onPressed: _saving ? null : _save,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Stock receipt: quantity + mandatory expiry arrive as a new lot
+/// (FEFO draws earliest-expiry first). Desktop dialog chrome.
+class InventoryReceiveDialog extends StatefulWidget {
+  final Map<String, dynamic> item;
+  const InventoryReceiveDialog({super.key, required this.item});
+  @override
+  State<InventoryReceiveDialog> createState() => InventoryReceiveDialogState();
+}
+
+class InventoryReceiveDialogState extends State<InventoryReceiveDialog> {
+  final _repo = getIt<LabLocalRepository>();
+  final _qty = TextEditingController();
+  final _expiry = TextEditingController();
+  final _supplier = TextEditingController();
+  final _note = TextEditingController();
+  bool _saving = false;
+
+  Map<String, dynamic>? get _currentUserMap {
+    final user = getIt<AuthGate>().currentUser;
+    if (user == null) return null;
+    return {
+      'id': user.id,
+      'uid': user.uid,
+      'username': user.username,
+      'full_name': user.fullName,
+    };
+  }
+
+  @override
+  void dispose() {
+    _qty.dispose();
+    _expiry.dispose();
+    _supplier.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> save() async {
+    setState(() => _saving = true);
+    try {
+      await _repo.receiveLot(
+        inventoryId: (widget.item['id'] as num).toInt(),
+        qty: double.tryParse(_qty.text) ?? 0,
+        expiryDate: _expiry.text.trim(),
+        supplier: _supplier.text.trim(),
+        note: _note.text.trim(),
+        user: _currentUserMap,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } on AppError catch (e) {
+      setState(() => _saving = false);
+      if (mounted) AppFeedback.error(context, e.message);
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) AppFeedback.errorFrom(context, e);
+    }
+  }
+
+  bool get saving => _saving;
+
+  Widget buildFields() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          AppText.t(
+            '${widget.item['name']} — الحالية: ${widget.item['current_qty'] ?? 0} ${widget.item['unit']}',
+            '${widget.item['name']} — current: ${widget.item['current_qty'] ?? 0} ${widget.item['unit']}',
+          ),
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppQuantityField(
+          label: AppText.t('كمية الاستلام', 'Received quantity'),
+          controller: _qty,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppDateField(
+          label: AppText.t('تاريخ الصلاحية *', 'Expiry date *'),
+          controller: _expiry,
+          enabled: !_saving,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppField(
+          label: AppText.t('المورّد (اختياري)', 'Supplier (optional)'),
+          controller: _supplier,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppField(
+          label: AppText.t('ملاحظة (اختياري)', 'Note (optional)'),
+          controller: _note,
+        ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AppWindow(
+      title: AppText.t('استلام كمية', 'Receive stock'),
+      icon: Icons.inventory_outlined,
+      size: AppWindowSize.sm,
+      actions: [
+        AppButton(
+          label: AppStrings.cancel,
+          style: AppButtonStyle.secondary,
+          onPressed: _saving ? null : () => Navigator.of(context).pop(false),
+        ),
+        AppButton(
+          label: AppStrings.save,
+          loading: _saving,
+          onPressed: _saving ? null : save,
+        ),
+      ],
+      child: buildFields(),
+    );
+  }
+}
+
+/// Mobile full-screen receive form (same repo call, 52h CTA).
+class InventoryReceiveForm extends StatefulWidget {
+  final Map<String, dynamic> item;
+  const InventoryReceiveForm({super.key, required this.item});
+  @override
+  State<InventoryReceiveForm> createState() => InventoryReceiveFormState();
+}
+
+class InventoryReceiveFormState extends State<InventoryReceiveForm> {
+  final _repo = getIt<LabLocalRepository>();
+  final _qty = TextEditingController();
+  final _expiry = TextEditingController();
+  final _supplier = TextEditingController();
+  final _note = TextEditingController();
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _qty.dispose();
+    _expiry.dispose();
+    _supplier.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      final user = getIt<AuthGate>().currentUser;
+      await _repo.receiveLot(
+        inventoryId: (widget.item['id'] as num).toInt(),
+        qty: double.tryParse(_qty.text) ?? 0,
+        expiryDate: _expiry.text.trim(),
+        supplier: _supplier.text.trim(),
+        note: _note.text.trim(),
+        user: user == null
+            ? null
+            : {
+                'id': user.id,
+                'uid': user.uid,
+                'username': user.username,
+                'full_name': user.fullName,
+              },
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } on AppError catch (e) {
+      setState(() => _saving = false);
+      if (mounted) AppFeedback.error(context, e.message);
+    } catch (e) {
+      setState(() => _saving = false);
+      if (mounted) AppFeedback.errorFrom(context, e);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '${widget.item['name']} — ${widget.item['current_qty'] ?? 0} ${widget.item['unit'] ?? ''}',
+          style: TextStyle(
+            fontSize: 14.spMax,
+            fontWeight: FontWeight.w700,
+            color: AppColors.textStrong,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        AppQuantityField(
+          label: AppText.t('كمية الاستلام', 'Received quantity'),
+          controller: _qty,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppDateField(
+          label: AppText.t('تاريخ الصلاحية *', 'Expiry date *'),
+          controller: _expiry,
+          enabled: !_saving,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppField(
+          label: AppText.t('المورّد (اختياري)', 'Supplier (optional)'),
+          controller: _supplier,
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppField(
+          label: AppText.t('ملاحظة (اختياري)', 'Note (optional)'),
+          controller: _note,
+        ),
         const SizedBox(height: AppSpacing.lg),
         SizedBox(
           height: AppSpacing.mobileCtaHeight.h,

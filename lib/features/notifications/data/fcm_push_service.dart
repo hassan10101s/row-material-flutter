@@ -1,10 +1,10 @@
 import 'dart:io';
 
-import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../../../core/firebase/firebase_bootstrap.dart';
 import 'notification_service.dart';
 
 /// Killed-app push path (FCM).
@@ -31,12 +31,9 @@ import 'notification_service.dart';
 /// informative on its own.
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  try {
-    await Firebase.initializeApp();
-  } on Object catch (_) {
-    // Already initialized in the foreground isolate or no Default options
-    // on this build flavor: still try to show the notification below.
-  }
+  // Firebase init is routed through the core bootstrap so this feature file
+  // never touches the firebase_core SDK directly.
+  await FirebaseBootstrap.ensureDefaultApp();
   try {
     final plugin = FlutterLocalNotificationsPlugin();
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -124,7 +121,7 @@ class FcmPushService {
           final payload = '${data['payload'] ?? ''}'.trim();
           if (payload.isNotEmpty) {
             // Remember deep-link even if the user taps the bell instead.
-            notifications.pendingPayload = payload;
+            notifications.deliverPayload(payload);
           }
           await notifications.initOs(requestPermission: false);
           await notifications.showOsNotificationsFromPush(
@@ -136,11 +133,13 @@ class FcmPushService {
           debugPrint('[fcm] foreground show skipped: $e');
         }
       });
-      // Background tap (app was in background, not killed).
+      // Background tap (app was in background, not killed): deliver through
+      // the pending-payload path so the shell routes and bell-badge both
+      // update — a null `onTap` used to leave this tap unrouted.
       FirebaseMessaging.onMessageOpenedApp.listen((message) {
         final payload = '${message.data['payload'] ?? ''}'.trim();
         if (payload.isNotEmpty) {
-          notifications.pendingPayload = payload;
+          notifications.deliverPayload(payload);
           onTap?.call(payload);
         }
       });
@@ -149,7 +148,7 @@ class FcmPushService {
       final initialPayload =
           '${initial?.data['payload'] ?? ''}'.trim();
       if (initialPayload.isNotEmpty) {
-        notifications.pendingPayload = initialPayload;
+        notifications.deliverPayload(initialPayload);
       }
       // Token refresh: Cloud Functions target topics, so no server upload is
       // strictly required; keep the hook for future per-device sends.

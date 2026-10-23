@@ -9,6 +9,7 @@ import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_paginated_table.dart';
+import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/export/table_html_export.dart';
@@ -16,6 +17,7 @@ import '../../../core/formula_engine.dart';
 import '../../cubit/inventory_cubit.dart';
 import '../../cubit/inventory_state.dart';
 import '../inventory_forms.dart';
+import '../inventory_log_screen.dart';
 
 /// Desktop inventory: the pre-split table verbatim (1280x720 grid).
 class DesktopInventoryTab extends StatefulWidget {
@@ -91,6 +93,23 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
     if (saved == true) await cubit.load();
   }
 
+  Future<void> _openReceive(
+    BuildContext context,
+    Map<String, dynamic> row,
+  ) async {
+    final cubit = context.read<InventoryCubit>();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (_) => InventoryReceiveDialog(item: row),
+    );
+    if (saved == true) await cubit.load();
+  }
+
+  Future<void> _openLog(BuildContext context, Map<String, dynamic> row) async {
+    await InventoryLogScreen.open(context, row);
+    if (context.mounted) await context.read<InventoryCubit>().load();
+  }
+
   Future<void> _exportAll(List<Map<String, dynamic>> rows) =>
       TableHtmlExport.export(
         context,
@@ -125,10 +144,21 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Title lives in the shell topbar on desktop; only actions stay.
+          // Title lives in the shell topbar on desktop; the search takes the
+          // free width and the actions stay on the same row.
           Row(
             children: [
-              const Spacer(),
+              Expanded(
+                child: DebouncedSearchField(
+                  hint: AppText.t(
+                    'بحث بالاسم أو الوحدة',
+                    'Search name or unit...',
+                  ),
+                  initialValue: state.query,
+                  onChanged: (v) => context.read<InventoryCubit>().setQuery(v),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
               IconButton(
                 tooltip: AppText.t('تصدير جدول', 'Export table'),
                 visualDensity: VisualDensity.compact,
@@ -182,10 +212,22 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
+                                tooltip: AppText.t('استلام كمية', 'Receive'),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () => _openReceive(context, r),
+                                icon: Icon(Icons.download_outlined, size: 18.r),
+                              ),
+                              IconButton(
                                 tooltip: AppText.t('تسوية الكمية', 'Adjust'),
                                 visualDensity: VisualDensity.compact,
                                 onPressed: () => _openAdjust(context, r),
                                 icon: Icon(Icons.swap_vert, size: 18.r),
+                              ),
+                              IconButton(
+                                tooltip: AppText.t('السجل', 'Log'),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () => _openLog(context, r),
+                                icon: Icon(Icons.history, size: 18.r),
                               ),
                               IconButton(
                                 tooltip: AppStrings.edit,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -45,12 +47,12 @@ class QcNcrListScreen extends StatelessWidget {
                 onPressed: cubit.state.rows.isEmpty
                     ? null
                     : () => TableHtmlExport.export(
-                          context,
-                          filePrefix: 'ncr',
-                          title: ncrExportTitle(),
-                          headers: ncrHeaders(),
-                          rows: ncrExportRows(cubit.state.rows),
-                        ),
+                        context,
+                        filePrefix: 'ncr',
+                        title: ncrExportTitle(),
+                        headers: ncrHeaders(),
+                        rows: ncrExportRows(cubit.state.rows),
+                      ),
                 icon: const Icon(Icons.table_view_outlined),
               ),
               IconButton(
@@ -70,21 +72,28 @@ class QcNcrListScreen extends StatelessWidget {
           ),
           body: Column(
             children: [
+              // Search sits above the register on every form factor. It writes
+              // the same `filters.query` the KPI cards and the list count, so
+              // the header total can never disagree with the visible rows.
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                  AppSpacing.md,
+                  0,
+                ),
+                child: _NcrSearchField(cubit: cubit),
+              ),
               if (state.hasFilters) NcrActiveFilterChips(state: state),
               Expanded(
                 child: state.error != null && state.rows.isEmpty
-                    ? AppEmptyState(
-                        icon: Icons.error_outline,
+                    ? AppErrorState(
                         title: AppText.t(
                           'تعذر تحميل التقرير',
                           'Report unavailable',
                         ),
                         subtitle: state.error,
-                        action: AppButton(
-                          label: AppText.t('إعادة المحاولة', 'Retry'),
-                          icon: const Icon(Icons.refresh),
-                          onPressed: cubit.load,
-                        ),
+                        onRetry: cubit.load,
                       )
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -115,8 +124,9 @@ class QcNcrListScreen extends StatelessWidget {
                             child: Center(
                               child: ConstrainedBox(
                                 constraints: BoxConstraints(
-                                  maxWidth:
-                                      FormFactor.current.isMobile ? 720 : 960,
+                                  maxWidth: FormFactor.current.isMobile
+                                      ? 720
+                                      : 960,
                                 ),
                                 child: AppAdaptiveDataView(
                                   cardsOnly: true,
@@ -218,6 +228,88 @@ class QcNcrListScreen extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Debounced free-text search for the NCR register.
+///
+/// Kept as its own stateful widget so the controller survives the surrounding
+/// [BlocBuilder] rebuilds; the text is re-synced when the query is changed from
+/// elsewhere (a removed chip, "clear all") instead of drifting out of step.
+class _NcrSearchField extends StatefulWidget {
+  const _NcrSearchField({required this.cubit});
+
+  final QcNcrCubit cubit;
+
+  @override
+  State<_NcrSearchField> createState() => _NcrSearchFieldState();
+}
+
+class _NcrSearchFieldState extends State<_NcrSearchField> {
+  final _controller = TextEditingController();
+  final _focus = FocusNode();
+  Timer? _debounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.text = widget.cubit.state.filters.query;
+  }
+
+  @override
+  void didUpdateWidget(covariant _NcrSearchField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncFromState();
+  }
+
+  void _syncFromState() {
+    final query = widget.cubit.state.filters.query;
+    if (_focus.hasFocus || _controller.text == query) return;
+    _controller.text = query;
+  }
+
+  void _onChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) widget.cubit.setQuery(value.trim());
+    });
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _syncFromState();
+    return TextField(
+      controller: _controller,
+      focusNode: _focus,
+      onChanged: _onChanged,
+      textInputAction: TextInputAction.search,
+      decoration: InputDecoration(
+        prefixIcon: const Icon(Icons.search),
+        hintText: AppText.t(
+          'بحث في: المرجع / الوصف / المخزون / المفتش...',
+          'Search: reference, description, lot, inspector...',
+        ),
+        isDense: true,
+        suffixIcon: _controller.text.isEmpty
+            ? null
+            : IconButton(
+                tooltip: AppText.t('مسح البحث', 'Clear search'),
+                onPressed: () {
+                  _controller.clear();
+                  widget.cubit.setQuery('');
+                },
+                icon: const Icon(Icons.close, size: 18),
+              ),
+      ),
     );
   }
 }

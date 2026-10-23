@@ -19,11 +19,19 @@ class RunTestCubit extends AppCubit<RunTestState> {
     required this.config,
     required this.results,
     required this.local,
+    this.editRow,
   }) : super(const RunTestState());
 
   final LabConfigurationRepository config;
   final LabResultRepository results;
   final LabLocalRepository local;
+
+  /// When non-null the cubit drives an *edit* of this existing
+  /// `lab_sample_tests` row instead of a new run: the analysis and source are
+  /// history and stay fixed, only sample/result/dynamic values are re-saved.
+  final Map<String, dynamic>? editRow;
+
+  bool get isEditing => editRow != null;
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, error: null));
@@ -40,6 +48,45 @@ class RunTestCubit extends AppCubit<RunTestState> {
       if (analysisId == null && analyses.isNotEmpty) {
         analysisId = (analyses.first['id'] as num).toInt();
       }
+      final row = editRow;
+      if (row == null) {
+        safeEmit(
+          state.copyWith(
+            loading: false,
+            analyses: analyses,
+            products: products,
+            rawMaterials: rawMaterials,
+            analysisId: analysisId,
+          ),
+        );
+        return;
+      }
+      // Edit mode: point the (fixed) form at the row's analysis/source and
+      // resolve its linked inspection so the sample picker mirrors a run.
+      analysisId = int.tryParse('${row['analysis_id'] ?? ''}') ?? analysisId;
+      final sourceType = '${row['source_type'] ?? 'raw_material'}';
+      final sourceName = '${row['source_name'] ?? ''}';
+      final refId = int.tryParse('${row['source_ref_id'] ?? ''}');
+      var sampleName = '${row['sample_name'] ?? ''}'.trim();
+      var inspection = <String, dynamic>{};
+      var inspections = <Map<String, dynamic>>[];
+      final entry = '${row['entry_code'] ?? ''}'.trim();
+      if (refId != null && refId > 0) {
+        inspections = sourceType == 'product'
+            ? await local.listProductInspectionRecords(refId)
+            : await local.listInspectionRecords(refId);
+        if (entry.isNotEmpty) {
+          inspection =
+              inspections
+                  .where((r) => '${r['entry_code'] ?? ''}' == entry)
+                  .firstOrNull ??
+              const {};
+          if (sampleName.isEmpty && inspection.isNotEmpty) {
+            final samples = _sampleNamesOf(inspection);
+            if (samples.isNotEmpty) sampleName = samples.first;
+          }
+        }
+      }
       safeEmit(
         state.copyWith(
           loading: false,
@@ -47,12 +94,19 @@ class RunTestCubit extends AppCubit<RunTestState> {
           products: products,
           rawMaterials: rawMaterials,
           analysisId: analysisId,
+          sourceType: sourceType,
+          sourceName: sourceName,
+          rawMaterialId: sourceType == 'product' ? null : refId,
+          productId: sourceType == 'product' ? refId : null,
+          inspections: inspections,
+          selectedInspection: inspection,
+          selectedSampleName: sampleName,
         ),
       );
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 
@@ -141,6 +195,23 @@ class RunTestCubit extends AppCubit<RunTestState> {
 
   void setSourceType(String type) {
     if (type == state.sourceType) return;
+    if (type == 'sample') {
+      // Free-text sample: no catalog entity and no inspection linkage, so
+      // drop anything carried over from a raw-material/product source.
+      safeEmit(
+        RunTestState(
+          loading: state.loading,
+          error: state.error,
+          analyses: state.analyses,
+          products: state.products,
+          rawMaterials: state.rawMaterials,
+          analysisId: state.analysisId,
+          sourceType: type,
+          running: state.running,
+        ),
+      );
+      return;
+    }
     safeEmit(state.copyWith(sourceType: type));
   }
 
@@ -163,18 +234,13 @@ class RunTestCubit extends AppCubit<RunTestState> {
       final inspections = await local.listProductInspectionRecords(id);
       if (state.productId != id) return;
       safeEmit(
-        state.copyWith(
-          inspections: inspections,
-          loadingInspections: false,
-        ),
+        state.copyWith(inspections: inspections, loadingInspections: false),
       );
     } on AppError catch (e) {
-      safeEmit(
-        state.copyWith(loadingInspections: false, error: e.message),
-      );
+      safeEmit(state.copyWith(loadingInspections: false, error: e.message));
     } catch (e) {
       safeEmit(
-        state.copyWith(loadingInspections: false, error: '$e'),
+        state.copyWith(loadingInspections: false, error: AppError.friendly(e)),
       );
     }
   }
@@ -195,18 +261,13 @@ class RunTestCubit extends AppCubit<RunTestState> {
       final inspections = await local.listInspectionRecords(materialId);
       if (state.rawMaterialId != materialId) return;
       safeEmit(
-        state.copyWith(
-          inspections: inspections,
-          loadingInspections: false,
-        ),
+        state.copyWith(inspections: inspections, loadingInspections: false),
       );
     } on AppError catch (e) {
-      safeEmit(
-        state.copyWith(loadingInspections: false, error: e.message),
-      );
+      safeEmit(state.copyWith(loadingInspections: false, error: e.message));
     } catch (e) {
       safeEmit(
-        state.copyWith(loadingInspections: false, error: '$e'),
+        state.copyWith(loadingInspections: false, error: AppError.friendly(e)),
       );
     }
   }
@@ -248,7 +309,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
         rawMaterialId: isProduct
             ? state.rawMaterialId
             : int.tryParse('${row['material_id'] ?? ''}') ??
-                state.rawMaterialId,
+                  state.rawMaterialId,
         productId: isProduct
             ? int.tryParse('${row['product_id'] ?? ''}') ?? state.productId
             : state.productId,
@@ -282,22 +343,30 @@ class RunTestCubit extends AppCubit<RunTestState> {
     safeEmit(state.copyWith(running: true, error: null));
     try {
       final isProduct = state.sourceType == 'product';
-      final sourceName = isProduct
+      final isSample = state.sourceType == 'sample';
+      final typed = sampleName.trim();
+      // A free-text sample is its own source: the source name mirrors the
+      // typed sample name and there is no catalog row to reference.
+      final effectiveSample = typed.isEmpty ? state.selectedSampleName : typed;
+      final sourceName = isSample
+          ? effectiveSample
+          : isProduct
           ? '${state.selectedInspection['material_name'] ?? _productName(state.productId)}'
           : '${state.selectedInspection['material_name'] ?? state.sourceName}';
-      final typed = sampleName.trim();
       final resolvedEntry = (entryCode ?? '').trim();
       // Both paths are record-driven now: an explicitly typed sample name
       // wins, otherwise the record's selected sample; same for the entry code.
-      final effectiveSample =
-          typed.isEmpty ? state.selectedSampleName : typed;
       final effectiveEntry = resolvedEntry.isNotEmpty
           ? resolvedEntry
           : '${state.selectedInspection['entry_code'] ?? ''}';
       return await results.runSampleTest(
         analysisId: state.analysisId!,
         sourceType: state.sourceType,
-        sourceRefId: isProduct ? state.productId : state.rawMaterialId,
+        sourceRefId: isSample
+            ? null
+            : isProduct
+            ? state.productId
+            : state.rawMaterialId,
         sourceName: sourceName,
         sampleName: effectiveSample,
         resultText: resultText.trim(),
@@ -305,6 +374,32 @@ class RunTestCubit extends AppCubit<RunTestState> {
         user: user,
         entryCode: effectiveEntry,
         manualResult: manualResult,
+      );
+    } finally {
+      safeEmit(state.copyWith(running: false));
+    }
+  }
+
+  /// Saves an *edit* of [editRow]: only the fillable fields travel (sample,
+  /// result and dynamic values) — the analysis, source and entry code are
+  /// history and never change. Corrected dynamic values re-derive the stock
+  /// consumption through the same delta pipeline as a run.
+  Future<Map<String, dynamic>> saveEdit({
+    required String sampleName,
+    required String resultText,
+    required Map<String, dynamic> dynamicValues,
+    Map<String, dynamic>? user,
+  }) async {
+    final id = int.tryParse('${editRow?['id'] ?? ''}');
+    if (id == null) throw const AppError('تعذّر حفظ التعديل');
+    safeEmit(state.copyWith(running: true, error: null));
+    try {
+      return await results.updateSampleTest(
+        id,
+        sampleName: sampleName,
+        resultText: resultText,
+        dynamicValues: dynamicValues,
+        user: user,
       );
     } finally {
       safeEmit(state.copyWith(running: false));

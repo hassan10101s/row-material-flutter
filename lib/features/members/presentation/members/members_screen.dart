@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
+import '../../../../core/responsive/form_factor.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
@@ -13,10 +16,13 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
 import '../../../../design_system/widgets/app_paginated_table.dart';
+import '../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../design_system/export/table_html_export.dart';
+import '../../../../design_system/widgets/app_adaptive.dart';
 import '../../../organizations/domain/organization_repository.dart';
 import '../../domain/member_repository.dart';
 import 'leave_organization_section.dart';
@@ -44,16 +50,23 @@ class _MembersScreenState extends State<MembersScreen> {
   final _code = TextEditingController();
   final _search = TextEditingController();
   MemberRepository? _repo;
+  AuthGate? _gate;
   List<Member> _members = const [];
   String? _error;
   bool _busy = false;
   String _role = AppRoles.lab;
+  Timer? _searchDebounce;
+  String _query = '';
 
   @override
   void initState() {
     super.initState();
     try {
       _repo = getIt<MemberRepository>();
+      // Perf: cache singleton once instead of getIt<AuthGate>() on every build
+      // + every table row. The instance is a singleton; live values
+      // (online/role) are still read per-build from the same object.
+      _gate = getIt<AuthGate>();
     } on Object catch (e) {
       _error = '$e';
       _repo = null;
@@ -62,8 +75,19 @@ class _MembersScreenState extends State<MembersScreen> {
     _load();
   }
 
+  /// Perf: debounce per-keystroke setState (300ms) so typing filters once
+  /// instead of rebuilding + re-filtering the roster on every character.
+  void _onSearchChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      if (!mounted) return;
+      setState(() => _query = value.trim().toLowerCase());
+    });
+  }
+
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _email.dispose();
     _code.dispose();
     _search.dispose();
@@ -230,7 +254,7 @@ class _MembersScreenState extends State<MembersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final gate = getIt<AuthGate>();
+    final gate = _gate ?? getIt<AuthGate>();
     // Member writes are online-only (never queued): gate the buttons on live
     // connectivity too, or an exempt admin sees enabled buttons offline that
     // can only fail with a raw error.
@@ -239,7 +263,7 @@ class _MembersScreenState extends State<MembersScreen> {
     final orgId = gate.organizationId;
     bool isSelf(String id) => id == gate.session.memberId;
 
-    final query = _search.text.trim().toLowerCase();
+    final query = _query;
     final visible = query.isEmpty
         ? _members
         : _members
@@ -359,7 +383,7 @@ class _MembersScreenState extends State<MembersScreen> {
             label: AppText.t('بحث', 'Search'),
             controller: _search,
             hint: 'name@company.com',
-            onChanged: (_) => setState(() {}),
+            onChanged: _onSearchChanged,
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
@@ -403,32 +427,37 @@ class _MembersScreenState extends State<MembersScreen> {
           ),
           const SizedBox(height: AppSpacing.sm),
         ],
-        if (_busy && _members.isEmpty)
-          const Center(child: CircularProgressIndicator()),
+        if (_busy && _members.isEmpty) const AppSkeletonList(rows: 8),
         SizedBox(
           height: 420.h,
-          child: AppPaginatedTable(
-            minTableWidth: 860,
-            columnFlex: const [1.3, 1.4, 1.0, 0.8, 1.5],
-            headers: [
-              AppText.t('العضو', 'Member'),
-              AppText.t('البريد الإلكتروني', 'Email'),
-              AppText.t('الدور', 'Role'),
-              AppText.t('الحالة', 'Status'),
-              AppText.t('الإجراءات', 'Actions'),
-            ],
-            rows: [for (final m in visible) _memberRow(m, isSelf(m.id))],
-            empty: Padding(
-              padding: const EdgeInsets.all(AppSpacing.page),
-              child: Text(
-                query.isEmpty
+          child: appAdaptiveVariant(
+            context,
+            desktop: (ctx) => AppPaginatedTable(
+              minTableWidth: 860,
+              columnFlex: const [1.3, 1.4, 1.0, 0.8, 1.5],
+              headers: [
+                AppText.t('العضو', 'Member'),
+                AppText.t('البريد الإلكتروني', 'Email'),
+                AppText.t('الدور', 'Role'),
+                AppText.t('الحالة', 'Status'),
+                AppText.t('الإجراءات', 'Actions'),
+              ],
+              rows: [for (final m in visible) _memberRow(m, isSelf(m.id))],
+              empty: AppEmptyState(
+                icon: Icons.group_add_outlined,
+                title: AppText.t('لا يوجد أعضاء بعد', 'No members yet'),
+                subtitle: query.isEmpty
                     ? AppText.t(
-                        'لا يوجد أعضاء بعد — أضف أول دعوة.',
-                        'No members yet — add the first invite.',
+                        'أضف أول دعوة من نموذج «إضافة عضو» أدناه.',
+                        'Add the first invite from the form below.',
                       )
-                    : AppText.t('لا نتائج مطابقة.', 'No matching members.'),
+                    : AppText.t(
+                        'لا نتائج مطابقة للبحث.',
+                        'No members match the search.',
+                      ),
               ),
             ),
+            mobile: (ctx) => _membersMobile(ctx, visible, query, isSelf),
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
@@ -539,13 +568,72 @@ class _MembersScreenState extends State<MembersScreen> {
     );
   }
 
+  /// The phone experience of the roster: cards instead of the 7-column
+  /// table (which would horizontally scroll on a phone). The cells come
+  /// from the same [_memberRow] builder the table uses, so the action
+  /// gating, the roles and the test keys cannot drift between the two.
+  Widget _membersMobile(
+    BuildContext context,
+    List<Member> visible,
+    String query,
+    bool Function(String id) isSelf,
+  ) {
+    if (visible.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(AppSpacing.page),
+        child: Text(
+          query.isEmpty
+              ? AppText.t('لا يوجد أعضاء بعد — أضف أول دعوة.', 'No members yet — add the first invite.')
+              : AppText.t('لا نتائج مطابقة.', 'No matching members.'),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        for (final m in visible) ...[
+          Builder(
+            builder: (context) {
+              final cells = _memberRow(m, isSelf(m.id));
+              return AppCard(
+                enableHover: false,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(child: cells[0]),
+                        const SizedBox(width: AppSpacing.sm),
+                        cells[3],
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    cells[1],
+                    const SizedBox(height: 2),
+                    cells[2],
+                    const SizedBox(height: AppSpacing.sm),
+                    cells[4],
+                  ],
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: AppSpacing.sm),
+        ],
+      ],
+    );
+  }
+
   /// One roster row for the paginated table. No bulk selection here on
   /// purpose: activate/disable/remove are destructive per-member decisions.
   List<Widget> _memberRow(Member member, bool self) {
-    final gate = getIt<AuthGate>();
+    final gate = _gate ?? getIt<AuthGate>();
     final canUpdate = gate.canWrite(Permission.usersUpdate) && gate.online;
     final canDisable = gate.canWrite(Permission.usersDisable) && gate.online;
     final color = _statusColor(member.status);
+    // Phone fingers need the 44dp+ floor; the mouse keeps the compact density.
+    final touch = FormFactor.current.isMobile
+        ? const BoxConstraints(minWidth: 48, minHeight: 48)
+        : const BoxConstraints(minWidth: 36, minHeight: 36);
     return [
       Text(
         '${member.label}${self ? ' (${AppText.t('أنت', 'You')})' : ''}',
@@ -583,6 +671,7 @@ class _MembersScreenState extends State<MembersScreen> {
               key: ValueKey('activate_${member.id}'),
               tooltip: AppText.t('تفعيل', 'Activate'),
               visualDensity: VisualDensity.compact,
+              constraints: touch,
               onPressed: () => _run(
                 () => _repo!.setStatus(memberId: member.id, status: 'active'),
               ),
@@ -593,6 +682,7 @@ class _MembersScreenState extends State<MembersScreen> {
               key: ValueKey('resend_${member.id}'),
               tooltip: AppText.t('إعادة إرسال الدعوة', 'Resend invite'),
               visualDensity: VisualDensity.compact,
+              constraints: touch,
               onPressed: () => _resend(member),
               icon: const Icon(Icons.send_outlined, size: 20),
             ),
@@ -612,6 +702,7 @@ class _MembersScreenState extends State<MembersScreen> {
             IconButton(
               tooltip: AppText.t('تعطيل', 'Disable'),
               visualDensity: VisualDensity.compact,
+              constraints: touch,
               onPressed: () => _confirmDisable(member),
               icon: const Icon(Icons.block, size: 20),
             ),
@@ -619,6 +710,7 @@ class _MembersScreenState extends State<MembersScreen> {
             IconButton(
               tooltip: AppText.t('إزالة', 'Remove'),
               visualDensity: VisualDensity.compact,
+              constraints: touch,
               onPressed: () => _confirmRemove(member),
               icon: const Icon(Icons.person_remove_outlined, size: 20),
             ),

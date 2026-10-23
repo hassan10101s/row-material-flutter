@@ -1,14 +1,20 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
+import 'package:material_lab/core/responsive/form_factor.dart';
+import 'package:material_lab/design_system/widgets/app_window.dart';
+import 'package:material_lab/di/service_locator.dart';
 import 'package:material_lab/features/qc_manager/domain/ncr_filters.dart';
 import 'package:material_lab/features/qc_manager/domain/ncr_kpis.dart';
 import 'package:material_lab/features/qc_manager/domain/ncr_report_repository.dart';
 import 'package:material_lab/features/qc_manager/domain/ncr_report_row.dart';
+import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
+import 'package:material_lab/features/qc_manager/domain/qc_nc_capa.dart';
+import 'package:material_lab/features/qc_manager/domain/qc_repositories.dart';
 import 'package:material_lab/features/qc_manager/presentation/cubit/qc_ncr_cubit.dart';
 import 'package:material_lab/features/qc_manager/presentation/ncr/qc_ncr_detail_screen.dart';
 import 'package:material_lab/features/qc_manager/presentation/ncr/qc_ncr_list_screen.dart';
@@ -89,7 +95,18 @@ Future<void> _scrollTo(WidgetTester tester, Finder target) async {
 void main() {
   // mocktail needs a concrete stand-in for any non-nullable custom argument
   // before `any()` will match it.
-  setUpAll(() => registerFallbackValue(const NcrFilters()));
+  setUpAll(() {
+    registerFallbackValue(const NcrFilters());
+    registerFallbackValue(
+      QcFindingNc(
+        inspectionId: 0,
+        severity: 'Minor',
+        description: '',
+        createdAt: '',
+        updatedAt: '',
+      ),
+    );
+  });
 
   // `AppText.arabic` is a mutable global that defaults to true, so every
   // `AppText.t(...)` in these widgets resolves to Arabic. Pin it to English so
@@ -152,7 +169,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Report unavailable'), findsOneWidget);
-      expect(find.widgetWithText(FilledButton, 'Retry'), findsOneWidget);
+      // The retry now renders through the shared `AppErrorState`
+      // (OutlinedButton) instead of a hand-rolled FilledButton.
+      expect(find.widgetWithText(OutlinedButton, 'Retry'), findsOneWidget);
     });
 
     testWidgets('the filter badge only lights up once something is set', (
@@ -239,10 +258,14 @@ void main() {
 
   group('QcNcrDetailScreen', () {
     late _RepoMock repo;
+    late _CapaMock capa;
+    late _InspectionsMock inspections;
     late QcNcrCubit cubit;
 
     setUp(() {
       repo = _RepoMock();
+      capa = _CapaMock();
+      inspections = _InspectionsMock();
       cubit = QcNcrCubit(repo);
     });
 
@@ -346,8 +369,143 @@ void main() {
 
       expect(find.text('Finding unavailable'), findsOneWidget);
     });
+
+    testWidgets('the app bar offers edit and delete for a shown finding', (
+      tester,
+    ) async {
+      _stub(repo);
+      when(() => repo.detail(5)).thenAnswer((_) async => _row(5));
+
+      await tester.pumpWidget(
+        _host(QcNcrDetailScreen(cubit: cubit, findingId: 5), cubit),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.edit_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    });
+
+    testWidgets('edit opens the stored finding in the editor', (tester) async {
+      _stub(repo);
+      when(() => repo.detail(5)).thenAnswer((_) async => _row(5));
+      when(() => capa.listDefectCodes()).thenAnswer((_) async => []);
+      when(
+        () => inspections.listInspections(limit: any(named: 'limit')),
+      ).thenAnswer((_) async => []);
+      when(() => capa.getFinding(5)).thenAnswer(
+        (_) async => QcFindingNc(
+          findingId: 5,
+          inspectionId: 1,
+          code: 'NC-5',
+          severity: NcSeverity.major,
+          description: 'defect 5',
+          status: NcStatus.assigned,
+          assignedTo: 'm-9',
+          assignedToName: 'Ali Qa',
+          assignedAt: '2026-01-02 09:00:00',
+          createdAt: '2026-01-01 09:00:00',
+          updatedAt: '2026-01-01 09:00:00',
+        ),
+      );
+      // The editor opened from the detail screen has no roster in hand and
+      // falls back to the facet pass the filter drawer already runs.
+      when(() => repo.filterOptions()).thenAnswer(
+        (_) async => const NcrFilterOptions(
+          assignees: [(id: 'm-9', name: 'Ali Qa')],
+        ),
+      );
+      getIt.registerSingleton<QcNcReportRepository>(repo);
+      getIt.registerSingleton<QcNcCapaRepository>(capa);
+      getIt.registerSingleton<QcInspectionRepository>(inspections);
+      addTearDown(getIt.reset);
+
+      // The editor's window-vs-route split decides on the form factor, which
+      // in a plain widget test resolves to Android: pin it to desktop so the
+      // unified window is what this test asserts.
+      FormFactor.debugSet(AppFormFactor.desktop);
+      addTearDown(() => FormFactor.debugSet(AppFormFactor.desktop));
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1280, 900);
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        _host(QcNcrDetailScreen(cubit: cubit, findingId: 5), cubit),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pumpAndSettle();
+
+      // The editor runs in edit mode over the stored finding, and the stored
+      // description shows in both the field and the detail behind it.
+      expect(find.byType(AppWindow), findsOneWidget);
+      expect(find.text('Edit non-conformance'), findsOneWidget);
+      expect(find.text('defect 5'), findsNWidgets(3));
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AppWindow), findsNothing);
+      verifyNever(() => capa.saveFinding(any()));
+      verifyNever(() => capa.deleteFinding(any()));
+    });
+
+    testWidgets('delete asks for confirmation, writes and pops back', (
+      tester,
+    ) async {
+      _stub(repo);
+      when(() => repo.detail(5)).thenAnswer((_) async => _row(5));
+      when(() => capa.deleteFinding(5)).thenAnswer((_) async {});
+      getIt.registerSingleton<QcNcCapaRepository>(capa);
+      addTearDown(getIt.reset);
+
+      await tester.pumpWidget(_hostDetailFromTrigger(cubit, 5));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('open detail'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byIcon(Icons.delete_outline));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete non-conformance'), findsOneWidget);
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      verify(() => capa.deleteFinding(5)).called(1);
+      // The tombstoned detail popped itself back to the caller.
+      expect(find.byType(AppWindow), findsNothing);
+      expect(find.text('open detail'), findsOneWidget);
+    });
   });
 }
+
+class _CapaMock extends Mock implements QcNcCapaRepository {}
+
+class _InspectionsMock extends Mock implements QcInspectionRepository {}
+
+Widget _hostDetailFromTrigger(QcNcrCubit cubit, int findingId) =>
+    ScreenUtilInit(
+      designSize: const Size(1280, 720),
+      builder: (context, _) => BlocProvider.value(
+        value: cubit,
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => Scaffold(
+              body: Center(
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          QcNcrDetailScreen(cubit: cubit, findingId: findingId),
+                    ),
+                  ),
+                  child: const Text('open detail'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
 
 /// Sentinel that must never appear; keeps the empty-state assertion honest.
 class AppEmptyStateProbe extends StatelessWidget {

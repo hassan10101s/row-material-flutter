@@ -12,6 +12,7 @@ import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_required_toggle.dart';
+import '../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../di/service_locator.dart';
 import '../../domain/parameter_type.dart';
 import '../../domain/reference_repository.dart';
@@ -540,7 +541,7 @@ class ProductEditorState extends State<ProductEditor> {
       children: [
         Expanded(
           child: _loading
-              ? const Center(child: CircularProgressIndicator())
+              ? const AppSkeletonList(rows: 4, height: 320, padding: EdgeInsets.zero)
               : SingleChildScrollView(
                   padding: EdgeInsets.symmetric(
                     horizontal: _compact ? 0 : AppSpacing.lg,

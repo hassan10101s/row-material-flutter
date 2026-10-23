@@ -70,18 +70,20 @@ class DesktopAppShell extends StatelessWidget {
       bindings: shellShortcutBindings(entries, onNavigate),
       child: FocusTraversalGroup(
         policy: OrderedTraversalPolicy(),
-        child: Semantics(
-          label: 'Application navigation',
-          child: Scaffold(
-            backgroundColor: AppColors.background,
-            // Sidebar on the right (first child in an RTL Row).
-            body: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Slim rail on purpose: every dp here is a dp the page
-                // tables lose, so the sidebar stays just wide enough for
-                // the identity card + labeled destinations.
-                Container(
+        child: Scaffold(
+          backgroundColor: AppColors.background,
+          // Sidebar on the right (first child in an RTL Row).
+          body: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Slim rail on purpose: every dp here is a dp the page
+              // tables lose, so the sidebar stays just wide enough for
+              // the identity card + labeled destinations.
+              Semantics(
+                container: true,
+                explicitChildNodes: true,
+                label: 'Application navigation',
+                child: Container(
                   width: 224.w,
                   decoration: BoxDecoration(
                     color: AppColors.surface,
@@ -107,26 +109,26 @@ class DesktopAppShell extends StatelessWidget {
                     canOpenPdfFolder: canOpenPdfFolder,
                   ),
                 ),
-                Expanded(
-                  child: Column(
-                    children: [
-                      ShellTopBar(
-                        user: user,
-                        locale: locale,
-                        theme: theme,
-                        syncStatus: syncStatus,
-                        // Page titles live here on desktop, outside the page
-                        // scope, so the tables below gain the vertical space
-                        // the in-page headers used to take.
-                        title: shellPageTitle(currentPath, entries),
-                        onOpenSync: () => onNavigate('/settings?tab=sync'),
-                      ),
-                      Expanded(child: child),
-                    ],
-                  ),
+              ),
+              Expanded(
+                child: Column(
+                  children: [
+                    ShellTopBar(
+                      user: user,
+                      locale: locale,
+                      theme: theme,
+                      syncStatus: syncStatus,
+                      // Page titles live here on desktop, outside the page
+                      // scope, so the tables below gain the vertical space
+                      // the in-page headers used to take.
+                      title: shellPageTitle(currentPath, entries),
+                      onOpenSync: () => onNavigate('/settings?tab=sync'),
+                    ),
+                    Expanded(child: child),
+                  ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -169,6 +171,7 @@ class _Sidebar extends StatelessWidget {
                   user: user,
                   onLogout: onLogout,
                   onLogoutThisDevice: onLogoutThisDevice,
+                  onOpenSettings: () => onSelect('/settings'),
                 ),
                 const Divider(height: 1),
                 // Nav list.

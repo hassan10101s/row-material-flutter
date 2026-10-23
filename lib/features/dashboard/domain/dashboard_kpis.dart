@@ -185,8 +185,8 @@ class NcrKpisSummary extends Equatable {
       ];
 }
 
-class SopGoalKpis extends Equatable {
-  const SopGoalKpis({
+class SopKpis extends Equatable {
+  const SopKpis({
     this.sopTotal = 0,
     this.sopPublished = 0,
     this.sopExpired = 0,
@@ -196,8 +196,7 @@ class SopGoalKpis extends Equatable {
     this.goalActive = 0,
     this.goalOverdue = 0,
     this.goalCompleted = 0,
-    this.goalAvgProgress = 0.0,
-    this.goalKpiMetRate = 0.0,
+    this.goalAvgProgress = 0,
     this.goalOverdueActions = 0,
   });
 
@@ -210,14 +209,21 @@ class SopGoalKpis extends Equatable {
   final int goalActive;
   final int goalOverdue;
   final int goalCompleted;
-  final double goalAvgProgress;
-  final double goalKpiMetRate;
+  final int goalAvgProgress;
   final int goalOverdueActions;
 
   @override
   List<Object?> get props => [
-        sopTotal, sopPublished, sopExpired, sopExpiring, sopPending, goalTotal,
-        goalActive, goalOverdue, goalCompleted, goalAvgProgress, goalKpiMetRate,
+        sopTotal,
+        sopPublished,
+        sopExpired,
+        sopExpiring,
+        sopPending,
+        goalTotal,
+        goalActive,
+        goalOverdue,
+        goalCompleted,
+        goalAvgProgress,
         goalOverdueActions,
       ];
 }
@@ -398,7 +404,7 @@ class DashboardBundle extends Equatable {
     this.lab = const LabKpis(),
     this.qc = const QcCheckKpis(),
     this.ncr = const NcrKpisSummary(),
-    this.sopGoals = const SopGoalKpis(),
+    this.sopGoals = const SopKpis(),
     this.inventory = const InventoryKpis(),
     this.trend = const [],
     this.supplierScores = const [],
@@ -414,7 +420,7 @@ class DashboardBundle extends Equatable {
   final LabKpis lab;
   final QcCheckKpis qc;
   final NcrKpisSummary ncr;
-  final SopGoalKpis sopGoals;
+  final SopKpis sopGoals;
   final InventoryKpis inventory;
   final List<TrendPoint> trend;
   final List<SupplierScore> supplierScores;

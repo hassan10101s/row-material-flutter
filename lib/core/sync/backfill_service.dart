@@ -65,7 +65,9 @@ class BackfillService {
 
   /// Generic backfill for every synced table (imports/restores of
   /// lab/reference/inventory/consumption/worksheet previously never
-  /// re-queued — only samples were). Walks each [SyncEntity] and re-queues
+  /// re-queued — only samples were; plan P8 adds the whole QC family, so
+  /// checklists / sheets / NC-CAPA rows that predate the sync also reach
+  /// the server here). Walks each [SyncEntity] and re-queues
   /// rows whose `sync_state` is not `synced`, using the same envelope as the
   /// normal write path. Safe to call twice (merges via SyncQueue.enqueue,
   /// skips already-tracked + conflict-parked rows).
@@ -107,20 +109,28 @@ class BackfillService {
         "SELECT name FROM sqlite_master WHERE type='table' AND name='${entity.localTable}'",
       ));
       if (tables.isEmpty) continue;
+      var lastPk = 0;
       while (budgetLeft()) {
-        final rows = await db.query(
-          entity.localTable,
-          where: "sync_state IS NULL OR sync_state <> 'synced'",
-          orderBy: 'id ASC',
-          limit: pageSize,
+        // Keyset pagination: this query also matches rows this pass has just
+        // moved to 'queued', so an unbounded loop used to re-read page 1
+        // forever — recounting its own rows against the budget and never
+        // reaching the rest of the table. `lastPk` walks the table and every
+        // row is visited exactly once.
+        final rows = await db.rawQuery(
+          "SELECT * FROM ${entity.localTable} "
+          "WHERE ${entity.pkColumn} > ? "
+          "AND (sync_state IS NULL OR sync_state <> 'synced') "
+          "ORDER BY ${entity.pkColumn} ASC LIMIT $pageSize",
+          [lastPk],
         );
         if (rows.isEmpty) break;
-
+        final pageStart = lastPk;
         await db.transaction((txn) async {
           for (final raw in rows) {
             if (!budgetLeft()) break;
             final row = Map<String, dynamic>.from(raw);
-            final id = (row['id'] as num?)?.toInt();
+            final id = (row[entity.pkColumn] as num?)?.toInt();
+            if (id != null) lastPk = id;
             if (id == null) {
               skipped++;
               continue;
@@ -147,7 +157,7 @@ class BackfillService {
               await txn.update(
                 entity.localTable,
                 {'sync_state': 'queued', 'updated_at': nowIso()},
-                where: 'id = ?',
+                where: '${entity.pkColumn} = ?',
                 whereArgs: [id],
               );
               await queue.enqueue(
@@ -160,44 +170,52 @@ class BackfillService {
                 baseVersion: remoteVersion,
               );
               tombstones++;
-              continue;
+            } else {
+              final localVersion = (row['version'] as num?)?.toInt() ?? 1;
+              final snapshot = Map<String, dynamic>.from(row)
+                ..['sync_state'] = 'queued';
+              final ctx = SyncPayloadContext(
+                organizationId: organizationId,
+                uid: uid,
+                deviceId: deviceId,
+                version: localVersion,
+                versionField: 'version',
+              );
+              final isFirstPush = remoteVersion == 0;
+              await txn.update(
+                entity.localTable,
+                {'sync_state': 'queued'},
+                where: '${entity.pkColumn} = ?',
+                whereArgs: [id],
+              );
+              await queue.enqueue(
+                txn,
+                entityType: entity.type,
+                entityId: docId,
+                localRef: id,
+                operation: isFirstPush ? 'create' : 'update',
+                payload: buildRemotePayload(
+                  entity,
+                  snapshot,
+                  ctx,
+                  asCreate: isFirstPush,
+                ),
+                baseVersion: remoteVersion,
+              );
+              queued++;
             }
-
-            final localVersion = (row['version'] as num?)?.toInt() ?? 1;
-            final snapshot = Map<String, dynamic>.from(row)
-              ..['sync_state'] = 'queued';
-            final ctx = SyncPayloadContext(
-              organizationId: organizationId,
-              uid: uid,
-              deviceId: deviceId,
-              version: localVersion,
-              versionField: 'version',
-            );
-            final isFirstPush = remoteVersion == 0;
-            await txn.update(
-              entity.localTable,
-              {'sync_state': 'queued'},
-              where: 'id = ?',
-              whereArgs: [id],
-            );
-            await queue.enqueue(
-              txn,
-              entityType: entity.type,
-              entityId: docId,
-              localRef: id,
-              operation: isFirstPush ? 'create' : 'update',
-              payload: buildRemotePayload(
-                entity,
-                snapshot,
-                ctx,
-                asCreate: isFirstPush,
-              ),
-              baseVersion: remoteVersion,
-            );
-            queued++;
+            // A row queued in this pass must not be re-queued by a later page
+            // (or call) reading a snapshot of `tracked` taken before it.
+            tracked.add('${entity.type}|$docId');
           }
         });
 
+        if (lastPk == pageStart) {
+          // No numeric pk advanced (text keys or a page of unparseable ids):
+          // keyset cannot progress here, so stop before this turns into a
+          // budget-burning spin.
+          break;
+        }
         if (rows.length < pageSize) break;
       }
     }

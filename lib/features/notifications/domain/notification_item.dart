@@ -4,13 +4,24 @@ library;
 /// Stable type stored in `notifications.type`.
 enum NotificationType {
   inspection('inspection'),
-  labResult('labResult');
+  labResult('labResult'),
+  sync('sync');
 
   const NotificationType(this.storage);
   final String storage;
 
-  static NotificationType fromStorage(String value) =>
-      value == 'labResult' ? NotificationType.labResult : NotificationType.inspection;
+  static NotificationType fromStorage(String value) {
+    switch (value) {
+      case 'labResult':
+        return NotificationType.labResult;
+      case 'sync':
+        return NotificationType.sync;
+      case 'inspection':
+        return NotificationType.inspection;
+      default:
+        return NotificationType.inspection;
+    }
+  }
 }
 
 /// One row shown in the bell list. `refId` is the local SQLite row id,
@@ -37,9 +48,10 @@ class NotificationItem {
   final bool read;
 
   /// Deep-link payload used by OS notifications and in-app taps.
-  /// Format: `inspection:<refId>` or `lab:<refId>`.
+  /// Format: `inspection:<refId>`, `lab:<refId>` or `sync:<refId>` (refId is
+  /// unused for sync rows; the payload simply routes to the sync screen).
   String get payload =>
-      '${type == NotificationType.inspection ? 'inspection' : 'lab'}:$refId';
+      '${type == NotificationType.inspection ? 'inspection' : type == NotificationType.labResult ? 'lab' : 'sync'}:$refId';
 
   /// Product batch analysis (vs raw-material inspection). Title prefix is
   /// written once by `NotificationService._inspectionTitle`, so it survives

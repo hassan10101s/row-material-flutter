@@ -45,6 +45,7 @@ import '../app/headless.dart' show isHeadlessBackground;
 import '../app/notif_poll_task.dart';
 import '../features/notifications/data/fcm_push_service.dart';
 import '../features/notifications/data/notification_service.dart';
+import '../features/notifications/domain/notifications_port.dart';
 import '../features/notifications/presentation/notification_controller.dart';
 import '../features/backup/domain/backup_service.dart';
 import '../features/dashboard/data/dashboard_repo.dart';
@@ -53,9 +54,11 @@ import '../features/inspections/data/inspection_repo.dart';
 import '../features/inspections/data/offline_first_inspection_repository.dart';
 import '../features/inspections/domain/inspection_repository.dart';
 import '../features/lab/data/lab_repo.dart';
+import '../features/lab/data/nir_validation_repo.dart';
 import '../features/lab/data/offline_first_lab_repository.dart';
 import '../features/lab/domain/lab_local_repository.dart';
 import '../features/lab/domain/lab_result_repository.dart';
+import '../features/lab/domain/nir_validation_repository.dart';
 import '../features/lab/domain/product_batch_repository.dart';
 import '../features/members/domain/member_repository.dart';
 import '../features/organizations/data/firestore_organization_repository.dart';
@@ -66,17 +69,21 @@ import '../features/reference/data/reference_repo.dart';
 import '../features/reference/domain/reference_repository.dart';
 import '../features/qc_manager/data/ncr_report_repo.dart';
 import '../features/qc_manager/data/offline_first_qc_repository.dart';
+import '../features/qc_manager/data/offline_first_qc_custom_tables.dart';
 import '../features/qc_manager/data/qc_audit_repo.dart';
-import '../features/qc_manager/data/ncr_export_service.dart';
-import '../features/qc_manager/domain/ncr_report_repository.dart';
+import '../features/qc_manager/data/qc_repo.dart';
+import '../features/qc_manager/data/qc_custom_tables_repo.dart';
 import '../features/qc_manager/domain/qc_repositories.dart';
-import '../features/qc_manager/presentation/cubit/qc_goal_detail_cubit.dart';
-import '../features/qc_manager/presentation/cubit/qc_goals_cubit.dart';
-import '../features/qc_manager/presentation/cubit/qc_inspection_sheet_cubit.dart';
-import '../features/qc_manager/presentation/cubit/qc_inspections_cubit.dart';
+import '../features/qc_manager/data/ncr_export_service.dart';
+import '../features/qc_manager/data/routine_lists_repository.dart'; // RoutineListsRepositoryImpl
+import '../features/qc_manager/domain/ncr_report_repository.dart';
+import '../features/qc_manager/presentation/cubit/qc_custom_tables_cubit.dart';
+import '../features/qc_manager/presentation/cubit/qc_table_rows_cubit.dart';
 import '../features/qc_manager/presentation/cubit/qc_sops_cubit.dart';
-import '../features/qc_manager/presentation/cubit/qc_templates_cubit.dart';
 import '../features/qc_manager/presentation/cubit/qc_ncr_cubit.dart';
+import '../features/qc_manager/presentation/routine/routine_history_cubit.dart';
+import '../features/qc_manager/presentation/routine/routine_lists_cubit.dart';
+import '../features/qc_manager/presentation/routine/routine_sheet_cubit.dart';
 import '../features/reports/data/report_html_builder.dart';
 import '../features/reports/data/report_service.dart';
 import '../features/reports/domain/report_repository.dart';
@@ -264,6 +271,18 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<ProductBatchRepository>(
       () => getIt<LabRepo>() as ProductBatchRepository,
     )
+    // ── NIR فلديشن (device validation) ───────────────────────────────────
+    ..registerLazySingleton<NirValidationRepo>(
+      () => NirValidationRepo(
+        dbHelper: dbHelper,
+        guard: getIt<WriteGuard>(),
+        queue: queue,
+        audit: audit,
+      ),
+    )
+    ..registerLazySingleton<NirValidationRepository>(
+      () => getIt<NirValidationRepo>() as NirValidationRepository,
+    )
     ..registerLazySingleton<ReportHtmlBuilder>(
       () => ReportHtmlBuilder(
         settingsRepo: getIt<SettingsRepo>(),
@@ -332,10 +351,10 @@ Future<void> initServiceLocator() async {
       () => AuditController(getIt<AuditTrail>()),
     )
     // ── QC Manager (plan V6_ENHANCED P3) ───────────────────────────────────
-    // One [QcRepositories] holds all six contracts over the same guard and the
-    // same transaction boundary. Registering them individually would hand out
-    // six independently-built stacks and let a caller audit one entity while
-    // writing another.
+    // One [QcRepositories] holds all five contracts over the same guard and
+    // the same transaction boundary. Registering them individually would hand
+    // out five independently-built stacks and let a caller audit one entity
+    // while writing another.
     ..registerLazySingleton<QcRepositories>(() {
       return QcRepositories.offlineFirst(
         dbHelper: dbHelper,
@@ -344,6 +363,11 @@ Future<void> initServiceLocator() async {
         // registration: a sign-out or a user switch must change who the next
         // audit row names. `QcActor.fromSession` holds the mapping rules.
         actorReader: () => QcActor.fromSession(sessionSource.session),
+        // P8: the checklists / sheets / NC-CAPA rows now push through the
+        // same sync queue the lab stack uses. The writer guards itself on an
+        // unbound account, so offline writes stay purely local there.
+        queue: queue,
+        syncAudit: audit,
       );
     })
     ..registerLazySingleton<QcSopRepository>(() => getIt<QcRepositories>().sops)
@@ -356,11 +380,40 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<QcNcCapaRepository>(
       () => getIt<QcRepositories>().ncCapa,
     )
-    ..registerLazySingleton<QcGoalRepository>(
-      () => getIt<QcRepositories>().goals,
-    )
     ..registerLazySingleton<QcAuditRepository>(
       () => getIt<QcRepositories>().audit,
+    )
+    // ── QC custom tables (the QC settings feature) ────────────────────────
+    // A family of its own rather than a seventh member of [QcRepositories]:
+    // it is the first QC stack wired into the sync queue (its writes go
+    // through `sync_write.enqueueLocalChange`), while the six above stay
+    // device-local by design (plan P8). Registering it separately keeps that
+    // architectural boundary visible - and keeps the other facades' tests
+    // free of a queue they do not use.
+    ..registerLazySingleton<QcCustomTablesRepository>(() {
+      return OfflineFirstQcCustomTablesRepository(
+        local: QcCustomTablesRepo(dbHelper),
+        guard: getIt<WriteGuard>(),
+        dbHelper: dbHelper,
+        queue: queue,
+        syncAudit: audit,
+      );
+    })
+    // The defs cubit is a factory (not lazy singleton) for the same reason
+    // the others are: it holds scope. But the hub and the settings screen
+    // must share defs, so the hub BlocProvider owns it and hands the same
+    // instance to the gear screen; the factory keeps that ownership one
+    // widget away instead of ambient.
+    ..registerFactory<QcCustomTablesCubit>(
+      () => QcCustomTablesCubit(repo: getIt<QcCustomTablesRepository>()),
+    )
+    // [registerFactoryParam]: the records screen asks for its cubit with a
+    // `tableId`, and a plain factory cannot accept one.
+    ..registerFactoryParam<QcTableRowsCubit, int, void>(
+      (tableId, _) => QcTableRowsCubit(
+        tableId: tableId,
+        repo: getIt<QcCustomTablesRepository>(),
+      ),
     )
     // ── QC NCR report (plan V6_ENHANCED P7) ───────────────────────────────
     // A read-only projection, registered on its own rather than folded into
@@ -378,46 +431,42 @@ Future<void> initServiceLocator() async {
     ..registerFactory<QcNcrCubit>(
       () => QcNcrCubit(getIt<QcNcReportRepository>()),
     )
-    // ── QC goals (plan V6_ENHANCED P6) ─────────────────────────────────────
-    // The list cubit owns the filter scope and the paged rows, the detail cubit
-    // owns one goal's people and its trail. Both are per-screen for the same
-    // reason [QcNcrCubit] is: neither may outlive the screen showing it.
-    ..registerFactory<QcGoalsCubit>(
-      () => QcGoalsCubit(repo: getIt<QcGoalRepository>()),
-    )
-    // [registerFactoryParam], not [registerFactory]: the detail route asks for
-    // this cubit with a `goalId`, and a plain factory cannot accept one.
-    ..registerFactoryParam<QcGoalDetailCubit, int, void>(
-      (goalId, _) => QcGoalDetailCubit(
-        repo: getIt<QcGoalRepository>(),
-        audit: getIt<QcAuditRepository>(),
-        goalId: goalId,
-      ),
-    )
     // ── QC inspections (plan V6_ENHANCED P2) ─────────────────────────────────
     // The register cubit carries the filter scope *and* the paged rows, and the
     // "start an inspection" form reuses that same instance so a newly created
     // sheet appears in the list behind it without a second refresh call.
     //
-    // [registerFactoryParam] for the sheet cubit: the detail route asks for it
-    // with an `inspectionId`, and the sheet must not outlive its screen - it
-    // holds unsaved drafts for the items on it.
-    ..registerFactory<QcInspectionsCubit>(
-      () => QcInspectionsCubit(
-        repo: getIt<QcInspectionRepository>(),
-        templates: getIt<QcTemplateRepository>(),
+    // [registerFactoryParam] for the sheet cubit: the detail route asks for
+    // it with an `inspectionId`, and the sheet must not outlive its screen -
+    // it holds the in-flight check being written.
+    ..registerLazySingleton<RoutineListsRepository>(
+      () => RoutineListsRepositoryImpl(
+        dbHelper: getIt<QcRepositories>().dbHelper,
+        guard: getIt<WriteGuard>(),
+        audit: QcAuditRepo(
+          dbHelper: getIt<QcRepositories>().dbHelper,
+          // Same live-session rule as the main QC stack: the routine sheet
+          // stamps names, not emails (resolved at write time).
+          actorReader: () => QcActor.fromSession(sessionSource.session),
+        ),
+        templates: QcTemplateRepo(getIt<QcRepositories>().dbHelper),
+        inspections: QcInspectionRepo(getIt<QcRepositories>().dbHelper),
       ),
     )
-    ..registerFactoryParam<QcInspectionSheetCubit, int, void>(
-      (inspectionId, _) => QcInspectionSheetCubit(
-        repo: getIt<QcInspectionRepository>(),
-        templates: getIt<QcTemplateRepository>(),
-        ncCapa: getIt<QcNcCapaRepository>(),
+    ..registerFactory<RoutineListsCubit>(
+      () => RoutineListsCubit(repo: getIt<RoutineListsRepository>()),
+    )
+    ..registerFactoryParam<RoutineSheetCubit, int, void>(
+      (inspectionId, _) => RoutineSheetCubit(
+        repo: getIt<RoutineListsRepository>(),
         inspectionId: inspectionId,
       ),
     )
+    ..registerFactory<RoutineHistoryCubit>(
+      () => RoutineHistoryCubit(repo: getIt<RoutineListsRepository>()),
+    )
     // ── QC SOPs (plan V6_ENHANCED P5) ──────────────────────────────────────
-    // The register cubit is per-screen for the same reason as the goal list: it
+    // The register cubit is per-screen: it
     // carries the active filter scope. The SOP detail cubit is built by the
     // detail screen from *this* instance rather than from DI, so advancing a
     // procedure also refreshes the list still sitting behind it - two
@@ -425,12 +474,6 @@ Future<void> initServiceLocator() async {
     // the one nobody fires is the one the user sees as stale.
     ..registerFactory<QcSopsCubit>(
       () => QcSopsCubit(repo: getIt<QcSopRepository>()),
-    )
-    // Same reasoning for checklist templates: the library owns the active
-    // filter scope, and the tree editor is opened against that same instance so
-    // publishing a checklist also updates the list behind it.
-    ..registerFactory<QcTemplatesCubit>(
-      () => QcTemplatesCubit(repo: getIt<QcTemplateRepository>()),
     )
     // ── Sync engine ───────────────────────────────────────────────────────
     ..registerLazySingleton<ConflictResolver>(
@@ -492,8 +535,12 @@ Future<void> initServiceLocator() async {
     ..registerLazySingleton<NotificationService>(
       () => NotificationService(dbHelper: dbHelper, metadata: metadata),
     )
+    // The presentation-facing contract over the same instance.
+    ..registerLazySingleton<NotificationsPort>(
+      () => getIt<NotificationService>(),
+    )
     ..registerLazySingleton<NotificationController>(
-      () => NotificationController(getIt<NotificationService>()),
+      () => NotificationController(getIt<NotificationsPort>()),
     )
     // Killed-app push (FCM topics `org_<orgId>`). Lazy so desktop builds
     // never touch firebase_messaging; initialized in startNotifications().
@@ -528,8 +575,13 @@ Future<void> registerOrganizationBinder(AuthRepository auth) async {
         debugPrint('[bootstrap] organization $organizationId bound (headless)');
         return;
       }
-      await getIt<SeedService>().ensureInitialImport();
-      await getIt<LabRepo>().ensureDefaultAnalyses();
+      // Perf: first two seeds are independent (reference data vs lab defaults);
+      // run concurrently, then sync links (needs both). Same final state,
+      // ~1 IO batch saved on org bind / cold start.
+      await Future.wait([
+        getIt<SeedService>().ensureInitialImport(),
+        getIt<LabRepo>().ensureDefaultAnalyses(),
+      ]);
       await getIt<LabRepo>().syncReferenceAnalyses();
       // VACUUM INTO rewrites the whole file while holding the single
       // connection: never block the bind (first frame / auth state) on it.
@@ -544,6 +596,24 @@ Future<void> registerOrganizationBinder(AuthRepository auth) async {
         debugPrint('[bootstrap] device registration skipped: $e');
       }
       getIt<SyncEngine>().start();
+      // Self-heal (two-way sync): every local row that is not `synced`
+      // re-joins the outbox, for ALL synced entity types — not only the
+      // samples the Sync-screen button covered. A queue entry lost to a
+      // crash, an offline import, or a write made before sync wiring can no
+      // longer strand a record on this device. Runs after the engine start
+      // so the debounced push carries the re-queued rows; never fails the
+      // bind.
+      unawaited(() async {
+        try {
+          final report = await getIt<BackfillService>().enqueueUnsyncedAll();
+          if (report.total > 0) {
+            debugPrint('[bootstrap] backfill re-queued $report');
+            getIt<SyncEngine>().scheduleSync();
+          }
+        } on Object catch (e) {
+          debugPrint('[bootstrap] backfill skipped: $e');
+        }
+      }());
       // Mobile-only bell: same hooks as app startup (engine start above does
       // not run them on an org switch). Best effort, never fails the bind.
       if ((Platform.isAndroid || Platform.isIOS) && !isHeadlessBackground) {
@@ -561,6 +631,25 @@ Future<void> registerOrganizationBinder(AuthRepository auth) async {
           queue.onEnqueued = () {
             prev?.call();
             unawaited(controller.refresh());
+          };
+          // Sync problems -> bell: when the engine's conflict/blocked/failed
+          // total changes between cycles, store a `sync` bell row + OS head.
+          // [notifySyncProblems] dedupes per count, so a stable problem does
+          // not spam; the refresh afterwards lets the 30 s timer wait.
+          getIt<SyncEngine>().onProblemsChanged = (conflicts, blocked, failed) {
+            unawaited(() async {
+              try {
+                await getIt<NotificationService>()
+                    .notifySyncProblems(
+                      conflicts: conflicts,
+                      blocked: blocked,
+                      failed: failed,
+                    );
+                await controller.refresh();
+              } on Object catch (e) {
+                debugPrint('[bootstrap] sync problem notify skipped: $e');
+              }
+            }());
           };
           // Bell populates without blocking the bind: `load` is two cheap
           // reads (recent + unread count) fired off while the bind returns,

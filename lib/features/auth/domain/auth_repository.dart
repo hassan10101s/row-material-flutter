@@ -1,4 +1,5 @@
 import '../../../core/auth/app_session.dart';
+import '../../../core/utils/app_exceptions.dart';
 
 /// Auth state machine of plan §8.1.
 enum AuthState {
@@ -66,6 +67,21 @@ abstract interface class AuthRepository {
   /// Bind another organization (multi-organization accounts).
   Future<void> changeOrganization(String organizationId);
 
+  /// Update the signed-in member's display name.
+  ///
+  /// The name is the member's own choice and is independent of the Google
+  /// profile name: it is written to `users/{uid}` and the local roster, and it
+  /// becomes the session's `displayName`, so the shell and the lab "بواسطة"
+  /// (By) column show it everywhere on this device.
+  Future<void> updateDisplayName(String displayName);
+
+  /// Send a Firebase password-reset email to [email].
+  ///
+  /// Radio-button-free and provider-safe: it works whether the account signed
+  /// in with Google or with an email/password, and never requires a recent
+  /// re-authentication.
+  Future<void> sendPasswordResetEmail(String email);
+
   /// Clear the cache, close the database and stop the sync engine.
   Future<void> signOut();
 
@@ -76,7 +92,7 @@ abstract interface class AuthRepository {
 }
 
 /// Domain error with a user-facing Arabic/English message.
-class AuthFailure implements Exception {
+class AuthFailure implements Exception, UserFacingError {
   const AuthFailure(this.message, {this.code = 'auth_failed'});
 
   final String message;
@@ -86,6 +102,9 @@ class AuthFailure implements Exception {
   bool get isDenied => code == 'access_denied';
   bool get isOffline => code == 'offline';
   bool get isConfiguration => code == 'missing_config';
+
+  @override
+  String get userMessage => message;
 
   @override
   String toString() => message;

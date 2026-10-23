@@ -23,6 +23,9 @@ class AppSession {
     this.idToken,
     this.idTokenExpiresAt,
     this.offline = false,
+    this.organizationStatus = '',
+    this.trialEndsAt,
+    this.manuallyActivated = false,
   });
 
   final String uid;
@@ -46,6 +49,18 @@ class AppSession {
   /// True when this session was restored from the offline cache.
   final bool offline;
 
+  /// Organization-level lifecycle (`trial` / `suspended` / `active`).
+  /// Empty when no organization is bound yet. Persisted in the cache so an
+  /// expired trial stays blocked offline too.
+  final String organizationStatus;
+
+  /// ISO-8601 of when the 30-day trial ends (null for legacy / active orgs).
+  final String? trialEndsAt;
+
+  /// True once support manually activated the company. Permanent: such a
+  /// session must never be treated as expired.
+  final bool manuallyActivated;
+
   bool get isSignedIn => uid.isNotEmpty;
 
   bool get hasOrganization => organizationId.isNotEmpty;
@@ -61,6 +76,16 @@ class AppSession {
 
   bool get isDisabled => status == MemberStatus.disabled;
 
+  /// True when the bound organization itself is suspended (trial finished and
+  /// waiting for manual activation), even though the member row is `active`.
+  /// Suspended members see the trial-expired screen, never the dashboard.
+  bool get isOrgSuspended =>
+      organizationStatus == OrgStatus.suspended ||
+      organizationStatus == OrgStatus.disabled;
+
+  /// True when the bound company is in its trial window.
+  bool get isOrgTrial => organizationStatus == OrgStatus.trial;
+
   /// No company binding (plan §1 `no_company`): may create a trial company or
   /// join with an invite.
   bool get hasNoCompany => organizationId.isEmpty;
@@ -72,9 +97,14 @@ class AppSession {
       MemberStatus.blocksNewCompany(status);
 
   /// The only state allowed into the dashboard, the company database and the
-  /// sync cycle (plan §5/§8/§12).
+  /// sync cycle (plan §5/§8/§12): an `active` member of a usable company.
+  /// A suspended company never enters, even with an `active` member row.
+  /// An empty [organizationStatus] (legacy cache / org read skipped) does not
+  /// block here; the repository gate already handled the known cases.
   bool get mayEnterCompany =>
-      organizationId.isNotEmpty && MemberStatus.mayEnter(status);
+      organizationId.isNotEmpty &&
+      MemberStatus.mayEnter(status) &&
+      !isOrgSuspended;
 
   /// Can this device write anything at all?
   bool get canWrite => isActiveMember && !readOnlyDevice;
@@ -126,7 +156,11 @@ class AppSession {
     String? idToken,
     DateTime? idTokenExpiresAt,
     bool? offline,
+    String? organizationStatus,
+    String? trialEndsAt,
+    bool? manuallyActivated,
     bool clearToken = false,
+    bool clearTrialEndsAt = false,
   }) => AppSession(
     uid: uid ?? this.uid,
     email: email ?? this.email,
@@ -144,6 +178,9 @@ class AppSession {
         ? null
         : (idTokenExpiresAt ?? this.idTokenExpiresAt),
     offline: offline ?? this.offline,
+    organizationStatus: organizationStatus ?? this.organizationStatus,
+    trialEndsAt: clearTrialEndsAt ? null : (trialEndsAt ?? this.trialEndsAt),
+    manuallyActivated: manuallyActivated ?? this.manuallyActivated,
   );
 
   Map<String, dynamic> toJson() => {
@@ -159,6 +196,9 @@ class AppSession {
     'readOnlyDevice': readOnlyDevice,
     'signedInAt': signedInAt?.toIso8601String(),
     'idTokenExpiresAt': idTokenExpiresAt?.toIso8601String(),
+    'organizationStatus': organizationStatus,
+    'trialEndsAt': trialEndsAt,
+    'manuallyActivated': manuallyActivated,
   };
 
   /// Rebuild a session from the on-disk cache.
@@ -187,6 +227,9 @@ class AppSession {
       signedInAt: _parseDate(json['signedInAt']),
       idToken: json['idToken'] as String?,
       idTokenExpiresAt: _parseDate(json['idTokenExpiresAt']),
+      organizationStatus: '${json['organizationStatus'] ?? ''}',
+      trialEndsAt: json['trialEndsAt'] as String?,
+      manuallyActivated: json['manuallyActivated'] == true,
     );
   }
 

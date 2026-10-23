@@ -3,11 +3,11 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
-import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../design_system/widgets/app_selection.dart';
 import '../../../../design_system/export/table_html_export.dart';
@@ -330,12 +330,12 @@ class _BodyState extends State<_Body> {
   Widget build(BuildContext context) {
     final controller = widget.controller;
     if (controller.loading && controller.page.entries.isEmpty) {
-      return const Center(child: CircularProgressIndicator());
+      return const AppSkeletonList(rows: 8);
     }
     if (controller.error != null) {
-      return AppEmptyState(
-        icon: Icons.error_outline,
+      return AppErrorState(
         title: AppText.t('تعذّر تحميل السجل', 'Could not load the trail'),
+        onRetry: controller.load,
       );
     }
     if (controller.page.entries.isEmpty) {

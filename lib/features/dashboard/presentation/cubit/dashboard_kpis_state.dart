@@ -8,7 +8,7 @@ import '../../domain/dashboard_kpis.dart';
 /// Each value mirrors the exact `?? 0` defaults the KPI tuple list already
 /// applies, so an empty state (initial / reset) renders zeroed cards.
 /// The cross-module [bundle] carries the senior-analyst KPIs (volume,
-/// quality, lab, QC checks, NCR/CAPA, SOP/goals, inventory, trend) while the
+/// quality, lab, QC checks, NCR/CAPA, SOP, inventory, trend) while the
 /// four legacy scalars stay for backward compatibility.
 @immutable
 class DashboardKpisState extends Equatable {
@@ -50,3 +50,4 @@ class DashboardKpisState extends Equatable {
         bundle,
       ];
 }
+

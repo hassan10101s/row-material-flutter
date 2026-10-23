@@ -399,9 +399,10 @@
               {% if report_logo_data_uri %}
               <img src="{{ report_logo_data_uri }}" class="brand-logo" alt="Material Lab" />
               {% endif %}
-              <span class="eyebrow">Lab Tests | تحاليل المعمل</span>
+              <span class="eyebrow">{% if is_en %}Lab Tests{% else %}Lab Tests | تحاليل المعمل{% endif %}</span>
               <h1 class="title">{{ title }}</h1>
               <p class="subtitle">{{ period_label }}</p>
+              {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
             </div>
             <div class="header-side"></div>
           </div>
@@ -412,32 +413,32 @@
             <div class="summary-card primary">
               <span class="summary-label">Total Tests</span>
               <span class="summary-value">{{ total }}</span>
-              <span class="summary-note">إجمالي التحاليل</span>
+              <span class="summary-note">{% if is_en %}Total Tests{% else %}إجمالي التحاليل{% endif %}</span>
             </div>
             <div class="summary-card success">
               <span class="summary-label">Within Range</span>
               <span class="summary-value">{{ in_count }}</span>
-              <span class="summary-note">ضمن النطاق</span>
+              <span class="summary-note">{% if is_en %}Within Range{% else %}ضمن النطاق{% endif %}</span>
             </div>
             <div class="summary-card danger">
               <span class="summary-label">Out of Range</span>
               <span class="summary-value">{{ out_count }}</span>
-              <span class="summary-note">خارج النطاق</span>
+              <span class="summary-note">{% if is_en %}Out of Range{% else %}خارج النطاق{% endif %}</span>
             </div>
             <div class="summary-card warning">
               <span class="summary-label">No Range</span>
               <span class="summary-value">{{ no_range_count }}</span>
-              <span class="summary-note">بدون نطاق محدد</span>
+              <span class="summary-note">{% if is_en %}No Range{% else %}بدون نطاق محدد{% endif %}</span>
             </div>
             <div class="summary-card">
               <span class="summary-label">Sources</span>
               <span class="summary-value">{{ unique_sources }}</span>
-              <span class="summary-note">خامات / منتجات</span>
+              <span class="summary-note">{% if is_en %}Materials / Products{% else %}خامات / منتجات{% endif %}</span>
             </div>
           </div>
 
           <div class="section-head">
-            <h2 class="section-title">تفاصيل التحاليل</h2>
+            <h2 class="section-title">{% if is_en %}Tests Details{% else %}تفاصيل التحاليل{% endif %}</h2>
             <div class="section-caption">Per-Source Test Details</div>
           </div>
 
@@ -447,26 +448,27 @@
             <section class="source-card">
               <div class="source-header">
                 <h3 class="source-title">{{ source.name }}</h3>
-                <span class="source-badge">{{ source.type_label }} · {{ source.count }} تحليل</span>
+                <span class="source-badge">{{ source.type_label }} · {% if is_en %}{{ source.count }} tests{% else %}{{ source.count }} تحليل{% endif %}</span>
               </div>
               <div class="source-meta">
-                <div class="source-meta-item">إجمالي التحاليل: <b>{{ source.count }}</b></div>
-                <div class="source-meta-item">خارج النطاق: <b>{{ source.out_count }}</b></div>
-                <div class="source-meta-item">مصدر: <b>{{ source.type_label }}</b></div>
+                <div class="source-meta-item">{% if is_en %}Total tests: {% else %}إجمالي التحاليل: {% endif %}<b>{{ source.count }}</b></div>
+                <div class="source-meta-item">{% if is_en %}Out of range: {% else %}خارج النطاق: {% endif %}<b>{{ source.out_count }}</b></div>
+                <div class="source-meta-item">{% if is_en %}Source: {% else %}مصدر: {% endif %}<b>{{ source.type_label }}</b></div>
               </div>
               <div class="table-wrap">
                 <table>
                   <thead>
                     <tr>
                       <th style="width: 3%">#</th>
-                      <th style="width: 11%">الوقت</th>
-                      <th style="width: 13%">العينة</th>
-                      <th style="width: 10%">كود الدخول</th>
-                      <th style="width: 14%">التحليل</th>
-                      <th style="width: 12%">النتيجة</th>
-                      <th style="width: 14%">النطاق المعياري</th>
-                      <th style="width: 12%">الحالة</th>
-                      <th style="width: 11%">بواسطة</th>
+                      <th style="width: 10%">{% if is_en %}Time{% else %}الوقت{% endif %}</th>
+                      <th style="width: 11%">{% if is_en %}Sample{% else %}العينة{% endif %}</th>
+                      <th style="width: 9%">{% if is_en %}Entry Code{% else %}كود الدخول{% endif %}</th>
+                      <th style="width: 12%">{% if is_en %}Analysis{% else %}التحليل{% endif %}</th>
+                      <th style="width: 11%">{% if is_en %}Reference{% else %}المرجع{% endif %}</th>
+                      <th style="width: 11%">{% if is_en %}Result{% else %}النتيجة{% endif %}</th>
+                      <th style="width: 12%">{% if is_en %}Reference Range{% else %}النطاق المعياري{% endif %}</th>
+                      <th style="width: 11%">{% if is_en %}Status{% else %}الحالة{% endif %}</th>
+                      <th style="width: 10%">{% if is_en %}By{% else %}بواسطة{% endif %}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -477,11 +479,12 @@
                       <td>{{ row.sample_name }}</td>
                       <td dir="ltr">{{ row.entry_code }}</td>
                       <td>{{ row.analysis_name }}</td>
+                      <td>{{ row.analysis_reference }}</td>
                       <td class="result-cell {{ row.range_state }}">{{ row.result_text }}</td>
                       <td>{{ row.range_text }}</td>
                       <td>
                         <span class="status-cell {{ row.range_state }}">
-                          {% if row.range_state == 'out' %}خارج النطاق{% elif row.range_state == 'in' %}ضمن النطاق{% else %}بدون نطاق{% endif %}
+                          {% if row.range_state == 'out' %}{% if is_en %}Out of Range{% else %}خارج النطاق{% endif %}{% elif row.range_state == 'in' %}{% if is_en %}Within Range{% else %}ضمن النطاق{% endif %}{% else %}{% if is_en %}No Range{% else %}بدون نطاق{% endif %}{% endif %}
                         </span>
                       </td>
                       <td>{{ row.tested_by_name }}</td>
@@ -495,14 +498,14 @@
           </div>
           {% else %}
           <div class="empty-state">
-            <h3>لا توجد تحاليل مطابقة لمعايير الفترة</h3>
-            <p>لم يتم العثور على بيانات.</p>
+            <h3>{% if is_en %}No tests match the period criteria{% else %}لا توجد تحاليل مطابقة لمعايير الفترة{% endif %}</h3>
+            <p>{% if is_en %}No data found.{% else %}لم يتم العثور على بيانات.{% endif %}</p>
           </div>
           {% endif %}
         </div>
 
         <div class="footer">
-          <div><strong>Material Lab</strong> | نظام المعمل الداخلي</div>
+          <div><strong>Material Lab</strong> | {% if is_en %}Internal lab system{% else %}نظام المعمل الداخلي{% endif %}</div>
           <div>Prepared Automatically by {{ department_label }}</div>
         </div>
       </div>

@@ -7,12 +7,13 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
+import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_export_button.dart';
 import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
-import '../../../../../design_system/widgets/app_page_header.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/export/table_html_export.dart';
 import '../../../core/formula_engine.dart';
@@ -20,6 +21,7 @@ import '../../cubit/inventory_cubit.dart';
 import '../../cubit/inventory_state.dart';
 import '../desktop/inventory_tab.dart' show DesktopInventoryTab;
 import '../inventory_forms.dart';
+import '../inventory_log_screen.dart';
 import '../widgets/inventory_cards.dart';
 
 /// Mobile inventory: searchable infinite card list + full-screen editors.
@@ -88,18 +90,37 @@ class _MobileInventoryTabState extends State<MobileInventoryTab> {
     if (saved == true) await cubit.load();
   }
 
+  Future<void> _openReceive(
+    BuildContext context,
+    Map<String, dynamic> row,
+  ) async {
+    final cubit = context.read<InventoryCubit>();
+    final saved = await Navigator.of(context).push<bool>(
+      appMaterialPageRoute<bool>(
+        builder: (_) => BlocProvider.value(
+          value: cubit,
+          child: _ReceiveEditorRoute(item: row),
+        ),
+      ),
+    );
+    if (saved == true) await cubit.load();
+  }
+
+  Future<void> _openLog(BuildContext context, Map<String, dynamic> row) async {
+    await InventoryLogScreen.open(context, row);
+    if (context.mounted) await context.read<InventoryCubit>().load();
+  }
+
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<InventoryCubit>();
     final state = context.watch<InventoryCubit>().state;
-    final countLabel = state.hasMore
-        ? '${state.rows.length}+'
-        : '${state.rows.length}';
     return AppErrorFeedback<InventoryCubit, InventoryState>(
       selector: (s) => s.error,
       // Add floats like the raw-material register (heroTag null: sibling
       // lab tabs share one IndexedStack).
       child: Scaffold(
+        backgroundColor: AppColors.background,
         floatingActionButton: FloatingActionButton(
           heroTag: null,
           tooltip: AppText.t('إضافة مادة', 'Add item'),
@@ -109,17 +130,20 @@ class _MobileInventoryTabState extends State<MobileInventoryTab> {
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppPageHeader(
-              title: AppText.t('المخزون', 'Inventory'),
-              subtitle: '$countLabel ${AppText.t('صنف', 'items')}',
-              icon: Icons.inventory_2_outlined,
-              actions: [
-                IconButton(
-                  tooltip: AppText.t('تصدير جدول', 'Export table'),
-                  constraints: const BoxConstraints(
-                    minWidth: 48,
-                    minHeight: 48,
+            // Compact top row: search takes the width, export sits beside
+            // it — no big title, so the list starts higher on small phones.
+            // One entrance animation for the header only: per-card entrances
+            // would keep timers/controllers/saveLayers alive while scrolling.
+            AppEntrance(
+              child: AppSearchRow(
+                search: AppField(
+                  label: AppText.t(
+                    'بحث بالاسم أو الوحدة',
+                    'Search name or unit...',
                   ),
+                  controller: _searchCtrl,
+                ),
+                export: AppExportIconButton(
                   onPressed: state.rows.isEmpty
                       ? null
                       : () => TableHtmlExport.export(
@@ -129,17 +153,8 @@ class _MobileInventoryTabState extends State<MobileInventoryTab> {
                           headers: DesktopInventoryTab.exportHeaders(),
                           rows: DesktopInventoryTab.exportRows(state.rows),
                         ),
-                  icon: const Icon(Icons.table_view_outlined),
                 ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            AppField(
-              label: AppText.t(
-                'بحث بالاسم أو الوحدة',
-                'Search name or unit...',
               ),
-              controller: _searchCtrl,
             ),
             const SizedBox(height: AppSpacing.sm),
             if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
@@ -211,18 +226,30 @@ class _MobileInventoryTabState extends State<MobileInventoryTab> {
         errorMore: state.errorMore,
         onLoadMore: () => cubit.loadMore(),
         onRetry: () => cubit.loadMore(),
+        // No horizontal inset here: the tab already sits inside the lab
+        // page padding, and a second inset only squeezes the cards.
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         totalLabel:
             '${state.rows.length} ${AppText.t('صنف', 'items')} • ${AppText.t('نهاية القائمة', 'End of list')}',
         itemBuilder: (context, index) {
           final r = state.rows[index];
-          return InventoryCard(
-            name: '${r['name']}',
-            category: inventoryCategoryLabel(r['category']),
-            qty: '${r['current_qty'] ?? 0} ${r['unit'] ?? ''}',
-            status: inventoryStatusText(r),
-            statusColor: inventoryStatusColor(r),
-            onEdit: () => _openEditor(context, r),
-            onAdjust: () => _openAdjust(context, r),
+          // RepaintBoundary isolates each card's repaint during scroll;
+          // no entrance animation here — dozens of concurrent opacity
+          // layers are what made scrolling feel heavy on weak GPUs.
+          return RepaintBoundary(
+            child: InventoryCard(
+              name: '${r['name']}',
+              category: inventoryCategoryLabel(r['category']),
+              qty: '${r['current_qty'] ?? 0} ${r['unit'] ?? ''}',
+              status: inventoryStatusText(r),
+              statusColor: inventoryStatusColor(r),
+              expiredQty: ((r['expired_qty'] as num?)?.toDouble() ?? 0.0),
+              nearestExpiry: '${r['nearest_expiry'] ?? ''}',
+              onEdit: () => _openEditor(context, r),
+              onAdjust: () => _openAdjust(context, r),
+              onReceive: () => _openReceive(context, r),
+              onLog: () => _openLog(context, r),
+            ),
           );
         },
       ),
@@ -309,6 +336,25 @@ class _AdjustEditorRoute extends StatelessWidget {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.pageMobile),
           child: InventoryAdjustForm(item: item),
+        ),
+      ),
+    );
+  }
+}
+
+/// Full-screen receive route: quantity + mandatory expiry arrive as a lot.
+class _ReceiveEditorRoute extends StatelessWidget {
+  const _ReceiveEditorRoute({required this.item});
+  final Map<String, dynamic> item;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text(AppText.t('استلام كمية', 'Receive stock'))),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.pageMobile),
+          child: InventoryReceiveForm(item: item),
         ),
       ),
     );

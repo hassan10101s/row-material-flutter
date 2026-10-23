@@ -13,7 +13,7 @@ import '../../../core/utils/app_format.dart';
 
 const List<String> inventoryCategories = ['liquid', 'powder', 'count'];
 const List<String> inventoryUnits = ['L', 'mL', 'kg', 'g', 'pc'];
-const List<String> sourceTypes = ['raw_material', 'product'];
+const List<String> sourceTypes = ['raw_material', 'product', 'sample'];
 
 /// Units an inventory category accepts. Liquids take volume, powders mass,
 /// and counted items take pieces only.
@@ -277,6 +277,22 @@ Map<String, dynamic> resolveConstants(
     return baseValue;
   }
 
+  // Pre-parse and pre-walk every derived expression once; the resolution
+  // rounds below reuse these cached trees instead of re-parsing per round.
+  final derived = <String, List<Object?>>{};
+  for (final symbol in descs.keys) {
+    final desc = descs[symbol]!;
+    final isExpr = (desc['is_expression'] as Object?) == 1 ||
+        desc['is_expression'] is bool && desc['is_expression'] == true;
+    if (!isExpr) continue;
+    final expr = '${desc['expression'] ?? ''}'.trim();
+    if (expr.isEmpty) {
+      throw ValidationError(AppErrors.formulaDerivedNoExpression(symbol));
+    }
+    final tree = FormulaParser.parse(expr);
+    derived[symbol] = [tree, formulaVariablesOfTree(tree)];
+  }
+
   final resolved = <String, double>{};
   final pending = descs.keys.toSet();
   final maxRounds = pending.length + 1;
@@ -290,18 +306,14 @@ Map<String, dynamic> resolveConstants(
     for (final symbol in pending.toList()) {
       final desc = descs[symbol]!;
       double value;
-      if ((desc['is_expression'] as Object?) == 1 || desc['is_expression'] is bool && desc['is_expression'] == true) {
-        final expr = '${desc['expression'] ?? ''}'.trim();
-        if (expr.isEmpty) {
-          throw ValidationError(AppErrors.formulaDerivedNoExpression(symbol));
-        }
-        final tree = FormulaParser.parse(expr);
-        final used =
-            formulaVariablesOfTree(tree).where(pending.contains).toSet();
+      if (derived.containsKey(symbol)) {
+        final tree = derived[symbol]![0] as Expr;
+        final treeVars = derived[symbol]![1] as List<String>;
+        final used = treeVars.where(pending.contains).toSet();
         if (used.isNotEmpty) continue;
         final vals = <String, Object?>{};
         var allResolved = true;
-        for (final u in formulaVariablesOfTree(tree)) {
+        for (final u in treeVars) {
           if (!resolved.containsKey(u) && u.toLowerCase() != 'true' && u.toLowerCase() != 'false') {
             allResolved = false;
             break;
@@ -458,9 +470,31 @@ class CallExpr extends Expr {
 }
 
 class FormulaParser {
+  /// Parsed-tree memo keyed by the raw expression text. Expr nodes are
+  /// immutable, so results can be shared safely; capped to keep hot editor
+  /// keystroke paths from compiling the same expressions repeatedly.
+  static final Map<String, Expr> _parseCache = {};
+  static const int _parseCacheLimit = 256;
+
+  static final RegExp _decimalCommaRe = RegExp(r'(?<=\d),(?=\d)');
+  static final RegExp _nameRe = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+  static final RegExp _wsRe = RegExp(r'\s');
+
+  static bool _isDigitCode(int c) => c >= 0x30 && c <= 0x39;
+  static bool _isAlphaCode(int c) =>
+      (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A);
+  static bool _isIdentCode(int c) =>
+      _isAlphaCode(c) || _isDigitCode(c) || c == 0x5F; // [A-Za-z0-9_]
+  static bool _isAlphaOrUnderscoreCode(int c) =>
+      _isAlphaCode(c) || c == 0x5F; // [A-Za-z_]
+  static bool _isWsCode(int c) =>
+      (c >= 0x09 && c <= 0x0D) || c == 0x20; // \t \n \v \f \r space
+
   static Expr parse(String expression) {
+    final cached = _parseCache[expression];
+    if (cached != null) return cached;
     // Normalize decimal comma -> dot (only between digits) and '^' -> '**'.
-    var expr = expression.replaceAll(RegExp(r'(?<=\d),(?=\d)'), '.');
+    var expr = expression.replaceAll(_decimalCommaRe, '.');
     expr = expr.replaceAll('^', '**');
     final p = FormulaParser(expr);
     if (expr.trim().isEmpty) throw ValidationError(AppErrors.formulaEmpty);
@@ -469,6 +503,8 @@ class FormulaParser {
       throw ValidationError(AppErrors.formulaInvalidSyntax);
     }
     _validate(tree);
+    if (_parseCache.length >= _parseCacheLimit) _parseCache.clear();
+    _parseCache[expression] = tree;
     return tree;
   }
 
@@ -479,8 +515,13 @@ class FormulaParser {
   bool get _atEnd => _pos >= _src.length;
 
   void _ws() {
-    while (!_atEnd && RegExp(r'\s').hasMatch(_src[_pos])) {
-      _pos++;
+    while (!_atEnd) {
+      final code = _src.codeUnitAt(_pos);
+      if (_isWsCode(code) || (code > 0x20 && _wsRe.hasMatch(_src[_pos]))) {
+        _pos++;
+      } else {
+        break;
+      }
     }
   }
 
@@ -489,7 +530,8 @@ class FormulaParser {
     if (_pos + word.length <= _src.length &&
         _src.substring(_pos, _pos + word.length) == word) {
       final next = _pos + word.length;
-      if (next < _src.length && RegExp(r'[A-Za-z0-9_]').hasMatch(_src[next])) {
+      if (next < _src.length &&
+          _isIdentCode(_src.codeUnitAt(next))) {
         return false;
       }
       return true;
@@ -633,10 +675,13 @@ class FormulaParser {
       _ws();
       return inner;
     }
-    if (RegExp(r'\d').hasMatch(ch) || (ch == '.' && _pos + 1 < _src.length && RegExp(r'\d').hasMatch(_src[_pos + 1]))) {
+    if (_isDigitCode(_src.codeUnitAt(_pos)) ||
+        (ch == '.' &&
+            _pos + 1 < _src.length &&
+            _isDigitCode(_src.codeUnitAt(_pos + 1)))) {
       return NumExpr(_parseNumber());
     }
-    if (RegExp(r'[A-Za-z_]').hasMatch(ch)) {
+    if (_isAlphaOrUnderscoreCode(_src.codeUnitAt(_pos))) {
       return _parseNameOrCall();
     }
     throw ValidationError(AppErrors.formulaInvalidSyntax);
@@ -644,8 +689,14 @@ class FormulaParser {
 
   double _parseNumber() {
     final start = _pos;
-    while (!_atEnd && RegExp(r'[0-9.]').hasMatch(_src[_pos])) {
-      _pos++;
+    while (!_atEnd) {
+      final code = _src.codeUnitAt(_pos);
+      if (_isDigitCode(code) || code == 0x2E) {
+        // '.' — [0-9.] in the original char class.
+        _pos++;
+      } else {
+        break;
+      }
     }
     final text = _src.substring(start, _pos);
     final value = double.tryParse(text);
@@ -656,11 +707,11 @@ class FormulaParser {
 
   Expr _parseNameOrCall() {
     final start = _pos;
-    while (!_atEnd && RegExp(r'[A-Za-z0-9_]').hasMatch(_src[_pos])) {
+    while (!_atEnd && _isIdentCode(_src.codeUnitAt(_pos))) {
       _pos++;
     }
     final name = _src.substring(start, _pos);
-    if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(name)) {
+    if (!_nameRe.hasMatch(name)) {
       throw ValidationError(AppErrors.formulaInvalidName(name));
     }
     _ws();
@@ -703,7 +754,7 @@ class FormulaParser {
   static void _validate(Expr node) {
     switch (node) {
       case NameExpr n:
-        if (!RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(n.name)) {
+        if (!_nameRe.hasMatch(n.name)) {
           throw ValidationError(AppErrors.formulaInvalidName(n.name));
         }
       case CallExpr c:

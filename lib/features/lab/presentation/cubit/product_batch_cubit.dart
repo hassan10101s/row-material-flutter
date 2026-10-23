@@ -32,7 +32,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 
@@ -64,7 +64,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
       safeEmit(state.copyWith(saving: false, error: e.message));
       return null;
     } catch (e) {
-      safeEmit(state.copyWith(saving: false, error: '$e'));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
       return null;
     }
   }
@@ -90,7 +90,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(saving: false, error: '$e'));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
   }
 
@@ -110,7 +110,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(saving: false, error: '$e'));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
   }
 
@@ -122,7 +122,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(saving: false, error: '$e'));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
   }
 }

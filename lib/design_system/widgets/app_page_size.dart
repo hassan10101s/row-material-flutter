@@ -12,12 +12,12 @@ const List<int> kPageSizeOptions = [10, 25, 50, 100, 200, 500];
 
 /// Mobile-only cap: a phone card list with 200 rows per page feels sluggish
 /// (heavy SQLite LIMIT/OFFSET + hundreds of card widgets per page). Phones
-/// default to 50 and may only pick from [kMobilePageSizeOptions]; desktop
+/// default to 25 and may only pick from [kMobilePageSizeOptions]; desktop
 /// keeps [kDefaultPageSize].
-const int kMobileMaxPageSize = 50;
+const int kMobileMaxPageSize = 25;
 
 /// Page-size choices offered on phones.
-const List<int> kMobilePageSizeOptions = [10, 25, 50];
+const List<int> kMobilePageSizeOptions = [10, 25];
 
 /// Small dropdown placed in table footers next to the prev/next arrows so the
 /// user controls how many records each page shows.

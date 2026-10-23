@@ -4,11 +4,12 @@ import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_errors.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/database/database_helper.dart';
+import '../../../core/sync/audit_logger.dart';
+import '../../../core/sync/sync_queue.dart';
+import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../organizations/data/member_write_guard.dart';
-import '../domain/qc_audit.dart';
 import '../domain/qc_enums.dart';
-import '../domain/qc_goal.dart';
 import '../domain/qc_inspection.dart';
 import '../domain/qc_nc_capa.dart';
 import '../domain/qc_repositories.dart';
@@ -16,6 +17,7 @@ import '../domain/qc_sop.dart';
 import '../domain/qc_template.dart';
 import 'qc_audit_repo.dart';
 import 'qc_repo.dart';
+import 'qc_sync_writer.dart';
 
 /// Offline-first facades over the thin QC local repositories
 /// (plan V6_ENHANCED §24 P3).
@@ -34,22 +36,24 @@ import 'qc_repo.dart';
 ///  * **the actor.** `QcAuditRepo` reads the live session at write time, so an
 ///    entry can never be attributed to somebody who did not make it.
 ///
-/// ## No `sync_queue` rows yet
-/// These facades deliberately do not enqueue. QC has no [SyncEntity] registered
-/// in `entity_registry.dart` and no remote collection, so a queued row could
-/// only ever settle as `conflict` ("Unknown entity type") and sit in the Sync
-/// screen's needs-attention list forever. Registering QC entities and their
-/// `firestore.rules` is remote work, owned by plan P8; until that lands,
-/// enqueueing would turn a working offline write into a visible failure.
+/// ## The `sync_queue` contract (plan P8)
+/// These facades now enqueue under the same contract as the QC settings
+/// feature (`offline_first_qc_custom_tables.dart`): every write also queues
+/// the touched row via [QcSyncWriter] (`enqueueLocalChange`), so the push
+/// carries it to the `qcTemplates`/`qcSections`/`qcItems`/`qcInspections`/
+/// `qcResponses`/`qcTaskLogs`/`qcFindingsNc`/`qcCapa` collections and the
+/// read-only viewers pull it. The queue/writer is *optional at
+/// construction* — legacy call sites and tests that build a facade without
+/// one keep the old purely-local behavior. SOPs alone stay device-local by
+/// design (their document lifecycles did not get a remote collection).
 ///
 /// ## Why not the core `AuditLogger` either
 /// The P3 row of the phase table says "WriteGuard/AuditLogger integration", but
 /// the module's own audit requirement (§14, line 236) scopes High Audit to
-/// `qc_audits` + `qc_sop_audits`, never `audit_logs`. `AuditLogger.log` would
-/// additionally push to the shared `organizations/{orgId}/auditLogs` collection,
-/// moving QC findings, evidence and inspection responses into a wider surface
-/// that P8 has not specified. [QcAuditRepo] is therefore the only audit sink
-/// here: one chain, one hasher, one set of immutability triggers.
+/// `qc_audits` + `qc_sop_audits`, never `audit_logs`. [QcAuditRepo] is therefore
+/// the only audit sink here: one chain, one hasher, one set of immutability
+/// triggers — while the *sync* trail (who pushed what) flows through the
+/// optional [AuditLogger] handed to [QcSyncWriter].
 ///
 /// ## Why these classes do not extend the local ones
 /// `OfflineFirstInspectionRepository` extends its local repo to keep the old
@@ -65,11 +69,129 @@ import 'qc_repo.dart';
 /// permission on every SELECT would duplicate that and buy nothing - a user who
 /// cannot see the module never gets a screen to read from.
 class _QcWrite {
-  const _QcWrite(this.guard, this.audit, this.dbHelper);
+  const _QcWrite(this.guard, this.audit, this.dbHelper, [this.sync]);
 
   final WriteGuard guard;
   final QcAuditRepo audit;
   final DatabaseHelper dbHelper;
+
+  /// Optional sync seam (plan P8). Null (or a disabled writer) keeps the
+  /// write purely local — the legacy contract of these facades.
+  final QcSyncWriter? sync;
+
+  /// Syncs the row of [table]/[pk]=[id] (template/inspection/response/
+  /// finding/CAPA) plus its parent-identity stamps. Skipped when no writer
+  /// is wired or no account is bound.
+  Future<void> queueRow(
+    DatabaseExecutor txn, {
+    required String entityType,
+    required String table,
+    required String pk,
+    Object? id,
+    String? operation,
+  }) async {
+    final sync = this.sync;
+    if (sync == null || !sync.enabled) return;
+    await sync.queueRow(
+      txn,
+      entityType: entityType,
+      table: table,
+      pk: pk,
+      id: id,
+      operation: operation,
+    );
+  }
+
+  /// Syncs all children of a container (template tree / fresh sheet) whose
+  /// rows were written inside the local repository. Each carries its own
+  /// lifecycle-derived queue operation.
+  Future<void> queueChildRows(
+    DatabaseExecutor txn, {
+    required String table,
+    required String pk,
+    required String entityType,
+    required String where,
+    List<Object?> whereArgs = const [],
+  }) async {
+    final sync = this.sync;
+    if (sync == null || !sync.enabled) return;
+    await sync.queueChildRows(
+      txn,
+      table: table,
+      pk: pk,
+      entityType: entityType,
+      where: where,
+      whereArgs: whereArgs,
+    );
+  }
+
+  /// Syncs a whole checklist tree after the local repository rewrote it
+  /// (template + its sections + items, retired ones included: the tombstones
+  /// replicate, the never-pushed tombstones are skipped).
+  Future<void> syncTree(DatabaseExecutor txn, int? templateId) async {
+    if (templateId == null || templateId <= 0) return;
+    await queueRow(
+      txn,
+      entityType: 'qcTemplate',
+      table: 'qc_templates',
+      pk: 'template_id',
+      id: templateId,
+    );
+    await queueChildRows(
+      txn,
+      table: 'qc_sections',
+      pk: 'section_id',
+      entityType: 'qcSection',
+      where: 'template_id = ?',
+      whereArgs: [templateId],
+    );
+    await queueChildRows(
+      txn,
+      table: 'qc_items',
+      pk: 'item_id',
+      entityType: 'qcItem',
+      where: 'template_id = ?',
+      whereArgs: [templateId],
+    );
+  }
+
+  /// Tombstones the alive children of [where] (a hard delete in the queue's
+  /// eyes needs a `deleted_at` on disk first) and syncs them, so a deleted
+  /// container leaves no resurrectable rows behind.
+  Future<void> tombstoneChildren(
+    DatabaseExecutor txn, {
+    required List<({String table, String pk, String entityType})> children,
+    required String containerColumn,
+    required int containerId,
+  }) async {
+    final sync = this.sync;
+    if (sync == null || !sync.enabled) return;
+    final stamp = nowIso();
+    for (final child in children) {
+      final alive = await txn.query(
+        child.table,
+        columns: [child.pk],
+        where: 'deleted_at IS NULL AND $containerColumn = ?',
+        whereArgs: [containerId],
+      );
+      if (alive.isEmpty) continue;
+      await txn.update(
+        child.table,
+        {'deleted_at': stamp},
+        where: 'deleted_at IS NULL AND $containerColumn = ?',
+        whereArgs: [containerId],
+      );
+      for (final r in alive) {
+        await queueRow(
+          txn,
+          entityType: child.entityType,
+          table: child.table,
+          pk: child.pk,
+          id: (r[child.pk] as num?)?.toInt(),
+        );
+      }
+    }
+  }
 
   /// §9.4: active member + permission + not a read-only device, and
   /// connectivity when the permission is privileged. Throws
@@ -190,18 +312,6 @@ abstract final class QcAuditAction {
   static const String capaVerified = 'CAPA_VERIFIED';
   static const String capaClosed = 'CAPA_CLOSED';
 
-  static const String goalCreated = 'GOAL_CREATED';
-  static const String goalSaved = 'GOAL_SAVED';
-  static const String goalCompleted = 'GOAL_COMPLETED';
-  static const String goalDeleted = 'GOAL_DELETED';
-  static const String goalAssigned = 'GOAL_ASSIGNED';
-  static const String goalUnassigned = 'GOAL_UNASSIGNED';
-  static const String goalActionAdded = 'GOAL_ACTION_ADDED';
-  static const String goalActionDone = 'GOAL_ACTION_DONE';
-  static const String goalKpiSaved = 'GOAL_KPI_SAVED';
-  static const String goalKpiDeleted = 'GOAL_KPI_DELETED';
-  static const String goalLinked = 'GOAL_LINKED';
-  static const String goalUnlinked = 'GOAL_UNLINKED';
 }
 
 /// Statuses that constitute a QC decision rather than authoring.
@@ -234,6 +344,9 @@ abstract final class _QcDecision {
 }
 
 /// SOPs, revisions and read/acknowledgement records (plan P3).
+///
+/// Device-local by design (plan P8): SOP lifecycles have no remote
+/// collection, so this facade never queues even when a sync writer exists.
 class OfflineFirstQcSopRepository implements QcSopRepository {
   OfflineFirstQcSopRepository({
     required QcSopRepo local,
@@ -360,7 +473,7 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
         changeSummary: changeSummary,
         effectiveFrom: effectiveFrom,
         editedBy: _w.guard.uid,
-        editedByName: _w.guard.email,
+        editedByName: _w.guard.actorName,
         exec: txn,
       );
       final revision = await txn.query(
@@ -440,7 +553,8 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
     required WriteGuard guard,
     required QcAuditRepo audit,
     required DatabaseHelper dbHelper,
-  }) : _w = _QcWrite(guard, audit, dbHelper),
+    QcSyncWriter? sync,
+  }) : _w = _QcWrite(guard, audit, dbHelper, sync),
        localRepo = local;
 
   final _QcWrite _w;
@@ -479,6 +593,13 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
         entityId: '$id',
         action: QcAuditAction.templateCreated,
         after: await _w.snapshot(txn, 'qc_templates', 'template_id', id),
+      );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcTemplate',
+        table: 'qc_templates',
+        pk: 'template_id',
+        id: id,
       );
       return id;
     });
@@ -531,6 +652,7 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
               : Map<String, dynamic>.from(newId),
           meta: {'sections': sections.length, 'items': items.length},
         );
+        await _w.syncTree(txn, (newId?['template_id'] as num?)?.toInt());
         return;
       }
       await _w.requireRow(before, 'No QC template with id $id');
@@ -544,6 +666,7 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
         after: await _w.snapshot(txn, 'qc_templates', 'template_id', id),
         meta: {'sections': sections.length, 'items': items.length},
       );
+      await _w.syncTree(txn, id);
     });
   }
 
@@ -559,6 +682,18 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
       );
       await _w.requireRow(before, 'No QC template with id $templateId');
       await localRepo.deleteTemplate(templateId, exec: txn);
+      // Children are tombstoned (not deleted) so historical inspections keep
+      // resolving them, and the tombstones replicate: otherwise a viewer
+      // would keep an orphaned, still-editable tree after the origin's delete.
+      await _w.tombstoneChildren(
+        txn,
+        children: const [
+          (table: 'qc_sections', pk: 'section_id', entityType: 'qcSection'),
+          (table: 'qc_items', pk: 'item_id', entityType: 'qcItem'),
+        ],
+        containerColumn: 'template_id',
+        containerId: templateId,
+      );
       await _w.record(
         txn,
         entityType: QcAuditEntity.template,
@@ -593,7 +728,7 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
       // The caller's name is not trusted: the signed-in user is the publisher.
       await localRepo.publishTemplate(
         templateId,
-        publishedBy: publishedBy.isEmpty ? _w.guard.email : publishedBy,
+        publishedBy: publishedBy.isEmpty ? _w.guard.actorName : publishedBy,
         effectiveDate: effectiveDate,
         exec: txn,
       );
@@ -609,6 +744,13 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
           'template_id',
           templateId,
         ),
+      );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcTemplate',
+        table: 'qc_templates',
+        pk: 'template_id',
+        id: templateId,
       );
     });
   }
@@ -637,6 +779,13 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
           'template_id',
           templateId,
         ),
+      );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcTemplate',
+        table: 'qc_templates',
+        pk: 'template_id',
+        id: templateId,
       );
     });
   }
@@ -680,6 +829,9 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
           if (newName.isNotEmpty) 'newName': newName,
         },
       );
+      // The duplicate copies the whole tree (new ids everywhere): sync it
+      // like the template it is a copy of.
+      await _w.syncTree(txn, newId);
       return newId;
     });
   }
@@ -692,7 +844,8 @@ class OfflineFirstQcInspectionRepository implements QcInspectionRepository {
     required WriteGuard guard,
     required QcAuditRepo audit,
     required DatabaseHelper dbHelper,
-  }) : _w = _QcWrite(guard, audit, dbHelper),
+    QcSyncWriter? sync,
+  }) : _w = _QcWrite(guard, audit, dbHelper, sync),
        localRepo = local;
 
   final _QcWrite _w;
@@ -758,6 +911,23 @@ class OfflineFirstQcInspectionRepository implements QcInspectionRepository {
         action: QcAuditAction.inspectionCreated,
         after: await _w.snapshot(txn, 'qc_inspections', 'inspection_id', id),
       );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcInspection',
+        table: 'qc_inspections',
+        pk: 'inspection_id',
+        id: id,
+      );
+      // The seeded unanswered responses replicate too: the progress counters
+      // ("3 of 12 answered") and the FKs of later answers need same shapes.
+      await _w.queueChildRows(
+        txn,
+        table: 'qc_responses',
+        pk: 'resp_id',
+        entityType: 'qcResponse',
+        where: 'inspection_id = ?',
+        whereArgs: [id],
+      );
       return id;
     });
   }
@@ -804,6 +974,13 @@ class OfflineFirstQcInspectionRepository implements QcInspectionRepository {
         after: await _w.snapshot(txn, 'qc_inspections', 'inspection_id', id),
         meta: {'status': to},
       );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcInspection',
+        table: 'qc_inspections',
+        pk: 'inspection_id',
+        id: id,
+      );
     });
   }
 
@@ -819,6 +996,19 @@ class OfflineFirstQcInspectionRepository implements QcInspectionRepository {
       );
       await _w.requireRow(before, 'No QC inspection with id $inspectionId');
       await localRepo.deleteInspection(inspectionId, exec: txn);
+      // The sheet's answers and done-logs follow the sheet into the
+      // tombstone so a viewer does not keep "done" counters for a dead
+      // sheet. Findings stay alive on purpose: the NCR worklist keeps its
+      // own visibility rules for them.
+      await _w.tombstoneChildren(
+        txn,
+        children: const [
+          (table: 'qc_responses', pk: 'resp_id', entityType: 'qcResponse'),
+          (table: 'qc_task_log', pk: 'log_id', entityType: 'qcTaskLog'),
+        ],
+        containerColumn: 'inspection_id',
+        containerId: inspectionId,
+      );
       await _w.record(
         txn,
         entityType: QcAuditEntity.inspection,
@@ -831,6 +1021,13 @@ class OfflineFirstQcInspectionRepository implements QcInspectionRepository {
           'inspection_id',
           inspectionId,
         ),
+      );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcInspection',
+        table: 'qc_inspections',
+        pk: 'inspection_id',
+        id: inspectionId,
       );
     });
   }
@@ -861,6 +1058,24 @@ class OfflineFirstQcInspectionRepository implements QcInspectionRepository {
           'result': response.result,
         },
       );
+      // The recompute inside the answer write may have moved the sheet's
+      // score/verdict/NC counters: both rows ride the push.
+      if (id != null) {
+        await _w.queueRow(
+          txn,
+          entityType: 'qcResponse',
+          table: 'qc_responses',
+          pk: 'resp_id',
+          id: id,
+        );
+      }
+      await _w.queueRow(
+        txn,
+        entityType: 'qcInspection',
+        table: 'qc_inspections',
+        pk: 'inspection_id',
+        id: response.inspectionId,
+      );
     });
   }
 }
@@ -872,7 +1087,8 @@ class OfflineFirstQcNcCapaRepository implements QcNcCapaRepository {
     required WriteGuard guard,
     required QcAuditRepo audit,
     required DatabaseHelper dbHelper,
-  }) : _w = _QcWrite(guard, audit, dbHelper),
+    QcSyncWriter? sync,
+  }) : _w = _QcWrite(guard, audit, dbHelper, sync),
        localRepo = local;
 
   final _QcWrite _w;
@@ -936,6 +1152,22 @@ class OfflineFirstQcNcCapaRepository implements QcNcCapaRepository {
           'inspectionId': finding.inspectionId,
         },
       );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcFindingNc',
+        table: 'qc_findings_nc',
+        pk: 'finding_id',
+        id: id,
+      );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcInspection',
+        table: 'qc_inspections',
+        pk: 'inspection_id',
+        id: finding.inspectionId,
+      );
+      // The NC counters on the sheet it belongs to moved (they are one of the
+      // reasons viewers show a sheet red).
       return id;
     });
   }
@@ -988,6 +1220,20 @@ class OfflineFirstQcNcCapaRepository implements QcNcCapaRepository {
             'verifiedBy': finding.verifiedBy,
         },
       );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcFindingNc',
+        table: 'qc_findings_nc',
+        pk: 'finding_id',
+        id: id,
+      );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcInspection',
+        table: 'qc_inspections',
+        pk: 'inspection_id',
+        id: finding.inspectionId,
+      );
     });
   }
 
@@ -1016,6 +1262,21 @@ class OfflineFirstQcNcCapaRepository implements QcNcCapaRepository {
           findingId,
         ),
       );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcFindingNc',
+        table: 'qc_findings_nc',
+        pk: 'finding_id',
+        id: findingId,
+      );
+      // The recompute inside the delete may have lifted the verdict.
+      await _w.queueRow(
+        txn,
+        entityType: 'qcInspection',
+        table: 'qc_inspections',
+        pk: 'inspection_id',
+        id: (before?['inspection_id'] as num?)?.toInt(),
+      );
     });
   }
 
@@ -1030,6 +1291,13 @@ class OfflineFirstQcNcCapaRepository implements QcNcCapaRepository {
         entityId: '$id',
         action: QcAuditAction.capaCreated,
         after: await _w.snapshot(txn, 'qc_capa', 'capa_id', id),
+      );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcCapa',
+        table: 'qc_capa',
+        pk: 'capa_id',
+        id: id,
       );
       return id;
     });
@@ -1087,384 +1355,17 @@ class OfflineFirstQcNcCapaRepository implements QcNcCapaRepository {
           if (capa.verifiedBy.isNotEmpty) 'verifiedBy': capa.verifiedBy,
         },
       );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcCapa',
+        table: 'qc_capa',
+        pk: 'capa_id',
+        id: id,
+      );
     });
   }
 }
 
-/// Goals, their people, actions, KPIs and links (plan P3).
-class OfflineFirstQcGoalRepository implements QcGoalRepository {
-  OfflineFirstQcGoalRepository({
-    required QcGoalRepo local,
-    required WriteGuard guard,
-    required QcAuditRepo audit,
-    required DatabaseHelper dbHelper,
-  }) : _w = _QcWrite(guard, audit, dbHelper),
-       localRepo = local;
-
-  final _QcWrite _w;
-  final QcGoalRepo localRepo;
-
-  @override
-  Future<List<QcGoal>> listGoals({
-    String status = '',
-    String dept = '',
-    String ownerId = '',
-    bool overdueOnly = false,
-    int limit = 100,
-    int offset = 0,
-  }) => localRepo.listGoals(
-    status: status,
-    dept: dept,
-    ownerId: ownerId,
-    overdueOnly: overdueOnly,
-    limit: limit,
-    offset: offset,
-  );
-
-  @override
-  Future<QcGoal?> getGoal(int goalId) => localRepo.getGoal(goalId);
-
-  @override
-  Future<QcGoalBundle?> getGoalBundle(int goalId) =>
-      localRepo.getGoalBundle(goalId);
-
-  @override
-  Future<List<QcGoalAssignment>> listAssignments(int goalId) =>
-      localRepo.listAssignments(goalId);
-
-  @override
-  Future<List<QcGoalAction>> listActions(int goalId) =>
-      localRepo.listActions(goalId);
-
-  @override
-  Future<List<QcGoalKpi>> listKpis(int goalId) => localRepo.listKpis(goalId);
-
-  @override
-  Future<int> createGoal(QcGoal goal) async {
-    _w.check(Permission.qcWrite);
-    if (goal.title.trim().isEmpty) {
-      throw ValidationError(
-        AppText.t('الهدف يحتاج إلى عنوان', 'A goal needs a title'),
-      );
-    }
-    return _w.transaction((txn) async {
-      final id = await localRepo.createGoal(goal, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goal,
-        entityId: '$id',
-        action: QcAuditAction.goalCreated,
-        after: await _w.snapshot(txn, 'qc_goals', 'goal_id', id),
-      );
-      return id;
-    });
-  }
-
-  @override
-  Future<void> saveGoal(QcGoal goal) async {
-    final id = goal.goalId;
-    if (id == null) {
-      throw const ValidationError('Cannot save a goal with no id');
-    }
-    return _w.transaction((txn) async {
-      final before = await _w.snapshot(txn, 'qc_goals', 'goal_id', id);
-      await _w.requireRow(before, 'No QC goal with id $id');
-      // Completing a goal is the accountability statement the plan asks for
-      // ("who/when"), so it is a decision rather than an edit.
-      final completing = goal.status == QcGoalStatus.completed;
-      _w.check(completing ? Permission.qcApprove : Permission.qcWrite);
-      if (completing) {
-        final blocker = goal.completionBlocker;
-        if (blocker.isNotEmpty) throw ValidationError(blocker);
-
-        final currentBundle = await localRepo.getGoalBundle(id, exec: txn);
-        if (currentBundle == null) {
-          throw NotFoundError('No QC goal with id $id');
-        }
-        final completionBundle = QcGoalBundle(
-          goal: goal,
-          assignments: currentBundle.assignments,
-          actions: currentBundle.actions,
-          kpis: currentBundle.kpis,
-          links: currentBundle.links,
-        );
-        final childBlocker = completionBundle.completionBlocker;
-        if (childBlocker.isNotEmpty) throw ValidationError(childBlocker);
-      }
-      await localRepo.saveGoal(goal, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goal,
-        entityId: '$id',
-        action: completing
-            ? QcAuditAction.goalCompleted
-            : QcAuditAction.goalSaved,
-        before: before,
-        after: await _w.snapshot(txn, 'qc_goals', 'goal_id', id),
-        meta: {
-          'status': goal.status,
-          if (completing) 'completedBy': goal.completedBy,
-        },
-      );
-    });
-  }
-
-  @override
-  Future<void> deleteGoal(int goalId) async {
-    _w.check(Permission.qcWrite);
-    return _w.transaction((txn) async {
-      final before = await _w.snapshot(txn, 'qc_goals', 'goal_id', goalId);
-      await _w.requireRow(before, 'No QC goal with id $goalId');
-      await localRepo.deleteGoal(goalId, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goal,
-        entityId: '$goalId',
-        action: QcAuditAction.goalDeleted,
-        before: before,
-        after: await _w.snapshot(txn, 'qc_goals', 'goal_id', goalId),
-      );
-    });
-  }
-
-  @override
-  Future<void> assignGoal(QcGoalAssignment assignment) async {
-    _w.check(Permission.qcWrite);
-    return _w.transaction((txn) async {
-      await localRepo.assignGoal(assignment, exec: txn);
-      final row = await txn.query(
-        'qc_goal_assignments',
-        where: 'goal_id = ? AND assignee_id = ?',
-        whereArgs: [assignment.goalId, assignment.assigneeId],
-        limit: 1,
-      );
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goalAssignment,
-        entityId: '${row.isEmpty ? '' : row.first['assign_id']}',
-        action: QcAuditAction.goalAssigned,
-        after: row.isEmpty
-            ? assignment.toMap(withId: false)
-            : Map<String, dynamic>.from(row.first),
-        meta: {'goalId': assignment.goalId, 'role': assignment.role},
-      );
-    });
-  }
-
-  @override
-  Future<void> updateAssignment(QcGoalAssignment assignment) async {
-    _w.check(Permission.qcWrite);
-    final id = assignment.assignId;
-    if (id == null) {
-      throw const ValidationError('Cannot update an assignment with no id');
-    }
-    return _w.transaction((txn) async {
-      final before = await _w.snapshot(
-        txn,
-        'qc_goal_assignments',
-        'assign_id',
-        id,
-      );
-      await _w.requireRow(before, 'No QC goal assignment with id $id');
-      await localRepo.updateAssignment(assignment, exec: txn);
-      final after = await _w.snapshot(
-        txn,
-        'qc_goal_assignments',
-        'assign_id',
-        id,
-      );
-      // "This action item is done" is the single most asked-for fact in goal
-      // tracking, so it gets a named action instead of hiding in a status diff.
-      final wasDone =
-          '${before?['status']}' == QcGoalAssignmentStatus.completed;
-      final isDone = '${after?['status']}' == QcGoalAssignmentStatus.completed;
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goalAssignment,
-        entityId: '$id',
-        action: !wasDone && isDone
-            ? QcAuditAction.goalActionDone
-            : QcAuditAction.goalAssigned,
-        before: before,
-        after: after,
-        meta: {'goalId': assignment.goalId, 'status': after?['status']},
-      );
-    });
-  }
-
-  @override
-  Future<void> removeAssignment(int assignId) async {
-    _w.check(Permission.qcWrite);
-    return _w.transaction((txn) async {
-      final before = await _w.snapshot(
-        txn,
-        'qc_goal_assignments',
-        'assign_id',
-        assignId,
-      );
-      await _w.requireRow(before, 'No QC goal assignment with id $assignId');
-      await localRepo.removeAssignment(assignId, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goalAssignment,
-        entityId: '$assignId',
-        action: QcAuditAction.goalUnassigned,
-        before: before,
-        after: await _w.snapshot(
-          txn,
-          'qc_goal_assignments',
-          'assign_id',
-          assignId,
-        ),
-        meta: {'goalId': before?['goal_id']},
-      );
-    });
-  }
-
-  @override
-  Future<int> addAction(QcGoalAction action) async {
-    _w.check(Permission.qcWrite);
-    if (action.actionText.trim().isEmpty) {
-      throw const ValidationError('A goal action needs a title');
-    }
-    return _w.transaction((txn) async {
-      final id = await localRepo.addAction(action, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goalAction,
-        entityId: '$id',
-        action: QcAuditAction.goalActionAdded,
-        after: await _w.snapshot(txn, 'qc_goal_actions', 'action_id', id),
-        meta: {'goalId': action.goalId},
-      );
-      return id;
-    });
-  }
-
-  @override
-  Future<void> saveAction(QcGoalAction action) async {
-    _w.check(Permission.qcWrite);
-    final id = action.actionId;
-    if (id == null) {
-      throw const ValidationError('Cannot save an action with no id');
-    }
-    return _w.transaction((txn) async {
-      final before = await _w.snapshot(txn, 'qc_goal_actions', 'action_id', id);
-      await _w.requireRow(before, 'No QC goal action with id $id');
-      await localRepo.saveAction(action, exec: txn);
-      final after = await _w.snapshot(txn, 'qc_goal_actions', 'action_id', id);
-      final wasDone = '${before?['status']}' == QcGoalActionStatus.done;
-      final isDone = '${after?['status']}' == QcGoalActionStatus.done;
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goalAction,
-        entityId: '$id',
-        action: !wasDone && isDone
-            ? QcAuditAction.goalActionDone
-            : QcAuditAction.goalActionAdded,
-        before: before,
-        after: after,
-        meta: {'goalId': action.goalId, 'status': action.status},
-      );
-    });
-  }
-
-  @override
-  Future<int> addKpi(QcGoalKpi kpi) async {
-    _w.check(Permission.qcWrite);
-    return _w.transaction((txn) async {
-      final id = await localRepo.addKpi(kpi, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goal,
-        entityId: '${kpi.goalId}',
-        action: QcAuditAction.goalKpiSaved,
-        after: await _w.snapshot(txn, 'qc_goal_kpis', 'kpi_id', id),
-        meta: {'kpiId': id, 'goalId': kpi.goalId},
-      );
-      return id;
-    });
-  }
-
-  @override
-  Future<void> saveKpi(QcGoalKpi kpi) async {
-    _w.check(Permission.qcWrite);
-    final id = kpi.kpiId;
-    if (id == null) throw const ValidationError('Cannot save a KPI with no id');
-    return _w.transaction((txn) async {
-      final before = await _w.snapshot(txn, 'qc_goal_kpis', 'kpi_id', id);
-      await _w.requireRow(before, 'No QC goal KPI with id $id');
-      await localRepo.saveKpi(kpi, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goal,
-        entityId: '${kpi.goalId}',
-        action: QcAuditAction.goalKpiSaved,
-        before: before,
-        after: await _w.snapshot(txn, 'qc_goal_kpis', 'kpi_id', id),
-        meta: {'kpiId': id, 'goalId': kpi.goalId},
-      );
-    });
-  }
-
-  @override
-  Future<void> deleteKpi(int kpiId) async {
-    _w.check(Permission.qcWrite);
-    return _w.transaction((txn) async {
-      final before = await _w.snapshot(txn, 'qc_goal_kpis', 'kpi_id', kpiId);
-      await _w.requireRow(before, 'No QC goal KPI with id $kpiId');
-      await localRepo.deleteKpi(kpiId, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goal,
-        entityId: '${before?['goal_id']}',
-        action: QcAuditAction.goalKpiDeleted,
-        before: before,
-        after: await _w.snapshot(txn, 'qc_goal_kpis', 'kpi_id', kpiId),
-      );
-    });
-  }
-
-  @override
-  Future<int> addLink(QcGoalLink link) async {
-    _w.check(Permission.qcWrite);
-    return _w.transaction((txn) async {
-      final id = await localRepo.addLink(link, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goal,
-        entityId: '${link.goalId}',
-        action: QcAuditAction.goalLinked,
-        after: link.toMap(withId: false),
-        meta: {
-          'linkId': id,
-          'goalId': link.goalId,
-          'entityType': link.linkType,
-          'entityId': link.refId,
-        },
-      );
-      return id;
-    });
-  }
-
-  @override
-  Future<void> deleteLink(int linkId) async {
-    _w.check(Permission.qcWrite);
-    return _w.transaction((txn) async {
-      final before = await _w.snapshot(txn, 'qc_goal_links', 'link_id', linkId);
-      await _w.requireRow(before, 'No QC goal link with id $linkId');
-      await localRepo.deleteLink(linkId, exec: txn);
-      await _w.record(
-        txn,
-        entityType: QcAuditEntity.goal,
-        entityId: '${before?['goal_id']}',
-        action: QcAuditAction.goalUnlinked,
-        before: before,
-        meta: {'linkId': linkId, 'goalId': before?['goal_id']},
-      );
-    });
-  }
-}
 
 /// Convenience bundle for the DI registrations (plan P8).
 ///
@@ -1477,25 +1378,36 @@ class QcRepositories {
     required this.templates,
     required this.inspections,
     required this.ncCapa,
-    required this.goals,
     required this.audit,
+    required this.dbHelper,
   });
 
   final QcSopRepository sops;
   final QcTemplateRepository templates;
   final QcInspectionRepository inspections;
   final QcNcCapaRepository ncCapa;
-  final QcGoalRepository goals;
   final QcAuditRepository audit;
+  final DatabaseHelper dbHelper;
 
   /// Registers a ready-made QC stack over [dbHelper]. [actorReader] is handed to
   /// the audit repository so it can attribute entries from the live session.
+  /// [queue] (with the optional [syncAudit]) wires the P8 sync seam into the
+  /// facades; without it the stack behaves exactly as before — device-local.
   static QcRepositories offlineFirst({
     required DatabaseHelper dbHelper,
     required WriteGuard guard,
     QcActor Function()? actorReader,
+    SyncQueue? queue,
+    AuditLogger? syncAudit,
   }) {
     final audit = QcAuditRepo(dbHelper: dbHelper, actorReader: actorReader);
+    final sync = queue == null
+        ? null
+        : QcSyncWriter(
+            queue: queue,
+            guard: guard,
+            syncAudit: syncAudit,
+          );
     return QcRepositories(
       sops: OfflineFirstQcSopRepository(
         local: QcSopRepo(dbHelper),
@@ -1508,26 +1420,24 @@ class QcRepositories {
         guard: guard,
         audit: audit,
         dbHelper: dbHelper,
+        sync: sync,
       ),
       inspections: OfflineFirstQcInspectionRepository(
         local: QcInspectionRepo(dbHelper),
         guard: guard,
         audit: audit,
         dbHelper: dbHelper,
+        sync: sync,
       ),
       ncCapa: OfflineFirstQcNcCapaRepository(
         local: QcNcCapaRepo(dbHelper),
         guard: guard,
         audit: audit,
         dbHelper: dbHelper,
-      ),
-      goals: OfflineFirstQcGoalRepository(
-        local: QcGoalRepo(dbHelper),
-        guard: guard,
-        audit: audit,
-        dbHelper: dbHelper,
+        sync: sync,
       ),
       audit: audit,
+      dbHelper: dbHelper,
     );
   }
 }

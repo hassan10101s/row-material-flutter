@@ -408,6 +408,12 @@
         .qr-caption { font-size: 9.5px; color: var(--muted); font-weight: 500; }
         .qr-warning { margin-top: 6px; font-size: 10px; color: #92400e; font-weight: 600; }
 
+        .qr-footer-center {
+            flex: none;
+            width: 190px;
+            margin: 0 auto 10px;
+        }
+
         .notes-box {
             flex: 1 1 0;
             min-width: 0;
@@ -670,8 +676,9 @@
                 {% if report_logo_data_uri %}
                 <img class="report-logo" src="{{ report_logo_data_uri }}" alt="Report Logo">
                 {% endif %}
-                <h1>محضر فحص خامات | Raw Material Inspection Report</h1>
+                <h1>{% if is_product %}{% if is_en %}Product Inspection Report{% else %}محضر فحص منتجات | Product Inspection Report{% endif %}{% else %}{% if is_en %}Raw Material Inspection Report{% else %}محضر فحص خامات | Raw Material Inspection Report{% endif %}{% endif %}</h1>
                 <p>{{ department_label or "Quality Control Department" }}</p>
+                {% if form_no %}<p>{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
             </div>
             <div class="header-side">
                 <div class="badge {{ decision_class }}">
@@ -684,53 +691,54 @@
 
         <div class="meta-grid">
             <div class="meta-card">
-                <span class="label">{% if is_product %}اسم المنتج | Product{% else %}اسم الخامة | Material{% endif %}</span>
+                <span class="label">{% if is_product %}{% if is_en %}Product{% else %}اسم المنتج | Product{% endif %}{% else %}{% if is_en %}Material{% else %}اسم الخامة | Material{% endif %}{% endif %}</span>
                 <span class="value">{{ material_name }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">كود الدخول | Entry Code</span>
+                <span class="label">{% if is_en %}Entry Code{% else %}كود الدخول | Entry Code{% endif %}</span>
                 <span class="value">{{ sample_number }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">تاريخ الفحص | Date</span>
+                <span class="label">{% if is_en %}Date{% else %}تاريخ الفحص | Date{% endif %}</span>
                 <span class="value">{{ date }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">تاريخ انتهاء الصلاحية | Expiry Date</span>
+                <span class="label">{% if is_en %}Expiry Date{% else %}تاريخ انتهاء الصلاحية | Expiry Date{% endif %}</span>
                 <span class="value">{{ expiry_date }}</span>
             </div>
             {% if is_product %}
             <div class="meta-card">
-                <span class="label">رقم الفورمولا | Formula Number</span>
+                <span class="label">{% if is_en %}Formula Number{% else %}رقم الفورمولا | Formula Number{% endif %}</span>
                 <span class="value">{{ formula_number }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">رقم التشغيلة | Batch Number</span>
+                <span class="label">{% if is_en %}Batch Number{% else %}رقم التشغيلة | Batch Number{% endif %}</span>
                 <span class="value">{{ batch_number }}</span>
             </div>
             {% else %}
             <div class="meta-card">
-                <span class="label">المورد | Supplier</span>
+                <span class="label">{% if is_en %}Supplier{% else %}المورد | Supplier{% endif %}</span>
                 <span class="value">{{ supplier }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">رقم السيارة | Truck Number</span>
+                <span class="label">{% if is_en %}Truck Number{% else %}رقم السيارة | Truck Number{% endif %}</span>
                 <span class="value">{{ truck_number }}</span>
             </div>
             {% endif %}
             <div class="meta-card">
-                <span class="label">الكمية | Quantity (Ton)</span>
+                <span class="label">{% if is_en %}Quantity (Ton){% else %}الكمية | Quantity (Ton){% endif %}</span>
                 <span class="value">{{ quantity }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">اخذت العينة بواسطة | Sample Taken By</span>
+                <span class="label">{% if is_en %}Sample Taken By{% else %}اخذت العينة بواسطة | Sample Taken By{% endif %}</span>
                 <span class="value">{{ sample_taken_by }}</span>
             </div>
         </div>
 
         <div class="sections">
+            {% if not is_product %}
             <section class="section">
-                <h2 class="section-title section-physical">Physical Aspects / الفحص الظاهري</h2>
+                <h2 class="section-title section-physical">{% if is_en %}Physical Aspects{% else %}Physical Aspects / الفحص الظاهري{% endif %}</h2>
                 <table>
                     <thead>
                         <tr>
@@ -761,7 +769,7 @@
             </section>
 
             <section class="section">
-                <h2 class="section-title section-chemical">Chemical Analysis / التحليل الكيميائي</h2>
+                <h2 class="section-title section-chemical">{% if is_en %}Chemical Analysis{% else %}Chemical Analysis / التحليل الكيميائي{% endif %}</h2>
                 <table>
                     <thead>
                         <tr>
@@ -790,62 +798,47 @@
                     </tbody>
                 </table>
             </section>
+            {% endif %}
 
             {% if show_batch_samples %}
             <section class="section">
-                <h2 class="section-title section-chemical">عينات التشغيلة / Batch Samples</h2>
-                {% for s in batch_samples %}
-                <div class="batch-sample">
-                    <div class="batch-sample-head">
-                        <strong>{{ s.sample_no }} • {{ s.sample_name }}</strong>
-                        <span>أخذها / Taken by: {{ s.sample_taker }} • {{ s.tested_at }}</span>
-                        <span>{{ s.decision_label }}</span>
-                    </div>
-                    {% if s.physical_results %}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>البيان / Item</th>
-                                <th class="minmax-col">النتيجة الظاهرية / Physical result</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for r in s.physical_results %}
-                            <tr>
-                                <td class="param-cell">{{ r.analysis_name }}</td>
-                                <td class="minmax-col">{{ r.result_text }}</td>
-                            </tr>
+                <h2 class="section-title section-chemical">{% if is_en %}Operational Samples{% else %}عينات التشغيلية / Operational Samples{% endif %}</h2>
+                <table>
+                    <thead>
+                        <tr>
+                            <th rowspan="2">{% if is_en %}Parameter{% else %}البيان / Parameter{% endif %}</th>
+                            {% for h in batch_merged_samples %}
+                            <th colspan="2" class="result-col">
+                                <span class="result-header-index">{{ h.label }}</span>
+                                <span class="result-header-name">{{ h.meta }}</span>
+                            </th>
                             {% endfor %}
-                        </tbody>
-                    </table>
-                    {% endif %}
-                    {% if s.chemical_results %}
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>التحليل / Analysis</th>
-                                <th class="minmax-col">النتيجة / Result</th>
-                                <th class="minmax-col">الوحدة / Unit</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for r in s.chemical_results %}
-                            <tr>
-                                <td class="param-cell">{{ r.analysis_name }}</td>
-                                <td class="minmax-col">{{ r.result_text }}</td>
-                                <td class="minmax-col">{{ r.unit }}</td>
-                            </tr>
+                        </tr>
+                        <tr>
+                            {% for h in batch_merged_samples %}
+                            <th class="result-col">{% if is_en %}Visual{% else %}ظاهري{% endif %}</th>
+                            <th class="result-col">{% if is_en %}Chemical{% else %}كيميائي{% endif %}</th>
                             {% endfor %}
-                        </tbody>
-                    </table>
-                    {% endif %}
-                </div>
-                {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in batch_merged_rows %}
+                        <tr>
+                            <td class="param-cell">{{ row.name }}</td>
+                            {% for cell in row.cells %}
+                            <td class="result-col">{% if cell.p %}{{ cell.p }}{% endif %}</td>
+                            <td class="minmax-col">{% if cell.c %}{{ cell.c }}{% endif %}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
             </section>
             {% endif %}
         </div>
 
         <div class="decision-row">
+            {% if not is_product %}
             <section class="qr-box">
                 <div class="decision-label">QR Code</div>
                 {% if qr_image_data_uri %}
@@ -859,24 +852,23 @@
                 {% endif %}
             </section>
 
-            {% if not is_product %}
             <section class="notes-box{% if not show_status_timeline %} notes-box--centered{% endif %}">
                 <div class="decision-head">
-                    <div class="decision-label">قرار الجودة  | QC Decision</div>
+                    <div class="decision-label">{% if is_en %}QC Decision{% else %}قرار الجودة  | QC Decision{% endif %}</div>
                     <div class="decision-value {{ decision_class }}">{{ decision_label }}</div>
                 </div>
                 {% if show_decision_reason %}
-                <div class="note-line"><strong>سبب القرار | Reason:</strong> {{ decision_reason }}</div>
+                <div class="note-line"><strong>{% if is_en %}Reason:{% else %}سبب القرار | Reason:{% endif %}</strong> {{ decision_reason }}</div>
                 {% endif %}
                 {% if show_follow_up_note %}
-                <div class="note-line"><strong>ملاحظة المتابعة | Follow-up:</strong> {{ follow_up_note }}</div>
+                <div class="note-line"><strong>{% if is_en %}Follow-up:{% else %}ملاحظة المتابعة | Follow-up:{% endif %}</strong> {{ follow_up_note }}</div>
                 {% endif %}
                 {% if show_rejected_quantity %}
-                <div class="note-line"><strong>الكمية المرفوضة | Rejected Quantity:</strong> {{ rejected_quantity }} طن</div>
+                <div class="note-line"><strong>{% if is_en %}Rejected Quantity:{% else %}الكمية المرفوضة | Rejected Quantity:{% endif %}</strong> {{ rejected_quantity }} {% if is_en %}ton{% else %}طن{% endif %}</div>
                 {% endif %}
                 {% if show_status_timeline %}
                 <div class="timeline-wrap">
-                    <div class="decision-label">تسلسل القرارات | Status Timeline</div>
+                    <div class="decision-label">{% if is_en %}Status Timeline{% else %}تسلسل القرارات | Status Timeline{% endif %}</div>
                     <div class="status-timeline{% if status_timeline|length > 4 %} is-multi-row{% endif %}">
                         {% for step in status_timeline %}
                         <div class="timeline-item">
@@ -889,7 +881,7 @@
                                 <div class="timeline-meta">
                                     {{ step.changed_at or "-" }}
                                 </div>
-                                <div class="timeline-reason"><strong>سبب القرار | Reason:</strong> {{ step.reason }}</div>
+                                <div class="timeline-reason"><strong>{% if is_en %}Reason:{% else %}سبب القرار | Reason:{% endif %}</strong> {{ step.reason }}</div>
                             </div>
                             {% if not loop.last %}
                             <div class="timeline-line"></div>
@@ -903,11 +895,26 @@
             {% endif %}
         </div>
 
+        {% if is_product %}
+        <section class="qr-box qr-footer-center">
+            <div class="decision-label">QR Code</div>
+            {% if qr_image_data_uri %}
+            <img class="qr-image" src="{{ qr_image_data_uri }}" alt="Inspection QR Code">
+            <div class="qr-caption">Scan to view report data</div>
+            {% if qr_warning %}
+            <div class="qr-warning">{{ qr_warning }}</div>
+            {% endif %}
+            {% else %}
+            <div class="qr-warning">{{ qr_warning or "QR is unavailable." }}</div>
+            {% endif %}
+        </section>
+        {% endif %}
+
         <div class="accent-strip-bottom"></div>
 
         <div class="footer">
             <div class="signature-box">
-                Quality Specialist / أخصائي الجودة<br>
+                {% if is_en %}Quality Specialist{% else %}Quality Specialist / أخصائي الجودة{% endif %}<br>
                 <strong>{{ quality_specialist_name }}</strong>
             </div>
 

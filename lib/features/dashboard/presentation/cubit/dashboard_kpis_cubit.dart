@@ -24,7 +24,7 @@ class DashboardKpisCubit extends AppCubit<DashboardKpisState> {
   }
 
   /// Stores the full cross-module bundle (volume/quality/lab/QC/NCR/SOP/
-  /// goals/inventory/trend). Display-only: no navigation side effects.
+  /// inventory/trend). Display-only: no navigation side effects.
   void hydrateBundle(DashboardBundle bundle) {
     safeEmit(state.copyWith(
       bundle: bundle,

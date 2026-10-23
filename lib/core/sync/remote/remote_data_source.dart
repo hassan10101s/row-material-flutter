@@ -169,13 +169,32 @@ enum SyncCollection {
   meta('meta'),
   inventoryItems('inventoryItems'),
   inventoryTransactions('inventoryTransactions'),
+  inventoryLots('inventoryLots'),
   equipment('equipment'),
   equipmentEvents('equipmentEvents'),
   worksheets('worksheets'),
   consumption('consumption'),
   stockAdjustments('stockAdjustments'),
   referenceMaterials('referenceMaterials'),
-  productBatchSamples('productBatchSamples');
+  productBatchSamples('productBatchSamples'),
+  // QC user-authored tables (definition / typed columns / records). Three
+  // collections so one table edit never overwrites unrelated data, and so
+  // the pull can process definitions before columns before rows.
+  qcCustomTables('qcCustomTables'),
+  qcCustomTableFields('qcCustomTableFields'),
+  qcCustomTableRows('qcCustomTableRows'),
+  // QC checklists and execution + NCR/CAPA (plan P8). Each table gets its
+  // own collection (same rule as the inventory family) and the pull walks
+  // templates → sections → items → inspections → responses → task logs →
+  // findings → capa (see `PullWorker._dependenciesFirst`).
+  qcTemplates('qcTemplates'),
+  qcSections('qcSections'),
+  qcItems('qcItems'),
+  qcInspections('qcInspections'),
+  qcResponses('qcResponses'),
+  qcTaskLogs('qcTaskLogs'),
+  qcFindingsNc('qcFindingsNc'),
+  qcCapa('qcCapa');
 
   const SyncCollection(this.path);
 
@@ -203,6 +222,17 @@ abstract interface class AuthRemoteDataSource {
     required String email,
     required String password,
   });
+
+  /// Self-service update of `users/{uid}.displayName` plus the Firebase Auth
+  /// profile name. The Firestore rules allow a signed-in member to change only
+  /// their own display name (and photo), never their role/status/organization.
+  Future<void> updateUserDisplayName({
+    required String uid,
+    required String displayName,
+  });
+
+  /// Sends a Firebase password-reset email for [email].
+  Future<void> sendPasswordResetEmail(String email);
 
   Future<void> signOut();
 
@@ -415,6 +445,10 @@ class OrganizationProfile {
     required this.ownerUid,
     this.status = 'active',
     this.schemaVersion = 2,
+    this.trialStartedAt,
+    this.trialEndsAt,
+    this.trialConsumed = false,
+    this.manuallyActivated = false,
   });
 
   final String id;
@@ -422,6 +456,24 @@ class OrganizationProfile {
   final String ownerUid;
   final String status;
   final int schemaVersion;
+
+  /// ISO-8601 of when the 30-day trial started (null for legacy documents).
+  final String? trialStartedAt;
+
+  /// ISO-8601 of when the 30-day trial ends (null for legacy documents).
+  final String? trialEndsAt;
+
+  /// True once the trial has expired (set by the server cron, never by hand).
+  /// Stays true after manual activation so the cron can never re-suspend.
+  final bool trialConsumed;
+
+  /// True once support manually activated the company. Permanent: the expiry
+  /// logic must never block such a company again.
+  final bool manuallyActivated;
+
+  bool get isSuspended => status == 'suspended' || status == 'disabled';
+
+  bool get isUsable => status == 'trial' || status == 'active';
 
   static OrganizationProfile? fromMap(String id, Map<String, dynamic>? data) {
     if (data == null) return null;
@@ -431,6 +483,24 @@ class OrganizationProfile {
       ownerUid: '${data['ownerUid'] ?? ''}',
       status: '${data['status'] ?? 'active'}',
       schemaVersion: (data['schemaVersion'] as num?)?.toInt() ?? 2,
+      trialStartedAt: _asIso(data['trialStartedAt']),
+      trialEndsAt: _asIso(data['trialEndsAt']),
+      trialConsumed: data['trialConsumed'] == true,
+      manuallyActivated: data['manuallyActivated'] == true,
     );
+  }
+
+  /// Accepts ISO strings, DateTime, and Firestore Timestamp (via `toDate()`).
+  static String? _asIso(Object? value) {
+    if (value == null) return null;
+    if (value is String) return value.isEmpty ? null : value;
+    if (value is DateTime) return value.toIso8601String();
+    try {
+      final dynamic dyn = value;
+      final asDate = dyn.toDate() as DateTime?;
+      return asDate?.toIso8601String();
+    } on Object {
+      return null;
+    }
   }
 }

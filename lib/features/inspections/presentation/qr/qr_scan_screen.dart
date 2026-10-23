@@ -23,6 +23,8 @@ import '../../../../design_system/widgets/app_window.dart';
 import '../../../../di/service_locator.dart';
 import '../../../lab/domain/lab_result_repository.dart';
 import '../../../reports/domain/report_repository.dart';
+import '../../../lab/domain/lab_local_repository.dart';
+import '../../../lab/presentation/equipment/equipment_tab.dart';
 import '../../domain/inspection_repository.dart';
 import '../cubit/inspection_detail_cubit.dart';
 import '../detail/inspection_detail_screen.dart';
@@ -142,7 +144,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
       setState(() {
         _busy = false;
         _error = AppText.t(
-          'هذا الرمز ليس من رموز البرنامج — يُقرأ فقط رمز المحاضر والملصقات',
+          'هذا الرمز ليس من رموز البرنامج — يُقرأ فقط رمز المحاضر و QR',
           'This is not an app code — only report and label codes are readable',
         );
       });
@@ -151,6 +153,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
     }
     var entryCode = parsed.entryCode;
     final body = parsed.body;
+    final kind = parsed.kind;
     if (body.startsWith(sealedTextPrefix)) {
       // Tamper check when verifiable: a sealed body that opens but points
       // at a different code than the envelope is a forged print.
@@ -207,6 +210,12 @@ class _QrScanScreenState extends State<QrScanScreen> {
       _rearm();
       return;
     }
+    // Equipment labels point at a device code (`EQ-0001`), not an entry
+    // code: open the device file (card + event log) instead of an inspection.
+    if (kind == appQrKindEquipment) {
+      await _lookupEquipment(entryCode);
+      return;
+    }
     await _lookup(entryCode);
   }
 
@@ -261,6 +270,58 @@ class _QrScanScreenState extends State<QrScanScreen> {
     }
   }
 
+  /// Loads the device by code from the local database and opens its file
+  /// (device card + event log) at once — same trust model as inspections:
+  /// the record comes from the database, never from the QR text.
+  Future<void> _lookupEquipment(String code) async {
+    if (mounted) {
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+    }
+    try {
+      final rows = await getIt<LabLocalRepository>().listEquipment();
+      Map<String, dynamic>? row;
+      for (final r in rows) {
+        if ('${r['code'] ?? ''}'.toLowerCase() == code.toLowerCase()) {
+          row = r;
+          break;
+        }
+      }
+      if (!mounted) return;
+      if (row == null) {
+        setState(() {
+          _busy = false;
+          _error = AppText.t(
+            'هذا الجهاز غير موجود على هذا الجهاز — قد يحتاج مزامنة من الجهاز الذي أُضيف عليه',
+            'Not on this device — it may need syncing from the device that added it',
+          );
+        });
+        _rearm();
+        return;
+      }
+      setState(() => _busy = false);
+      await Navigator.of(context).push<void>(
+        AppPageRoute(
+          builder: (_) =>
+              EquipmentDetailScreen(equipmentId: (row!['id'] as num).toInt()),
+        ),
+      );
+      if (!mounted) return;
+      _scanAgain();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _error = AppText.t(
+          'تعذّر البحث بكود الجهاز',
+          'Could not look up the equipment code',
+        );
+      });
+      _rearm();
+    }
+  }
   /// Re-arms the camera for the next code without clearing the current
   /// message, so a miss stays visible while scanning continues.
   void _rearm() {

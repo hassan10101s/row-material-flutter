@@ -52,6 +52,9 @@ class AnalysisEditorState extends State<AnalysisEditor> {
   late final TextEditingController _description = TextEditingController(
     text: '${widget.analysis?['description'] ?? ''}',
   );
+  late final TextEditingController _referenceText = TextEditingController(
+    text: '${widget.analysis?['reference'] ?? ''}',
+  );
   late final TextEditingController _formula = TextEditingController(
     text:
         '${widget.analysis?['formula'] is Map ? (widget.analysis?['formula'] as Map)['expression'] : ''}',
@@ -242,6 +245,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
     _name.dispose();
     _unit.dispose();
     _description.dispose();
+    _referenceText.dispose();
     _formula.dispose();
     _newFieldController.dispose();
     for (final c in _fieldControllers) {
@@ -415,6 +419,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
           unit: _unit.text,
           parameterId: _parameterId,
           description: _description.text,
+          reference: _referenceText.text,
           dynamicFields: _fieldList,
           formula: _formula.text.trim(),
           items: consumedItems,
@@ -432,6 +437,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
           // Unlinking a previously linked analysis clears the reference.
           clearParameter: !_linked && hadLink,
           description: _description.text,
+          reference: _referenceText.text,
           dynamicFields: _fieldList,
           formula: _formula.text.trim(),
           items: consumedItems,
@@ -1164,6 +1170,19 @@ class AnalysisEditorState extends State<AnalysisEditor> {
             symbols: _unitSymbols,
             enabled: !_saving,
           ),
+        TextField(
+          controller: _referenceText,
+          maxLines: 2,
+          decoration: InputDecoration(
+            labelText: AppText.t('المرجع / الطريقة', 'Reference / Method'),
+            hintText: AppText.t(
+              'مثال: ISO 2171 أو طريقة المعمل',
+              'e.g. ISO 2171 or in-house method',
+            ),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 8),
         TextField(
           controller: _description,
           maxLines: 2,

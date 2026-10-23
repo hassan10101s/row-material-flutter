@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
+import 'package:material_lab/design_system/widgets/app_button.dart';
+import 'package:material_lab/design_system/widgets/app_field.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_sop.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_repositories.dart';
@@ -108,9 +110,24 @@ void _tallWindow(WidgetTester tester) {
   addTearDown(tester.view.reset);
 }
 
+/// The detail dialogs migrated to `AppField`, whose label is a sibling Text,
+/// not decoration data: address the field via its AppField, not by label text.
+Finder _dialogField(String label) => find
+    .descendant(
+      of: find.byWidgetPredicate((w) => w is AppField && w.label == label),
+      matching: find.byType(TextField),
+    )
+    .first;
+
 void main() {
   setUp(() => AppText.arabic = false);
   tearDownAll(() => AppText.arabic = true);
+
+  // Cubits surface raw throwables through `AppError.friendly`, which
+  // collapses anything that is not a `UserFacingError` (driver
+  // exceptions like these StateErrors) to the generic message.
+  const unexpected = 'Something went wrong';
+
   setUpAll(() {
     // `any()`/`captureAny` need a value of the argument's type up front.
     registerFallbackValue(_sop());
@@ -254,7 +271,7 @@ void main() {
       await cubit.load();
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('table is gone'), findsOneWidget);
+      expect(find.textContaining(unexpected), findsOneWidget);
     });
 
     testWidgets('the filter sheet narrows by status', (tester) async {
@@ -269,11 +286,20 @@ void main() {
       await tester.pumpWidget(_host(const QcSopsScreen(), cubit));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byIcon(Icons.tune));
+      // The Scaffold app bar and the filter bar both carry a tune icon that
+      // opens the same sheet.
+      await tester.tap(find.byIcon(Icons.tune).first);
       await tester.pumpAndSettle();
       expect(find.text('Procedure filters'), findsOneWidget);
 
-      await tester.tap(find.widgetWithText(FilterChip, 'Published'));
+      // Statuses are toggle buttons now, not FilterChips. The tile of the
+      // published SOP also shows a "Published" pill: target the button.
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AppButton),
+          matching: find.text('Published'),
+        ),
+      );
       await tester.pumpAndSettle();
 
       expect(cubit.state.filters.statuses, {SopStatus.published});
@@ -417,7 +443,7 @@ void main() {
       await tester.tap(find.text('Submit for approval'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('needs qcApprove'), findsOneWidget);
+      expect(find.textContaining(unexpected), findsOneWidget);
     });
 
     testWidgets('lists who has read the current revision', (tester) async {
@@ -475,7 +501,7 @@ void main() {
 
       expect(find.text('New revision'), findsOneWidget);
       await tester.enterText(
-        find.widgetWithText(TextField, 'Change summary'),
+        _dialogField('Change summary'),
         'Torque figure corrected',
       );
       await tester.tap(find.widgetWithText(FilledButton, 'Save'));
@@ -511,7 +537,7 @@ void main() {
 
       await tester.tap(find.text('Acknowledge read'));
       await tester.pumpAndSettle();
-      await tester.enterText(find.widgetWithText(TextField, 'User id'), 'u9');
+      await tester.enterText(_dialogField('User id'), 'u9');
       await tester.tap(find.widgetWithText(FilledButton, 'Confirm'));
       await tester.pumpAndSettle();
 

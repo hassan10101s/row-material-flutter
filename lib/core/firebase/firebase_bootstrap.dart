@@ -57,4 +57,18 @@ class FirebaseBootstrap {
 
   /// Test hook: forget that `initializeApp` already ran.
   static void resetForTesting() => _initialized = false;
+
+  /// Initialises the default app for hand-rolled entry points (the FCM
+  /// background handler runs in its own isolate where the dart-define
+  /// generated default options are the only configuration available).
+  /// Returns whether a default app is usable afterwards; never throws.
+  static Future<bool> ensureDefaultApp() async {
+    try {
+      if (Firebase.apps.isNotEmpty) return true;
+      await Firebase.initializeApp();
+      return true;
+    } on Object {
+      return false;
+    }
+  }
 }

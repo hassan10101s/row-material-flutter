@@ -14,16 +14,18 @@ import 'seal_codec.dart';
 /// its tamper-evidence for the origin device.
 const String appQrMagic = 'ML1.';
 
-/// A parsed app QR: the inspection it points at plus the original body
+/// A parsed app QR: what it points at plus the original body
 /// (sealed `enc1:` token or raw JSON) for optional verification.
 class AppQrPayload {
   const AppQrPayload({
     required this.entryCode,
     required this.body,
     required this.legacy,
+    this.kind = '',
   });
 
-  /// The inspection entry code. Empty only for legacy sealed prints when the
+  /// The inspection entry code — or, for `kind == 'equipment'`, the equipment
+  /// code (`EQ-0001`). Empty only for legacy sealed prints when the
   /// local secret cannot open them (sealed on another device).
   final String entryCode;
 
@@ -32,15 +34,29 @@ class AppQrPayload {
 
   /// True for prints from before the envelope existed.
   final bool legacy;
+
+  /// Target record family: '' (legacy inspection prints) or 'equipment'.
+  /// Empty means inspection — every print made before kinds existed.
+  final String kind;
 }
 
+/// Record family pointed at by an equipment label QR.
+const String appQrKindEquipment = 'equipment';
+
 /// Wraps a generated payload (`sealed token` or raw JSON) with the
-/// inspection pointer. Called by the report/label builders only.
+/// record pointer. Called by the report/label builders only. [kind] is
+/// omitted from the JSON when empty so prints made before kinds existed
+/// stay byte-identical.
 String encodeAppQrPayload({
   required String entryCode,
   required String body,
-}) =>
-    '$appQrMagic${jsonEncode({'v': 1, 'ec': entryCode, 'body': body})}';
+  String kind = '',
+}) => '$appQrMagic${jsonEncode({
+      'v': 1,
+      'ec': entryCode,
+      if (kind.isNotEmpty) 'kind': kind,
+      'body': body,
+    })}';
 
 /// Parses scanned text. Returns null for anything that is not an app QR —
 /// callers must treat null as "reject", never as data.
@@ -55,6 +71,7 @@ AppQrPayload? tryParseAppQr(String raw) {
         entryCode: '${decoded['ec'] ?? ''}',
         body: '${decoded['body'] ?? ''}',
         legacy: false,
+        kind: '${decoded['kind'] ?? ''}',
       );
     } catch (_) {
       return null;
@@ -72,6 +89,7 @@ AppQrPayload? tryParseAppQr(String raw) {
           entryCode: '${decoded['ec']}',
           body: text,
           legacy: true,
+          kind: '${decoded['kind'] ?? ''}',
         );
       }
     } catch (_) {}

@@ -20,6 +20,7 @@ class NcrFilters extends Equatable {
     this.inspectorIds = const {},
     this.assignedTo = const {},
     this.capaStatuses = const {},
+    this.query = '',
     this.lotNo = '',
     this.batchNo = '',
     this.poNo = '',
@@ -55,6 +56,10 @@ class NcrFilters extends Equatable {
   final Set<String> inspectorIds;
   final Set<String> assignedTo;
   final Set<String> capaStatuses;
+
+  /// Free-text search across code/description/category/assignee/lot/batch/PO/
+  /// inspector. Empty means "no search".
+  final String query;
   final String lotNo;
   final String batchNo;
   final String poNo;
@@ -96,6 +101,7 @@ class NcrFilters extends Equatable {
       inspectorIds.isEmpty &&
       assignedTo.isEmpty &&
       capaStatuses.isEmpty &&
+      query.isEmpty &&
       lotNo.isEmpty &&
       batchNo.isEmpty &&
       poNo.isEmpty &&
@@ -125,6 +131,7 @@ class NcrFilters extends Equatable {
     add('inspector', inspectorIds.join('/'));
     add('assigned to', assignedTo.join('/'));
     add('capa status', capaStatuses.join('/'));
+    add('search', query);
     add('lot', lotNo);
     add('batch', batchNo);
     add('PO', poNo);
@@ -148,6 +155,7 @@ class NcrFilters extends Equatable {
     Set<String>? inspectorIds,
     Set<String>? assignedTo,
     Set<String>? capaStatuses,
+    String? query,
     String? lotNo,
     String? batchNo,
     String? poNo,
@@ -168,6 +176,7 @@ class NcrFilters extends Equatable {
     inspectorIds: inspectorIds ?? this.inspectorIds,
     assignedTo: assignedTo ?? this.assignedTo,
     capaStatuses: capaStatuses ?? this.capaStatuses,
+    query: query ?? this.query,
     lotNo: lotNo ?? this.lotNo,
     batchNo: batchNo ?? this.batchNo,
     poNo: poNo ?? this.poNo,
@@ -202,6 +211,7 @@ class NcrFilters extends Equatable {
     inspectorIds,
     assignedTo,
     capaStatuses,
+    query,
     lotNo,
     batchNo,
     poNo,

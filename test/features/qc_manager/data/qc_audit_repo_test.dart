@@ -20,7 +20,7 @@ class _FakeAppPaths extends AppPaths {
   Future<Directory> appSupportRoot() async => Directory('$base/MaterialLab');
 }
 
-/// Immutability and chaining of `qc_audits` (plan V6_ENHANCED §21.3).
+/// Immutability and chaining of `qc_audits` (plan V6_ENHANCED Â§21.3).
 ///
 /// The interesting property is not "the repository has no delete method" - it is
 /// what happens when something *else* tries. Every tampering test here reaches
@@ -130,7 +130,7 @@ void main() {
   group('append', () {
     test('insert_creates_row_with_hash_and_prev_hash_null_for_first', () async {
       final id = await repo.append(
-        entityType: QcAuditEntity.goal,
+        entityType: QcAuditEntity.sop,
         entityId: '42',
         action: 'completed',
         before: {'status': 'InProgress'},
@@ -145,7 +145,7 @@ void main() {
       )).single;
       expect(row['hash'], hasLength(64));
       expect(row['prev_hash'], anyOf(isNull, ''));
-      expect(row['entity_type'], 'GOAL');
+      expect(row['entity_type'], 'SOP');
       expect(row['by_user_id'], 'uid-hana', reason: 'actor comes from session');
       expect(row['by_user_name'], 'Hana');
       expect(row['device_id'], 'device-1');
@@ -196,7 +196,7 @@ void main() {
       () async {
         // Inserted with keys in a deliberately unhelpful order.
         final id = await repo.append(
-          entityType: QcAuditEntity.goal,
+          entityType: QcAuditEntity.sop,
           entityId: '42',
           action: 'completed',
           before: {'z': 1, 'a': 2},
@@ -225,7 +225,7 @@ void main() {
     test('rejects a blank action', () async {
       await expectLater(
         repo.append(
-          entityType: QcAuditEntity.goal,
+          entityType: QcAuditEntity.sop,
           entityId: '1',
           action: '  ',
         ),
@@ -254,7 +254,7 @@ void main() {
   group('immutability', () {
     test('cannot_update_existing_audit_row', () async {
       final id = await repo.append(
-        entityType: QcAuditEntity.goal,
+        entityType: QcAuditEntity.sop,
         entityId: '42',
         action: 'created',
       );
@@ -280,7 +280,7 @@ void main() {
 
     test('cannot_delete_existing_audit_row', () async {
       final id = await repo.append(
-        entityType: QcAuditEntity.goal,
+        entityType: QcAuditEntity.sop,
         entityId: '42',
         action: 'created',
       );
@@ -294,7 +294,7 @@ void main() {
 
     test('cannot_delete_the_whole_table', () async {
       await repo.append(
-        entityType: QcAuditEntity.goal,
+        entityType: QcAuditEntity.sop,
         entityId: '1',
         action: 'created',
       );
@@ -307,7 +307,7 @@ void main() {
       await expectLater(
         db.transaction((txn) async {
           await repo.append(
-            entityType: QcAuditEntity.goal,
+            entityType: QcAuditEntity.sop,
             entityId: '99',
             action: 'created',
             exec: txn,
@@ -441,12 +441,12 @@ void main() {
   group('reads', () {
     test('filters by entity, action and paging', () async {
       await repo.append(
-        entityType: QcAuditEntity.goal,
+        entityType: QcAuditEntity.sop,
         entityId: '1',
         action: 'created',
       );
       await repo.append(
-        entityType: QcAuditEntity.goal,
+        entityType: QcAuditEntity.sop,
         entityId: '1',
         action: 'completed',
       );
@@ -457,15 +457,15 @@ void main() {
       );
 
       expect(await repo.count(), 3);
-      expect(await repo.count(entityType: QcAuditEntity.goal), 2);
+      expect(await repo.count(entityType: QcAuditEntity.sop), 2);
       expect(
-        await repo.count(entityType: QcAuditEntity.goal, entityId: '1'),
+        await repo.count(entityType: QcAuditEntity.sop, entityId: '1'),
         2,
       );
 
-      final goals = await repo.list(entityType: QcAuditEntity.goal);
+      final rows = await repo.list(entityType: QcAuditEntity.sop);
       expect(
-        goals.map((a) => a.action),
+        rows.map((a) => a.action),
         ['completed', 'created'],
         reason: 'newest first, so a screen shows the latest event at the top',
       );
@@ -481,7 +481,7 @@ void main() {
       'an entry round-trips into the model with its snapshots intact',
       () async {
         final id = await repo.append(
-          entityType: QcAuditEntity.goal,
+          entityType: QcAuditEntity.sop,
           entityId: '42',
           action: 'completed',
           before: {'status': 'InProgress'},
@@ -491,7 +491,7 @@ void main() {
 
         final entry = await repo.get(id);
         expect(entry, isNotNull);
-        expect(entry!.entityType, QcAuditEntity.goal);
+        expect(entry!.entityType, QcAuditEntity.sop);
         expect(entry.after['status'], 'Completed');
         expect(entry.before['status'], 'InProgress');
         expect(entry.meta['evidence'], 'sop101.pdf');
@@ -506,7 +506,7 @@ void main() {
 
     test('the export carries the chain verdict', () async {
       await repo.append(
-        entityType: QcAuditEntity.goal,
+        entityType: QcAuditEntity.sop,
         entityId: '1',
         action: 'created',
       );
@@ -523,7 +523,7 @@ void main() {
       final contract = _AppendOnlyContract();
       expect(
         await contract.append(
-          entityType: 'GOAL',
+          entityType: 'SOP',
           entityId: '1',
           action: 'created',
         ),
@@ -574,3 +574,5 @@ class _AppendOnlyContract implements QcAuditRepository {
   Future<QcChainVerification> verifyChain({int? limit}) async =>
       const QcChainVerification.ok(checked: 0, headHash: '');
 }
+
+

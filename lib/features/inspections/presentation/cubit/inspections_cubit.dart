@@ -12,11 +12,29 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
     required this.repo,
     required this.reports,
     this.kind = 'raw',
-    // Phones pass `kMobileMaxPageSize` (50); desktop keeps the default (200).
+    // Phones pass `kMobileMaxPageSize` (25); desktop keeps the default (200).
     // A constructor parameter — not a `FormFactor` read — so the cubit stays
     // platform-agnostic and tests keep the old default.
     int initialPageSize = 200,
-  }) : super(InspectionsState(pageSize: initialPageSize));
+    // Deep-link seeds (dashboard drill-down): applied once at construction,
+    // before the first load. Empty/null filters are inert.
+    String initialStatus = '',
+    String initialSupplier = '',
+    int? initialMaterialId,
+    String initialMaterialName = '',
+    String initialDateFrom = '',
+    String initialDateTo = '',
+  }) : super(
+          InspectionsState(
+            pageSize: initialPageSize,
+            status: initialStatus,
+            supplier: initialSupplier,
+            materialId: initialMaterialId,
+            materialName: initialMaterialName,
+            dateFrom: initialDateFrom,
+            dateTo: initialDateTo,
+          ),
+        );
 
   final InspectionRepository repo;
   final ReportRepository reports;
@@ -36,38 +54,44 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
         repo.list(
           query: state.query,
           status: state.status,
+          reason: state.reason,
           limit: state.pageSize,
           offset: page * state.pageSize,
           orderBy: 'inspection_date DESC, id DESC',
           kind: kind,
           dateFrom: state.dateFrom,
           dateTo: state.dateTo,
+          supplier: state.supplier,
           materialId: isProduct ? null : state.materialId,
           productId: isProduct ? state.materialId : null,
         ),
         repo.count(
           query: state.query,
           status: state.status,
+          reason: state.reason,
           kind: kind,
           dateFrom: state.dateFrom,
           dateTo: state.dateTo,
+          supplier: state.supplier,
           materialId: isProduct ? null : state.materialId,
           productId: isProduct ? state.materialId : null,
         ),
       ]);
       final rows = settled[0] as List<Map<String, dynamic>>;
       final total = settled[1] as int;
-      safeEmit(state.copyWith(
-        rows: rows,
-        visible: rows,
-        total: total,
-        page: page,
-        loading: false,
-      ));
+      safeEmit(
+        state.copyWith(
+          rows: rows,
+          visible: rows,
+          total: total,
+          page: page,
+          loading: false,
+        ),
+      );
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 
@@ -94,20 +118,40 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
     await load(page: 0);
   }
 
-  /// Applies the filter-dialog draft (status + inclusive date bounds +
-  /// material/product selection; null id = all).
+  /// Applies the reason (decision_reason) substring filter. The reason is
+  /// never a table column — it only narrows the register.
+  Future<void> setReason(String reason) async {
+    safeEmit(state.copyWith(reason: reason));
+    await load(page: 0);
+  }
+
+  /// Applies the exact-supplier filter (dashboard drill-down or the filter
+  /// dialog). Empty clears it.
+  Future<void> setSupplier(String supplier) async {
+    final next = supplier.trim();
+    if (next == state.supplier) return;
+    safeEmit(state.copyWith(supplier: next));
+    await load(page: 0);
+  }
+
+  /// Applies the filter-dialog draft (status + reason + inclusive date bounds
+  /// + supplier + material/product selection; null id = all).
   Future<void> applyFilters({
     required String status,
+    String reason = '',
     required String dateFrom,
     required String dateTo,
     required int? materialId,
     required String materialName,
+    String supplier = '',
   }) async {
     safeEmit(
       state.copyWith(
         status: status,
+        reason: reason,
         dateFrom: dateFrom,
         dateTo: dateTo,
+        supplier: supplier,
         materialId: materialId,
         materialName: materialName,
         clearMaterialId: materialId == null,
@@ -121,36 +165,49 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
     await load(page: 0);
   }
 
-  /// Clears status + date + material filters (the search query has its own
-  /// clear).
+  /// Clears status + reason + date + material + supplier filters (the search
+  /// query has its own clear).
   Future<void> clearFilters() async {
     if (state.status.isEmpty &&
+        state.reason.isEmpty &&
         state.dateFrom.isEmpty &&
         state.dateTo.isEmpty &&
+        state.supplier.isEmpty &&
         state.materialId == null) {
       return;
     }
-    safeEmit(state.copyWith(
-      status: '',
-      dateFrom: '',
-      dateTo: '',
-      clearMaterialId: true,
-    ));
+    safeEmit(
+      state.copyWith(
+        status: '',
+        reason: '',
+        dateFrom: '',
+        dateTo: '',
+        supplier: '',
+        clearMaterialId: true,
+      ),
+    );
     await load(page: 0);
   }
 
-  /// Removes one filter chip (`status`, `dates` or `material`).
+  /// Removes one filter chip (`status`, `reason`, `dates`, `material` or
+  /// `supplier`).
   Future<void> clearChip(String key) async {
     switch (key) {
       case 'status':
         if (state.status.isEmpty) return;
         safeEmit(state.copyWith(status: ''));
+      case 'reason':
+        if (state.reason.isEmpty) return;
+        safeEmit(state.copyWith(reason: ''));
       case 'dates':
         if (state.dateFrom.isEmpty && state.dateTo.isEmpty) return;
         safeEmit(state.copyWith(dateFrom: '', dateTo: ''));
       case 'material':
         if (state.materialId == null) return;
         safeEmit(state.copyWith(clearMaterialId: true));
+      case 'supplier':
+        if (state.supplier.isEmpty) return;
+        safeEmit(state.copyWith(supplier: ''));
       default:
         return;
     }

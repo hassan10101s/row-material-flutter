@@ -82,6 +82,18 @@ class AppErrors {
     '«$name» — المطلوب $requested $unit، المتاح $available $unit',
     '«$name» — required $requested $unit, available $available $unit',
   );
+  static String get lotExpiryRequired => AppText.t(
+    'تاريخ الصلاحية مطلوب عند إدخال كمية.',
+    'Expiry date is required when receiving quantity.',
+  );
+  static String get lotExpiryInvalid => AppText.t(
+    'تاريخ الصلاحية غير صالح (YYYY-MM-DD).',
+    'Expiry date is invalid (YYYY-MM-DD).',
+  );
+  static String get lotQtyRequired => AppText.t(
+    'كمية الاستلام يجب أن تكون أكبر من الصفر.',
+    'Received quantity must be greater than zero.',
+  );
 
   // ── Products (lab) ───────────────────────────────────────────────────────
 
@@ -220,8 +232,8 @@ class AppErrors {
   static String get selectAtLeastOne =>
       AppText.t('حدد سجلات واحدة على الأقل.', 'Select at least one record.');
   static String get maxLabels100 => AppText.t(
-    'الحد الأقصى 100 ملصق في المرة الواحدة.',
-    'Maximum 100 labels at a time.',
+    'الحد الأقصى 100 QR في المرة الواحدة.',
+    'Maximum 100 QR at a time.',
   );
 
   // ── Inspections ──────────────────────────────────────────────────────────
@@ -363,82 +375,76 @@ class AppErrors {
   );
   static String get parameterNameRequired =>
       AppText.t('اسم البارامتر مطلوب.', 'Parameter name is required.');
-  static String get parameterTypeInvalid => AppText.t(
-    'نوع البارامتر يجب أن يكون chemical أو physical.',
-    'parameter_type must be chemical or physical.',
-  );
+  static String get parameterTypeInvalid =>
+      AppText.t('نوع البارامتر غير صالح.', 'Invalid parameter type.');
   static String get unitSymbolRequired =>
       AppText.t('رمز الوحدة مطلوب.', 'Unit symbol is required.');
 
   // ── Backup / migration ───────────────────────────────────────────────────
 
   static String get backupIntegrityFail => AppText.t(
-    'ملف النسخة الاحتياطية تالف (فشل فحص السلامة integrity check).',
+    'ملف النسخة الاحتياطية تالف (فشل التحقق من السلامة).',
     'Backup file is corrupt (integrity check failed).',
   );
   static String backupMissingTables(Object missing) => AppText.t(
-    'ملف النسخة الاحتياطية غير صالح: الجداول المطلوبة ناقصة: $missing',
-    'Invalid backup file: required tables are missing: $missing',
+    'ملف النسخة الاحتياطية غير صالح: بيانات مطلوبة ناقصة.',
+    'Invalid backup file: required data is missing.',
   );
   static String backupSchemaTooOld(Object table, Object missingCols) =>
       AppText.t(
-        'ملف النسخة الاحتياطية قديم جداً أو غير متوافق مع هذا الإصدار: '
-            'جدول "$table" ينقصه الأعمدة: $missingCols',
-        'Backup file is too old or incompatible with this version: '
-            'table "$table" is missing columns: $missingCols',
+        'ملف النسخة الاحتياطية قديم جداً أو غير متوافق مع هذا الإصدار.',
+        'Backup file is too old or incompatible with this version.',
       );
   static String backupUnreadable(Object err) => AppText.t(
-    'ملف النسخة الاحتياطية تالف أو غير قابل للقراءة: $err',
-    'Backup file is corrupt or unreadable: $err',
+    'تعذر قراءة ملف النسخة الاحتياطية. تأكد من أن الملف سليم ثم أعد المحاولة.',
+    'Could not read the backup file. Make sure the file is valid and try again.',
   );
   static String backupUpgradeFailed(Object err) => AppText.t(
-    'تعذر ترقية النسخة الاحتياطية إلى بنية النسخة الحالية من البرنامج: $err',
-    'Could not upgrade the backup to the current app schema: $err',
+    'تعذر تجهيز النسخة الاحتياطية للاستخدام مع هذا الإصدار.',
+    'Could not prepare the backup for use with this version.',
   );
   static String get backupIntegrityAfterUpgrade => AppText.t(
     'فشل التحقق من سلامة النسخة الاحتياطية بعد الترقية التلقائية.',
     'Backup integrity verification failed after automatic upgrade.',
   );
   static String backupRestoreFailed(Object err) => AppText.t(
-    'فشل استرداد قاعدة البيانات: $err',
-    'Failed to restore database: $err',
+    'تعذر استرداد النسخة الاحتياطية. لم يتم تغيير بياناتك.',
+    'Could not restore the backup. Your data was not changed.',
   );
   static String get invalidMaterialsDb => AppText.t(
-    'قاعدة بيانات المواد غير صالحة: جدول reference_materials ناقص.',
-    'Invalid materials database: missing reference_materials table.',
+    'تعذر فتح بيانات المواد.',
+    'Could not open the materials data.',
   );
   static String get invalidParamsDb => AppText.t(
-    'قاعدة بيانات المواد غير صالحة: جدول parameters ناقص.',
-    'Invalid materials database: missing parameters table.',
+    'تعذر فتح البيانات المرجعية.',
+    'Could not open the reference data.',
   );
   static String incompatibleMaterialsTable(Object missing) => AppText.t(
-    'جدول المواد غير متوافق (ناقص: $missing).',
-    'Incompatible materials table (missing: $missing).',
+    'بيانات المواد غير متوافقة مع هذا الإصدار.',
+    'The materials data is not compatible with this version.',
   );
   static String incompatibleParamsTable(Object missing) => AppText.t(
-    'جدول البارامترات غير متوافق (ناقص: $missing).',
-    'Incompatible parameters table (missing: $missing).',
+    'البيانات المرجعية غير متوافقة مع هذا الإصدار.',
+    'The reference data is not compatible with this version.',
   );
   static String get backupPathMustDiffer => AppText.t(
-    'يجب أن يختلف مسار النسخة الاحتياطية عن مسار قاعدة البيانات النشطة.',
-    'Backup path must be different from the active database path.',
+    'اختر موقعاً مختلفاً عن موقع البيانات الحالي.',
+    'Choose a location different from the current data location.',
   );
   static String get backupVerifiedFail => AppText.t(
     'تم إنشاء النسخة الاحتياطية لكن فشل التحقق من سلامتها.',
     'Backup was created but integrity verification failed.',
   );
   static String get restoreActiveDbSelected => AppText.t(
-    'الملف المختار هو قاعدة البيانات النشطة نفسها.',
-    'Selected file is already the active database.',
+    'الملف المختار هو ملف البيانات الحالي نفسه.',
+    'Selected file is already the current data file.',
   );
   static String usersTableMissingColumns(Object missing) => AppText.t(
-    'جدول المستخدمين في قاعدة البيانات المصدر ينقصه أعمدة: $missing',
-    'Source database users table is missing columns: $missing',
+    'ملف المستخدمين المحدد غير متوافق مع هذا الإصدار.',
+    'The selected users file is not compatible with this version.',
   );
-  static String get restoreSuccess => AppText.t(
-    'تم استرداد قاعدة البيانات بنجاح.',
-    'Database was restored successfully.',
-  );
+  static String get restoreSuccess =>
+      AppText.t('تم استرداد البيانات بنجاح.', 'Data restored successfully.');
 
   // ── QR / logo / worksheet seeding ────────────────────────────────────────
 
@@ -458,8 +464,8 @@ class AppErrors {
   static String get batchLabelsSelectAtLeastOne =>
       AppText.t('حدد سجلات واحدة على الأقل.', 'Select at least one record.');
   static String get batchLabelsMax100 => AppText.t(
-    'الحد الأقصى 100 ملصق في المرة الواحدة.',
-    'Maximum of 100 labels at a time.',
+    'الحد الأقصى 100 QR في المرة الواحدة.',
+    'Maximum of 100 QR at a time.',
   );
   static String get dailyDateRequired =>
       AppText.t('التاريخ مطلوب', 'Date is required');
@@ -480,8 +486,8 @@ class AppErrors {
   static String seedNoWorksheet(Object label) =>
       AppText.t('لا توجد ورقة عمل في $label.', 'No worksheet found in $label.');
   static String seedMissingColumns(Object missing) => AppText.t(
-    'ملف Reference.xlsx ينقصه الأعمدة المطلوبة: $missing',
-    'Reference.xlsx is missing required columns: $missing',
+    'ملف Reference.xlsx لا يحتوي على البيانات المطلوبة: $missing',
+    'Reference.xlsx is missing required data: $missing',
   );
 
   // ── Formula engine ───────────────────────────────────────────────────────

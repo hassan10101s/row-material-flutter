@@ -58,14 +58,12 @@ void main() {
     'qc_capa',
     'qc_audits',
     'qc_defect_codes',
-    'qc_goals',
-    'qc_goal_assignments',
-    'qc_goal_actions',
-    'qc_goal_kpis',
-    'qc_goal_links',
+    'qc_custom_tables',
+    'qc_custom_table_fields',
+    'qc_custom_table_rows',
   ];
 
-  /// Indexes the NCR report and the goal screens depend on for their queries.
+  /// Indexes the NCR report and the register screens depend on for their queries.
   /// Each is listed with the table it must exist on, so a rename that silently
   /// drops the index shows up as a missing name rather than a slow screen.
   const requiredIndexes = {
@@ -95,14 +93,11 @@ void main() {
       'idx_qc_audits_at',
       'idx_qc_audits_actor',
     ],
-    'qc_goals': [
-      'idx_qc_goals_status',
-      'idx_qc_goals_owner',
-      'idx_qc_goals_due',
-    ],
-    'qc_goal_assignments': [
-      'idx_qc_goal_assign_goal',
-      'idx_qc_goal_assign_user',
+    'qc_custom_tables': ['idx_qc_custom_tables_deleted'],
+    'qc_custom_table_fields': ['idx_qc_custom_fields_table'],
+    'qc_custom_table_rows': [
+      'idx_qc_custom_rows_table',
+      'idx_qc_custom_rows_recorded',
     ],
   };
 
@@ -150,14 +145,6 @@ void main() {
 
   test('reopening is idempotent and keeps QC rows', () async {
     final first = await helper.database;
-    await first.insert('qc_goals', {
-      'code': 'G-TEST-1',
-      'title': 'Close every critical NC within 5 days',
-      'start_date': '2026-01-01',
-      'due_date': '2026-03-31',
-      'created_at': '2026-01-01 08:00:00',
-      'updated_at': '2026-01-01 08:00:00',
-    });
     await first.insert('qc_defect_codes', {
       'code': 'D-001',
       'name': 'Moisture above limit',
@@ -167,78 +154,7 @@ void main() {
     // Second open re-runs `_createSchema`; every statement is `IF NOT EXISTS`
     // so this must neither throw nor duplicate anything.
     final second = await helper.database;
-    expect(await second.query('qc_goals'), hasLength(1));
     expect(await second.query('qc_defect_codes'), hasLength(1));
-    expect(
-      await indexNamesOn(second, 'qc_goals'),
-      contains('idx_qc_goals_status'),
-    );
-  });
-
-  test('a goal records who finished it and what they attached', () async {
-    final db = await helper.database;
-    final id = await db.insert('qc_goals', {
-      'code': 'G-TEST-2',
-      'title': 'Publish SOP-101 by Q2',
-      'status': 'Completed',
-      'priority': 'Critical',
-      'start_date': '2026-04-01',
-      'due_date': '2026-06-30',
-      'completed_at': '2026-05-04 11:30:00',
-      'completed_by': 'uid-of-hana',
-      'completed_by_name': 'Hana',
-      'completion_evidence_json': '["/photos/sop101.pdf"]',
-      'created_at': '2026-04-01 08:00:00',
-      'updated_at': '2026-05-04 11:30:00',
-    });
-
-    final row = (await db.query(
-      'qc_goals',
-      where: 'goal_id = ?',
-      whereArgs: [id],
-    )).single;
-    expect(row['completed_by'], 'uid-of-hana');
-    expect(row['completed_by_name'], 'Hana');
-    expect(row['completed_at'], '2026-05-04 11:30:00');
-    expect(row['completion_evidence_json'], contains('sop101.pdf'));
-  });
-
-  test('assignments are unique per person per goal', () async {
-    final db = await helper.database;
-    final goalId = await db.insert('qc_goals', {
-      'code': 'G-TEST-3',
-      'title': 'Goal with two people',
-      'start_date': '2026-01-01',
-      'created_at': '2026-01-01 08:00:00',
-      'updated_at': '2026-01-01 08:00:00',
-    });
-
-    Map<String, Object?> assignment(String uid) => {
-      'goal_id': goalId,
-      'assignee_id': uid,
-      'assignee_name': uid,
-      'assigned_at': '2026-01-01 08:00:00',
-      'created_at': '2026-01-01 08:00:00',
-      'updated_at': '2026-01-01 08:00:00',
-    };
-
-    await db.insert('qc_goal_assignments', assignment('uid-a'));
-    await db.insert('qc_goal_assignments', assignment('uid-b'));
-
-    // Re-assigning the same person must not create a second row, or goal
-    // progress would count them twice.
-    expect(
-      () => db.insert('qc_goal_assignments', assignment('uid-a')),
-      throwsA(isA<Exception>()),
-    );
-    expect(
-      await db.query(
-        'qc_goal_assignments',
-        where: 'goal_id = ?',
-        whereArgs: [goalId],
-      ),
-      hasLength(2),
-    );
   });
 
   test('a finding cascades away with its inspection', () async {
@@ -273,6 +189,221 @@ void main() {
       isEmpty,
       reason: 'FK cascade must take the finding with the inspection',
     );
+  });
+
+  test('a legacy qc_findings_nc is rebuilt to allow standalone findings',
+      () async {
+    // The NCR create window raises findings with no inspection linked. A NULL
+    // child key satisfies the FK to qc_inspections, but the column shipped as
+    // NOT NULL, so pre-existing installs carry it and every standalone save
+    // would trip the FK. Simulated like such an install: rebuild the table
+    // with the legacy DDL, seed it, close, and let the every-open guarantee
+    // run the guarded rebuild.
+    final first = await helper.database;
+    await first.execute('DROP TABLE qc_capa');
+    await first.execute('DROP TABLE qc_findings_nc');
+    await first.execute('''
+      CREATE TABLE qc_findings_nc (
+        finding_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inspection_id INTEGER NOT NULL,
+        item_id INTEGER,
+        resp_id INTEGER,
+        code TEXT,
+        severity TEXT CHECK(severity IN ('Minor','Major','Critical')) NOT NULL,
+        category TEXT,
+        description TEXT NOT NULL,
+        status TEXT CHECK(status IN ('Open','Assigned','InProgress','Verified','Closed','Rejected')) DEFAULT 'Open',
+        type TEXT CHECK(type IN ('NonConformance','Observation','Deviation')) DEFAULT 'NonConformance',
+        due_date TEXT,
+        assigned_to TEXT,
+        assigned_to_name TEXT,
+        assigned_at TEXT,
+        root_cause TEXT,
+        action_plan TEXT,
+        proposed_action TEXT,
+        qty_affected REAL,
+        qty_unit TEXT,
+        disposition TEXT CHECK(disposition IN ('Rework','Scrap','UseAsIs','Return','Concession','Pending')) DEFAULT 'Pending',
+        verified_by TEXT,
+        verified_by_name TEXT,
+        verified_at TEXT,
+        closed_at TEXT,
+        closed_by TEXT,
+        rejected_at TEXT,
+        rejection_reason TEXT,
+        evidence_json TEXT,
+        capa_id INTEGER,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        FOREIGN KEY(inspection_id) REFERENCES qc_inspections(inspection_id) ON DELETE CASCADE,
+        FOREIGN KEY(resp_id) REFERENCES qc_responses(resp_id)
+      )
+    ''');
+    await first.execute('''
+      CREATE TABLE qc_capa (
+        capa_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        finding_id INTEGER UNIQUE,
+        type TEXT CHECK(type IN ('Corrective','Preventive')) NOT NULL,
+        action_plan TEXT,
+        root_cause TEXT,
+        status TEXT CHECK(status IN ('Open','InProgress','Verified','Closed','Rejected')) DEFAULT 'Open',
+        priority TEXT CHECK(priority IN ('Low','Medium','High')) DEFAULT 'Medium',
+        due_at TEXT,
+        assigned_to TEXT,
+        assigned_to_name TEXT,
+        target_completion_at TEXT,
+        action_completed_at TEXT,
+        is_effective INTEGER DEFAULT 0,
+        effectiveness_checked_at TEXT,
+        effectiveness_notes TEXT,
+        closure_notes TEXT,
+        closed_at TEXT,
+        closed_by TEXT,
+        rejected_at TEXT,
+        rejection_reason TEXT,
+        evidence_json TEXT,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT,
+        FOREIGN KEY(finding_id) REFERENCES qc_findings_nc(finding_id) ON DELETE CASCADE
+      )
+    ''');
+    final templateId = await first.insert('qc_templates', {
+      'name': 'Legacy template',
+      'created_at': '2026-02-01 08:00:00',
+      'updated_at': '2026-02-01 08:00:00',
+    });
+    final inspectionId = await first.insert('qc_inspections', {
+      'template_id': templateId,
+      'inspection_date': '2026-02-02',
+      'created_at': '2026-02-02 09:00:00',
+      'updated_at': '2026-02-02 09:00:00',
+    });
+    await first.insert('qc_findings_nc', {
+      'inspection_id': inspectionId,
+      'severity': 'Major',
+      'description': 'Legacy linked finding',
+      'status': 'Closed',
+      'created_at': '2026-02-02 09:00:00',
+      'updated_at': '2026-02-02 09:00:00',
+    });
+    final storedSql = await first.rawQuery(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' "
+      "AND name = 'qc_findings_nc'",
+    );
+    // ignore: avoid_print
+    print('SQL_AT_CLOSE: '
+        '${'${storedSql.first['sql']}'.replaceAll('\n', ' ')}');
+    await helper.close();
+
+    final reopened = await helper.database;
+
+    // The constraint itself is gone, not just bypassed.
+    final cols = await reopened.rawQuery('PRAGMA table_info(qc_findings_nc)');
+    final inspectionCol = cols.singleWhere((c) => c['name'] == 'inspection_id');
+    expect(inspectionCol['notnull'], 0);
+
+    // ...the legacy rows travelled with the rebuild...
+    final rows = await reopened.query('qc_findings_nc');
+    expect(rows, hasLength(1));
+    expect(rows.single['description'], 'Legacy linked finding');
+    expect(rows.single['status'], 'Closed');
+
+    // ...and the AUTOINCREMENT sequence does not reuse legacy ids.
+    final nextId = await reopened.insert('qc_findings_nc', {
+      'inspection_id': null,
+      'severity': 'Minor',
+      'description': 'Standalone after migration',
+      'status': 'Open',
+      'created_at': '2026-02-03 09:00:00',
+      'updated_at': '2026-02-03 09:00:00',
+    });
+    expect(nextId, greaterThan(1));
+
+    // The FK stays: a NULL child is a standalone finding, but garbage ids
+    // are still rejected.
+    expect(
+      () => reopened.insert('qc_findings_nc', {
+        'inspection_id': 4242,
+        'severity': 'Minor',
+        'description': 'Not an inspection',
+        'created_at': '2026-02-03 09:00:00',
+        'updated_at': '2026-02-03 09:00:00',
+      }),
+      throwsA(isA<Exception>()),
+    );
+  });
+
+  test('a custom table cascades away with its columns and records', () async {
+    final db = await helper.database;
+    final tableId = await db.insert('qc_custom_tables', {
+      'remote_id': 'tbl-remote-1',
+      'title': 'Sample weights',
+      'created_at': '2026-01-01 08:00:00',
+      'updated_at': '2026-01-01 08:00:00',
+    });
+    final fieldId = await db.insert('qc_custom_table_fields', {
+      'table_id': tableId,
+      'table_remote_id': 'tbl-remote-1',
+      'remote_id': 'fld-remote-1',
+      'label': 'Weight',
+      'col_type': 'number',
+      'required': 1,
+      'sort_order': 0,
+      'created_at': '2026-01-01 08:00:00',
+      'updated_at': '2026-01-01 08:00:00',
+    });
+    await db.insert('qc_custom_table_rows', {
+      'table_id': tableId,
+      'table_remote_id': 'tbl-remote-1',
+      'remote_id': 'row-remote-1',
+      'values_json': '{"fld-remote-1": 12.5}',
+      'recorded_at': '2026-01-02 09:00:00',
+      'created_at': '2026-01-02 09:00:00',
+      'updated_at': '2026-01-02 09:00:00',
+    });
+
+    // The column type CHECK is what stops a drift between devices from
+    // writing an unrepresentable value.
+    expect(
+      () => db.insert('qc_custom_table_fields', {
+        'table_id': tableId,
+        'table_remote_id': 'tbl-remote-1',
+        'remote_id': 'fld-remote-2',
+        'label': 'Photo',
+        'col_type': 'image',
+        'required': 0,
+        'sort_order': 1,
+        'created_at': '2026-01-01 08:00:00',
+        'updated_at': '2026-01-01 08:00:00',
+      }),
+      throwsA(isA<Exception>()),
+      reason: 'only number/text/date columns can sync as plain values',
+    );
+
+    expect(await db.query('qc_custom_table_fields'), hasLength(1));
+    expect(await db.query('qc_custom_table_rows'), hasLength(1));
+    await db.delete(
+      'qc_custom_tables',
+      where: 'table_id = ?',
+      whereArgs: [tableId],
+    );
+    expect(
+      await db.query('qc_custom_table_fields'),
+      isEmpty,
+      reason: 'FK cascade must take the columns with the table',
+    );
+    expect(
+      await db.query('qc_custom_table_rows'),
+      isEmpty,
+      reason: 'FK cascade must take the records with the table',
+    );
+    expect(fieldId, greaterThan(0));
   });
 
   test('audit rows reject an unknown entity_type', () async {
@@ -323,11 +454,9 @@ void main() {
 
   /// Child tables first, so the drop order never depends on FK enforcement.
   const qcTablesChildFirst = [
-    'qc_goal_links',
-    'qc_goal_kpis',
-    'qc_goal_actions',
-    'qc_goal_assignments',
-    'qc_goals',
+    'qc_custom_table_rows',
+    'qc_custom_table_fields',
+    'qc_custom_tables',
     'qc_defect_codes',
     'qc_audits',
     'qc_capa',
@@ -347,8 +476,8 @@ void main() {
     // The regression this pins. The schema version is pinned at 1, so `onCreate`
     // and `onUpgrade` never fire for an already-installed app. Creating the QC
     // tables only from `_createSchema` therefore left every existing install
-    // without them, and the first QC query failed with "no such table:
-    // qc_goals" - a crash that no fresh-install test or type check would catch.
+    // without them, and the first QC query failed with "no such table" - a
+    // crash that no fresh-install test or type check would catch.
     //
     // Simulated by building a full database, stripping the QC tables back off,
     // and reopening: that is byte-for-byte what a pre-QC install looks like.
@@ -363,7 +492,7 @@ void main() {
     for (final t in qcTablesChildFirst) {
       await first.execute('DROP TABLE IF EXISTS $t');
     }
-    expect(await tablesOf(first), isNot(contains('qc_goals')));
+    expect(await tablesOf(first), isNot(contains('qc_inspections')));
     await helper.close();
 
     final reopened = await helper.database;
@@ -378,10 +507,6 @@ void main() {
     expect(
       await indexNamesOn(reopened, 'qc_inspections'),
       containsAll(requiredIndexes['qc_inspections']!),
-    );
-    expect(
-      await indexNamesOn(reopened, 'qc_goals'),
-      containsAll(requiredIndexes['qc_goals']!),
     );
 
     // ...and the install's own data is still there.
@@ -408,7 +533,7 @@ void main() {
     expect(await tablesOf(third), containsAll(qcTables));
     // Re-running `CREATE INDEX IF NOT EXISTS` over an existing index must not
     // fail or duplicate it.
-    final goalIndexes = await indexNamesOn(third, 'qc_goals');
-    expect(goalIndexes.where((n) => n == 'idx_qc_goals_status'), hasLength(1));
+    final inspectionIndexes = await indexNamesOn(third, 'qc_inspections');
+    expect(inspectionIndexes.where((n) => n == 'idx_qc_insps_status'), hasLength(1));
   });
 }

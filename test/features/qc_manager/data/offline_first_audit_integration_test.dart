@@ -10,7 +10,6 @@ import 'package:material_lab/features/organizations/data/member_write_guard.dart
 import 'package:material_lab/features/qc_manager/data/offline_first_qc_repository.dart';
 import 'package:material_lab/features/qc_manager/data/qc_audit_repo.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
-import 'package:material_lab/features/qc_manager/domain/qc_goal.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_inspection.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_nc_capa.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_sop.dart';
@@ -18,14 +17,14 @@ import 'package:material_lab/features/qc_manager/domain/qc_template.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'
     show Database, DatabaseException;
 
-/// The offline-first contract for QC (plan V6_ENHANCED §21.3, P3).
+/// The offline-first contract for QC (plan V6_ENHANCED Â§21.3, P3).
 ///
 /// The local repositories are proven elsewhere (`qc_repo_test.dart`). What is
 /// proven *here* is the seam the local layer deliberately does not have:
 ///
 ///  * the write, its `qc_audits` row and (where relevant) its `sync_queue` row
 ///    commit as one unit,
-///  * the §9.4 guards run before anything is written,
+///  * the Â§9.4 guards run before anything is written,
 ///  * the actor comes from the live session, and
 ///  * a rollback takes the audit evidence with it rather than leaving a trail of
 ///    something that never happened.
@@ -134,17 +133,6 @@ void main() {
     createdAt: t0,
     updatedAt: t0,
   );
-
-  QcGoal goal({String code = 'GOAL-1', String status = QcGoalStatus.draft}) =>
-      QcGoal(
-        code: code,
-        title: 'Cut weld defects',
-        goalType: QcGoalType.kpi,
-        startDate: t0,
-        status: status,
-        createdAt: t0,
-        updatedAt: t0,
-      );
 
   QcFindingNc finding({
     required int inspectionId,
@@ -320,68 +308,6 @@ void main() {
         );
       },
     );
-
-    test('a goal completion records who finished it and audits it', () async {
-      final r = repos(approver());
-      final goalId = await r.goals.createGoal(goal());
-
-      final done = goal(status: QcGoalStatus.completed);
-      await r.goals.saveGoal(
-        QcGoal(
-          goalId: goalId,
-          code: done.code,
-          title: done.title,
-          goalType: done.goalType,
-          startDate: t0,
-          status: QcGoalStatus.completed,
-          completedBy: 'u1',
-          completedByName: 'Shift Lead',
-          completedAt: t1,
-          createdAt: t0,
-          updatedAt: t1,
-        ),
-      );
-
-      final stored = await r.goals.getGoal(goalId);
-      expect(stored!.completedBy, 'u1');
-      expect(stored.completedAt, t1);
-      final audit = (await r.audit.list(
-        action: QcAuditAction.goalCompleted,
-      )).single;
-      expect(audit.entityId, '$goalId');
-      expect(audit.after['completed_by'], 'u1');
-    });
-
-    test(
-      'completing a goal is refused without the approve permission',
-      () async {
-        final r = repos(_TestGuard());
-        final goalId = await r.goals.createGoal(goal());
-
-        await expectLater(
-          r.goals.saveGoal(
-            QcGoal(
-              goalId: goalId,
-              code: 'GOAL-1',
-              title: 'Cut weld defects',
-              startDate: t0,
-              status: QcGoalStatus.completed,
-              createdAt: t0,
-              updatedAt: t1,
-            ),
-          ),
-          throwsA(isA<AuthorizationError>()),
-        );
-        expect(
-          (await r.goals.getGoal(goalId))!.status,
-          isNot(QcGoalStatus.completed),
-        );
-        expect(
-          await r.audit.list(action: QcAuditAction.goalCompleted),
-          isEmpty,
-        );
-      },
-    );
   });
 
   group('validation happens before the write', () {
@@ -548,39 +474,6 @@ void main() {
       );
       expect((await r.ncCapa.getFinding(findingId))!.status, NcStatus.open);
     });
-
-    test('marking a goal action done is a distinguished event', () async {
-      final r = repos(approver());
-      final goalId = await r.goals.createGoal(goal());
-      final actionId = await r.goals.addAction(
-        QcGoalAction(
-          goalId: goalId,
-          actionText: 'Re-train the welder',
-          createdAt: t0,
-          updatedAt: t0,
-        ),
-      );
-
-      await r.goals.saveAction(
-        QcGoalAction(
-          actionId: actionId,
-          goalId: goalId,
-          actionText: 'Re-train the welder',
-          status: QcGoalActionStatus.done,
-          doneAt: t1,
-          doneBy: 'u1',
-          createdAt: t0,
-          updatedAt: t1,
-        ),
-      );
-
-      final audit = (await r.audit.list(
-        action: QcAuditAction.goalActionDone,
-      )).single;
-      expect(audit.entityId, '$actionId');
-      expect(audit.before['status'], isNot(QcGoalActionStatus.done));
-      expect(audit.after['status'], QcGoalActionStatus.done);
-    });
   });
 
   group('the trail is still append-only through the facade', () {
@@ -637,8 +530,8 @@ void main() {
 
         final newId = await r.templates.duplicateTemplate(
           templateId,
-          'TPL-1-v2',
           'Daily weld check v2',
+          newCode: 'TPL-1-v2',
         );
 
         final copy = await r.templates.getTemplate(newId);

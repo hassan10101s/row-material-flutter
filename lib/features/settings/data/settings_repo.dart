@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/app_paths.dart';
+import '../../../core/constants/report_form_keys.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/security/seal_codec.dart';
@@ -60,6 +61,23 @@ class SettingsRepo implements SettingsRepository {
       'export_root_path': ?exportRoot,
       'whatsapp_launch_url': 'https://web.whatsapp.com/',
       'department_label': 'Quality Assurance Department',
+      // Per-form QA form numbers (`نموذج رقم / Form No:` on the printed
+      // document), each editable from the gear button beside its own report
+      // or label. `qa_form_no` is the legacy global value, kept as a fallback
+      // for any form whose own key is still empty.
+      ReportFormKeys.global: '',
+      ReportFormKeys.inspectionReport: '',
+      ReportFormKeys.inspectionLabel: '',
+      // Equipment label keeps its historical key.
+      ReportFormKeys.equipmentLabel: '',
+      ReportFormKeys.dailyReport: '',
+      ReportFormKeys.monthlyReport: '',
+      ReportFormKeys.yearlyReport: '',
+      ReportFormKeys.followUpReport: '',
+      ReportFormKeys.labDailyReport: '',
+      ReportFormKeys.labMonthlyReport: '',
+      ReportFormKeys.labYearlyReport: '',
+      ReportFormKeys.ncrReport: '',
       'usage_expiry_date': '',
       'report_logo_path': '',
       'reference_seed_done': '0',

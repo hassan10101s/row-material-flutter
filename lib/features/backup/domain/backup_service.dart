@@ -24,9 +24,8 @@ abstract interface class BackupService {
   /// Importing local password hashes into the roster would resurrect the exact
   /// vulnerability V2 removes, and Firebase UIDs cannot be invented locally.
   static const String usersImportDisabledMessage =
-      'استيراد المستخدمين معطّل في النسخة الثانية: الهوية أصبحت عبر Google/Firebase. '
-      'أضف الأعضاء من شاشة "الأعضاء" (Members) داخل التطبيق، وسيتم ربط كل بريد '
-      'بحسابه تلقائيًا عند أول تسجيل دخول.';
+      'استيراد المستخدمين غير متاح. أضف الأعضاء من شاشة "الأعضاء" داخل التطبيق، '
+      'وسيتم ربط كل بريد بحسابه تلقائيًا عند أول تسجيل دخول.';
 
   // ── Backup / restore ───────────────────────────────────────────
 

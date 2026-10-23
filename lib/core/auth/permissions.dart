@@ -139,12 +139,33 @@ abstract final class AppRoles {
 }
 
 /// Organization lifecycle states (plan: single-company policy §4).
+///
+/// Trial model (30-day one-time trial):
+/// `trial` → (after 30 days) → `suspended` → (manual activation by support)
+/// → `active` (permanent, never auto-suspended again).
+///
+/// `disabled` is a legacy value kept for backward compatibility with older
+/// documents; new code never writes it.
 abstract final class OrgStatus {
   static const String trial = 'trial';
+  static const String suspended = 'suspended';
   static const String active = 'active';
   static const String disabled = 'disabled';
 
-  static const List<String> all = [trial, active, disabled];
+  static const List<String> all = [trial, suspended, active, disabled];
+
+  /// Statuses in which an organization is usable (dashboard + sync open).
+  /// `suspended` is the only non-usable state for trial expiry: the member
+  /// may still be `active`, but the company is locked until manual activation.
+  static const List<String> usable = [trial, active];
+
+  /// Length of the one-time free trial, in days.
+  static const int trialDays = 30;
+
+  static bool isSuspended(String? status) => status == suspended;
+
+  static bool isUsable(String? status) =>
+      status == trial || status == active;
 }
 
 /// Member states.

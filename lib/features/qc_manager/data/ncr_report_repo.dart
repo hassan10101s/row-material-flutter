@@ -192,6 +192,24 @@ LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
       args['refid'] = '%${f.refId}%';
     }
 
+    // Free-text search: one term matched across every human-readable column a
+    // reader would scan the table for (code/description/category/assignee plus
+    // the inspection's lot/batch/PO/GRN/inspector).
+    if (f.query.isNotEmpty) {
+      clauses.add(
+        "(COALESCE(fn.code, '') LIKE :q"
+        " OR COALESCE(fn.description, '') LIKE :q"
+        " OR COALESCE(fn.category, '') LIKE :q"
+        " OR COALESCE(fn.assigned_to_name, '') LIKE :q"
+        " OR COALESCE(i.lot_no, '') LIKE :q"
+        " OR COALESCE(i.batch_no, '') LIKE :q"
+        " OR COALESCE(i.po_no, '') LIKE :q"
+        " OR COALESCE(i.grn_no, '') LIKE :q"
+        " OR COALESCE(i.inspector_name, '') LIKE :q)",
+      );
+      args['q'] = '%${f.query}%';
+    }
+
     // The date range is matched against the column the user picked, date-only
     // on both ends so `from=2026-09-01` includes everything that happened on
     // the 1st, whatever time it happened at.
@@ -216,11 +234,18 @@ LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
       );
     }
 
-    // A finding whose inspection was deleted is not reportable: the report's
-    // entire value is the lot/batch/inspector context, and without it the row
-    // is an anonymous NC that cannot be traced back to anything.
-    clauses.add('i.inspection_id IS NOT NULL');
-    clauses.add('i.deleted_at IS NULL');
+    // Reportability rule. Two families of rows, one predicate:
+    //  * standard findings point at a live inspection and stay reportable
+    //    through it (`i.deleted_at IS NULL`);
+    //  * standalone findings raised from the create-NCR window carry a NULL
+    //    `inspection_id` (the FK to qc_inspections is satisfied by a NULL
+    //    child; 0 would never match any parent row), and the LEFT JOIN
+    //    leaves `i.*` NULL for them - they are reportable on their own
+    //    account.
+    // A finding whose linked inspection was hard-killed or tombstoned
+    // remains excluded: without the lot/batch/inspector context it cannot
+    // be traced back to anything, which is the report's entire value.
+    clauses.add('(fn.inspection_id IS NULL OR i.deleted_at IS NULL)');
 
     return _Clause(clauses.join(' AND '), args);
   }
@@ -670,8 +695,9 @@ WHERE i.deleted_at IS NULL AND COALESCE(i.$idColumn, '') <> ''
     // result set for the auditor who selects it.
     String findingScope(String column) =>
         'FROM qc_findings_nc fn '
-        'JOIN qc_inspections i ON i.inspection_id = fn.inspection_id '
-        'WHERE fn.deleted_at IS NULL AND i.deleted_at IS NULL '
+        'LEFT JOIN qc_inspections i ON i.inspection_id = fn.inspection_id '
+        'WHERE fn.deleted_at IS NULL '
+        'AND (fn.inspection_id IS NULL OR i.deleted_at IS NULL) '
         "AND COALESCE(fn.$column, '') <> ''";
 
     Future<List<String>> findingFacet(String column) async {
@@ -716,8 +742,9 @@ WHERE i.deleted_at IS NULL AND COALESCE(i.$idColumn, '') <> ''
 SELECT DISTINCT fn.assigned_to AS id,
        COALESCE(NULLIF(fn.assigned_to_name, ''), fn.assigned_to) AS name
 FROM qc_findings_nc fn
-JOIN qc_inspections i ON i.inspection_id = fn.inspection_id
-WHERE fn.deleted_at IS NULL AND i.deleted_at IS NULL
+LEFT JOIN qc_inspections i ON i.inspection_id = fn.inspection_id
+WHERE fn.deleted_at IS NULL
+  AND (fn.inspection_id IS NULL OR i.deleted_at IS NULL)
   AND COALESCE(fn.assigned_to, '') <> ''
 ''');
     return [

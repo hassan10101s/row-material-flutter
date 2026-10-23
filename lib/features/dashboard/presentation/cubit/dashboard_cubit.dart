@@ -10,10 +10,8 @@ import 'dashboard_state.dart';
 /// typed KPI cards can be rebuilt from Equatable state; the bundle follows
 /// in the same load so hero cards and analyst sections never disagree.
 class DashboardCubit extends AppCubit<DashboardState> {
-  DashboardCubit({
-    required this.repo,
-    required this.kpis,
-  }) : super(const DashboardState());
+  DashboardCubit({required this.repo, required this.kpis})
+    : super(const DashboardState());
 
   final DashboardRepository repo;
   final DashboardKpisCubit kpis;
@@ -42,15 +40,17 @@ class DashboardCubit extends AppCubit<DashboardState> {
       kpis.hydrate(results[1] as Map<String, dynamic>);
       final bundle = results[3] as DashboardBundle?;
       if (bundle != null) kpis.hydrateBundle(bundle);
-      safeEmit(state.copyWith(
-        loading: false,
-        summary: results[0] as Map<String, dynamic>,
-        filterOptions: results[2] as DashboardFilterOptions,
-      ));
+      safeEmit(
+        state.copyWith(
+          loading: false,
+          summary: results[0] as Map<String, dynamic>,
+          filterOptions: results[2] as DashboardFilterOptions,
+        ),
+      );
     } on AppError catch (e) {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 
@@ -91,6 +91,24 @@ class DashboardCubit extends AppCubit<DashboardState> {
   void setStatus(String status) {
     if (status == state.selectedStatus || state.loading) return;
     safeEmit(state.copyWith(selectedStatus: status));
+    load();
+  }
+
+  /// Clears material/supplier/status in one shot — a single reload instead of
+  /// three stacked loads.
+  void clearFilters() {
+    if (state.selectedMaterial == 'ALL' &&
+        state.selectedSupplier == 'ALL' &&
+        state.selectedStatus == 'ALL') {
+      return;
+    }
+    safeEmit(
+      state.copyWith(
+        selectedMaterial: 'ALL',
+        selectedSupplier: 'ALL',
+        selectedStatus: 'ALL',
+      ),
+    );
     load();
   }
 }

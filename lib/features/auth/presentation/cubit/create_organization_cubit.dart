@@ -1,6 +1,7 @@
 import '../../../../app/auth_gate.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/state/app_cubit.dart';
+import '../../../../core/utils/app_exceptions.dart';
 import '../../domain/auth_repository.dart';
 import '../../../organizations/domain/organization_repository.dart';
 import 'create_organization_state.dart';
@@ -79,7 +80,7 @@ class CreateOrganizationCubit extends AppCubit<CreateOrganizationState> {
       safeEmit(state.copyWith(busy: false, error: e.message));
       return false;
     } on Object catch (e) {
-      safeEmit(state.copyWith(busy: false, error: '$e'));
+      safeEmit(state.copyWith(busy: false, error: AppError.friendly(e)));
       return false;
     }
   }

@@ -54,7 +54,7 @@ class DesktopMaterialsTab extends StatefulWidget {
   ];
 
   static String exportTitle() =>
-      AppText.t('المواد المرجعية', 'Reference Materials');
+      AppText.t('خامات مرجعية', 'Reference Materials');
 
   @override
   State<DesktopMaterialsTab> createState() => _DesktopMaterialsTabState();

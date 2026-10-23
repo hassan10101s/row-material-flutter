@@ -109,8 +109,8 @@ void main() {
       user: null,
     );
     final testRow = result['test'] as Map;
-    expect(testRow['result_text'], '5.0',
-        reason: 'fixed V=2.5 × selected C=2');
+    expect(testRow['result_text'], '5.000',
+        reason: 'fixed V=2.5 × selected C=2, stored with 3 decimals');
     final consumption =
         (result['consumption'] as List).cast<Map<String, dynamic>>();
     expect(consumption, hasLength(1),

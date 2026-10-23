@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "603169053186",
+    "project_id": "materiallab-63405",
+    "storage_bucket": "materiallab-63405.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:603169053186:android:5a57a7d696d4030edb251b",
+        "android_client_info": {
+          "package_name": "com.materiallab"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "603169053186-at9vt5ptgvl4mp8a24ea3gulce9jpq66.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.materiallab",
+            "certificate_hash": "f3b4bf7d7f5be94d85bbbae5f1a9b828696efbeb"
+          }
+        },
+        {
+          "client_id": "603169053186-gqbpf6nmn1g5p9tdq7tergah0o298jha.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.materiallab",
+            "certificate_hash": "0de498f6e676272b97669f1493e097c6f199a9da"
+          }
+        },
+        {
+          "client_id": "603169053186-rcvet128phhlju5pjngtc1oqmi508f84.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC5Qv-g5i5EtV3AdOALg3giaG_duD9pp-8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "603169053186-rcvet128phhlju5pjngtc1oqmi508f84.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

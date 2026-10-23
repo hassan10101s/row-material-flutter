@@ -33,3 +33,28 @@ String buildQrPayloadText({
   // keeps its tamper-evidence for the origin device.
   return encodeAppQrPayload(entryCode: entryCode, body: body);
 }
+
+/// Equipment-label twin of [buildQrPayloadText]: the QR carries the device
+/// code **only** (slim, camera-friendly), still sealed when a key is
+/// available. The envelope carries `kind: 'equipment'` so the scanner opens
+/// the device file instead of an inspection; the code itself is already
+/// printed human-readable under the QR.
+String buildEquipmentQrPayloadText({
+  required Map<String, dynamic> equipment,
+  List<int>? encryptKey,
+}) {
+  final code = '${equipment['code'] ?? ''}';
+
+  final raw = jsonEncode({'ec': code, 'kind': appQrKindEquipment});
+  final String body;
+  if (encryptKey != null && encryptKey.isNotEmpty) {
+    body = sealText(raw, encryptKey);
+  } else {
+    body = raw;
+  }
+  return encodeAppQrPayload(
+    entryCode: code,
+    body: body,
+    kind: appQrKindEquipment,
+  );
+}

@@ -646,6 +646,95 @@ void main() {
     });
   });
 
+  group('revision guard (lost-update race)', () {
+    // The regression: while a claimed push is in flight, the user edits the
+    // row again. The edit merges into the *same* queue row (partial unique
+    // index) and resets it to `pending`. When the older push then settles by
+    // id it used to delete that row, silently discarding the newer edit.
+    Future<QueueEntry> enqueueAndClaim(String code, int id) async {
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: code,
+            localRef: id,
+            operation: 'create',
+            payload: const {'v': 1},
+          ));
+      return (await queue.claim()).single;
+    }
+
+    Future<void> editWhileInFlight(String code, int id) async {
+      await fixture.transaction((txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: code,
+            localRef: id,
+            operation: 'update',
+            payload: const {'v': 2},
+          ));
+    }
+
+    test('a push that finishes after a newer edit does not delete that edit',
+        () async {
+      final id = await insertSample('QC-RACE1');
+      final claimed = await enqueueAndClaim('QC-RACE1', id);
+      await editWhileInFlight('QC-RACE1', id);
+
+      await queue.markDone(claimed, remoteVersion: 9);
+
+      final rows = await queue.listQueue();
+      expect(rows, hasLength(1),
+          reason: 'the older push must not delete the newer edit');
+      expect(rows.single['status'], 'pending');
+      expect('${rows.single['payload']}', contains('"v":2'));
+      final local = (await fixture.db
+              .query('inspections', where: 'id = ?', whereArgs: [id]))
+          .single;
+      expect(local['sync_state'], isNot('synced'),
+          reason: 'the local row still carries an unsynced edit');
+      expect(local['remote_version'], 0,
+          reason: 'the stale push must not stamp its remote version');
+    });
+
+    test('a stale retry does not reset the newer edit\'s backoff', () async {
+      final id = await insertSample('QC-RACE2');
+      final claimed = await enqueueAndClaim('QC-RACE2', id);
+      await editWhileInFlight('QC-RACE2', id);
+
+      await queue.markRetry(claimed, 'offline');
+
+      final row = (await queue.listQueue()).single;
+      expect(row['status'], 'pending');
+      expect(row['retry_count'], 0, reason: 'the newer edit is a fresh attempt');
+      expect(row['last_error'], isNull);
+      expect(row['next_attempt_at'], isNull, reason: 'no stale backoff');
+    });
+
+    test('a stale conflict is not parked against a newer edit', () async {
+      final id = await insertSample('QC-RACE3');
+      final claimed = await enqueueAndClaim('QC-RACE3', id);
+      await editWhileInFlight('QC-RACE3', id);
+
+      await queue.markConflict(claimed, direction: 'push_rejected');
+
+      expect(await queue.listConflicts(), isEmpty,
+          reason: 'the user must not resolve a conflict for a superseded payload');
+      expect((await queue.listQueue()).single['status'], 'pending');
+    });
+
+    test('recovery supersedes a settlement that outlived its claim', () async {
+      final id = await insertSample('QC-RACE4');
+      final claimed = await enqueueAndClaim('QC-RACE4', id);
+
+      expect(await queue.recoverStalled(), 1);
+      await queue.markDone(claimed, remoteVersion: 5);
+
+      final row = (await queue.listQueue()).single;
+      expect(row['status'], 'pending',
+          reason: 'the recovered row must not be deleted by the dead claim');
+    });
+  });
+
   test('purgeSolved drops rows whose local row disappeared, keeps tombstones',
       () async {
     final goneId = await insertSample('QC-12');

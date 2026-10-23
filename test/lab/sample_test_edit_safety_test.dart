@@ -233,8 +233,19 @@ void main() {
     });
 
     test('correcting dynamic values posts a consumption delta', () async {
-      await db.update('lab_inventory', {'current_qty': 40},
-          where: 'id = ?', whereArgs: [titerId]);
+      // Reset through lots (the pool is SUM(lots): writing it directly
+      // would diverge from the lots and the next refresh would undo it).
+      await db.delete(
+        'inventory_lots',
+        where: 'inventory_id = ?',
+        whereArgs: [titerId],
+      );
+      await repo.receiveLot(
+        inventoryId: titerId,
+        qty: 40,
+        expiryDate: '2027-01-01',
+        executor: db,
+      );
       final result = await repo.runSampleTest(
         analysisId: analysisId,
         sourceType: 'raw_material',
@@ -261,8 +272,12 @@ void main() {
     });
 
     test('an uncovered increase refuses the whole edit', () async {
-      await db.update('lab_inventory', {'current_qty': 0},
-          where: 'id = ?', whereArgs: [titerId]);
+      await db.delete(
+        'inventory_lots',
+        where: 'inventory_id = ?',
+        whereArgs: [titerId],
+      );
+      await repo.refreshInventoryCache(db, titerId);
       final result = await repo.runSampleTest(
         analysisId: analysisId,
         sourceType: 'raw_material',

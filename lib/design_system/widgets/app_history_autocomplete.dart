@@ -3,6 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
+import '../tokens/app_text_theme.dart';
 import '../tokens/app_spacing.dart';
 import 'app_autocomplete_overlay.dart';
 
@@ -29,6 +30,11 @@ class AppHistoryAutocomplete extends StatefulWidget {
   final ValueChanged<String>? onChanged;
   final bool enabled;
 
+  /// Inline validation error shown under the field (save-gate style:
+  /// the caller owns the message and the [Autocomplete]'s TextField is not
+  /// a [TextFormField], so there is no Form validator path here).
+  final String? error;
+
   const AppHistoryAutocomplete({
     super.key,
     required this.controller,
@@ -38,6 +44,7 @@ class AppHistoryAutocomplete extends StatefulWidget {
     this.textInputAction = TextInputAction.next,
     this.onChanged,
     this.enabled = true,
+    this.error,
   });
 
   @override
@@ -207,6 +214,17 @@ class _AppHistoryAutocompleteState extends State<AppHistoryAutocomplete> {
               '${widget.options.length} from history — type to search or enter a new one',
             ),
             style: TextStyle(fontSize: 11.spMax, color: AppColors.textMuted),
+          ),
+        ],
+        if (widget.error != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            widget.error!,
+            style: TextStyle(
+              color: AppColors.danger,
+              fontSize: 12.spMax,
+              fontFamily: AppTextTheme.cairoFontFamily,
+            ),
           ),
         ],
       ],

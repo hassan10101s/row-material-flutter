@@ -105,12 +105,21 @@ class _AppAutocompleteState<T extends Object>
   /// overlay takes the full field width (sample-taker reference look).
   double _fieldWidth = AppAutocompleteOverlay.fallbackWidth;
 
+  /// True while the user re-opened the list of a committed value. The stored
+  /// choice is not cleared: the field just stops being read-only and offers the
+  /// whole list again, and loses focus without a pick restores the committed
+  /// text. Without this the caret was dead once a value was committed, so a
+  /// picker whose first value is auto-selected (the lab sample picker) could
+  /// never be changed without first clearing it.
+  bool _reopening = false;
+
   @override
   void initState() {
     super.initState();
     // A picker opened with an existing committed choice must show it from the
     // very first frame, not only after the parent changes the selection.
     _resolveFieldText();
+    _focusNode.addListener(_handleFocusChange);
   }
 
   @override
@@ -119,8 +128,17 @@ class _AppAutocompleteState<T extends Object>
     // A committed choice is owned by the parent; keep the field in step when
     // it changes from outside (e.g. a "change X" action clears the selection).
     if (oldWidget.selected != widget.selected) {
+      _reopening = false;
       _resolveFieldText();
     }
+  }
+
+  /// Closing the list without picking must not leave the field blank: restore
+  /// the committed display string.
+  void _handleFocusChange() {
+    if (_focusNode.hasFocus || !_reopening) return;
+    setState(() => _reopening = false);
+    _resolveFieldText();
   }
 
   void _resolveFieldText() {
@@ -134,6 +152,23 @@ class _AppAutocompleteState<T extends Object>
   }
 
   void _openOptions() {
+    // Re-opening a committed value offers the whole list again instead of
+    // treating the committed text as an unchangeable query. The focus has to
+    // happen after the rebuild that makes the field editable: doing it in the
+    // same frame would be evaluated by the old (committed) options builder,
+    // which returns nothing.
+    if (widget.selected != null && !_reopening) {
+      setState(() => _reopening = true);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_reopening) return;
+        _controller.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _controller.text.length,
+        );
+        _focusNode.requestFocus();
+      });
+      return;
+    }
     _focusNode.requestFocus();
     _controller.selection = TextSelection.collapsed(
       offset: _controller.text.length,
@@ -142,6 +177,7 @@ class _AppAutocompleteState<T extends Object>
 
   @override
   void dispose() {
+    _focusNode.removeListener(_handleFocusChange);
     if (_ownsController) _controller.dispose();
     if (_ownsFocusNode) _focusNode.dispose();
     super.dispose();
@@ -149,7 +185,7 @@ class _AppAutocompleteState<T extends Object>
 
   @override
   Widget build(BuildContext context) {
-    final committed = widget.selected != null;
+    final committed = widget.selected != null && !_reopening;
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: _controller,
       builder: (context, value, _) {
@@ -178,6 +214,15 @@ class _AppAutocompleteState<T extends Object>
                 // silently edit what the user already confirmed.
                 if (committed) return <T>[];
                 final q = builderValue.text.trim().toLowerCase();
+                // While re-opening, the field still carries the committed
+                // display string: that is not a query, so offer everything
+                // until the user actually types something else.
+                final committedText = widget.selected == null
+                    ? ''
+                    : widget.displayString(widget.selected!);
+                if (_reopening && builderValue.text == committedText) {
+                  return widget.options;
+                }
                 if (q.isEmpty) {
                   return widget.options;
                 }
@@ -200,13 +245,11 @@ class _AppAutocompleteState<T extends Object>
                       tooltip:
                           widget.dropdownLabel ??
                           AppAutocomplete.defaultDropdownLabel(),
-                      onPressed: committed ? null : () => _openOptions(),
+                      onPressed: _openOptions,
                       icon: Icon(
                         Icons.arrow_drop_down,
                         size: 24.r,
-                        color: committed
-                            ? AppColors.textMuted
-                            : AppColors.primary,
+                        color: AppColors.primary,
                       ),
                     ),
                     filled: true,
@@ -247,7 +290,12 @@ class _AppAutocompleteState<T extends Object>
                   titleOf: widget.displayString,
                 )(context, onSelected, items);
               },
-              onSelected: widget.onSelected,
+              onSelected: (option) {
+                if (_reopening) {
+                  setState(() => _reopening = false);
+                }
+                widget.onSelected(option);
+              },
             );
           },
         );

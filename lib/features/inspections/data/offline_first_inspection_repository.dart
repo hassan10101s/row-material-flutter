@@ -323,5 +323,5 @@ class OfflineFirstInspectionRepository extends InspectionRepo
   }
 
   UserContext _systemUser() =>
-      UserContext(id: null, fullName: guard.email, role: '');
+      UserContext(id: null, fullName: guard.actorName, role: '');
 }

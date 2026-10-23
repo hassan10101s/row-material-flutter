@@ -431,6 +431,11 @@ class QcResponse extends Equatable {
   final double? measuredValue;
   final String defectCode;
 
+  /// Who tapped the check on a routine list (`guard.uid` / display name at
+  /// answer time). Empty on legacy rows and on untouched seed rows.
+  final String answeredBy;
+  final String answeredByName;
+
   /// Set when this failure came from a critical item - it is what drives the
   /// Critical NC and the `Fail` overall result.
   final bool isCriticalFailure;
@@ -451,6 +456,8 @@ class QcResponse extends Equatable {
     this.measuredAt = '',
     this.measuredValue,
     this.defectCode = '',
+    this.answeredBy = '',
+    this.answeredByName = '',
     this.isCriticalFailure = false,
     required this.createdAt,
     required this.updatedAt,
@@ -494,6 +501,8 @@ class QcResponse extends Equatable {
     measuredAt,
     measuredValue,
     defectCode,
+    answeredBy,
+    answeredByName,
     isCriticalFailure,
     createdAt,
     updatedAt,
@@ -513,6 +522,8 @@ class QcResponse extends Equatable {
     measuredAt: '${m['measured_at'] ?? ''}',
     measuredValue: (m['measured_value'] as num?)?.toDouble(),
     defectCode: '${m['defect_code'] ?? ''}',
+    answeredBy: '${m['answered_by'] ?? ''}',
+    answeredByName: '${m['answered_by_name'] ?? ''}',
     isCriticalFailure: (m['is_critical_failure'] as num?)?.toInt() == 1,
     createdAt: '${m['created_at'] ?? ''}',
     updatedAt: '${m['updated_at'] ?? ''}',
@@ -532,6 +543,8 @@ class QcResponse extends Equatable {
     'measured_at': measuredAt,
     if (measuredValue != null) 'measured_value': measuredValue,
     'defect_code': defectCode,
+    'answered_by': answeredBy,
+    'answered_by_name': answeredByName,
     'is_critical_failure': isCriticalFailure ? 1 : 0,
     'created_at': createdAt,
     'updated_at': updatedAt,
@@ -554,6 +567,8 @@ class QcResponse extends Equatable {
     Object? measuredAt = _unsetField,
     Object? measuredValue = _unsetField,
     Object? defectCode = _unsetField,
+    String? answeredBy,
+    String? answeredByName,
     bool? isCriticalFailure,
     String? createdAt,
     String? updatedAt,
@@ -571,6 +586,8 @@ class QcResponse extends Equatable {
     measuredAt: _keepOr(measuredAt, this.measuredAt),
     measuredValue: _keepOrNull(measuredValue, this.measuredValue),
     defectCode: _keepOr(defectCode, this.defectCode),
+    answeredBy: answeredBy ?? this.answeredBy,
+    answeredByName: answeredByName ?? this.answeredByName,
     isCriticalFailure: isCriticalFailure ?? this.isCriticalFailure,
     createdAt: createdAt ?? this.createdAt,
     updatedAt: updatedAt ?? this.updatedAt,

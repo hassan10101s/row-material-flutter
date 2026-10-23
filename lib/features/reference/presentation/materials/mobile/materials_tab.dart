@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -9,22 +7,22 @@ import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
+import '../../../../../design_system/export/table_html_export.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
-import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_page_header.dart';
+import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../lab/domain/lab_result_repository.dart';
 import '../../../domain/reference_repository.dart';
 import '../../cubit/reference_cubit.dart';
 import '../../cubit/reference_state.dart';
 import '../desktop/materials_tab.dart' show DesktopMaterialsTab;
-import '../../../../../design_system/export/table_html_export.dart';
 import 'material_editor.dart';
 
 /// Mobile reference materials list.
@@ -49,26 +47,11 @@ class MobileMaterialsTab extends StatefulWidget {
 
 class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
   final _searchCtrl = TextEditingController();
-  Timer? _debounce;
-
-  @override
-  void initState() {
-    super.initState();
-    _searchCtrl.addListener(_onSearchChanged);
-  }
-
-  void _onSearchChanged() {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 350), () {
-      if (!mounted) return;
-      context.read<ReferenceCubit>().setQuery(_searchCtrl.text.trim());
-    });
-  }
+  late final _searchFocus = FocusNode();
 
   @override
   void dispose() {
-    _debounce?.cancel();
-    _searchCtrl.removeListener(_onSearchChanged);
+    _searchFocus.dispose();
     _searchCtrl.dispose();
     super.dispose();
   }
@@ -134,8 +117,8 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppPageHeader(
-              title: AppText.t('المواد المرجعية', 'Reference Materials'),
+              AppPageHeader(
+                title: AppText.t('خامات مرجعية', 'Reference Materials'),
               subtitle: '$countLabel ${AppText.t('مادة', 'materials')}',
               icon: Icons.science_outlined,
               actions: [
@@ -159,12 +142,17 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
               ],
             ),
             const SizedBox(height: AppSpacing.md),
-            AppField(
-              label: AppText.t(
-                'بحث بالاسم أو الكود',
-                'Search by name or code...',
-              ),
+            // Compact dense search (icon + clear + built-in debounce) instead
+            // of the tall labeled form field — the label floats inside.
+            DebouncedSearchField(
               controller: _searchCtrl,
+              focusNode: _searchFocus,
+              hint: AppText.t('بحث بالاسم أو الكود', 'Search by name or code...'),
+              onChanged: (query) {
+                if (mounted) {
+                  context.read<ReferenceCubit>().setQuery(query.trim());
+                }
+              },
             ),
             const SizedBox(height: AppSpacing.sm),
             if (state.loading && rows.isNotEmpty) const AppRefreshBar(),

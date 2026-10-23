@@ -9,13 +9,14 @@ import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
+import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_export_button.dart';
 import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
-import '../../../../../design_system/widgets/app_page_header.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/export/table_html_export.dart';
 import '../analysis_editor.dart';
@@ -105,14 +106,12 @@ class _MobileAnalysesTabState extends State<MobileAnalysesTab> {
   Widget build(BuildContext context) {
     final cubit = context.read<AnalysesCubit>();
     final state = context.watch<AnalysesCubit>().state;
-    final countLabel = state.hasMore
-        ? '${state.rows.length}+'
-        : '${state.rows.length}';
     return AppErrorFeedback<AnalysesCubit, AnalysesState>(
       selector: (s) => s.error,
       // Add floats like the raw-material register (heroTag null: sibling
       // lab tabs share one IndexedStack).
       child: Scaffold(
+        backgroundColor: AppColors.background,
         floatingActionButton: FloatingActionButton(
           heroTag: null,
           tooltip: AppText.t('إضافة تحليل', 'Add analysis'),
@@ -122,17 +121,17 @@ class _MobileAnalysesTabState extends State<MobileAnalysesTab> {
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            AppPageHeader(
-              title: AppText.t('التحاليل', 'Analyses'),
-              subtitle: '$countLabel ${AppText.t('تحليل', 'analyses')}',
-              icon: Icons.biotech_outlined,
-              actions: [
-                IconButton(
-                  tooltip: AppText.t('تصدير جدول', 'Export table'),
-                  constraints: const BoxConstraints(
-                    minWidth: 48,
-                    minHeight: 48,
-                  ),
+            // Compact top row: search takes the width, export sits beside
+            // it — no big title, so the list starts higher on small phones.
+            // One entrance animation for the header only: per-card entrances
+            // would keep timers/controllers/saveLayers alive while scrolling.
+            AppEntrance(
+              child: AppSearchRow(
+                search: AppField(
+                  label: AppText.t('بحث بالاسم', 'Search by name...'),
+                  controller: _searchCtrl,
+                ),
+                export: AppExportIconButton(
                   onPressed: state.rows.isEmpty
                       ? null
                       : () => TableHtmlExport.export(
@@ -142,14 +141,8 @@ class _MobileAnalysesTabState extends State<MobileAnalysesTab> {
                           headers: AnalysesTable.exportHeaders(),
                           rows: AnalysesTable.exportRows(state.rows),
                         ),
-                  icon: const Icon(Icons.table_view_outlined),
                 ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            AppField(
-              label: AppText.t('بحث بالاسم', 'Search by name...'),
-              controller: _searchCtrl,
+              ),
             ),
             const SizedBox(height: AppSpacing.sm),
             if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),
@@ -224,20 +217,28 @@ class _MobileAnalysesTabState extends State<MobileAnalysesTab> {
         errorMore: state.errorMore,
         onLoadMore: () => cubit.loadMore(),
         onRetry: () => cubit.loadMore(),
+        // No horizontal inset here: the tab already sits inside the lab
+        // page padding, and a second inset only squeezes the cards.
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         totalLabel:
             '${state.rows.length} ${AppText.t('تحليل', 'analyses')} • ${AppText.t('نهاية القائمة', 'End of list')}',
         itemBuilder: (context, index) {
           final r = state.rows[index];
-          return AnalysisCard(
-            name: '${r['name']}',
-            unit: '${r['unit'] ?? '%'}',
-            reference: '${r['reference_parameter_name'] ?? '—'}',
-            formula:
-                '${(r['formula'] is Map ? (r['formula'] as Map)['expression'] : '') ?? ''}',
-            itemsCount: (r['items'] as List?)?.length ?? 0,
-            fields: (r['dynamic_fields'] as List?)?.join(', ') ?? '',
-            onEdit: () => _openEditor(context, r),
-            onDelete: () => _delete(context, r),
+          // RepaintBoundary isolates each card's repaint during scroll;
+          // no entrance animation here — dozens of concurrent opacity
+          // layers are what made scrolling feel heavy on weak GPUs.
+          return RepaintBoundary(
+            child: AnalysisCard(
+              name: '${r['name']}',
+              unit: '${r['unit'] ?? '%'}',
+              reference: '${r['reference_parameter_name'] ?? '—'}',
+              formula:
+                  '${(r['formula'] is Map ? (r['formula'] as Map)['expression'] : '') ?? ''}',
+              itemsCount: (r['items'] as List?)?.length ?? 0,
+              fields: (r['dynamic_fields'] as List?)?.join(', ') ?? '',
+              onEdit: () => _openEditor(context, r),
+              onDelete: () => _delete(context, r),
+            ),
           );
         },
       ),

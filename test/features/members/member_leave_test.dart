@@ -73,6 +73,17 @@ void main() {
         onRosterChanged: () async => rosterChanges++,
       );
 
+  RemoteDocument doc(
+    String id,
+    String role,
+    String status, {
+    String uid = '',
+  }) => RemoteDocument(
+    id: id,
+    data: {'uid': uid, 'email': '$id@lab.test', 'role': role, 'status': status},
+    version: 1,
+  );
+
   group('MemberRepository.leave', () {
     test('a member without any users.* permission can still leave', () async {
       final guard = _FakeGuard(permitted: false);
@@ -172,6 +183,114 @@ void main() {
         ).called(1);
       },
     );
+  });
+
+  group('leave requires an active successor owner', () {
+    test('the last active owner cannot leave', () async {
+      when(() => remote.listMembers(any())).thenAnswer(
+        (_) async => [doc('member_1', AppRoles.admin, 'active', uid: 'uid_1')],
+      );
+
+      await expectLater(
+        build(_FakeGuard()).members.leave(),
+        throwsA(
+          isA<OrganizationFailure>().having(
+            (e) => e.code,
+            'code',
+            'last_owner',
+          ),
+        ),
+      );
+      verifyNever(
+        () => remote.leaveOrganization(
+          organizationId: any(named: 'organizationId'),
+          memberId: any(named: 'memberId'),
+          uid: any(named: 'uid'),
+        ),
+      );
+      verifyNever(
+        () => remote.writeAudit(
+          organizationId: any(named: 'organizationId'),
+          action: any(named: 'action'),
+          entityType: any(named: 'entityType'),
+          entityId: any(named: 'entityId'),
+          details: any(named: 'details'),
+        ),
+      );
+    });
+
+    test('an owner with another active owner can leave', () async {
+      when(() => remote.listMembers(any())).thenAnswer(
+        (_) async => [
+          doc('member_1', AppRoles.admin, 'active', uid: 'uid_1'),
+          doc('member_2', AppRoles.admin, 'active'),
+        ],
+      );
+
+      await build(_FakeGuard()).members.leave();
+
+      verify(
+        () => remote.leaveOrganization(
+          organizationId: 'org_1',
+          memberId: 'member_1',
+          uid: 'uid_1',
+        ),
+      ).called(1);
+    });
+
+    test('an invited co-owner is not yet a valid successor', () async {
+      when(() => remote.listMembers(any())).thenAnswer(
+        (_) async => [
+          doc('member_1', AppRoles.admin, 'active', uid: 'uid_1'),
+          doc('member_2', AppRoles.admin, 'invited'),
+        ],
+      );
+
+      await expectLater(
+        build(_FakeGuard()).members.leave(),
+        throwsA(
+          isA<OrganizationFailure>().having(
+            (e) => e.code,
+            'code',
+            'last_owner',
+          ),
+        ),
+      );
+    });
+
+    test('a lab member is never blocked by the owner guard', () async {
+      when(() => remote.listMembers(any())).thenAnswer(
+        (_) async => [doc('member_1', AppRoles.lab, 'active', uid: 'uid_1')],
+      );
+
+      await build(_FakeGuard()).members.leave();
+
+      verify(
+        () => remote.leaveOrganization(
+          organizationId: 'org_1',
+          memberId: 'member_1',
+          uid: 'uid_1',
+        ),
+      ).called(1);
+    });
+
+    test('a trial owner is never blocked', () async {
+      when(() => remote.listMembers(any())).thenAnswer(
+        (_) async => [
+          doc('member_1', AppRoles.trialOwner, 'active', uid: 'uid_1'),
+        ],
+      );
+
+      await build(_FakeGuard()).members.leave();
+
+      verify(
+        () => remote.leaveOrganization(
+          organizationId: 'org_1',
+          memberId: 'member_1',
+          uid: 'uid_1',
+        ),
+      ).called(1);
+    });
   });
 
   group('co-owner invitations', () {

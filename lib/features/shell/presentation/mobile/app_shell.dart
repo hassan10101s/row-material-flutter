@@ -250,13 +250,21 @@ class _MobileAppShellState extends State<MobileAppShell> {
         // shadow instead of a full-bleed strip. The More slot carries a
         // sync-attention dot while anything is pending/blocked, so unsynced
         // work is visible without opening the drawer.
+        //
+        // The SafeArea keeps the bar clear of the system gesture bar (which
+        // would otherwise swallow its bottom edge on edge-to-edge phones);
+        // the compact single-line label style keeps long Arabic labels from
+        // wrapping onto a clipped second line in the narrow slots.
         bottomNavigationBar: ListenableBuilder(
           listenable: widget.syncStatus,
           builder: (context, _) {
             final attention = widget.syncStatus.status.pending +
                 widget.syncStatus.status.blocked;
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(
+            return SafeArea(
+              top: false,
+              left: false,
+              right: false,
+              minimum: const EdgeInsets.fromLTRB(
                 AppSpacing.md,
                 0,
                 AppSpacing.md,
@@ -281,14 +289,25 @@ class _MobileAppShellState extends State<MobileAppShell> {
                       border: Border.all(color: AppColors.borderMuted),
                       borderRadius: BorderRadius.circular(22),
                     ),
-                    child: NavigationBar(
-                      height: 72,
-                      elevation: 0,
-                      backgroundColor: Colors.transparent,
-                      indicatorColor:
-                          AppColors.primary.withValues(alpha: 0.14),
-                      labelBehavior:
-                          NavigationDestinationLabelBehavior.alwaysShow,
+                    child: NavigationBarTheme(
+                      data: NavigationBarThemeData(
+                        labelTextStyle: WidgetStatePropertyAll(
+                          TextStyle(
+                            fontSize: 11.spMax,
+                            fontWeight: FontWeight.w600,
+                            height: 1.1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      child: NavigationBar(
+                        height: 70,
+                        elevation: 0,
+                        backgroundColor: Colors.transparent,
+                        indicatorColor:
+                            AppColors.primary.withValues(alpha: 0.14),
+                        labelBehavior:
+                            NavigationDestinationLabelBehavior.alwaysShow,
                       selectedIndex: selected,
                       onDestinationSelected: _selectSlot,
                       destinations: [
@@ -315,7 +334,8 @@ class _MobileAppShellState extends State<MobileAppShell> {
                                   ),
                             label: slot.label,
                           ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -372,6 +392,7 @@ class _ShellDrawer extends StatelessWidget {
                     user: user,
                     onLogout: onLogout,
                     onLogoutThisDevice: onLogoutThisDevice,
+                    onOpenSettings: () => onSelect('/settings'),
                   ),
                   const Divider(height: 1),
                   for (final e in entries)

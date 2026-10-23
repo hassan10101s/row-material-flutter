@@ -12,16 +12,23 @@ class DebouncedSearchField extends StatefulWidget {
   const DebouncedSearchField({
     super.key,
     required this.onChanged,
+    this.controller,
     this.label,
     this.hint,
     this.prefixIcon = Icons.search,
     this.debounce = const Duration(milliseconds: 350),
     this.initialValue,
     this.autofocus = false,
+    this.focusNode,
   });
 
   /// Fired once the user pauses typing for [debounce].
   final ValueChanged<String> onChanged;
+
+  /// Optional caller-owned controller, so a page can read/clear the query
+  /// (e.g. an empty-state "clear search" button) while the field keeps the
+  /// same compact styling. When absent the field allocates its own.
+  final TextEditingController? controller;
   final String? label;
   final String? hint;
   final IconData prefixIcon;
@@ -29,46 +36,70 @@ class DebouncedSearchField extends StatefulWidget {
   final String? initialValue;
   final bool autofocus;
 
+  /// Caller-owned focus handle so page-level shortcuts (Ctrl+F) can move
+  /// focus into the field. The caller disposes it, like its controllers.
+  final FocusNode? focusNode;
+
   @override
   State<DebouncedSearchField> createState() => _DebouncedSearchFieldState();
 }
 
 class _DebouncedSearchFieldState extends State<DebouncedSearchField> {
-  late final TextEditingController _controller =
-      TextEditingController(text: widget.initialValue);
-  Timer? _timer;
+  TextEditingController? _internalController;
+
+  TextEditingController get _effectiveController =>
+      widget.controller ??
+      (_internalController ??= TextEditingController(text: widget.initialValue));
+
+  @override
+  void didUpdateWidget(covariant DebouncedSearchField oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == null && widget.controller != null) {
+      _effectiveController.removeListener(_syncHasText);
+      _internalController?.dispose();
+      _internalController = null;
+      _hasText = _effectiveController.text.isNotEmpty;
+      _effectiveController.addListener(_syncHasText);
+    }
+  }
+
+  @override
+  void dispose() {
+    _effectiveController.removeListener(_syncHasText);
+    _internalController?.dispose();
+    super.dispose();
+  }
+
   bool _hasText = false;
 
   @override
   void initState() {
     super.initState();
-    _hasText = _controller.text.isNotEmpty;
-    _controller.addListener(_onLocalChanged);
+    _hasText = _effectiveController.text.isNotEmpty;
+    _effectiveController.addListener(_syncHasText);
   }
 
-  void _onLocalChanged() {
-    final has = _controller.text.isNotEmpty;
-    if (has != _hasText && mounted) setState(() => _hasText = has);
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    _controller.dispose();
-    super.dispose();
+  void _syncHasText() {
+    if (!mounted) return;
+    final has = _effectiveController.text.isNotEmpty;
+    if (has != _hasText) setState(() => _hasText = has);
   }
 
   void _onTextChanged(String value) {
-    _timer?.cancel();
-    _timer = Timer(widget.debounce, () {
+    _syncHasText(); // immediate clear-suffix response
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(widget.debounce, () {
       if (mounted) widget.onChanged(value);
     });
   }
 
+  Timer? _debounceTimer;
+
   @override
   Widget build(BuildContext context) {
     return TextField(
-      controller: _controller,
+      controller: _effectiveController,
+      focusNode: widget.focusNode,
       onChanged: _onTextChanged,
       autofocus: widget.autofocus,
       textInputAction: TextInputAction.search,
@@ -82,7 +113,7 @@ class _DebouncedSearchFieldState extends State<DebouncedSearchField> {
                 tooltip: MaterialLocalizations.of(context).searchFieldLabel,
                 visualDensity: VisualDensity.compact,
                 onPressed: () {
-                  _controller.clear();
+                  _effectiveController.clear();
                   widget.onChanged('');
                 },
                 icon: const Icon(Icons.clear, size: 18),

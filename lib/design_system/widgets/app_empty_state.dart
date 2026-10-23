@@ -104,26 +104,50 @@ class AppErrorState extends StatelessWidget {
 class AppSectionHeader extends StatelessWidget {
   final String title;
   final IconData? icon;
+  final Color? iconColor;
+  final String? subtitle;
   final Widget? trailing;
 
-  const AppSectionHeader({super.key, required this.title, this.icon, this.trailing});
+  const AppSectionHeader({
+    super.key,
+    required this.title,
+    this.icon,
+    this.iconColor,
+    this.subtitle,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final headerColor = iconColor ?? AppColors.primary;
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Row(
         children: [
           if (icon != null) ...[
-            Icon(icon, size: 18.r, color: AppColors.primary),
+            Icon(icon, size: 18.r, color: headerColor),
             const SizedBox(width: AppSpacing.sm),
           ],
           Expanded(
             child: Text(
               title,
+              overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
             ),
           ),
+          if (subtitle != null) ...[
+            const SizedBox(width: AppSpacing.sm),
+            Flexible(
+              child: Text(
+                subtitle!,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 11.spMax,
+                ),
+              ),
+            ),
+          ],
           ?trailing,
         ],
       ),

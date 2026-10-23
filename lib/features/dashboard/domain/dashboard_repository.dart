@@ -32,7 +32,7 @@ abstract interface class DashboardRepository {
   Future<DashboardFilterOptions> filterOptions();
 
   /// Full cross-module KPI bundle (inspections + lab + QC + NCR/CAPA +
-  /// SOP/goals + inventory + 6-month trend). Read-only; every section is
+  /// SOP + inventory + 6-month trend). Read-only; every section is
   /// best-effort — a missing table yields zeros, never a throw.
   Future<DashboardBundle> dashboardBundle({
     String period,

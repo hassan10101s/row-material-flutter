@@ -254,6 +254,49 @@ void main() {
       expect(cubit.state.error, 'db locked');
       await cubit.close();
     });
+
+    test('clearFilters resets all three filters in one reload', () async {
+      final repo = _DashboardRepoMock();
+      when(() => repo.summary(
+            period: any(named: 'period'),
+            materialId: any(named: 'materialId'),
+            supplier: any(named: 'supplier'),
+            status: any(named: 'status'),
+          )).thenAnswer((_) async => {'total': 5});
+      when(() => repo.todayKpis()).thenAnswer((_) async => {'approved': 2});
+      when(() => repo.filterOptions()).thenAnswer(
+        (_) async => const DashboardFilterOptions(
+            materials: [], suppliers: [], statuses: []),
+      );
+
+      final cubit =
+          DashboardCubit(repo: repo, kpis: DashboardKpisCubit());
+      void applyAll() {
+        cubit.setMaterial('Salt');
+        cubit.setSupplier('Acme');
+        cubit.setStatus('APPROVED');
+      }
+
+      // The setters are guard-gated on `loading`, so apply one at a time and
+      // let each load settle before firing the next.
+      applyAll();
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      await cubit.load();
+
+      cubit.clearFilters();
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      expect(cubit.state.selectedMaterial, 'ALL');
+      expect(cubit.state.selectedSupplier, 'ALL');
+      expect(cubit.state.selectedStatus, 'ALL');
+      expect(cubit.state.loading, isFalse);
+      verify(() => repo.summary(
+            period: any(named: 'period'),
+            materialId: 'ALL',
+            supplier: 'ALL',
+            status: 'ALL',
+          ));
+      await cubit.close();
+    });
   });
 
   group('InspectionsCubit', () {
@@ -328,6 +371,52 @@ void main() {
           )).thenAnswer((_) async => 0);
       await cubit.setQuery('zzz');
       expect(cubit.state.visible, isEmpty);
+      await cubit.close();
+    });
+
+    test('exportFollowUp returns null when nothing to export', () async {
+      final repo = _InspectionRepoMock();
+      final reports = _ReportServiceMock();
+      final cubit = InspectionsCubit(
+        repo: repo,
+        reports: reports,
+        initialStatus: 'APPROVED',
+        initialSupplier: 'Acme',
+        initialDateFrom: '2026-09-01',
+        initialDateTo: '2026-09-30',
+      );
+      when(() => repo.list(
+            query: any(named: 'query'),
+            status: 'APPROVED',
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+            orderBy: any(named: 'orderBy'),
+            kind: any(named: 'kind'),
+            dateFrom: '2026-09-01',
+            dateTo: '2026-09-30',
+            supplier: 'Acme',
+          )).thenAnswer((_) async => []);
+      when(() => repo.count(
+            query: any(named: 'query'),
+            status: 'APPROVED',
+            kind: any(named: 'kind'),
+            dateFrom: '2026-09-01',
+            dateTo: '2026-09-30',
+            supplier: 'Acme',
+          )).thenAnswer((_) async => 0);
+      await cubit.load();
+      // Deep-link seeds reach the SQL layer verbatim.
+      verify(() => repo.list(
+            query: '',
+            status: 'APPROVED',
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+            orderBy: any(named: 'orderBy'),
+            kind: any(named: 'kind'),
+            dateFrom: '2026-09-01',
+            dateTo: '2026-09-30',
+            supplier: 'Acme',
+          )).called(1);
       await cubit.close();
     });
 
@@ -731,9 +820,12 @@ void main() {
         role: 'lab',
         status: 'invited',
       );
-      // The permissions matrix still lists `samples.create`, but
-      // `AppSession.canDo` refuses it while the status is not active.
-      expect(invited.canCreateInspection, isTrue);
+      // The permissions matrix still lists `samples.create`, but the role and
+      // the status are two different gates: inactive members (`canWriteAnything`
+      // = false) get no write affordance in the UI at all — `AppSession.canDo`
+      // would refuse them anyway.
+      expect(invited.permissions, contains(Permission.samplesCreate));
+      expect(invited.canCreateInspection, isFalse);
       const session = AppSession(
         uid: 'u1',
         email: 'i@lab.test',
@@ -923,6 +1015,126 @@ void main() {
             dynamicValues: any(named: 'dynamicValues'),
             user: any(named: 'user'),
             entryCode: 'QC-9',
+          )).called(1);
+      await cubit.close();
+    });
+
+    test('runs a free-text sample with no catalog source', () async {
+      final repo = _LabRepoMock();
+      when(() => repo.listAnalyses()).thenAnswer((_) async => [
+            {'id': 2, 'name': 'pH', 'unit': 'pH', 'dynamic_fields': <String>[]},
+          ]);
+      when(() => repo.listProducts()).thenAnswer((_) async => []);
+      when(() => repo.listInspectionMaterials())
+          .thenAnswer((_) async => <Map<String, dynamic>>[]);
+      when(() => repo.runSampleTest(
+            analysisId: any(named: 'analysisId'),
+            sourceType: any(named: 'sourceType'),
+            sourceRefId: any(named: 'sourceRefId'),
+            sourceName: any(named: 'sourceName'),
+            sampleName: any(named: 'sampleName'),
+            resultText: any(named: 'resultText'),
+            dynamicValues: any(named: 'dynamicValues'),
+            user: any(named: 'user'),
+            entryCode: any(named: 'entryCode'),
+          )).thenAnswer((_) async => {
+            'test': {'id': 1},
+            'analysis_unit': 'pH',
+            'consumption': <dynamic>[],
+            'low_stock': <dynamic>[],
+          });
+
+      final cubit = RunTestCubit(config: repo, results: repo, local: repo);
+      await cubit.load();
+      cubit.setSourceType('sample');
+      expect(cubit.state.sourceType, 'sample');
+      expect(cubit.state.rawMaterialId, isNull);
+      expect(cubit.state.productId, isNull);
+      expect(cubit.state.selectedInspection, isEmpty);
+
+      await cubit.run(
+        sampleName: 'Free sample',
+        resultText: '7',
+        dynamicValues: <String, dynamic>{},
+        user: const {'id': 1},
+      );
+
+      verify(() => repo.runSampleTest(
+            analysisId: 2,
+            sourceType: 'sample',
+            sourceRefId: null,
+            sourceName: 'Free sample',
+            sampleName: 'Free sample',
+            resultText: '7',
+            dynamicValues: any(named: 'dynamicValues'),
+            user: any(named: 'user'),
+            entryCode: '',
+          )).called(1);
+      await cubit.close();
+    });
+
+    test('edit mode prefills the row and saves only the fillable fields', () async {
+      final repo = _LabRepoMock();
+      when(() => repo.listAnalyses()).thenAnswer((_) async => [
+            {'id': 5, 'name': 'pH', 'unit': 'pH', 'dynamic_fields': ['Temp']},
+          ]);
+      when(() => repo.listProducts()).thenAnswer((_) async => []);
+      when(() => repo.listInspectionMaterials())
+          .thenAnswer((_) async => <Map<String, dynamic>>[]);
+      when(() => repo.listInspectionRecords(4)).thenAnswer((_) async => [
+            {
+              'id': 9,
+              'entry_code': 'QC-9',
+              'material_id': 4,
+              'material_name': 'Sugar',
+              'sample_names': ['S1', 'S2'],
+            },
+          ]);
+      when(() => repo.updateSampleTest(
+            any(),
+            sampleName: any(named: 'sampleName'),
+            resultText: any(named: 'resultText'),
+            dynamicValues: any(named: 'dynamicValues'),
+            user: any(named: 'user'),
+          )).thenAnswer((_) async => {'id': 1, 'result_text': '7.1'});
+
+      final cubit = RunTestCubit(
+        config: repo,
+        results: repo,
+        local: repo,
+        editRow: const {
+          'id': 1,
+          'analysis_id': 5,
+          'source_type': 'raw_material',
+          'source_ref_id': 4,
+          'source_name': 'Sugar',
+          'sample_name': 'S2',
+          'result_text': '6.5',
+          'entry_code': 'QC-9',
+        },
+      );
+      await cubit.load();
+
+      expect(cubit.isEditing, isTrue);
+      expect(cubit.state.analysisId, 5);
+      expect(cubit.state.sourceType, 'raw_material');
+      expect(cubit.state.sourceName, 'Sugar');
+      expect(cubit.state.rawMaterialId, 4);
+      expect(cubit.state.selectedSampleName, 'S2');
+      expect(cubit.state.selectedInspection['entry_code'], 'QC-9');
+
+      await cubit.saveEdit(
+        sampleName: 'S2',
+        resultText: '7.1',
+        dynamicValues: const {'Temp': '20'},
+        user: const {'id': 1},
+      );
+      verify(() => repo.updateSampleTest(
+            1,
+            sampleName: 'S2',
+            resultText: '7.1',
+            dynamicValues: const {'Temp': '20'},
+            user: const {'id': 1},
           )).called(1);
       await cubit.close();
     });

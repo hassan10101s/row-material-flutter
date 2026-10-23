@@ -153,7 +153,6 @@ void main() {
       'QcTemplateRepository',
       'QcInspectionRepository',
       'QcNcCapaRepository',
-      'QcGoalRepository',
       'QcAuditRepository',
       'ReferenceRepository',
       'ReportRepository',

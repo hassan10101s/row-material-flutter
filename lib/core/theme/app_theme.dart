@@ -233,18 +233,8 @@ class AppTheme {
           ),
         ),
       ),
-      snackBarTheme: SnackBarThemeData(
-        backgroundColor: palette.surfaceDeep,
-        contentTextStyle: TextStyle(
-          color: Colors.white,
-          fontFamily: AppTextTheme.cairoFontFamily,
-          fontSize: 13.spMax,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md),
-        ),
-        behavior: SnackBarBehavior.floating,
-      ),
+      // NOTE: no `snackBarTheme` — the app has zero SnackBars; all toasts go
+      // through `AppFeedback`'s root overlay, which styles itself.
 
       // Interaction feedback. Without these the defaults come from the seed
       // palette and do not match the surfaces they paint over.

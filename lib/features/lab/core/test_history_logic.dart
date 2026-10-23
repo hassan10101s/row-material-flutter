@@ -36,9 +36,9 @@ String thRangeLabel(String state) {
 }
 
 String thSourceLabel(String sourceType) {
-  return sourceType == 'product'
-      ? AppText.t('منتج', 'Product')
-      : AppText.t('خام', 'Raw');
+  if (sourceType == 'product') return AppText.t('منتج', 'Product');
+  if (sourceType == 'sample') return AppText.t('عينة', 'Sample');
+  return AppText.t('خام', 'Raw');
 }
 
 int thCoerceRecordLimit(Object? raw) {
@@ -115,6 +115,7 @@ String thSearchHaystack(Map<String, dynamic> row) {
     row['range_unit'],
     row['tested_by_name'],
     row['id'],
+    row['decision_reason'],
     thRangeLabel('${row['range_state'] ?? ''}'),
     thSourceLabel('${row['source_type'] ?? ''}'),
     '${row['tested_at'] ?? ''}',
@@ -127,6 +128,7 @@ List<Map<String, dynamic>> thApplyRowFilters(
   required Object? sourceType,
   required Object? chemicalId,
   required Object? rangeState,
+  required String reasonState,
   required String query,
   required Map<String, Set<String>> chemTestMap,
 }) {
@@ -157,6 +159,16 @@ List<Map<String, dynamic>> thApplyRowFilters(
     result = [
       for (final r in result)
         if ('${r['range_state'] ?? 'none'}' == rangeWant) r
+    ];
+  }
+  // Reason filter (سبب القرار): `has` keeps only the tests whose محضر
+  // carries a decision reason — the register stays column-free, it just
+  // hides the records without a reason.
+  final reasonWant = '$reasonState';
+  if (reasonWant == 'has') {
+    result = [
+      for (final r in result)
+        if ('${r['decision_reason'] ?? ''}'.trim().isNotEmpty) r
     ];
   }
   final q = thNormalizeText(query);
@@ -269,7 +281,7 @@ List<({String value, String label})> thBuildChemicalOptions(
 }
 
 ({String filterMode, String specificDate, String analysisId, String sourceType,
-        String chemicalId, String rangeState, String query})
+        String chemicalId, String rangeState, String reasonState, String query})
     thClearChip({
   required String filterMode,
   required String specificDate,
@@ -277,11 +289,13 @@ List<({String value, String label})> thBuildChemicalOptions(
   required String sourceType,
   required String chemicalId,
   required String rangeState,
+  required String reasonState,
   required String query,
   required String key,
 }) {
   var m = filterMode, d = specificDate, a = analysisId;
   var s = sourceType, c = chemicalId, r = rangeState;
+  var rs = reasonState;
   switch (key) {
     case 'mode':
       m = 'all';
@@ -294,6 +308,8 @@ List<({String value, String label})> thBuildChemicalOptions(
       c = '';
     case 'range':
       r = '';
+    case 'reason':
+      rs = '';
   }
   return (
     filterMode: m,
@@ -302,6 +318,7 @@ List<({String value, String label})> thBuildChemicalOptions(
     sourceType: s,
     chemicalId: c,
     rangeState: r,
+    reasonState: rs,
     query: query,
   );
 }
@@ -313,6 +330,7 @@ List<({String key, String label})> thBuildChips({
   required String sourceType,
   required String chemicalId,
   required String rangeState,
+  required String reasonState,
   required List<Map<String, dynamic>> analyses,
   required List<({String value, String label})> chemicalOptions,
 }) {
@@ -358,6 +376,9 @@ List<({String key, String label})> thBuildChips({
   }
   if (rangeState.isNotEmpty) {
     chips.add((key: 'range', label: thRangeLabel(rangeState)));
+  }
+  if (reasonState == 'has') {
+    chips.add((key: 'reason', label: AppText.t('فيها سبب', 'Has reason')));
   }
   return chips;
 }

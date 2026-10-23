@@ -27,6 +27,7 @@ Future<void> _insert(
   required String date,
   String status = 'PENDING',
   String kind = 'raw',
+  String reason = '',
 }) async {
   final db = await helper.database;
   await db.insert('inspections', {
@@ -41,6 +42,7 @@ Future<void> _insert(
     'physical_reference_json': '{}',
     'chemical_reference_json': '{}',
     'decision_status': status,
+    'decision_reason': reason,
     'snapshot_json': '{}',
     'sample_names_json': '[]',
     'created_by': 0,
@@ -157,6 +159,43 @@ void main() {
     test('short/malformed bounds are ignored, never throw', () async {
       expect((await repo.list(dateFrom: '2026', dateTo: '')), hasLength(3));
       expect(await repo.count(dateFrom: 'x', dateTo: 'y'), 3);
+    });
+
+    test('reason matches decision_reason substring in list and count',
+        () async {
+      await _insert(
+        helper,
+        entryCode: 'E-004',
+        date: '2026-10-02',
+        reason: 'سوس',
+      );
+      await _insert(
+        helper,
+        entryCode: 'E-005',
+        date: '2026-10-02',
+        reason: 'رطوبة عالية',
+      );
+      // Substring, not exact: «سوس» inside «سوسة» still matches.
+      await _insert(
+        helper,
+        entryCode: 'E-006',
+        date: '2026-10-02',
+        reason: 'إصابة سوسة',
+      );
+      expect(
+        (await repo.list(reason: 'سوس')).map((r) => r['entry_code']),
+        containsAll(['E-004', 'E-006']),
+      );
+      expect(await repo.count(reason: 'سوس'), 2);
+      expect(
+        (await repo.list(reason: 'رطوبة')).map((r) => r['entry_code']),
+        ['E-005'],
+      );
+      expect(await repo.count(reason: 'رطوبة'), 1);
+      expect(await repo.list(reason: 'مفيش'), isEmpty);
+      expect(await repo.count(reason: 'مفيش'), 0);
+      // Blank reason is a no-op (the whole register comes back).
+      expect(await repo.count(reason: '   '), 6);
     });
   });
 
@@ -302,6 +341,60 @@ void main() {
             materialId: null,
             productId: null,
           )).called(1);
+      await cubit.close();
+    });
+
+    test('reason filter passes decision_reason through and clearChip removes it',
+        () async {
+      final repo = _RepoMock();
+      when(() => repo.list(
+            query: any(named: 'query'),
+            status: any(named: 'status'),
+            reason: any(named: 'reason'),
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+            orderBy: any(named: 'orderBy'),
+            kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
+            materialId: any(named: 'materialId'),
+            productId: any(named: 'productId'),
+          )).thenAnswer((_) async => const []);
+      when(() => repo.count(
+            query: any(named: 'query'),
+            status: any(named: 'status'),
+            reason: any(named: 'reason'),
+            kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
+            materialId: any(named: 'materialId'),
+            productId: any(named: 'productId'),
+          )).thenAnswer((_) async => 0);
+      final cubit = InspectionsCubit(repo: repo, reports: _ReportServiceMock());
+      await cubit.applyFilters(
+        status: '',
+        reason: 'سوس',
+        dateFrom: '',
+        dateTo: '',
+        materialId: null,
+        materialName: '',
+      );
+      expect(cubit.state.reason, 'سوس');
+      verify(() => repo.list(
+            query: any(named: 'query'),
+            status: any(named: 'status'),
+            reason: 'سوس',
+            limit: any(named: 'limit'),
+            offset: any(named: 'offset'),
+            orderBy: any(named: 'orderBy'),
+            kind: any(named: 'kind'),
+            dateFrom: any(named: 'dateFrom'),
+            dateTo: any(named: 'dateTo'),
+            materialId: null,
+            productId: null,
+          )).called(1);
+      await cubit.clearChip('reason');
+      expect(cubit.state.reason, isEmpty);
       await cubit.close();
     });
   });

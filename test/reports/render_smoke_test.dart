@@ -5,8 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 
 import 'package:material_lab/core/app_paths.dart';
+import 'package:material_lab/core/constants/report_form_keys.dart';
 import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/core/security/local_secret.dart';
+import 'package:material_lab/core/security/qr_builder.dart';
+import 'package:material_lab/core/security/qr_payload.dart';
 import 'package:material_lab/core/utils/app_dates.dart';
 import 'package:material_lab/features/inspections/data/inspection_repo.dart';
 import 'package:material_lab/features/lab/data/lab_repo.dart';
@@ -90,6 +93,19 @@ Map<String, dynamic> _labCtx() {
   );
 }
 
+Map<String, dynamic> _equipment() {
+  return {
+    'id': 7,
+    'name': 'Drying oven',
+    'code': 'EQ-0007',
+    'manufacturer': 'Binder',
+    'serial_number': 'SN-2024-001',
+    'description': '',
+    'last_calibration_date': '2026-01-15',
+    'next_calibration_date': '2027-01-15',
+  };
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -155,6 +171,76 @@ void main() {
   test('lab report PDF renders', () async {
     final bytes = await PdfRenderer.renderLab(_labCtx());
     expect(_isPdf(bytes), isTrue);
+  });
+
+  group('qa form number', () {
+    test('qaFormNo prefers the global key, falls back to the legacy one', () {
+      expect(qaFormNo({'qa_form_no': 'QA-F-07'}), 'QA-F-07');
+      expect(
+        qaFormNo({'qa_form_no': '', 'equipment_label_form_no': 'QA-F-01'}),
+        'QA-F-01',
+      );
+      expect(qaFormNo({}), '');
+    });
+
+    test('each report type reads its own form number key', () {
+      // The type key wins over the legacy global value.
+      expect(
+        qaFormNo({
+          ReportFormKeys.global: 'GLOBAL',
+          ReportFormKeys.dailyReport: 'QA-D-01',
+        }, ReportFormKeys.dailyReport),
+        'QA-D-01',
+      );
+      // An empty type key falls back to the global value.
+      expect(
+        qaFormNo({ReportFormKeys.global: 'GLOBAL'}, ReportFormKeys.dailyReport),
+        'GLOBAL',
+      );
+    });
+
+    test('plusOneYearIso shifts a year, clamps Feb 29, rejects garbage', () {
+      expect(plusOneYearIso('2026-03-15'), '2027-03-15');
+      expect(plusOneYearIso('2024-02-29'), '2025-02-28');
+      // Impossible input normalizes through DateTime before shifting.
+      expect(plusOneYearIso('2023-02-29'), '2024-03-01');
+      expect(plusOneYearIso(''), '');
+      expect(plusOneYearIso('not-a-date'), '');
+    });
+
+    test('equipment QR round-trips with the equipment kind', () {
+      final text = buildEquipmentQrPayloadText(
+        equipment: {'code': 'EQ-0007'},
+      );
+      final parsed = tryParseAppQr(text)!;
+      expect(parsed.kind, appQrKindEquipment);
+      expect(parsed.entryCode, 'EQ-0007');
+    });
+
+    test('equipment label context carries the form number', () {
+      final ctx = buildEquipmentLabelContext(
+        _equipment(),
+        settings: {'qa_form_no': 'QA-F-07'},
+      );
+      expect(ctx['form_no'], 'QA-F-07');
+      final parsed = tryParseAppQr('${ctx['qr_payload_text']}')!;
+      expect(parsed.kind, appQrKindEquipment);
+    });
+
+    test('equipment label PDF renders with and without a form number',
+        () async {
+      final withForm = await PdfRenderer.renderEquipmentLabel(
+        buildEquipmentLabelContext(
+          _equipment(),
+          settings: {'qa_form_no': 'QA-F-07'},
+        ),
+      );
+      expect(_isPdf(withForm), isTrue);
+      final withoutForm = await PdfRenderer.renderEquipmentLabel(
+        buildEquipmentLabelContext(_equipment(), settings: _settings()),
+      );
+      expect(_isPdf(withoutForm), isTrue);
+    });
   });
 
   serviceGroup();
@@ -231,6 +317,30 @@ Future<void> zoneSeedDatabase() async {
     'description': 'Moisture content',
     'created_at': nowIso(),
   });
+  await db.insert('lab_equipment', {
+    'name': 'Drying oven',
+    'code': 'EQ-0007',
+    'manufacturer': 'Binder',
+    'serial_number': 'SN-2024-001',
+    'description': '',
+    'last_calibration_date': '2026-01-15',
+    'next_calibration_date': '2027-01-15',
+    'created_at': nowIso(),
+    'updated_at': nowIso(),
+  });
+  // Second device (calibration overdue on purpose) so the batch-label
+  // sheet and the OVERDUE branch get real rows to render.
+  await db.insert('lab_equipment', {
+    'name': 'Precision balance',
+    'code': 'EQ-0008',
+    'manufacturer': 'Sartorius',
+    'serial_number': 'SN-2024-002',
+    'description': '',
+    'last_calibration_date': '2024-01-10',
+    'next_calibration_date': '2025-01-10',
+    'created_at': nowIso(),
+    'updated_at': nowIso(),
+  });
   await db.insert('lab_sample_tests', {
     'analysis_id': 1,
     'source_type': 'raw_material',
@@ -278,6 +388,19 @@ void serviceGroup() {
       expect(_isPdf(doc.bytes), isTrue);
       expect(doc.filename, startsWith('Label_QC-2026-001_'));
       expect(doc.title, 'Label_QC-2026-001');
+    });
+
+    test('equipment label', timeout: Timeout(const Duration(minutes: 3)), () async {
+      final doc = await _service.equipmentLabelPdf(1);
+      expect(_isPdf(doc.bytes), isTrue);
+      expect(doc.filename, startsWith('EquipmentLabel_EQ-0007_'));
+      expect(doc.title, 'EquipmentLabel_EQ-0007');
+    });
+
+    test('equipment batch labels', timeout: Timeout(const Duration(minutes: 3)), () async {
+      final doc = await _service.equipmentLabelsPdf([1, 2]);
+      expect(_isPdf(doc.bytes), isTrue);
+      expect(doc.filename, startsWith('EquipmentLabels_2_'));
     });
 
     test('batch labels', timeout: Timeout(const Duration(minutes: 3)), () async {

@@ -116,6 +116,24 @@ void main() {
     expect(await metadata.lastPullAt(), isNotNull);
   });
 
+  test('a pulled row keeps the origin\'s createdAt, not today', () async {
+    remote.documents['$orgId/samples/R-CREATED'] = remoteSample(
+      'R-CREATED',
+      version: 1,
+    );
+
+    expect((await worker().runOnce()).applied, 1);
+
+    final row = (await fixture.db
+            .query('inspections', where: 'entry_code = ?', whereArgs: ['R-CREATED']))
+        .single;
+    expect(
+      row['created_at'],
+      '2026-09-01T08:00:00.000',
+      reason: 'the local mirror must show when the row was really created',
+    );
+  });
+
   test('a newer remote version overwrites a clean local row', () async {
     final localId = await fixture.db.insert('inspections', sampleRow(entryCode: 'R-3'));
     await fixture.db.update(
@@ -296,6 +314,143 @@ void main() {
 
     expect(await fixture.db.query('inspections'), isEmpty,
         reason: 'only the bound organization is pulled');
+  });
+
+  /// A remote `inventoryItem` document, shaped like `buildRemotePayload` output.
+  Map<String, dynamic> remoteItem({
+    required String remoteId,
+    required String name,
+    String category = 'powder',
+    String unit = 'kg',
+    int version = 1,
+    String updatedAt = '2026-09-01T10:00:00.000',
+  }) =>
+      <String, dynamic>{
+        'name': name,
+        'category': category,
+        'unit': unit,
+        'currentQty': 0,
+        'minQty': 0,
+        'description': '',
+        'localId': 1,
+        'remoteId': remoteId,
+        'version': version,
+        'updatedBy': 'uid_admin',
+        'deviceId': 'dev_2',
+        'updatedAt': updatedAt,
+        'createdAt': '2026-09-01T09:00:00.000',
+        'payloadBytes': 90,
+      };
+
+  /// A remote `inventoryLot` document pointing at its item by remote id.
+  Map<String, dynamic> remoteLot({
+    required String remoteId,
+    required String inventoryRemoteId,
+    required String lotNo,
+    int version = 1,
+    String updatedAt = '2026-09-01T10:30:00.000',
+  }) =>
+      <String, dynamic>{
+        'inventoryRemoteId': inventoryRemoteId,
+        'lotNo': lotNo,
+        'qtyReceived': 100.0,
+        'qtyRemaining': 100.0,
+        'expiryDate': '',
+        'supplier': 'Supplier',
+        'note': '',
+        'receivedAt': '2026-09-01T10:00:00.000',
+        'localId': 5,
+        'remoteId': remoteId,
+        'version': version,
+        'updatedBy': 'uid_admin',
+        'deviceId': 'dev_2',
+        'updatedAt': updatedAt,
+        'createdAt': '2026-09-01T09:00:00.000',
+        'payloadBytes': 90,
+      };
+
+  test('a lot failing on a missing parent fetches the item in the retry',
+      () async {
+    remote.documents['$orgId/inventoryItems/legacy_lab_inventory_1'] =
+        remoteItem(remoteId: 'legacy_lab_inventory_1', name: 'Cement');
+    remote.documents['$orgId/inventoryLots/legacy_inventory_lots_1'] =
+        remoteLot(
+      remoteId: 'legacy_inventory_lots_1',
+      inventoryRemoteId: 'legacy_lab_inventory_1',
+      lotNo: 'L-OP-1',
+    );
+    // The item streamed before this device's `inventoryItem` cursor (a page
+    // this device walked on another cycle), so the remap only succeeds when
+    // the retry pass fetches the parent by its remote id.
+    await metadata.setCursor(
+      'inventoryItem',
+      const PullCursor('2026-09-01T10:00:00.000', 'legacy_lab_inventory_1'),
+    );
+
+    final report = await worker().runOnce();
+
+    expect(report.applied, 1,
+        reason: 'the child lot is resolved in the same cycle, not replayed '
+            'once per cycle forever');
+    final items = await fixture.db.query('lab_inventory');
+    expect(items, hasLength(1));
+    expect(items.single['remote_id'], 'legacy_lab_inventory_1');
+    final lots = await fixture.db.query('inventory_lots');
+    expect(lots, hasLength(1));
+    expect(lots.single['inventory_id'], items.single['id'],
+        reason: 'the per-device parent id is remapped');
+    expect(lots.single['inventory_remote_id'], 'legacy_lab_inventory_1');
+  });
+
+  test('a missing parent with no remote copy still fails the lot', () async {
+    remote.documents['$orgId/inventoryLots/legacy_inventory_lots_2'] =
+        remoteLot(
+      remoteId: 'legacy_inventory_lots_2',
+      inventoryRemoteId: 'legacy_lab_inventory_9',
+      lotNo: 'L-OP-2',
+    );
+
+    final report = await worker().runOnce();
+
+    expect(report.applied, 0);
+    expect(report.failed, 1);
+    expect(await fixture.db.query('lab_inventory'), isEmpty);
+    expect(await fixture.db.query('inventory_lots'), isEmpty);
+  });
+
+  test('a same-name item with a divergent identity is adopted on skip',
+      () async {
+    final localId = await fixture.db.insert('lab_inventory', {
+      'remote_id': 'legacy_lab_inventory_1',
+      'name': 'Cement',
+      'category': 'powder',
+      'unit': 'kg',
+      'current_qty': 10.0,
+      'min_qty': 0.0,
+      'created_at': '2026-09-01T07:00:00.000',
+      'updated_at': '2026-09-01T07:00:00.000',
+      'version': 1,
+      'remote_version': 1,
+      'sync_state': 'synced',
+    });
+    // The same business row created on another device before the
+    // organization was bound: same name, same version, different doc id.
+    remote.documents['$orgId/inventoryItems/b88b0ac4-item'] = remoteItem(
+      remoteId: 'b88b0ac4-item',
+      name: 'Cement',
+      updatedAt: '2026-09-02T10:00:00.000',
+    );
+
+    final report = await worker().runOnce();
+
+    expect(report.applied, 0);
+    expect(report.skipped, 1);
+    final row = (await fixture.db
+            .query('lab_inventory', where: 'id = ?', whereArgs: [localId]))
+        .single;
+    expect(row['remote_id'], 'b88b0ac4-item',
+        reason: 'the skipped row adopts the document identity so children '
+            'of that identity (lots) remap onto it');
   });
 }
 

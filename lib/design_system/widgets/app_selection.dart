@@ -8,7 +8,8 @@ import '../../core/constants/app_strings.dart';
 
 /// Generic bulk-action bar for register tables (the same gold bar idea as
 /// [SelectionActionBar]): a `محدد: N` badge, one `Export table (N)` HTML
-/// action and `إلغاء التحديد`. Screens whose rows need domain exports
+/// action, an optional labels action ([onExportLabels]) and
+/// `إلغاء التحديد`. Screens whose rows need domain exports
 /// (inspection PDFs/labels) keep [SelectionActionBar]; every other table
 /// uses this so selection looks and behaves identically everywhere.
 class TableSelectionBar extends StatefulWidget {
@@ -16,11 +17,16 @@ class TableSelectionBar extends StatefulWidget {
   final Future<void> Function() onExportTable;
   final VoidCallback onClear;
 
+  /// Optional sticker-export action (PDF labels for the selected rows) —
+  /// shown as a second action when provided.
+  final Future<void> Function()? onExportLabels;
+
   const TableSelectionBar({
     super.key,
     required this.selectedCount,
     required this.onExportTable,
     required this.onClear,
+    this.onExportLabels,
   });
 
   @override
@@ -29,14 +35,27 @@ class TableSelectionBar extends StatefulWidget {
 
 class _TableSelectionBarState extends State<TableSelectionBar> {
   bool _busy = false;
+  bool _busyLabels = false;
+
+  bool get _busyAny => _busy || _busyLabels;
 
   Future<void> _run() async {
-    if (_busy) return;
+    if (_busyAny) return;
     setState(() => _busy = true);
     try {
       await widget.onExportTable();
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _runLabels() async {
+    if (_busyAny) return;
+    setState(() => _busyLabels = true);
+    try {
+      await widget.onExportLabels!();
+    } finally {
+      if (mounted) setState(() => _busyLabels = false);
     }
   }
 
@@ -84,14 +103,25 @@ class _TableSelectionBarState extends State<TableSelectionBar> {
                 ? AppText.t('جاري التصدير...', 'Exporting...')
                 : '${AppText.t('تصدير جدول', 'Export table')} ($n)',
             loading: _busy,
-            onPressed: _busy ? null : _run,
+            onPressed: _busyAny ? null : _run,
           ),
+          if (widget.onExportLabels != null)
+            AppButton(
+              small: true,
+              style: AppButtonStyle.secondary,
+              icon: Icon(Icons.label_outline, size: 16.r),
+              label: _busyLabels
+                  ? AppText.t('جاري التصدير...', 'Exporting...')
+                  : '${AppText.t('تصدير QR', 'Export QR')} ($n)',
+              loading: _busyLabels,
+              onPressed: _busyAny ? null : _runLabels,
+            ),
           AppButton(
             small: true,
             style: AppButtonStyle.secondary,
             icon: Icon(Icons.close, size: 16.r),
             label: AppText.t('إلغاء التحديد', 'Clear selection'),
-            onPressed: _busy ? null : widget.onClear,
+            onPressed: _busyAny ? null : widget.onClear,
           ),
         ],
       ),
@@ -103,7 +133,7 @@ class _TableSelectionBarState extends State<TableSelectionBar> {
 ///
 /// Shown only while [selectedCount] > 0 — the owner hides it otherwise.
 /// Mirrors the legacy app: a `محدد: N` badge, `Export as a Report (N)` and
-/// `Export labels (N)` with per-action busy states, and `إلغاء التحديد`.
+/// `Export QR (N)` with per-action busy states, and `إلغاء التحديد`.
 /// Busy flags live here (like Vue's `actionBusy`) so stateless screens and
 /// both form factors share the exact behavior; errors are reported by the
 /// callbacks, which keep the selection on failure and clear it on success.
@@ -225,7 +255,7 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
             icon: Icon(Icons.label_outline, size: 16.r),
             label: _busyLabels
                 ? AppText.t('جاري التصدير...', 'Exporting...')
-                : '${AppText.t('تصدير ملصقات', 'Export labels')} ($n)',
+                : '${AppText.t('تصدير QR', 'Export QR')} ($n)',
             loading: _busyLabels,
             onPressed: _busy
                 ? null

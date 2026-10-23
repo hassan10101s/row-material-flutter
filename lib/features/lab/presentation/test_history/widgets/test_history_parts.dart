@@ -8,10 +8,12 @@ import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_page_size.dart';
+import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../core/test_history_logic.dart';
 import '../../../core/lab_result_format.dart';
 import '../../cubit/test_history_state.dart';
 import '../test_history_print.dart';
+import '../test_history_pdf.dart';
 import '../test_history_scope.dart';
 
 /// Small widgets composing the test-history tab on both experiences.
@@ -20,8 +22,10 @@ import '../test_history_scope.dart';
 /// rendering + callbacks, so the desktop table and the mobile cards can
 /// never disagree on content.
 
-/// Search + filter + "All" toolbar. Stacks on narrow widths (single
-/// experience layout via [AppBreakpoints], not a form-factor branch).
+/// Search + filter + "All" toolbar. One row at every width: the search takes
+/// the remaining width and the actions sit beside it — never stacked, so the
+/// pinned header cannot grow past a single line. [AppBreakpoints] keeps the
+/// desktop "New test" [trailing] slot from starving the search.
 class TestHistoryToolbar extends StatelessWidget {
   const TestHistoryToolbar({
     super.key,
@@ -30,6 +34,7 @@ class TestHistoryToolbar extends StatelessWidget {
     required this.onOpenFilters,
     required this.onClearAll,
     this.trailing,
+    this.onExportPdf,
   });
 
   final List<({String key, String label})> chips;
@@ -40,6 +45,9 @@ class TestHistoryToolbar extends StatelessWidget {
   /// Extra action sharing the search row (desktop "New test" button), so
   /// search and actions sit on one level instead of stacking rows.
   final Widget? trailing;
+
+  /// Exports the current (filtered) register as a PDF. Null hides the action.
+  final VoidCallback? onExportPdf;
 
   @override
   Widget build(BuildContext context) {
@@ -74,6 +82,13 @@ class TestHistoryToolbar extends StatelessWidget {
         small: true,
         onPressed: chips.isEmpty && !hasQuery ? null : onClearAll,
       ),
+      if (onExportPdf != null)
+        IconButton(
+          tooltip: AppText.t('تصدير الجدول PDF', 'Export table PDF'),
+          visualDensity: VisualDensity.compact,
+          onPressed: onExportPdf,
+          icon: Icon(Icons.picture_as_pdf_outlined, size: 18.r),
+        ),
       ?trailing,
     ];
     return LayoutBuilder(
@@ -87,17 +102,17 @@ class TestHistoryToolbar extends StatelessWidget {
             ],
           );
         }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        // Phones: one row — the search keeps the width, the filter/clear
+        // actions sit beside it. The old layout stacked the search above the
+        // actions, which ate half the screen before the first card.
+        return Row(
           children: [
-            search,
-            const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: actions,
-            ),
+            Expanded(child: search),
+            const SizedBox(width: AppSpacing.sm),
+            for (final action in actions) ...[
+              action,
+              const SizedBox(width: AppSpacing.sm),
+            ],
           ],
         );
       },
@@ -157,56 +172,67 @@ class TestHistoryChips extends StatelessWidget {
         ],
       );
     }
-    // Narrow phones: the trailing count + badges collapse below the chips
-    // instead of squeezing them into an overflowing Row.
+    // Narrow phones: keep the whole strip to a single (scrollable) line so
+    // the pinned header never grows past one row; the count/badges ride on
+    // the same line instead of collapsing below the chips.
+    final chipItems = <Widget>[
+      Text(
+        AppText.t('الفلاتر:', 'Filters:'),
+        style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+      ),
+      for (final chip in chips)
+        InputChip(
+          visualDensity: VisualDensity.compact,
+          label: Text(
+            chip.label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(fontSize: 12.spMax),
+          ),
+          onDeleted: () => scope.clearChip(chip.key),
+        ),
+      TextButton(
+        onPressed: onClearAll,
+        child: Text(
+          AppText.t('مسح الكل', 'Clear all'),
+          style: TextStyle(fontSize: 12.spMax),
+        ),
+      ),
+    ];
+    final trailingItems = <Widget>[count, ...badges];
     return LayoutBuilder(
       builder: (context, constraints) {
-        final chipsWrap = Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            Text(
-              AppText.t('الفلاتر:', 'Filters:'),
-              style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-            ),
-            for (final chip in chips)
-              InputChip(
-                visualDensity: VisualDensity.compact,
-                label: Text(
-                  chip.label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12.spMax),
-                ),
-                onDeleted: () => scope.clearChip(chip.key),
-              ),
-            TextButton(
-              onPressed: onClearAll,
-              child: Text(
-                AppText.t('مسح الكل', 'Clear all'),
-                style: TextStyle(fontSize: 12.spMax),
-              ),
-            ),
-          ],
-        );
-        final trailing = Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [count, ...badges],
-        );
         if (constraints.maxWidth < 480) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [chipsWrap, const SizedBox(height: 4), trailing],
+          return SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                ...chipItems,
+                const SizedBox(width: 8),
+                ...trailingItems,
+              ],
+            ),
           );
         }
         return Row(
           children: [
-            Expanded(child: chipsWrap),
+            Expanded(
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: chipItems,
+              ),
+            ),
             const SizedBox(width: 8),
-            Flexible(child: trailing),
+            Flexible(
+              child: Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: trailingItems,
+              ),
+            ),
           ],
         );
       },
@@ -214,11 +240,13 @@ class TestHistoryChips extends StatelessWidget {
   }
 }
 
-/// Desktop ten-column sortable table, verbatim from the pre-split screen.
+/// Desktop test log: the shared [AppPaginatedTable] (pinned header, built-in
+/// pager, long-press multi-select) with the log's own columns and sort keys.
 ///
 /// Tapping a row opens its detail/edit screen ([onOpen] receives the row).
-/// Long-pressing a row enters multi-select mode ([onLongPressRow]); while
-/// [selecting], checkboxes appear and tapping toggles instead of opening.
+/// Long-pressing a row enters multi-select mode; while [selecting] the
+/// checkboxes appear and a tap toggles instead of opening. The out-of-range /
+/// in-range row tint and the range badge ride on the shared table too.
 class TestHistoryTable extends StatelessWidget {
   const TestHistoryTable({
     super.key,
@@ -226,12 +254,18 @@ class TestHistoryTable extends StatelessWidget {
     required this.start,
     required this.isEmpty,
     this.onOpen,
+    this.onOpenReport,
     this.selecting = false,
     this.selectedIds = const <String>{},
     this.onToggleSelect,
     this.onLongPressRow,
     this.onToggleSelectAll,
     this.allOnPageSelected = false,
+    this.total,
+    this.page,
+    this.onPageChanged,
+    this.onPageSizeChanged,
+    this.rowsPerPage = thPageSize,
   });
 
   final List<Map<String, dynamic>> slice;
@@ -239,229 +273,299 @@ class TestHistoryTable extends StatelessWidget {
   final bool isEmpty;
   final ValueChanged<Map<String, dynamic>>? onOpen;
 
+  /// Opens the inspection (المحضر) linked by the row's entry code. Tapping the
+  /// merged source+code cell calls this instead of [onOpen] — the freed entry
+  /// code column lives inside the source cell now.
+  final ValueChanged<Map<String, dynamic>>? onOpenReport;
+
   /// True once the user long-pressed: selection checkboxes are shown.
   final bool selecting;
 
   /// Keys ([thRowKey]) of the selected rows.
   final Set<String> selectedIds;
   final ValueChanged<Map<String, dynamic>>? onToggleSelect;
+
+  /// Kept for API parity: the shared table now owns long-press-to-select, so
+  /// the press itself enters select mode through [onToggleSelect].
   final ValueChanged<Map<String, dynamic>>? onLongPressRow;
   final VoidCallback? onToggleSelectAll;
   final bool allOnPageSelected;
 
+  /// Server-driven paging, owned by [TestHistoryScope]. When [total] and
+  /// [onPageChanged] are supplied the shared table pages through them; without
+  /// them it slices [slice] in memory (used by the selection widget test).
+  final int? total;
+  final int? page;
+  final Future<void> Function(int page)? onPageChanged;
+  final Future<void> Function(int pageSize)? onPageSizeChanged;
+  final int rowsPerPage;
+
+  /// Sort keys aligned with the headers; null = not sortable (#, Range).
+  static const List<String?> _sortKeys = [
+    null,
+    'tested_at',
+    'analysis_name',
+    'sample_name',
+    'source_name',
+    'result_text',
+    null,
+    'range_state',
+    'tested_by_name',
+  ];
+
   @override
   Widget build(BuildContext context) {
     final scope = TestHistoryScope.of(context);
-    DataColumn sortable(String label, String key) {
-      return DataColumn(
-        label: InkWell(
-          onTap: () => scope.setSort(key),
-          child: Text('$label${scope.sortMark(key)}'),
-        ),
-      );
-    }
-
-    return AppCard(
-      padding: EdgeInsets.zero,
-      child: SizedBox(
-        width: double.infinity,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: DataTable(
-            // No built-in checkbox column: its boxes would open the editor
-            // on tap (onSelectChanged doubles as the row opener). Selection
-            // has exactly one UI — the explicit first column below, shown
-            // only in select mode after a long-press.
-            showCheckboxColumn: false,
-            columns: [
-              if (selecting)
-                DataColumn(
-                  label: Checkbox(
-                    value: allOnPageSelected,
-                    tristate: true,
-                    onChanged: onToggleSelectAll == null
-                        ? null
-                        : (_) => onToggleSelectAll!(),
-                  ),
-                ),
-              const DataColumn(label: Text('#')),
-              sortable(AppText.t('التوقيت', 'Time'), 'tested_at'),
-              sortable(AppText.t('التحليل', 'Analysis'), 'analysis_name'),
-              sortable(AppText.t('العينة', 'Sample'), 'sample_name'),
-              sortable(AppText.t('المصدر', 'Source'), 'source_name'),
-              sortable(AppText.t('كود الدخول', 'Entry code'), 'entry_code'),
-              sortable(AppText.t('النتيجة', 'Result'), 'result_text'),
-              DataColumn(label: Text(AppText.t('النطاق', 'Range'))),
-              sortable(AppText.t('الحالة', 'Status'), 'range_state'),
-              sortable(AppText.t('بواسطة', 'By'), 'tested_by_name'),
-            ],
-            rows: [
-              if (slice.isEmpty)
-                DataRow(
-                  cells: [
-                    if (selecting) const DataCell(SizedBox()),
-                    for (var i = 0; i < 10; i++)
-                      DataCell(
-                        i == 0
-                            ? Text(
-                                isEmpty
-                                    ? AppText.t(
-                                        'لا توجد تحاليل بعد. شغّل تحليلاً من تبويب تشغيل تحليل.',
-                                        'No analyses yet. Run one from the run-test tab.',
-                                      )
-                                    : AppText.t(
-                                        'لا توجد نتائج مطابقة للفلاتر الحالية.',
-                                        'No results match the current filters.',
-                                      ),
-                                style: TextStyle(color: AppColors.textMuted),
-                              )
-                            : const SizedBox(),
-                      ),
-                  ],
+    final selectedIndices = <int>{
+      for (var i = 0; i < slice.length; i++)
+        if (selectedIds.contains(thRowKey(slice[i]))) i,
+    };
+    return AppPaginatedTable(
+      height: null,
+      minTableWidth: 900,
+      columnFlex: const [0.35, 1.15, 1.4, 1.0, 1.3, 0.95, 1.05, 0.8, 0.9],
+      headers: [
+        '#',
+        AppText.t('التوقيت', 'Time'),
+        AppText.t('التحليل', 'Analysis'),
+        AppText.t('العينة', 'Sample'),
+        AppText.t('المصدر', 'Source'),
+        AppText.t('النتيجة', 'Result'),
+        AppText.t('النطاق', 'Range'),
+        AppText.t('الحالة', 'Status'),
+        AppText.t('بواسطة', 'By'),
+      ],
+      headerSortKeys: _sortKeys,
+      sortKey: scope.sortKey,
+      sortAscending: scope.sortDir > 0,
+      onSortChanged: scope.setSort,
+      rows: [
+        for (var i = 0; i < slice.length; i++)
+          _rowCells(slice[i], start + i + 1),
+      ],
+      rowBackgrounds: [for (final r in slice) _rowTint(r)],
+      empty: Padding(
+        padding: const EdgeInsets.all(AppSpacing.page),
+        child: Text(
+          isEmpty
+              ? AppText.t(
+                  'لا توجد تحاليل بعد. شغّل تحليلاً من تبويب تشغيل تحليل.',
+                  'No analyses yet. Run one from the run-test tab.',
                 )
-              else
-                for (var i = 0; i < slice.length; i++)
-                  historyRow(
-                    slice[i],
-                    start + i + 1,
-                    onTap: onOpen == null ? null : () => onOpen!(slice[i]),
-                    selected: selectedIds.contains(thRowKey(slice[i])),
-                    showSelect: selecting,
-                    onToggleSelect: onToggleSelect == null
-                        ? null
-                        : () => onToggleSelect!(slice[i]),
-                    onLongPress: onLongPressRow == null
-                        ? null
-                        : () => onLongPressRow!(slice[i]),
-                  ),
-            ],
-          ),
+              : AppText.t(
+                  'لا توجد نتائج مطابقة للفلاتر الحالية.',
+                  'No results match the current filters.',
+                ),
+          style: TextStyle(color: AppColors.textMuted),
+        ),
+      ),
+      onRowTap: onOpen == null ? null : (i) => onOpen!(slice[i]),
+      selectHidden: true,
+      selectedIndices: selectedIndices,
+      onToggleIndex: onToggleSelect == null
+          ? null
+          : (i) => onToggleSelect!(slice[i]),
+      selectAllValue: allOnPageSelected
+          ? true
+          : selectedIndices.isEmpty
+              ? false
+              : null,
+      onToggleAll: onToggleSelectAll == null
+          ? null
+          : (_) => onToggleSelectAll!(),
+      total: total,
+      page: page,
+      rowsPerPage: rowsPerPage,
+      onPageChanged: onPageChanged,
+      onPageSizeChanged: onPageSizeChanged,
+    );
+  }
+
+  /// One row's cells, in the same column order as the headers above.
+  List<Widget> _rowCells(Map<String, dynamic> r, int index) {
+    final out = '${r['range_state'] ?? ''}' == 'out';
+    final range = r['min'] == null && r['max'] == null
+        ? '-'
+        : '${r['min'] ?? ''} – ${r['max'] ?? ''} '
+              '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
+    return [
+      Text('$index'),
+      Text(
+        thFmtDateTime(r['tested_at']),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      _analysisCell(r),
+      Text(
+        '${r['sample_name'] ?? '-'}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      _sourceEntryCell(
+        r,
+        onOpenReport: selecting || onOpenReport == null
+            ? null
+            : () => onOpenReport!(r),
+      ),
+      Text(
+        formatLabResult(r['result_text']),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          fontWeight: FontWeight.w600,
+          color: out ? AppColors.danger : null,
+        ),
+      ),
+      Text(
+        range,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 12.spMax),
+      ),
+      _statusPill(r),
+      Text(
+        '${r['tested_by_name'] ?? '-'}',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+    ];
+  }
+
+  /// Faint out-of-range / in-range row tint (the pre-rebuild DataRow colour).
+  Color? _rowTint(Map<String, dynamic> r) {
+    final state = '${r['range_state'] ?? ''}';
+    if (state == 'out') return AppColors.danger.withValues(alpha: 0.06);
+    if (state == 'in') return AppColors.success.withValues(alpha: 0.06);
+    return null;
+  }
+
+  Widget _statusPill(Map<String, dynamic> r) {
+    final state = '${r['range_state'] ?? ''}';
+    final color = state == 'out'
+        ? AppColors.danger
+        : state == 'in'
+        ? AppColors.success
+        : AppColors.textMuted;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Text(
+        thRangeLabel(state.isEmpty ? 'none' : state),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: color,
+          fontSize: 11.spMax,
+          fontWeight: FontWeight.w600,
         ),
       ),
     );
   }
 }
 
-/// One history row (desktop tint + cells), shared by the table.
-/// [onTap] opens the row's detail/edit screen. In select mode the checkbox
-/// cell toggles ([onToggleSelect]) and a long-press ([onLongPress]) is what
-/// enters the mode in the first place.
-DataRow historyRow(
-  Map<String, dynamic> r,
-  int index, {
-  VoidCallback? onTap,
-  bool selected = false,
-  bool showSelect = false,
-  VoidCallback? onToggleSelect,
-  VoidCallback? onLongPress,
+/// Analysis cell: the analysis name on top, the method/reference (`a.reference`,
+/// e.g. "ISO 2171" or an in-house method) beneath it in a very small muted font.
+/// Hidden when the analysis has no reference, so the cell collapses to a single
+/// line exactly like before.
+Widget _analysisCell(
+  Map<String, dynamic> r, {
+  TextStyle? nameStyle,
+  int nameMaxLines = 1,
 }) {
-  final out = '${r['range_state'] ?? ''}' == 'out';
-  final inn = '${r['range_state'] ?? ''}' == 'in';
-  final stateColor = out
-      ? AppColors.danger
-      : inn
-      ? AppColors.success
-      : AppColors.textMuted;
-  final range = r['min'] == null && r['max'] == null
-      ? '-'
-      : '${r['min'] ?? ''} – ${r['max'] ?? ''} '
-            '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
-  return DataRow(
-    selected: selected,
-    color: out
-        ? WidgetStatePropertyAll(AppColors.danger.withValues(alpha: 0.06))
-        : inn
-        ? WidgetStatePropertyAll(AppColors.success.withValues(alpha: 0.06))
-        : null,
-    onSelectChanged: showSelect
-        ? (onToggleSelect == null ? null : (_) => onToggleSelect())
-        : (onTap == null ? null : (_) => onTap()),
-    onLongPress: onLongPress,
-    cells: [
-      if (showSelect)
-        DataCell(
-          Checkbox(
-            value: selected,
-            onChanged: onToggleSelect == null ? null : (_) => onToggleSelect(),
-          ),
-        ),
-      DataCell(Text('$index')),
-      DataCell(
-        Text(
-          thFmtDateTime(r['tested_at']),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      DataCell(
-        Text(
+  final reference = '${r['analysis_reference'] ?? ''}'.trim();
+  final hasReference = reference.isNotEmpty && reference != 'null';
+  return Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Flexible(
+        child: Text(
           '${r['analysis_name'] ?? '-'}',
-          maxLines: 1,
+          maxLines: nameMaxLines,
           overflow: TextOverflow.ellipsis,
+          style: nameStyle,
         ),
       ),
-      DataCell(
-        Text(
-          '${r['sample_name'] ?? '-'}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      DataCell(
-        Text(
-          '${r['source_name'] ?? '-'}'
-          '${'${r['source_type'] ?? ''}'.isEmpty ? '' : ' (${r['source_type'] == 'product' ? 'منتج' : 'خام'})'}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      DataCell(
-        Text(
-          '${r['entry_code'] ?? '-'}',
-          textDirection: TextDirection.ltr,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
-      DataCell(
-        Text(
-          formatLabResult(r['result_text']),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: out ? AppColors.danger : null,
-          ),
-        ),
-      ),
-      DataCell(Text(range, overflow: TextOverflow.ellipsis)),
-      DataCell(
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-          decoration: BoxDecoration(
-            color: stateColor.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(20),
-          ),
+      if (hasReference) ...[
+        const SizedBox(height: 2),
+        Flexible(
           child: Text(
-            thRangeLabel('${r['range_state'] ?? 'none'}'),
+            reference,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: stateColor,
-              fontSize: 11.spMax,
-              fontWeight: FontWeight.w600,
+              fontSize: 9.5.spMax,
+              height: 1.1,
+              color: AppColors.textMuted,
             ),
           ),
         ),
-      ),
-      DataCell(
-        Text(
-          '${r['tested_by_name'] ?? '-'}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-      ),
+      ],
     ],
+  );
+}
+
+/// Merged source + entry-code cell: the source name (with its خام/منتج tag) on
+/// top, the entry code beneath it. Tapping opens the linked inspection
+/// ([onOpenReport]); with [onOpenReport] null it is plain text (select mode, or
+/// no link callback wired). Merging the old entry-code column in here frees a
+/// whole column of width for the analysis/result cells.
+Widget _sourceEntryCell(Map<String, dynamic> r, {VoidCallback? onOpenReport}) {
+  final sourceType = '${r['source_type'] ?? ''}';
+  final label =
+      '${r['source_name'] ?? '-'}'
+      '${sourceType.isEmpty ? '' : ' (${thSourceLabel(sourceType)})'}';
+  // The table row reserves a fixed 44px slot (rowHeight 52 − 2×4 vertical
+  // padding). Two stacked lines sit right at that limit at the authored text
+  // scale, so each line is wrapped in Flexible: when text scale or the window
+  // grows the lines compress into the slot instead of overflowing it.
+  final code = '${r['entry_code'] ?? ''}'.trim();
+  final hasCode = code.isNotEmpty && code != 'null';
+  final body = Column(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Flexible(
+        child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+      ),
+      if (hasCode) ...[
+        const SizedBox(height: 2),
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.qr_code_2_outlined, size: 13, color: AppColors.primary),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  code,
+                  textDirection: TextDirection.ltr,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ],
+  );
+  if (onOpenReport == null) return body;
+  return InkWell(
+    onTap: onOpenReport,
+    borderRadius: BorderRadius.circular(6),
+    child: Tooltip(
+      message: AppText.t('فتح المحضر المرتبط', 'Open the linked report'),
+      child: body,
+    ),
   );
 }
 
@@ -474,6 +578,7 @@ class TestHistoryCards extends StatelessWidget {
     required this.slice,
     required this.start,
     this.onOpen,
+    this.onOpenReport,
     this.selecting = false,
     this.selectedIds = const <String>{},
     this.onToggleSelect,
@@ -483,6 +588,9 @@ class TestHistoryCards extends StatelessWidget {
   final List<Map<String, dynamic>> slice;
   final int start;
   final ValueChanged<Map<String, dynamic>>? onOpen;
+
+  /// Opens the inspection (المحضر) linked by a card's entry code.
+  final ValueChanged<Map<String, dynamic>>? onOpenReport;
 
   /// True once the user long-pressed: checkboxes are shown.
   final bool selecting;
@@ -499,18 +607,23 @@ class TestHistoryCards extends StatelessWidget {
       // md (12) between cards so they read as separate tappable rows
       // instead of one stuck mass — sm (8) is reserved for in-card gaps.
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
-      itemBuilder: (context, i) => TestHistoryCard(
-        row: slice[i],
-        index: start + i + 1,
-        onTap: onOpen == null ? null : () => onOpen!(slice[i]),
-        selected: selectedIds.contains(thRowKey(slice[i])),
-        showSelect: selecting,
-        onToggleSelect: onToggleSelect == null
-            ? null
-            : () => onToggleSelect!(slice[i]),
-        onLongPress: onLongPressRow == null
-            ? null
-            : () => onLongPressRow!(slice[i]),
+      itemBuilder: (context, i) => RepaintBoundary(
+        child: TestHistoryCard(
+          row: slice[i],
+          index: start + i + 1,
+          onTap: onOpen == null ? null : () => onOpen!(slice[i]),
+          onOpenReport: onOpenReport == null
+              ? null
+              : () => onOpenReport!(slice[i]),
+          selected: selectedIds.contains(thRowKey(slice[i])),
+          showSelect: selecting,
+          onToggleSelect: onToggleSelect == null
+              ? null
+              : () => onToggleSelect!(slice[i]),
+          onLongPress: onLongPressRow == null
+              ? null
+              : () => onLongPressRow!(slice[i]),
+        ),
       ),
     );
   }
@@ -522,6 +635,7 @@ class TestHistoryCard extends StatelessWidget {
     required this.row,
     required this.index,
     this.onTap,
+    this.onOpenReport,
     this.selected = false,
     this.showSelect = false,
     this.onToggleSelect,
@@ -531,6 +645,9 @@ class TestHistoryCard extends StatelessWidget {
   final Map<String, dynamic> row;
   final int index;
   final VoidCallback? onTap;
+
+  /// Opens the inspection (المحضر) linked by [row]'s entry code.
+  final VoidCallback? onOpenReport;
   final bool selected;
   final bool showSelect;
   final VoidCallback? onToggleSelect;
@@ -590,11 +707,10 @@ class TestHistoryCard extends StatelessWidget {
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                child: Text(
-                  '${row['analysis_name'] ?? '-'}',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
+                child: _analysisCell(
+                  row,
+                  nameMaxLines: 2,
+                  nameStyle: TextStyle(
                     fontSize: 14.spMax,
                     fontWeight: FontWeight.w700,
                     color: AppColors.textStrong,
@@ -625,20 +741,12 @@ class TestHistoryCard extends StatelessWidget {
           // values on a 360dp phone.
           _metaLine(Icons.science_outlined, '${row['sample_name'] ?? '-'}'),
           const SizedBox(height: AppSpacing.xs),
-          _metaLine(Icons.inventory_2_outlined, '${row['source_name'] ?? '-'}'),
+          _sourceEntryLine(row, onOpenReport: showSelect ? null : onOpenReport),
           const SizedBox(height: AppSpacing.xs),
           _metaLine(
             Icons.schedule_outlined,
             '${thFmtDateTime(row['tested_at'])} • ${row['tested_by_name'] ?? '-'}',
           ),
-          if ('${row['entry_code'] ?? ''}'.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.xs),
-            _metaLine(
-              Icons.qr_code_2_outlined,
-              '${row['entry_code']}',
-              mono: true,
-            ),
-          ],
           const Divider(height: AppSpacing.lg),
           Row(
             children: [
@@ -708,6 +816,16 @@ class _TestHistorySelectionBarState extends State<TestHistorySelectionBar> {
     }
   }
 
+  Future<void> _exportPdf() async {
+    if (_printing) return;
+    setState(() => _printing = true);
+    try {
+      await TestHistoryPdf.export(context, widget.rows);
+    } finally {
+      if (mounted) setState(() => _printing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppCard(
@@ -746,6 +864,14 @@ class _TestHistorySelectionBarState extends State<TestHistorySelectionBar> {
             onPressed: _printing ? null : _print,
           ),
           const SizedBox(width: AppSpacing.xs),
+          AppButton(
+            small: true,
+            style: AppButtonStyle.secondary,
+            label: AppText.t('PDF', 'PDF'),
+            icon: Icon(Icons.picture_as_pdf_outlined, size: 16.r),
+            onPressed: _printing ? null : _exportPdf,
+          ),
+          const SizedBox(width: AppSpacing.xs),
           IconButton(
             tooltip: AppText.t('إلغاء تحديد الكل', 'Clear selection'),
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
@@ -773,6 +899,57 @@ Widget _metaLine(IconData icon, String text, {bool mono = false}) {
         ),
       ),
     ],
+  );
+}
+
+/// Mobile card line merging the source name (خام/منتج) with the entry code.
+/// Tapping it opens the linked inspection (المحضر) — the card's own tap still
+/// opens the lab-test detail, so this is a deliberate, labelled link target.
+Widget _sourceEntryLine(
+  Map<String, dynamic> row, {
+  VoidCallback? onOpenReport,
+}) {
+  final sourceType = '${row['source_type'] ?? ''}';
+  final source =
+      '${row['source_name'] ?? '-'}'
+      '${sourceType.isEmpty ? '' : ' (${thSourceLabel(sourceType)})'}';
+  final code = '${row['entry_code'] ?? ''}'.trim();
+  final hasCode = code.isNotEmpty && code != 'null';
+  final tappable = onOpenReport != null && hasCode;
+  final content = Row(
+    children: [
+      Icon(
+        Icons.qr_code_2_outlined,
+        size: 15.r,
+        color: tappable ? AppColors.primary : AppColors.textMuted,
+      ),
+      const SizedBox(width: 6),
+      Expanded(
+        child: Text(
+          hasCode ? '$source • $code' : source,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 12.spMax,
+            color: tappable ? AppColors.primary : AppColors.textMuted,
+            fontWeight: tappable ? FontWeight.w600 : null,
+            decoration: tappable ? TextDecoration.underline : null,
+          ),
+        ),
+      ),
+    ],
+  );
+  if (!tappable) return content;
+  return InkWell(
+    onTap: onOpenReport,
+    borderRadius: BorderRadius.circular(6),
+    child: Tooltip(
+      message: AppText.t('فتح المحضر المرتبط', 'Open the linked report'),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: content,
+      ),
+    ),
   );
 }
 
@@ -916,6 +1093,7 @@ Widget testHistoryFilterGrid(
   required String sourceType,
   required String chemicalId,
   required String rangeState,
+  required String reasonState,
   required String recordLimit,
   required ValueChanged<String> onMode,
   required VoidCallback onDate,
@@ -923,6 +1101,7 @@ Widget testHistoryFilterGrid(
   required ValueChanged<String> onSource,
   required ValueChanged<String> onChemical,
   required ValueChanged<String> onRange,
+  required ValueChanged<String> onReason,
   required ValueChanged<String> onLimit,
 }) {
   Widget field({required String label, required Widget child}) {
@@ -1051,6 +1230,10 @@ Widget testHistoryFilterGrid(
                 value: 'product',
                 child: Text(AppText.t('منتج', 'Product')),
               ),
+              DropdownMenuItem(
+                value: 'sample',
+                child: Text(AppText.t('عينة جديدة', 'New sample')),
+              ),
             ],
             onChanged: (v) => onSource(v ?? ''),
           ),
@@ -1074,6 +1257,27 @@ Widget testHistoryFilterGrid(
                 DropdownMenuItem(value: o.value, child: Text(o.label)),
             ],
             onChanged: (v) => onChemical(v ?? ''),
+          ),
+        ),
+        field(
+          label: AppText.t('سبب القرار', 'Decision reason'),
+          child: Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              ChoiceChip(
+                label: Text(AppText.t('الكل', 'All')),
+                selected: reasonState.isEmpty,
+                visualDensity: VisualDensity.compact,
+                onSelected: (_) => onReason(''),
+              ),
+              ChoiceChip(
+                label: Text(AppText.t('فيها سبب فقط', 'With reason only')),
+                selected: reasonState == 'has',
+                visualDensity: VisualDensity.compact,
+                onSelected: (_) => onReason('has'),
+              ),
+            ],
           ),
         ),
         field(

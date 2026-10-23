@@ -1,9 +1,7 @@
 import 'package:equatable/equatable.dart';
 
-import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_format.dart';
 import 'qc_enums.dart';
-import 'qc_goal.dart';
 
 /// An append-only, hash-chained QC audit entry (features/qc_manager/domain).
 ///
@@ -211,107 +209,6 @@ class QcChainVerification extends Equatable {
   String toString() => isValid
       ? 'QcChainVerification.ok(checked: $checked)'
       : 'QcChainVerification.broken(at: $brokenAt, reason: $reason)';
-}
-
-/// A goal plus the child rows the detail screen renders, fetched in one go.
-///
-/// Bundling them avoids the N+1 that a screen issuing five list queries would
-/// otherwise cause on every open, and guarantees the summary figures and the
-/// rows they were derived from come from the same snapshot.
-class QcGoalBundle extends Equatable {
-  final QcGoal goal;
-  final List<QcGoalAssignment> assignments;
-  final List<QcGoalAction> actions;
-  final List<QcGoalKpi> kpis;
-  final List<QcGoalLink> links;
-
-  const QcGoalBundle({
-    required this.goal,
-    this.assignments = const [],
-    this.actions = const [],
-    this.kpis = const [],
-    this.links = const [],
-  });
-
-  int get totalAssignments => assignments.length;
-
-  int get completedAssignments =>
-      assignments.where((a) => a.isCompleted).length;
-
-  int get overdueAssignments => assignments.where((a) => a.isOverdue).length;
-
-  int get totalActions => actions.length;
-
-  int get doneActions => actions.where((a) => a.isDone).length;
-
-  int get blockedActions => actions.where((a) => a.isBlocked).length;
-
-  int get overdueActions => actions.where((a) => a.isOverdue).length;
-
-  int get measuredKpis => kpis.where((k) => k.isMeasured).length;
-
-  int get metKpis => kpis.where((k) => k.isMet).length;
-
-  /// Who finished the goal itself, or an empty string when it is still open.
-  String get finishedBy =>
-      goal.completedByName.isNotEmpty ? goal.completedByName : goal.completedBy;
-
-  String get finishedAt => goal.completedAt;
-
-  /// True once every assignee has signed off - the precondition the repository
-  /// enforces before allowing the goal itself to be completed.
-  bool get allAssignmentsComplete =>
-      assignments.every(
-        (a) => a.isCompleted || a.status == QcGoalAssignmentStatus.cancelled,
-      );
-
-  bool get allActionsDone =>
-      actions.every(
-        (a) => a.isDone || a.status == QcGoalActionStatus.cancelled,
-      );
-
-  /// Combined reason this goal cannot be closed yet, or an empty string when it
-  /// can. Surfaced as a disabled-button hint rather than an error dialog.
-  String get completionBlocker {
-    if (goal.completionBlocker.isNotEmpty) return goal.completionBlocker;
-    final openAssignments = assignments
-        .where(
-          (a) =>
-              !a.isCompleted &&
-              a.status != QcGoalAssignmentStatus.cancelled,
-        )
-        .length;
-    if (openAssignments > 0) {
-      return AppText.t(
-        '$openAssignments تكليفات ما زالت مفتوحة',
-        '$openAssignments assignment(s) still open',
-      );
-    }
-    final openActions = actions
-        .where((a) => !a.isDone && a.status != QcGoalActionStatus.cancelled)
-        .length;
-    if (openActions > 0) {
-      return AppText.t(
-        '$openActions إجراءات ما زالت مفتوحة',
-        '$openActions action(s) still open',
-      );
-    }
-    return '';
-  }
-
-  bool get canComplete => completionBlocker.isEmpty;
-
-  /// Share of finished work, 0..1. Actions weigh more than assignments because
-  /// they are the actual steps; with neither, progress falls back to the goal's
-  /// own KPI progress.
-  double? get progress {
-    if (totalActions > 0) return doneActions / totalActions;
-    if (totalAssignments > 0) return completedAssignments / totalAssignments;
-    return goal.progress;
-  }
-
-  @override
-  List<Object?> get props => [goal, assignments, actions, kpis, links];
 }
 
 Map<String, dynamic> _jsonMap(Object? value) {

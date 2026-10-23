@@ -156,4 +156,42 @@ void main() {
     expect(find.text('Water'), findsOneWidget);
     expect(find.text('Water softener'), findsOneWidget);
   });
+
+  testWidgets('the caret re-opens the list of a committed value', (
+    tester,
+  ) async {
+    await tester.pumpWidget(harness(selected: (3, 'Water softener')));
+    await tester.pumpAndSettle();
+
+    // A committed field is read-only, but the caret must still open the full
+    // list so the choice can be changed without clearing it first.
+    expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isTrue);
+    await tester.tap(find.byIcon(Icons.arrow_drop_down));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isFalse);
+    expect(find.text('Water'), findsOneWidget);
+    expect(find.text('Glass'), findsOneWidget);
+  });
+
+  testWidgets('closing a re-opened list restores the committed value', (
+    tester,
+  ) async {
+    await tester.pumpWidget(harness(selected: (3, 'Water softener')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.arrow_drop_down));
+    await tester.pumpAndSettle();
+    tester.binding.focusManager.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isTrue);
+    expect(
+      find.descendant(
+        of: find.byType(TextField),
+        matching: find.text('Water softener'),
+      ),
+      findsOneWidget,
+    );
+  });
 }

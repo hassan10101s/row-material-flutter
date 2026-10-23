@@ -68,3 +68,22 @@ class SessionWriteGuard implements WriteGuard {
     return session.canDo(permission, online: online);
   }
 }
+
+/// The human-readable name to stamp on writes: the session's `displayName`
+/// when the member gave one, the email as the honest fallback — the same
+/// rule `QcActor.fromSession` applies to QC audit rows.
+///
+/// An extension rather than an interface member on purpose: production
+/// guards are [SessionWriteGuard] (they hold the live session), while the
+/// test fakes keep compiling unchanged and resolve to their email, which is
+/// exactly what they always stamped.
+extension WriteGuardActor on WriteGuard {
+  String get actorName {
+    final session = this is SessionWriteGuard
+        ? (this as SessionWriteGuard).session
+        : null;
+    final name = session?.displayName ?? '';
+    final trimmed = name.trim();
+    return trimmed.isNotEmpty ? trimmed : email;
+  }
+}

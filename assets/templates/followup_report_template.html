@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>تقرير متابعة جودة الخامات - {{ date_str }}</title>
+    <title>{% if is_en %}Material Quality Follow-Up Report - {% else %}تقرير متابعة جودة الخامات - {% endif %}{{ date_str }}</title>
     {% if base_url %}<base href="{{ base_url }}">{% endif %}
     <link rel="stylesheet" href="fonts/fonts.css">
     <style>
@@ -348,6 +348,10 @@
             table-layout: fixed;
         }
 
+        .params-table {
+            table-layout: auto;
+        }
+
         thead {
             display: table-header-group;
         }
@@ -453,11 +457,12 @@
 
                     <div class="brand-center">
                         <div class="eyebrow">Quality Follow-Up Report</div>
-                        <h1 class="title">تقرير متابعة جودة الخامات | Quality Follow-Up Report</h1>
+                        <h1 class="title">{% if is_en %}Quality Follow-Up Report{% else %}تقرير متابعة جودة الخامات | Quality Follow-Up Report{% endif %}</h1>
                         <p class="subtitle">{{ department_label }}</p>
+                        {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
                         <p class="subtitle">{{ formatted_date }} | {{ date_str }}</p>
                         {% if shift_label %}
-                        <p class="subtitle" style="font-size: 11px; color: #6d7f93; margin-top: 4px;">🕐 نطاق التغطية: {{ shift_label }}</p>
+                        <p class="subtitle" style="font-size: 11px; color: #6d7f93; margin-top: 4px;">🕐 {% if is_en %}Coverage: {% else %}نطاق التغطية: {% endif %}{{ shift_label }}</p>
                         {% endif %}
                     </div>
 
@@ -489,32 +494,32 @@
                     <div class="summary-card primary">
                         <span class="summary-label">Total Inspections</span>
                         <span class="summary-value">{{ total }}</span>
-                        <span class="summary-note">إجمالي الفحص   </span>
+                        <span class="summary-note">{% if is_en %}Total Inspections{% else %}إجمالي الفحص{% endif %}   </span>
                     </div>
                     <div class="summary-card success">
                         <span class="summary-label">Accepted</span>
                         <span class="summary-value">{{ accepted_total }}</span>
-                        <span class="summary-note">قبول نهائي أو قبول مع متابعة</span>
+                        <span class="summary-note">{% if is_en %}Approved or conditionally approved{% else %}قبول نهائي أو قبول مع متابعة{% endif %}</span>
                     </div>
                     <div class="summary-card warning">
                         <span class="summary-label">Under Follow-Up</span>
                         <span class="summary-value">{{ conditional_partial }}</span>
-                        <span class="summary-note">حالات المتابعة أو الرفض الجزئي</span>
+                        <span class="summary-note">{% if is_en %}Follow-up or partial rejection cases{% else %}حالات المتابعة أو الرفض الجزئي{% endif %}</span>
                     </div>
                     <div class="summary-card danger">
                         <span class="summary-label">Rejected</span>
                         <span class="summary-value">{{ rejected }}</span>
-                        <span class="summary-note">عدد حالات الرفض الكلي</span>
+                        <span class="summary-note">{% if is_en %}Total full rejections{% else %}عدد حالات الرفض الكلي{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Unique Materials</span>
                         <span class="summary-value">{{ unique_materials }}</span>
-                        <span class="summary-note">عدد الخامات </span>
+                        <span class="summary-note">{% if is_en %}Materials Count{% else %}عدد الخامات{% endif %} </span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Total Quantity</span>
                         <span class="summary-value">{{ total_quantity }}</span>
-                        <span class="summary-note">مجموع الكميات </span>
+                        <span class="summary-note">{% if is_en %}Total Quantities{% else %}مجموع الكميات{% endif %} </span>
                     </div>
                 </div>
 
@@ -522,17 +527,17 @@
                     <div class="summary-card">
                         <span class="summary-label">Accepted Quantity</span>
                         <span class="summary-value">{{ total_accepted_quantity }}</span>
-                        <span class="summary-note">إجمالي الكمية المقبولة</span>
+                        <span class="summary-note">{% if is_en %}Total Accepted Quantity{% else %}إجمالي الكمية المقبولة{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Approximate Rejected Quantity</span>
                         <span class="summary-value">{{ total_rejected_quantity }}</span>
-                        <span class="summary-note">إجمالي الكمية المرفوضة تقريبية</span>
+                        <span class="summary-note">{% if is_en %}Total Rejected Quantity (approximate){% else %}إجمالي الكمية المرفوضة تقريبية{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Approval Rate</span>
                         <span class="summary-value">{{ approval_rate }}%</span>
-                        <span class="summary-note">نسبة القبول (من العينات)</span>
+                        <span class="summary-note">{% if is_en %}Acceptance Rate (from samples){% else %}نسبة القبول (من العينات){% endif %}</span>
                     </div>
                 </div>
                 
@@ -540,17 +545,17 @@
                     <div class="summary-card">
                         <span class="summary-label">Suppliers</span>
                         <span class="summary-value">{{ unique_suppliers }}</span>
-                        <span class="summary-note">عدد الموردين </span>
+                        <span class="summary-note">{% if is_en %}Suppliers Count{% else %}عدد الموردين{% endif %} </span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Decision Spectrum</span>
                         <span class="summary-value">{{ approved }}/{{ conditional_partial }}/{{ rejected }}</span>
-                        <span class="summary-note">قبول | متابعة/جزئي | رفض كلي</span>
+                        <span class="summary-note">{% if is_en %}Accepted | Follow-up/Partial | Fully Rejected{% else %}قبول | متابعة/جزئي | رفض كلي{% endif %}</span>
                     </div>
                 </div>
 
                 <div class="section-head">
-                    <h2 class="section-title">تفاصيل الفحص حسب الخامة</h2>
+                    <h2 class="section-title">{% if is_en %}Inspection details by material{% else %}تفاصيل الفحص حسب الخامة{% endif %}</h2>
                     <div class="section-caption">Material-Wise Follow-Up Details</div>
                 </div>
 
@@ -560,7 +565,7 @@
                     <section class="material-card">
                         <div class="material-header">
                             <h3 class="material-title">{{ material.name }}</h3>
-                            <span class="material-badge">{{ material.count }} سجل</span>
+                            <span class="material-badge">{{ material.count }}{% if is_en %} records{% else %} سجل{% endif %}</span>
                         </div>
 
                         <div class="material-kpis">
@@ -595,44 +600,28 @@
                         </div>
 
                         <div class="table-wrap">
-                            {# Check if column data exists for this specific material section using namespace for scoping #}
-                            {% set ns = namespace(has_follow_up=false, has_rejected_qty=false) %}
-                            {% for row in material.rows %}
-                                {% if row.follow_up_note and row.follow_up_note != '-' and row.follow_up_note|trim != '' %}
-                                    {% set ns.has_follow_up = true %}
-                                {% endif %}
-                                {% if row.rejected_quantity and row.rejected_quantity != '-' and row.rejected_quantity != '0' and row.rejected_quantity|trim != '' %}
-                                    {% set ns.has_rejected_qty = true %}
-                                {% endif %}
-                            {% endfor %}
-
-                            <table>
+                            <table class="params-table">
                                 <thead>
                                     <tr>
-                                        <th style="width: 3%;">#</th>
-                                        <th style="width: 15%;">كود الدخول</th>
-                                        <th style="width: 7%;">وقت القرار</th>
-                                        <th style="width: 15%;">المورد</th>
-                                        <th style="width: 7%;">الكمية</th>
-                                        <th style="width: 11%;">الحالة</th>
-                                        <th style="width: 18%;">سبب القرار</th>
-                                        {% if ns.has_follow_up %}
-                                        <th style="width: 12%;">ملاحظة المتابعة</th>
-                                        {% endif %}
-                                        {% if ns.has_rejected_qty %}
-                                        <th style="width: 7%;">الكمية المرفوضة</th>
-                                        {% endif %}
-                                        <th style="width: 15%;">أخصائي الجودة</th>
+                                        <th>#</th>
+                                        <th>{% if is_en %}Sample Name{% else %}اسم العينة{% endif %}</th>
+                                        <th>{% if is_en %}Sample Taken By{% else %}اسم من أخذ العينة{% endif %}</th>
+                                        <th>{% if is_en %}Time{% else %}الوقت{% endif %}</th>
+                                        <th>{% if is_en %}Entry Code{% else %}كود الدخول{% endif %}</th>
+                                        <th>{% if is_en %}Status{% else %}الحالة{% endif %}</th>
+                                        {% for column in material.columns %}
+                                        <th>{{ column }}</th>
+                                        {% endfor %}
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {% for row in material.rows %}
                                     <tr>
                                         <td>{{ row.index }}</td>
+                                        <td>{{ row.sample_name }}</td>
+                                        <td>{{ row.taken_by }}</td>
+                                        <td>{{ row.time }}</td>
                                         <td>{{ row.entry_code }}</td>
-                                        <td>{{ row.decision_time }}</td>
-                                        <td>{{ row.supplier }}</td>
-                                        <td>{{ row.quantity }}</td>
                                         <td class="status-cell" style="
                                             {% if row.decision_status_raw == 'FULL_REJECTION' or row.decision_status_raw == 'PARTIAL_REJECTION' %}
                                                 color: var(--danger-text); background-color: var(--danger-bg);
@@ -643,16 +632,11 @@
                                             {% endif %}
                                             border-radius: 4px; border: 1px solid rgba(0,0,0,0.05); padding: 4px;
                                         ">
-                                            {{ row.decision_status or '-' }}
+                                            {{ row.decision }}
                                         </td>
-                                        <td>{{ row.decision_reason or '-' }}</td>
-                                        {% if ns.has_follow_up %}
-                                        <td>{{ row.follow_up_note or '-' }}</td>
-                                        {% endif %}
-                                        {% if ns.has_rejected_qty %}
-                                        <td>{{ row.rejected_quantity or '-' }}</td>
-                                        {% endif %}
-                                        <td>{{ row.specialist_name }}</td>
+                                        {% for value in row.values %}
+                                        <td>{{ value }}</td>
+                                        {% endfor %}
                                     </tr>
                                     {% endfor %}
                                 </tbody>
@@ -663,14 +647,14 @@
                 </div>
                 {% else %}
                 <div class="empty-state">
-                    <h3>لا توجد فحوصات مطابقة لمعايير التصفية</h3>
-                    <p>لم يتم العثور على بيانات.</p>
+                    <h3>{% if is_en %}No inspections match the filter criteria{% else %}لا توجد فحوصات مطابقة لمعايير التصفية{% endif %}</h3>
+                    <p>{% if is_en %}No data found.{% else %}لم يتم العثور على بيانات.{% endif %}</p>
                 </div>
                 {% endif %}
             </div>
 
             <div class="footer">
-                <div><strong>Material Lab</strong> | نظام ادارة المعمل الداخلي</div>
+                <div><strong>Material Lab</strong> | {% if is_en %}Internal lab management system{% else %}نظام ادارة المعمل الداخلي{% endif %}</div>
                 <div>Prepared Automatically by {{ department_label }}</div>
             </div>
         </div>

@@ -85,30 +85,36 @@ class _SyncScreenState extends State<SyncScreen> {
 
   Future<void> _refresh() async {
     final snapshot = await _engine.syncNow(reason: 'screen');
+    if (mounted) setState(() => _status = snapshot);
+    await _refreshData();
+  }
+
+  /// Re-reads the conflict/queue lists. Deliberately does **not** run a sync
+  /// cycle: every `_retryAll`-style action has already run its own [syncNow],
+  /// and the old shape called [syncNow] a second time through here — two full
+  /// walks (2× the pull plus 2× the audit maintenance) per button tap.
+  Future<void> _refreshData() async {
     final rows = await _queue.listConflicts(limit: 200);
     final queueRows = await _queue.listQueue(limit: 200);
     if (mounted) {
       setState(() {
-        _status = snapshot;
         _rows = rows;
         _queueRows = queueRows;
       });
     }
   }
 
-  Future<void> _syncNow() =>
-      _guarded(() async {
-        await _engine.syncNow(reason: 'manual');
-        await _refresh();
-      });
+  Future<void> _syncNow() => _guarded(() async {
+    await _engine.syncNow(reason: 'manual');
+    await _refreshData();
+  });
 
   /// "تنزيل السجل": a pull-only cycle, for a device that just wants the
   /// server's history without pushing anything.
-  Future<void> _downloadHistory() =>
-      _guarded(() async {
-        await _engine.syncNow(reason: 'history', pullOnly: true);
-        await _refresh();
-      });
+  Future<void> _downloadHistory() => _guarded(() async {
+    await _engine.syncNow(reason: 'history', pullOnly: true);
+    await _refreshData();
+  });
 
   /// "إعادة السحب الكامل": forget pull cursors and re-walk every collection
   /// from the beginning. For devices whose cursor was poisoned by old code
@@ -117,62 +123,55 @@ class _SyncScreenState extends State<SyncScreen> {
   /// app data) will ever fetch them. Applied rows re-skip cheaply and queued
   /// local edits are untouched, unlike wiping app data.
   Future<void> _fullRepull() => _guarded(() async {
-        await getIt<SyncMetadata>().clearCursors();
-        await _engine.syncNow(reason: 'full-repull', pullOnly: true);
-        await _refresh();
-        if (mounted) {
-          AppFeedback.success(
-            context,
-            AppText.t(
-              'تمت إعادة السحب الكامل',
-              'Full re-pull done',
-            ),
-          );
-        }
-      });
+    await getIt<SyncMetadata>().clearCursors();
+    await _engine.syncNow(reason: 'full-repull', pullOnly: true);
+    await _refreshData();
+    if (mounted) {
+      AppFeedback.success(
+        context,
+        AppText.t('تمت إعادة السحب الكامل', 'Full re-pull done'),
+      );
+    }
+  });
 
   /// "رفع المتأخر": re-queue every local inspection row that never reached
   /// the server (imports / restores / lost queue rows), then push in batches.
   /// Temporary recovery tool for the current history backlog.
   Future<void> _backfill() => _guarded(() async {
-        final report =
-            await getIt<BackfillService>().enqueueUnsyncedSamples();
-        await _engine.syncNow(reason: 'backfill');
-        await _refresh();
-        if (mounted) {
-          AppFeedback.success(
-            context,
-            AppText.t(
-              'تم تجهيز ${report.total} سجل للرفع (${report.tombstones} حذف)',
-              'Queued ${report.total} record(s) for upload (${report.tombstones} deletes)',
-            ),
-          );
-        }
-      });
+    final report = await getIt<BackfillService>().enqueueUnsyncedSamples();
+    await _engine.syncNow(reason: 'backfill');
+    await _refreshData();
+    if (mounted) {
+      AppFeedback.success(
+        context,
+        AppText.t(
+          'تم تجهيز ${report.total} سجل للرفع (${report.tombstones} حذف)',
+          'Queued ${report.total} record(s) for upload (${report.tombstones} deletes)',
+        ),
+      );
+    }
+  });
 
   /// "إعادة المحاولة": clear the backoff of every blocked row, then sync again.
-  Future<void> _retryAll() =>
-      _guarded(() async {
-        await _queue.retryBlocked();
-        await _engine.syncNow(reason: 'retry');
-        await _refresh();
-      });
+  Future<void> _retryAll() => _guarded(() async {
+    await _queue.retryBlocked();
+    await _engine.syncNow(reason: 'retry');
+    await _refreshData();
+  });
 
-  Future<void> _retryOne(Map<String, Object?> row) =>
-      _guarded(() async {
-        await _queue.retryRow((row['id'] as num).toInt());
-        await _engine.syncNow(reason: 'retry-one');
-        await _refresh();
-      });
+  Future<void> _retryOne(Map<String, Object?> row) => _guarded(() async {
+    await _queue.retryRow((row['id'] as num).toInt());
+    await _engine.syncNow(reason: 'retry-one');
+    await _refreshData();
+  });
 
   /// "تجاهل الكل": dismiss every unresolved conflict without picking a side.
   /// Purely local (no sync cycle), so it also works offline — the stale rows
   /// just stop blocking the badge until fresh writes re-queue themselves.
-  Future<void> _dismissAll() =>
-      _guarded(() async {
-        await _queue.dismissAllConflicts();
-        await _refresh();
-      });
+  Future<void> _dismissAll() => _guarded(() async {
+    await _queue.dismissAllConflicts();
+    await _refreshData();
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -192,10 +191,14 @@ class _SyncScreenState extends State<SyncScreen> {
         AppPageHeader(
           title: AppText.t('المزامنة', 'Sync'),
           subtitle: gate.session.offline
-              ? AppText.t('جلسة محلية (بدون توكن حي)',
-                  'Local session (no live token)')
-              : AppText.t('الحالة والطابور والتعارضات',
-                  'Status, queue and conflicts'),
+              ? AppText.t(
+                  'جلسة محلية (بدون توكن حي)',
+                  'Local session (no live token)',
+                )
+              : AppText.t(
+                  'الحالة والطابور والتعارضات',
+                  'Status, queue and conflicts',
+                ),
           icon: Icons.sync_outlined,
           actions: [
             AppButton(
@@ -248,8 +251,7 @@ class _SyncScreenState extends State<SyncScreen> {
           builder: (context, constraints) {
             final width = constraints.maxWidth;
             final stacked = width < AppBreakpoints.medium;
-            final tileWidth =
-                stacked ? width : (width - AppSpacing.sm * 3) / 4;
+            final tileWidth = stacked ? width : (width - AppSpacing.sm * 3) / 4;
             return Wrap(
               spacing: AppSpacing.sm,
               runSpacing: AppSpacing.sm,
@@ -274,7 +276,9 @@ class _SyncScreenState extends State<SyncScreen> {
                 _Tile(
                   label: AppText.t('تعارضات', 'Conflicts'),
                   value: '${status?.conflicts ?? 0}',
-                  color: (status?.conflicts ?? 0) > 0 ? AppColors.warning : null,
+                  color: (status?.conflicts ?? 0) > 0
+                      ? AppColors.warning
+                      : null,
                   width: tileWidth,
                 ),
               ],
@@ -290,7 +294,10 @@ class _SyncScreenState extends State<SyncScreen> {
         if (status?.lastError != null) ...[
           const SizedBox(height: AppSpacing.sm),
           Text(
-            '${status!.lastError}',
+            AppText.t(
+              'تعذر إكمال آخر عملية مزامنة. حاول مرة أخرى لاحقًا.',
+              'The last sync did not complete. Please try again later.',
+            ),
             style: TextStyle(color: AppColors.danger, fontSize: 12.spMax),
           ),
         ],
@@ -298,8 +305,8 @@ class _SyncScreenState extends State<SyncScreen> {
           const SizedBox(height: AppSpacing.sm),
           Text(
             AppText.t(
-              'Firebase غير مهيأ — التطبيق يعمل محلياً فقط.',
-              'Firebase is not configured — the app works locally only.',
+              'المزامنة غير مهيأة — التطبيق يعمل محلياً فقط.',
+              'Sync is not configured — the app works locally only.',
             ),
             style: TextStyle(color: AppColors.warning, fontSize: 12.spMax),
           ),
@@ -318,12 +325,12 @@ class _SyncScreenState extends State<SyncScreen> {
               onPressed: _queueRows.isEmpty
                   ? null
                   : () => TableHtmlExport.export(
-                        context,
-                        filePrefix: 'sync_queue',
-                        title: AppText.t('طابور المزامنة', 'Sync queue'),
-                        headers: _QueueRow.exportHeaders(),
-                        rows: _QueueRow.exportRows(_queueRows),
-                      ),
+                      context,
+                      filePrefix: 'sync_queue',
+                      title: AppText.t('طابور المزامنة', 'Sync queue'),
+                      headers: _QueueRow.exportHeaders(),
+                      rows: _QueueRow.exportRows(_queueRows),
+                    ),
               icon: const Icon(Icons.table_view_outlined),
             ),
           ],
@@ -396,20 +403,24 @@ class _SyncScreenState extends State<SyncScreen> {
               onPressed: _rows.isEmpty
                   ? null
                   : () => TableHtmlExport.export(
-                        context,
-                        filePrefix: 'sync_conflicts',
-                        title: AppText.t('تعارضات المزامنة', 'Sync conflicts'),
-                        headers: _ConflictRow.exportHeaders(),
-                        rows: _ConflictRow.exportRows(_rows),
-                      ),
+                      context,
+                      filePrefix: 'sync_conflicts',
+                      title: AppText.t('تعارضات المزامنة', 'Sync conflicts'),
+                      headers: _ConflictRow.exportHeaders(),
+                      rows: _ConflictRow.exportRows(_rows),
+                    ),
               icon: const Icon(Icons.table_view_outlined),
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
         if (_rows.isEmpty)
-          Text(AppText.t(
-              'لا توجد تعارضات — كل البيانات متزامنة.', 'No conflicts — all data is synced.'))
+          Text(
+            AppText.t(
+              'لا توجد تعارضات — كل البيانات متزامنة.',
+              'No conflicts — all data is synced.',
+            ),
+          )
         else
           SizedBox(
             height: 320.h,
@@ -471,8 +482,10 @@ class _SyncScreenState extends State<SyncScreen> {
   void _refuseOffline() {
     AppFeedback.error(
       context,
-      AppText.t('حل التعارض يحتاج جلسة صالحة واتصال بالإنترنت',
-          'Resolving a conflict needs a valid session and an internet connection'),
+      AppText.t(
+        'حل التعارض يحتاج جلسة صالحة واتصال بالإنترنت',
+        'Resolving a conflict needs a valid session and an internet connection',
+      ),
     );
   }
 
@@ -485,7 +498,7 @@ class _SyncScreenState extends State<SyncScreen> {
         organizationId: gate.organizationId,
         session: _SessionView(gate.session.uid, gate.session.deviceId),
       );
-      await _refresh();
+      await _refreshData();
     });
   }
 
@@ -498,7 +511,7 @@ class _SyncScreenState extends State<SyncScreen> {
         organizationId: gate.organizationId,
         session: _SessionView(gate.session.uid, gate.session.deviceId),
       );
-      await _refresh();
+      await _refreshData();
     });
   }
 
@@ -555,10 +568,7 @@ class _Tile extends StatelessWidget {
           children: [
             Text(
               label,
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12.spMax,
-              ),
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
             ),
             const SizedBox(height: AppSpacing.xs),
             Text(
@@ -599,43 +609,44 @@ class _QueueRow {
     return [
       if (retryCount > 0)
         AppText.t('محاولات: $retryCount', 'Attempts: $retryCount'),
-      if (error != null && '$error'.isNotEmpty) '$error',
+      if (error != null && '$error'.trim().isNotEmpty)
+        AppText.t('تعذرت آخر محاولة', 'Last attempt failed'),
     ].join(' · ');
   }
 
   static List<String> exportHeaders() => [
-        AppText.t('الكيان', 'Entity'),
-        AppText.t('العملية', 'Operation'),
-        AppText.t('الحالة', 'Status'),
-        AppText.t('معلومات', 'Info'),
-      ];
+    AppText.t('الكيان', 'Entity'),
+    AppText.t('العملية', 'Operation'),
+    AppText.t('الحالة', 'Status'),
+    AppText.t('معلومات', 'Info'),
+  ];
 
   static List<List<String>> exportRows(List<Map<String, Object?>> rows) => [
-        for (final row in rows)
-          [
-            '${row['entity_type']} · ${row['entity_id']}',
-            '${row['operation']}',
-            statusLabel('${row['status'] ?? ''}'),
-            infoText(row),
-          ],
-      ];
+    for (final row in rows)
+      [
+        '${row['entity_type']} · ${row['entity_id']}',
+        '${row['operation']}',
+        statusLabel('${row['status'] ?? ''}'),
+        infoText(row),
+      ],
+  ];
 }
 
 class _ConflictRow {
   _ConflictRow._();
 
   static List<String> exportHeaders() => [
-        AppText.t('الكيان', 'Entity'),
-        AppText.t('الاتجاه', 'Direction'),
-        AppText.t('الرصد', 'Detected'),
-      ];
+    AppText.t('الكيان', 'Entity'),
+    AppText.t('الاتجاه', 'Direction'),
+    AppText.t('الرصد', 'Detected'),
+  ];
 
   static List<List<String>> exportRows(List<Map<String, Object?>> rows) => [
-        for (final row in rows)
-          [
-            '${row['entity_type']} · ${row['entity_id']}',
-            '${row['direction']}',
-            '${row['detected_at']}',
-          ],
-      ];
+    for (final row in rows)
+      [
+        '${row['entity_type']} · ${row['entity_id']}',
+        '${row['direction']}',
+        '${row['detected_at']}',
+      ],
+  ];
 }

@@ -36,25 +36,25 @@ List<String> ncrHeaders() => [
 /// labels): feeds the shared HTML table export so the register exports
 /// exactly the table it shows.
 List<List<String>> ncrExportRows(List<NcrReportRow> rows) => [
-      for (final r in rows)
-        [
-          r.reference,
-          r.description,
-          severityLabel(r.severity),
-          r.status,
-          r.inspectionRefId.isEmpty
-              ? (r.inspectorName.isEmpty ? '—' : r.inspectorName)
-              : r.inspectionRefId,
-          r.lotNo.isNotEmpty
-              ? r.lotNo
-              : r.batchNo.isNotEmpty
-                  ? r.batchNo
-                  : '—',
-          r.assignedToName.isEmpty ? '—' : r.assignedToName,
-          r.dueDate.isEmpty ? '—' : r.dueDate,
-          r.capaStatus.isEmpty ? '-' : r.capaStatus,
-        ],
-    ];
+  for (final r in rows)
+    [
+      r.reference,
+      r.description,
+      severityLabel(r.severity),
+      r.status,
+      r.inspectionRefId.isEmpty
+          ? (r.inspectorName.isEmpty ? '—' : r.inspectorName)
+          : r.inspectionRefId,
+      r.lotNo.isNotEmpty
+          ? r.lotNo
+          : r.batchNo.isNotEmpty
+          ? r.batchNo
+          : '—',
+      r.assignedToName.isEmpty ? '—' : r.assignedToName,
+      r.dueDate.isEmpty ? '—' : r.dueDate,
+      r.capaStatus.isEmpty ? '-' : r.capaStatus,
+    ],
+];
 
 String ncrExportTitle() => AppText.t('حالات عدم المطابقة', 'Non-conformances');
 
@@ -112,11 +112,7 @@ String severityLabel(String value) => switch (value) {
 /// bottom sheet on phones). The overlay is a new route, so the page's
 /// provider is re-provided by value: the sheet writes filters through
 /// the same instance the page reads.
-void openNcrFilters(
-  BuildContext context,
-  QcNcrState state,
-  QcNcrCubit cubit,
-) {
+void openNcrFilters(BuildContext context, QcNcrState state, QcNcrCubit cubit) {
   showAppOverlay<void>(
     context,
     title: AppText.t('تصفية النتائج', 'Filter results'),
@@ -141,6 +137,11 @@ class NcrActiveFilterChips extends StatelessWidget {
     final cubit = context.read<QcNcrCubit>();
     final f = state.filters;
     final chips = <Widget>[
+      if (f.query.isNotEmpty)
+        _Chip(
+          label: '${AppText.t('بحث', 'Search')}: ${f.query}',
+          onRemove: () => cubit.applyFilters(f.copyWith(query: '')),
+        ),
       if (f.hasDateRange)
         _Chip(
           label:
@@ -211,11 +212,7 @@ class _Chip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InputChip(
-      label: Text(
-        label,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
+      label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
       onDeleted: onRemove,
       deleteIcon: const Icon(Icons.close, size: 16),
       visualDensity: VisualDensity.compact,

@@ -24,6 +24,7 @@ class TestHistoryPrinter {
     th('#', '#');
     th('التوقيت', 'Time');
     th('التحليل', 'Analysis');
+    th('المرجع', 'Reference');
     th('العينة', 'Sample');
     th('المصدر', 'Source');
     th('كود الدخول', 'Entry code');
@@ -48,6 +49,7 @@ class TestHistoryPrinter {
         '<tr><td>${i + 1}</td>'
         '<td>${esc(thFmtDateTime(r['tested_at']))}</td>'
         '<td>${esc('${r['analysis_name'] ?? '-'}')}</td>'
+        '<td>${esc('${r['analysis_reference'] ?? '-'}')}</td>'
         '<td>${esc('${r['sample_name'] ?? '-'}')}</td>'
         '<td>$source</td>'
         '<td dir="ltr">${esc('${r['entry_code'] ?? '-'}')}</td>'

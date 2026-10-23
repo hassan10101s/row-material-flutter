@@ -35,11 +35,126 @@ import '../widgets/sop_pill.dart';
 /// an audit consequence, so it lives on the detail screen where the revision
 /// history is visible next to the action.
 class QcSopsScreen extends StatelessWidget {
-  const QcSopsScreen({super.key});
+  const QcSopsScreen({super.key, this.embedded = false});
+
+  /// Embedded inside the quality hub: no [Scaffold]/app bar because the hub
+  /// draws its own chrome — the register's actions re-render as an inline
+  /// toolbar row, matching the routine lists tab's header row.
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<QcSopsCubit>();
+    final body = BlocConsumer<QcSopsCubit, QcSopsState>(
+      listenWhen: (a, b) => a.error != b.error && b.error != null,
+      listener: (context, state) => AppFeedback.error(context, state.error!),
+      builder: (context, state) {
+        if (state.loading && state.sops.isEmpty) {
+          return const AppSkeletonList(rows: 5);
+        }
+        if (state.sops.isEmpty) {
+          return AppEmptyState(
+            icon: Icons.menu_book_outlined,
+            title: AppText.t('لا توجد إجراءات', 'No procedures yet'),
+            subtitle: state.filters.isEmpty
+                ? AppText.t('أنشئ أول إجراء تشغيل', 'Draft the first procedure')
+                : AppText.t(
+                    'لا توجد إجراءات تطابق هذه الفلاتر',
+                    'No procedures match these filters',
+                  ),
+            action: state.filters.isEmpty
+                ? null
+                : AppButton(
+                    label: AppText.t('مسح الفلاتر', 'Clear filters'),
+                    style: AppButtonStyle.secondary,
+                    onPressed: () => cubit.clearFilters(),
+                  ),
+          );
+        }
+        return Column(
+          children: [
+            if (state.loading && state.sops.isNotEmpty) const AppRefreshBar(),
+            _SummaryStrip(summary: state.summary),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.sm,
+                AppSpacing.md,
+                0,
+              ),
+              child: AppFilterBar(
+                searchHint: AppText.t(
+                  'بحث بالرمز أو العنوان',
+                  'Search code or title',
+                ),
+                initialSearch: state.filters.text,
+                onSearch: (v) =>
+                    cubit.applyFilters(state.filters.copyWith(text: v)),
+                trailing: AppButton(
+                  label: AppText.t('فلاتر', 'Filters'),
+                  icon: const Icon(Icons.tune, size: 18),
+                  style: AppButtonStyle.ghost,
+                  small: true,
+                  onPressed: () => _openFilters(context),
+                ),
+              ),
+            ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: () => cubit.refresh(),
+                child: AppInfiniteList(
+                  itemCount: state.sops.length,
+                  hasMore: false,
+                  itemBuilder: (context, i) => _SopTile(sop: state.sops[i]),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+    if (embedded) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+            child: Row(
+              children: [
+                const Spacer(),
+                AppButton(
+                  small: true,
+                  style: AppButtonStyle.ghost,
+                  icon: const Icon(Icons.table_view_outlined, size: 18),
+                  onPressed: () =>
+                      RegisterExports.sops(context, cubit.state.sops),
+                ),
+                AppButton(
+                  small: true,
+                  style: AppButtonStyle.ghost,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  onPressed: () => cubit.refresh(),
+                ),
+                AppButton(
+                  small: true,
+                  style: AppButtonStyle.ghost,
+                  label: AppText.t('فلاتر', 'Filters'),
+                  icon: const Icon(Icons.tune, size: 18),
+                  onPressed: () => _openFilters(context),
+                ),
+                AppButton(
+                  small: true,
+                  style: AppButtonStyle.secondary,
+                  label: AppText.t('إجراء جديد', 'New SOP'),
+                  icon: const Icon(Icons.add, size: 18),
+                  onPressed: () => QcSopFormScreen.open(context),
+                ),
+              ],
+            ),
+          ),
+          Expanded(child: body),
+        ],
+      );
+    }
     return Scaffold(
       appBar: AppTopAppBar(
         title: AppText.t('إجراءات التشغيل SOP', 'Procedures SOP'),
@@ -66,77 +181,7 @@ class QcSopsScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: BlocConsumer<QcSopsCubit, QcSopsState>(
-        listenWhen: (a, b) => a.error != b.error && b.error != null,
-        listener: (context, state) =>
-            AppFeedback.error(context, state.error!),
-        builder: (context, state) {
-          if (state.loading && state.sops.isEmpty) {
-            return const AppSkeletonList(rows: 5);
-          }
-          if (state.sops.isEmpty) {
-            return AppEmptyState(
-              icon: Icons.menu_book_outlined,
-              title: AppText.t('لا توجد إجراءات', 'No procedures yet'),
-              subtitle: state.filters.isEmpty
-                  ? AppText.t(
-                      'أنشئ أول إجراء تشغيل',
-                      'Draft the first procedure',
-                    )
-                  : AppText.t(
-                      'لا توجد إجراءات تطابق هذه الفلاتر',
-                      'No procedures match these filters',
-                    ),
-              action: state.filters.isEmpty
-                  ? null
-                  : AppButton(
-                      label: AppText.t('مسح الفلاتر', 'Clear filters'),
-                      style: AppButtonStyle.secondary,
-                      onPressed: () => cubit.clearFilters(),
-                    ),
-            );
-          }
-          return Column(
-            children: [
-              if (state.loading && state.sops.isNotEmpty)
-                const AppRefreshBar(),
-              _SummaryStrip(summary: state.summary),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.md,
-                  AppSpacing.sm,
-                  AppSpacing.md,
-                  0,
-                ),
-                child: AppFilterBar(
-                  searchHint: AppText.t('بحث بالرمز أو العنوان', 'Search code or title'),
-                  initialSearch: state.filters.text,
-                  onSearch: (v) => cubit.applyFilters(
-                    state.filters.copyWith(text: v),
-                  ),
-                  trailing: AppButton(
-                    label: AppText.t('فلاتر', 'Filters'),
-                    icon: const Icon(Icons.tune, size: 18),
-                    style: AppButtonStyle.ghost,
-                    small: true,
-                    onPressed: () => _openFilters(context),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () => cubit.refresh(),
-                  child: AppInfiniteList(
-                    itemCount: state.sops.length,
-                    hasMore: false,
-                    itemBuilder: (context, i) => _SopTile(sop: state.sops[i]),
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
-      ),
+      body: body,
     );
   }
 
@@ -147,10 +192,8 @@ class QcSopsScreen extends StatelessWidget {
       title: AppText.t('فلاتر الإجراءات', 'Procedure filters'),
       icon: Icons.filter_alt_outlined,
       size: AppWindowSize.sm,
-      builder: (_, _) => BlocProvider.value(
-        value: cubit,
-        child: const _SopFilterSheet(),
-      ),
+      builder: (_, _) =>
+          BlocProvider.value(value: cubit, child: const _SopFilterSheet()),
     );
   }
 }
@@ -200,9 +243,7 @@ class _SummaryStrip extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, constraints) {
           if (constraints.maxWidth >= 600) {
-            return Row(
-              children: [for (final c in cards) Expanded(child: c)],
-            );
+            return Row(children: [for (final c in cards) Expanded(child: c)]);
           }
           return Wrap(
             spacing: AppSpacing.sm,
@@ -430,65 +471,62 @@ class _SopFilterSheetState extends State<_SopFilterSheet> {
               hint: AppText.t('رمز أو عنوان', 'Code or title'),
               onChanged: (v) => cubit.applyFilters(f.copyWith(text: v)),
             ),
-                const SizedBox(height: AppSpacing.sm),
-                AppField(
-                  label: AppText.t('القسم', 'Department'),
-                  controller: _dept,
-                  onChanged: (v) =>
-                      cubit.applyFilters(f.copyWith(dept: v.trim())),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Text(AppText.t('الحالة', 'Status')),
-                const SizedBox(height: AppSpacing.xs),
-                Wrap(
-                  spacing: AppSpacing.xs,
-                  runSpacing: AppSpacing.xs,
-                  children: [
-                    for (final status in SopStatus.all)
-                      AppButton(
-                        small: true,
-                        style: f.statuses.contains(status)
-                            ? AppButtonStyle.primary
-                            : AppButtonStyle.secondary,
-                        label: SopPill.statusLabel(status),
-                        onPressed: () => cubit.toggleStatus(status),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.sm),
+            const SizedBox(height: AppSpacing.sm),
+            AppField(
+              label: AppText.t('القسم', 'Department'),
+              controller: _dept,
+              onChanged: (v) => cubit.applyFilters(f.copyWith(dept: v.trim())),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(AppText.t('الحالة', 'Status')),
+            const SizedBox(height: AppSpacing.xs),
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final status in SopStatus.all)
+                  AppButton(
+                    small: true,
+                    style: f.statuses.contains(status)
+                        ? AppButtonStyle.primary
+                        : AppButtonStyle.secondary,
+                    label: SopPill.statusLabel(status),
+                    onPressed: () => cubit.toggleStatus(status),
+                  ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              small: true,
+              style: f.includeArchived
+                  ? AppButtonStyle.primary
+                  : AppButtonStyle.secondary,
+              icon: Icon(
+                f.includeArchived ? Icons.check_circle : Icons.circle_outlined,
+                size: 16,
+              ),
+              label: AppText.t('إظهار المؤرشف', 'Show archived'),
+              onPressed: () => cubit.applyFilters(
+                f.copyWith(includeArchived: !f.includeArchived),
+              ),
+            ),
+            AppWindow.footer(
+              actions: [
                 AppButton(
+                  label: AppText.t('مسح', 'Clear'),
+                  style: AppButtonStyle.ghost,
                   small: true,
-                  style: f.includeArchived
-                      ? AppButtonStyle.primary
-                      : AppButtonStyle.secondary,
-                  icon: Icon(
-                    f.includeArchived
-                        ? Icons.check_circle
-                        : Icons.circle_outlined,
-                    size: 16,
-                  ),
-                  label: AppText.t('إظهار المؤرشف', 'Show archived'),
-                  onPressed: () => cubit.applyFilters(
-                    f.copyWith(includeArchived: !f.includeArchived),
-                  ),
+                  onPressed: () => cubit.clearFilters(),
                 ),
-                AppWindow.footer(
-                  actions: [
-                    AppButton(
-                      label: AppText.t('مسح', 'Clear'),
-                      style: AppButtonStyle.ghost,
-                      small: true,
-                      onPressed: () => cubit.clearFilters(),
-                    ),
-                    AppButton(
-                      label: AppText.t('تم', 'Done'),
-                      small: true,
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
+                AppButton(
+                  label: AppText.t('تم', 'Done'),
+                  small: true,
+                  onPressed: () => Navigator.of(context).pop(),
                 ),
               ],
-            );
+            ),
+          ],
+        );
       },
     );
   }

@@ -346,18 +346,6 @@ void main() {
       );
     });
 
-    test('the goals detail route lights the goals section', () {
-      final entries = shellNavEntries(canSeeSettings: false, canReadQc: true);
-      expect(
-        shellSectionIndex(entries, '/qc-goals/detail?goalId=7'),
-        shellSectionIndex(entries, '/qc-goals'),
-      );
-      expect(
-        shellSectionIndex(entries, '/qc-goals/detail?goalId=7'),
-        shellSectionIndex(entries, '/quality-management'),
-      );
-    });
-
     test('a detail route under the NCR report still lights its section', () {
       // The list and detail routes are longer than `/qc-ncr`, so longest-prefix
       // matching has to keep the section highlighted on the way in.
@@ -954,6 +942,8 @@ void main() {
       const signOutDevice = 'Sign out of this device only';
       const signOut = 'Logout';
 
+      // The two sign-outs moved into the account sheet, opened by tapping the
+      // member row (they used to be two icon buttons crowding that row).
       await pumpDesktop(
         tester,
         routerWith(
@@ -965,8 +955,10 @@ void main() {
           ),
         ),
       );
-      expect(find.byTooltip(signOutDevice), findsOneWidget);
-      expect(find.byTooltip(signOut), findsOneWidget);
+      await tester.tap(find.text(user.fullName));
+      await tester.pumpAndSettle();
+      expect(find.text(signOutDevice), findsOneWidget);
+      expect(find.text(signOut), findsOneWidget);
 
       await pumpMobile(
         tester,
@@ -982,14 +974,12 @@ void main() {
       await tester.tap(moreSlot(tester));
       await tester.pumpAndSettle();
       final drawer = find.byType(Drawer);
-      expect(
-        find.descendant(of: drawer, matching: find.byTooltip(signOutDevice)),
-        findsOneWidget,
+      await tester.tap(
+        find.descendant(of: drawer, matching: find.text(user.fullName)),
       );
-      expect(
-        find.descendant(of: drawer, matching: find.byTooltip(signOut)),
-        findsOneWidget,
-      );
+      await tester.pumpAndSettle();
+      expect(find.text(signOutDevice), findsOneWidget);
+      expect(find.text(signOut), findsOneWidget);
     });
 
     testWidgets('the read-only role chip is desktop-only', (tester) async {

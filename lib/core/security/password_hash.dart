@@ -3,7 +3,6 @@ import 'dart:isolate';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:pointycastle/digests/sha256.dart';
 import 'package:pointycastle/key_derivators/api.dart';
 import 'package:pointycastle/key_derivators/pbkdf2.dart';
@@ -23,6 +22,28 @@ List<int> _hexToBytes(String hex) {
   }
   return out;
 }
+
+/// Hex decoder that returns null instead of throwing on malformed input.
+///
+/// `verify` parses the salt out of an attacker/tamper-controllable stored
+/// hash, so it must fail closed (deny the login) rather than surfacing a
+/// `FormatException` from the login path.
+List<int>? _tryHexToBytes(String hex) {
+  if (hex.isEmpty || hex.length.isOdd) return null;
+  final out = Uint8List(hex.length ~/ 2);
+  for (var i = 0; i < out.length; i++) {
+    final byte = int.tryParse(hex.substring(i * 2, i * 2 + 2), radix: 16);
+    if (byte == null) return null;
+    out[i] = byte;
+  }
+  return out;
+}
+
+/// Upper bound on the KDF rounds read from a stored hash. A legitimately
+/// issued hash uses at most [developerPasswordHashRounds]; anything beyond
+/// this is treated as malformed so a tampered row cannot wedge the login
+/// path with an unbounded PBKDF2 run (KDF DoS).
+const int _maxStoredHashRounds = developerPasswordHashRounds * 4;
 
 String _randomSaltHex() {
   final rand = math.Random.secure();
@@ -115,38 +136,39 @@ class PasswordHasher {
   Future<bool> verify(String password, String storedHash) async {
     if (storedHash.trim().isEmpty) return false;
     final parts = storedHash.split('\$');
-    if (parts.length == 4) {
-      final algorithm = parts[0];
-      final rounds = int.tryParse(parts[1]);
-      final salt = _hexToBytes(parts[2]);
-      final digest = parts[3];
-      if (rounds == null) return false;
+    // Only the four-field `algo$rounds$salt$digest` shape is accepted. A bare
+    // 64-hex SHA-256 digest is deliberately NOT accepted: it carries no salt
+    // and no pepper, so verifying it would let a leaked database be cracked
+    // with a precomputed table. Such rows are treated as unverifiable and, per
+    // `needsUpgrade`, must be re-hashed on the next successful login.
+    if (parts.length != 4) return false;
+    final algorithm = parts[0];
+    if (algorithm != passwordHashAlgoV2 &&
+        algorithm != developerPasswordHashAlgo &&
+        algorithm != passwordHashAlgoLegacy) {
+      return false;
+    }
+    final rounds = int.tryParse(parts[1]);
+    if (rounds == null || rounds <= 0 || rounds > _maxStoredHashRounds) {
+      return false;
+    }
+    // Fail closed on a malformed salt: return false, never throw out of the
+    // login path.
+    final salt = _tryHexToBytes(parts[2]);
+    if (salt == null) return false;
+    final digest = parts[3];
 
-      List<int> material;
-      if (algorithm == passwordHashAlgoV2 ||
-          algorithm == developerPasswordHashAlgo) {
-        material = utf8.encode(password + pepper);
-      } else if (algorithm == passwordHashAlgoLegacy) {
-        material = utf8.encode(password);
-      } else {
-        return false;
-      }
-      final outcome = await _runHash(_HashRequest(
-        material: material,
-        salt: salt,
-        rounds: rounds,
-        isDeveloper: algorithm == developerPasswordHashAlgo,
-        verifyDigest: digest,
-      ));
-      if (outcome.verified) return true;
-    }
-    // Legacy fallback: plain SHA-256 hex (64 chars).
-    if (storedHash.length == 64 &&
-        RegExp(r'^[0-9a-fA-F]+$').hasMatch(storedHash)) {
-      final candidate = sha256.convert(utf8.encode(password)).toString();
-      return _constantTextEquals(candidate.toLowerCase(), storedHash.toLowerCase());
-    }
-    return false;
+    final material = algorithm == passwordHashAlgoLegacy
+        ? utf8.encode(password)
+        : utf8.encode(password + pepper);
+    final outcome = await _runHash(_HashRequest(
+      material: material,
+      salt: salt,
+      rounds: rounds,
+      isDeveloper: algorithm == developerPasswordHashAlgo,
+      verifyDigest: digest,
+    ));
+    return outcome.verified;
   }
 
   /// Whether the stored hash should be upgraded after a successful login.

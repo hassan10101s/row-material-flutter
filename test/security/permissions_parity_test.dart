@@ -80,6 +80,7 @@ void main() {
       // Comprehensive sync (plan §7).
       'inventoryItems',
       'inventoryTransactions',
+      'inventoryLots',
       'consumption',
       'stockAdjustments',
       'equipment',
@@ -87,6 +88,10 @@ void main() {
       'worksheets',
       'referenceMaterials',
       'productBatchSamples',
+      // QC user-authored tables (definition / columns / records).
+      'qcCustomTables',
+      'qcCustomTableFields',
+      'qcCustomTableRows',
     };
     expect(allowedCollections.difference(expected), isEmpty);
   });

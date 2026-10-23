@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <title>Equipment Batch Labels</title>
+    <link rel="stylesheet" href="fonts/fonts.css">
+    <style>
+        :root {
+            --primary: #1a365d;
+            --accent: #2563eb;
+            --text-main: #0f172a;
+            --text-muted: #475569;
+            --border: #cbd5e1;
+            --bg-faint: #f8fafc;
+            --danger: #b00020;
+        }
+
+        @page {
+            size: A4;
+            margin: 5mm 4mm;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Inter', 'IBM Plex Sans Arabic', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: white;
+            color: var(--text-main);
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+        }
+
+        .page {
+            width: 100%;
+            page-break-after: always;
+        }
+
+        .page:last-child {
+            page-break-after: auto;
+        }
+
+        .labels-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: repeat(5, 1fr);
+            gap: 4mm 4mm;
+            width: 100%;
+            height: 287mm;
+        }
+
+        .label-card {
+            display: flex;
+            height: 100%;
+            min-height: 54mm;
+            border: 2px solid var(--primary);
+            overflow: hidden;
+            page-break-inside: avoid;
+            background: white;
+        }
+
+        .label-main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        .label-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--primary);
+            color: white;
+            padding: 4px 10px;
+            border-bottom: 2px solid var(--primary);
+        }
+
+        .device-name {
+            font-size: 13px;
+            font-weight: 900;
+            color: white;
+            letter-spacing: 0.4px;
+            word-break: break-word;
+        }
+
+        .device-code {
+            font-size: 10px;
+            font-weight: 900;
+            color: white;
+            letter-spacing: 0.5px;
+            background: rgba(255,255,255,0.18);
+            border-radius: 4px;
+            padding: 2px 7px;
+            white-space: nowrap;
+            margin-right: 6px;
+        }
+
+        .label-content {
+            padding: 5px 10px;
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 4px 8px;
+            margin-bottom: auto;
+        }
+
+        .info-item { min-width: 0; }
+
+        .info-label {
+            font-size: 7.5px;
+            font-weight: 800;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: 2px;
+            letter-spacing: 0.2px;
+        }
+
+        .info-value {
+            font-size: 9.5px;
+            font-weight: 700;
+            color: var(--text-main);
+            line-height: 1.25;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            word-break: break-word;
+        }
+
+        .info-value.overdue { color: var(--danger); }
+
+        .info-value.overdue::after {
+            content: ' (OVERDUE)';
+            font-size: 7.5px;
+            font-weight: 900;
+            letter-spacing: 0.3px;
+        }
+
+        .label-footer {
+            margin-top: 5px;
+            font-size: 7.5px;
+            font-weight: 800;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            text-align: center;
+            padding-top: 4px;
+            border-top: 1px solid var(--border);
+            letter-spacing: 0.5px;
+        }
+
+        .label-qr-col {
+            width: 4.5cm;
+            background: var(--bg-faint);
+            border-left: 2px solid var(--primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 5px 4px;
+            flex-shrink: 0;
+        }
+
+        .label-meta-row {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+            width: 100%;
+        }
+
+        .label-id {
+            font-size: 6.5px;
+            font-weight: 800;
+            color: var(--text-muted);
+            letter-spacing: 0.2px;
+            white-space: nowrap;
+        }
+
+        .label-qr-img {
+            width: 100%;
+            max-width: 4cm;
+            height: auto;
+            aspect-ratio: 1;
+            background: #fff;
+            padding: 2px;
+            border: 1.5px solid var(--border);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        .label-qr-fallback {
+            width: 4cm;
+            height: 4cm;
+            background: #fff;
+            border: 1.5px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 8px;
+            text-align: center;
+            color: var(--text-muted);
+        }
+
+        .label-qr-hint {
+            font-size: 7px;
+            font-weight: 900;
+            color: var(--primary);
+            text-transform: uppercase;
+            margin-top: 4px;
+            letter-spacing: 0.5px;
+        }
+
+        .empty-slot {
+            border: 2px dashed #cbd5e1;
+            height: 100%;
+            min-height: 54mm;
+            background: #f8fafc;
+        }
+    </style>
+</head>
+<body>
+    {% for page_start in range(0, labels|length, 10) %}
+    <div class="page">
+        <div class="labels-grid">
+            {% for i in range(10) %}
+                {% set idx = page_start + i %}
+                {% if idx < labels|length %}
+                {% set lbl = labels[idx] %}
+                <div class="label-card">
+                    <div class="label-main">
+                        <div class="label-header">
+                            <div class="device-name">{{ lbl.name }}</div>
+                            <div class="device-code">{{ lbl.code or '-' }}</div>
+                        </div>
+                        <div class="label-content">
+                            <div class="info-grid">
+                                <div class="info-item">
+                                    <div class="info-label">Manufacturer</div>
+                                    <div class="info-value">{{ lbl.manufacturer or '-' }}</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">Serial Number</div>
+                                    <div class="info-value">{{ lbl.serial_number or '-' }}</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">Last Calibration</div>
+                                    <div class="info-value">{{ lbl.last_calibration_date or '-' }}</div>
+                                </div>
+                                <div class="info-item">
+                                    <div class="info-label">Next Calibration</div>
+                                    <div class="info-value {{ 'overdue' if lbl.overdue else '' }}">{{ lbl.next_calibration_date or '-' }}</div>
+                                </div>
+                            </div>
+                            <div class="label-footer">{{ department_label }}{% if form_no %} | {% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}{% endif %}</div>
+                        </div>
+                    </div>
+                    <div class="label-qr-col">
+                        <div class="label-meta-row">
+                            <span class="label-id">{{ generated_at }}</span>
+                        </div>
+                        {% if lbl.qr_image_data_uri %}
+                        <img class="label-qr-img" src="{{ lbl.qr_image_data_uri }}" alt="QR">
+                        {% else %}
+                        <div class="label-qr-fallback">NO QR DATA</div>
+                        {% endif %}
+                        <div class="label-qr-hint">SCAN TO OPEN</div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="empty-slot"></div>
+                {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</body>
+</html>

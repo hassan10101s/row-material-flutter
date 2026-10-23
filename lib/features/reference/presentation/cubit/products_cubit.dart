@@ -23,11 +23,7 @@ class ProductsCubit extends AppCubit<ProductsState> {
     safeEmit(state.copyWith(loading: true, clearError: true));
     try {
       final settled = await Future.wait([
-        repo.listProductsPaged(
-          query: state.query,
-          limit: pageSize,
-          offset: 0,
-        ),
+        repo.listProductsPaged(query: state.query, limit: pageSize, offset: 0),
         repo.countProducts(query: state.query),
         // Analyses picker stays unpaged (small catalog, needed by editor).
         repo.listAnalyses(),
@@ -50,7 +46,7 @@ class ProductsCubit extends AppCubit<ProductsState> {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 

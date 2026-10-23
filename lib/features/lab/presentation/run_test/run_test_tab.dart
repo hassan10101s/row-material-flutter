@@ -6,15 +6,14 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../app/auth_gate.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_exceptions.dart';
+import '../../../../core/utils/app_format.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
-import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_entity_autocomplete.dart';
-import '../../../../design_system/widgets/app_field.dart';
 import '../../../../di/service_locator.dart';
 import '../../core/formula_engine.dart';
 import '../../core/lab_result_format.dart';
@@ -22,9 +21,29 @@ import '../cubit/run_test_cubit.dart';
 import '../cubit/run_test_state.dart';
 
 /// Run a sample test against an analysis (raw material or product).
+///
+/// Passing [editRow] switches the tab into *edit* mode: the exact same
+/// field widgets are used (list → dropdown, fixed value → read-only, linked
+/// → text field) but the analysis and source are shown fixed (history), the
+/// sample stays editable and saving goes through `updateSampleTest` instead
+/// of creating a new row.
 class RunTestTab extends StatefulWidget {
   final VoidCallback onTestRun;
-  const RunTestTab({super.key, required this.onTestRun});
+
+  /// The `lab_sample_tests` row being edited, or null to record a new run.
+  final Map<String, dynamic>? editRow;
+
+  /// Optional destructive action (edit mode only) rendered beside Save.
+  final VoidCallback? onDelete;
+
+  const RunTestTab({
+    super.key,
+    required this.onTestRun,
+    this.editRow,
+    this.onDelete,
+  });
+
+  bool get isEditing => editRow != null;
 
   @override
   State<RunTestTab> createState() => _RunTestTabState();
@@ -35,14 +54,50 @@ class _RunTestTabState extends State<RunTestTab> {
   final _standaloneSample = TextEditingController();
   bool _formulaAuto = true;
 
+  /// Seed values for the dynamic fields while editing: the controller for a
+  /// linked field is created with its saved value, and `_listSelections` is
+  /// primed so a list field re-selects the stored option.
+  final Map<String, String> _initialDynamic = {};
+
+  bool get _editing => widget.editRow != null;
+
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
     if (user == null) return null;
     return {
       'id': user.id,
+      'uid': user.uid,
       'username': user.username,
       'full_name': user.fullName,
     };
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    final row = widget.editRow;
+    if (row == null) return;
+    // Editing keeps the stored result editable (never silently re-derived);
+    // the formula toggle is still available to recompute on demand.
+    _formulaAuto = false;
+    // Old rows may carry the double's full precision; the editable field gets
+    // the same fixed-three-decimal text every other surface shows. Non-numeric
+    // text (and empty) passes through unchanged.
+    final storedResult = '${row['result_text'] ?? ''}'.trim();
+    _resultText.text = storedResult.isEmpty
+        ? ''
+        : formatLabResult(storedResult);
+    _standaloneSample.text = '${row['sample_name'] ?? ''}';
+    final raw = row['dynamic_values'];
+    final map = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : jsonLoads('${row['dynamic_values_json'] ?? ''}');
+    for (final e in map.entries) {
+      final value = '${e.value ?? ''}'.trim();
+      if (value.isEmpty) continue;
+      _initialDynamic[e.key] = value;
+      _listSelections[e.key] = value;
+    }
   }
 
   @override
@@ -57,7 +112,8 @@ class _RunTestTabState extends State<RunTestTab> {
   }
 
   Future<void> _run() async {
-    final state = context.read<RunTestCubit>().state;
+    final cubit = context.read<RunTestCubit>();
+    final state = cubit.state;
     if (state.analysisId == null) {
       AppFeedback.error(
         context,
@@ -90,6 +146,13 @@ class _RunTestTabState extends State<RunTestTab> {
       );
       return;
     }
+    if (state.sourceType == 'sample' && sampleName.isEmpty) {
+      AppFeedback.error(
+        context,
+        AppText.t('أدخل اسم العينة أولاً', 'Enter a sample name first.'),
+      );
+      return;
+    }
     final comp = _computedResult(state);
     final formulaEnabled = comp['enabled'] == true;
     final autoOk = formulaEnabled && _formulaAuto && comp['ok'] == true;
@@ -111,7 +174,19 @@ class _RunTestTabState extends State<RunTestTab> {
       }
     }
     try {
-      final result = await context.read<RunTestCubit>().run(
+      if (_editing) {
+        await cubit.saveEdit(
+          sampleName: sampleName,
+          resultText: resultText,
+          dynamicValues: dynamicValues,
+          user: _currentUserMap,
+        );
+        if (!mounted) return;
+        widget.onTestRun();
+        Navigator.of(context).pop(true);
+        return;
+      }
+      final result = await cubit.run(
         // Both paths are record-driven: the record's selected sample is
         // used (the caller may still pass an explicit override).
         sampleName: sampleName,
@@ -150,6 +225,17 @@ class _RunTestTabState extends State<RunTestTab> {
       if (lowStock.isNotEmpty)
         '${AppText.t('تنبيه مخزون منخفض', 'Low stock')}: ${lowStock.length}',
     ];
+    final expiredNames = [
+      for (final c in consumption)
+        if (((c['expired_qty'] as num?)?.toDouble() ?? 0.0) > 1e-9)
+          '${c['inventory_name'] ?? ''}',
+    ];
+    if (expiredNames.isNotEmpty) {
+      lines.add(
+        '${AppText.t('تنبيه: استهلاك من لوت منتهي', 'Warning: consumed from expired lot')}: '
+        '${expiredNames.toSet().join('، ')}',
+      );
+    }
 
     if (lowStock.isNotEmpty) {
       AppFeedback.show(
@@ -174,21 +260,25 @@ class _RunTestTabState extends State<RunTestTab> {
   Map<String, dynamic> _computedResult(RunTestState state) {
     final analysis = _selectedAnalysis(state);
     if (analysis == null) return {'enabled': false, 'ok': true};
+    // Memoize: the full parse+resolve+eval pipeline is keyed on the inputs
+    // that can affect it (selected analysis instance, formula mode, and the
+    // dynamic value map). Every keystroke rebuild hits this with unchanged
+    // inputs and gets the cached result instead of re-evaluating.
+    final values = _evaluateValues(state, analysis);
+    if (identical(analysis, _compAnalysis) &&
+        _compFormulaAuto == _formulaAuto &&
+        _compValues != null &&
+        _flatMapEquals(_compValues!, values)) {
+      return _compResult;
+    }
     final formula = normalizeFormulaValue(analysis['formula']);
     final expr = '${formula['expression'] ?? ''}'.trim();
     if (expr.isEmpty) return {'enabled': false, 'ok': true};
-    final values = <String, Object?>{};
-    for (final item in analysis['items'] as List? ?? const []) {
-      final m = item as Map<String, dynamic>;
-      values['${m['inventory_name'] ?? ''}'.trim()] = safeFormulaFloat(
-        m['qty_per_sample'],
-      );
-    }
-    values.addAll(_effectiveValues(state));
     final missing = [
       for (final v in formulaVariables(expr))
         if (values[v] == null || '${values[v]}'.trim().isEmpty) v,
     ];
+    Map<String, dynamic> result;
     try {
       final value = evaluateFormula(
         expr,
@@ -196,7 +286,7 @@ class _RunTestTabState extends State<RunTestTab> {
         constants: formula['constants'],
         targetUnit: '${analysis['unit'] ?? ''}',
       );
-      return {
+      result = {
         'enabled': true,
         'ok': missing.isEmpty,
         'value': value,
@@ -209,7 +299,7 @@ class _RunTestTabState extends State<RunTestTab> {
               ),
       };
     } on ValidationError catch (e) {
-      return {
+      result = {
         'enabled': true,
         'ok': false,
         'value': null,
@@ -217,12 +307,50 @@ class _RunTestTabState extends State<RunTestTab> {
         'error': e.message,
       };
     }
+    _compAnalysis = analysis;
+    _compFormulaAuto = _formulaAuto;
+    _compValues = Map<String, Object?>.from(values);
+    _compResult = result;
+    return result;
+  }
+
+  Map<String, dynamic> _compResult = const {'enabled': false, 'ok': true};
+  Map<String, dynamic>? _compAnalysis;
+  bool? _compFormulaAuto;
+  Map<String, Object?>? _compValues;
+
+  static bool _flatMapEquals(
+      Map<String, Object?> a, Map<String, Object?> b) {
+    if (a.length != b.length) return false;
+    for (final k in a.keys) {
+      if (!b.containsKey(k) || a[k] != b[k]) return false;
+    }
+    return true;
+  }
+
+  /// Values map used for formula evaluation: inventory qty-per-sample defaults
+  /// plus the effective dynamic values (controllers, fixed values, lists).
+  Map<String, Object?> _evaluateValues(
+    RunTestState state,
+    Map<String, dynamic> analysis,
+  ) {
+    final values = <String, Object?>{};
+    for (final item in analysis['items'] as List? ?? const []) {
+      final m = item as Map<String, dynamic>;
+      values['${m['inventory_name'] ?? ''}'.trim()] = safeFormulaFloat(
+        m['qty_per_sample'],
+      );
+    }
+    values.addAll(_effectiveValues(state));
+    return values;
   }
 
   String _computedDisplay(Object? value) {
     final n = safeFormulaFloat(value);
     if (n == null) return '';
-    return '${(n * 10000).round() / 10000}';
+    // Fixed three decimals everywhere the computed result is shown or typed
+    // into the result box before saving — same shape the repository stores.
+    return labResultText(n);
   }
 
   final Map<String, TextEditingController> _dynamicControllers = {};
@@ -246,7 +374,7 @@ class _RunTestTabState extends State<RunTestTab> {
     // otherwise stale values + undisposed controllers leak across analyses.
     return _dynamicControllers.putIfAbsent(
       field,
-      () => TextEditingController(),
+      () => TextEditingController(text: _initialDynamic[field] ?? ''),
     );
   }
 
@@ -265,12 +393,22 @@ class _RunTestTabState extends State<RunTestTab> {
     Map<String, dynamic> analysis,
     String field,
   ) {
-    for (final l in analysis['field_chemical_links'] as List? ?? const []) {
-      final m = l as Map<String, dynamic>;
-      if ('${m['dynamic_field'] ?? ''}'.trim() == field) return m;
+    if (!identical(analysis, _cfgAnalysis)) {
+      _cfgAnalysis = analysis;
+      _cfgMap = <String, Map<String, dynamic>>{};
+      for (final l in analysis['field_chemical_links'] as List? ?? const []) {
+        final m = l as Map<String, dynamic>;
+        final key = '${m['dynamic_field'] ?? ''}'.trim();
+        if (key.isNotEmpty && !_cfgMap!.containsKey(key)) {
+          _cfgMap![key] = m;
+        }
+      }
     }
-    return const {};
+    return _cfgMap?[field] ?? const {};
   }
+
+  Map<String, dynamic>? _cfgAnalysis;
+  Map<String, Map<String, dynamic>>? _cfgMap;
 
   List<String> _listOptionsOf(Map<String, dynamic> cfg) => [
     for (final o in (cfg['list_values'] as List?) ?? const [])
@@ -359,8 +497,8 @@ class _RunTestTabState extends State<RunTestTab> {
               'Fixed value from analysis setup — not typed here.',
             )
           : AppText.t(
-              'قيمة ثابتة = $v تُستخدم تلقائياً في المعادلة.',
-              'Fixed value = $v used automatically in the formula.',
+              'قيمة ثابتة = ${labNumber(v)} تُستخدم تلقائياً في المعادلة.',
+              'Fixed value = ${labNumber(v)} used automatically in the formula.',
             );
       input = InputDecorator(
         decoration: const InputDecoration(
@@ -370,7 +508,7 @@ class _RunTestTabState extends State<RunTestTab> {
         child: Align(
           alignment: AlignmentDirectional.centerStart,
           child: Text(
-            v == null ? '-' : '${(v * 10000).round() / 10000}',
+            v == null ? '-' : labNumber(v),
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
           ),
         ),
@@ -509,6 +647,116 @@ class _RunTestTabState extends State<RunTestTab> {
           ],
         );
       },
+    );
+  }
+
+  /// Read-only summary of the parts that are history while editing: the
+  /// analysis and source are fixed, and the sample stays editable (the same
+  /// picker as a run when the record has registered samples).
+  Widget _editFixedCard(RunTestCubit cubit, RunTestState state) {
+    final analysis = _selectedAnalysis(state);
+    final sourceLabel = switch (state.sourceType) {
+      'product' => AppText.t('منتج', 'Product'),
+      'sample' => AppText.t('عينة', 'Sample'),
+      _ => AppText.t('خام', 'Raw'),
+    };
+    final entry = '${state.selectedInspection['entry_code'] ?? ''}'.trim();
+    return AppCard(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _fixedRow(
+            Icons.science_outlined,
+            AppText.t('التحليل', 'Analysis'),
+            analysis == null
+                ? '-'
+                : '${analysis['name']} (${analysis['unit'] ?? '%'})',
+          ),
+          _fixedRow(
+            Icons.category_outlined,
+            AppText.t('المصدر', 'Source'),
+            '${state.sourceName} · $sourceLabel',
+          ),
+          if (entry.isNotEmpty)
+            _fixedRow(
+              Icons.qr_code_2,
+              AppText.t('رقم المحضر', 'Record'),
+              entry,
+            ),
+          const SizedBox(height: AppSpacing.md),
+          if (state.selectedInspection.isNotEmpty)
+            _inspectionSamplePicker(cubit, state)
+          else
+            SizedBox(
+              width: 280.w,
+              child: TextField(
+                controller: _standaloneSample,
+                decoration: InputDecoration(
+                  labelText: AppText.t('اسم العينة', 'Sample name'),
+                  isDense: true,
+                  prefixIcon: const Icon(Icons.science_outlined),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _fixedRow(IconData icon, String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 15.r, color: AppColors.primary),
+        const SizedBox(width: 6),
+        SizedBox(
+          width: 90.w,
+          child: Text(
+            label,
+            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: TextStyle(fontSize: 13.spMax, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  /// Sample names recorded on the inspection (product batches read these from
+  /// their `product_batch_samples` rows; raw materials from `sample_names`).
+  List<String> _sampleNamesOf(Map<String, dynamic> inspection) => [
+    for (final name in (inspection['sample_names'] as List? ?? const []))
+      if ('$name'.trim().isNotEmpty) '$name'.trim(),
+  ];
+
+  /// Sample picker for a run linked to an inspection record. The stored
+  /// selection is folded into the options so an edit always displays its
+  /// current sample even when it was typed outside the record's list.
+  Widget _inspectionSamplePicker(RunTestCubit cubit, RunTestState state) {
+    final names = _sampleNamesOf(state.selectedInspection);
+    final current = state.selectedSampleName.trim();
+    if (current.isNotEmpty && !names.contains(current))
+      names.insert(0, current);
+    return SizedBox(
+      width: 220.w,
+      child: AppEntityAutocomplete(
+        options: [
+          for (final name in names) {'id': name, 'name': name},
+        ],
+        selectedId: state.selectedSampleName,
+        label: AppText.t('العينة في المحضر', 'Inspection sample'),
+        hint: AppText.t('ابحث باسم العينة…', 'Search samples…'),
+        displayOf: (r) => '${r['name']}',
+        filter: (r, q) => entityMatches(r, q, [(x) => '${x['name'] ?? ''}']),
+        onSelected: (name) => cubit.selectInspectionSample('$name'),
+        onCleared: cubit.clearInspectionSample,
+      ),
     );
   }
 
@@ -655,6 +903,7 @@ class _RunTestTabState extends State<RunTestTab> {
   Widget build(BuildContext context) {
     final state = context.watch<RunTestCubit>().state;
     final cubit = context.read<RunTestCubit>();
+    final sampleNames = _sampleNamesOf(state.selectedInspection);
     final dynamicFields = _dynamicFieldsOf(state);
     final analysis = _selectedAnalysis(state);
     final comp = _computedResult(state);
@@ -676,12 +925,14 @@ class _RunTestTabState extends State<RunTestTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            AppText.t('تشغيل اختبار', 'Run a test'),
+            _editing
+                ? AppText.t('تعديل التحليل', 'Edit test')
+                : AppText.t('تشغيل اختبار', 'Run a test'),
             style: Theme.of(context).textTheme.titleLarge,
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            '${AppText.t('سجّل تحليلاً جديداً وفق إعدادات التحليل.', 'Record a new test following the analysis setup.')}'
+            '${_editing ? AppText.t('عدّل بيانات العينة والنتيجة — التحليل والمصدر ثابتان.', 'Edit the sample and result — analysis and source are fixed.') : AppText.t('سجّل تحليلاً جديداً وفق إعدادات التحليل.', 'Record a new test following the analysis setup.')}'
             '${analysis == null ? '' : ' — ${analysis['name']} (${analysis['unit'] ?? '%'})'}',
             style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
           ),
@@ -690,363 +941,316 @@ class _RunTestTabState extends State<RunTestTab> {
           if (state.loading && state.analyses.isEmpty) ...[
             const AppSkeletonList(rows: 6, lines: 3, height: 380),
           ] else ...[
-            _sectionTitle('1', AppText.t('إعدادات العينة', 'Sample setup')),
-            AppCard(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  AppEntityAutocomplete(
-                    options: state.analyses,
-                    selectedId: state.analysisId,
-                    label: AppText.t('التحليل', 'Analysis'),
-                    hint: AppText.t('ابحث باسم التحليل…', 'Search analyses…'),
-                    prefixIcon: Icons.science_outlined,
-                    displayOf: (a) => '${a['name']} (${a['unit'] ?? '%'})',
-                    filter: (a, q) => entityMatches(a, q, [
-                      (r) => '${r['name'] ?? ''}',
-                      (r) => '${r['unit'] ?? ''}',
-                    ]),
-                    onSelected: (v) {
-                      _resetDynamicInputs();
-                      cubit.selectAnalysis((v as num).toInt());
-                    },
-                    onCleared: () {
-                      _resetDynamicInputs();
-                      cubit.clearAnalysis();
-                    },
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  Wrap(
-                    spacing: AppSpacing.md,
-                    runSpacing: AppSpacing.sm,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      SizedBox(
-                        width: 220.w,
-                        child: DropdownButtonFormField<String>(
-                          initialValue: state.sourceType,
-                          isExpanded: true,
-                          menuMaxHeight: 320,
-                          decoration: InputDecoration(
-                            labelText: AppText.t('المصدر', 'Source'),
-                            isDense: true,
-                          ),
-                          items: [
-                            DropdownMenuItem(
-                              value: 'raw_material',
-                              child: Text(
-                                AppText.t('مادة خام', 'Raw material'),
-                              ),
-                            ),
-                            DropdownMenuItem(
-                              value: 'product',
-                              child: Text(AppText.t('منتج', 'Product')),
-                            ),
-                          ],
-                          onChanged: (v) {
-                            if (v != null) cubit.setSourceType(v);
-                          },
-                        ),
-                      ),
-                      SwitchListTile.adaptive(
-                        contentPadding: EdgeInsets.zero,
-                        value: state.selectedInspection.isNotEmpty,
-                        title: Text(
-                          AppText.t(
-                            'ربط التحليل بمحضر فحص',
-                            'Link to inspection record',
-                          ),
-                        ),
-                        subtitle: Text(
-                          AppText.t(
-                            'اختياري — يمكنك إجراء التحليل مباشرة على المنتج أو الخامة.',
-                            'Optional — run the analysis directly against the product or raw material.',
-                          ),
-                        ),
-                        onChanged: (linked) {
-                          if (!linked) {
-                            cubit.clearInspection();
-                          }
-                        },
-                      ),
-                      if (state.selectedInspection.isEmpty)
+            if (_editing) ...[
+              _sectionTitle('1', AppText.t('بيانات ثابتة', 'Fixed details')),
+              _editFixedCard(cubit, state),
+            ] else ...[
+              _sectionTitle('1', AppText.t('إعدادات العينة', 'Sample setup')),
+              AppCard(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    AppEntityAutocomplete(
+                      options: state.analyses,
+                      selectedId: state.analysisId,
+                      label: AppText.t('التحليل', 'Analysis'),
+                      hint: AppText.t('ابحث باسم التحليل…', 'Search analyses…'),
+                      prefixIcon: Icons.science_outlined,
+                      displayOf: (a) => '${a['name']} (${a['unit'] ?? '%'})',
+                      filter: (a, q) => entityMatches(a, q, [
+                        (r) => '${r['name'] ?? ''}',
+                        (r) => '${r['unit'] ?? ''}',
+                      ]),
+                      onSelected: (v) {
+                        _resetDynamicInputs();
+                        cubit.selectAnalysis((v as num).toInt());
+                      },
+                      onCleared: () {
+                        _resetDynamicInputs();
+                        cubit.clearAnalysis();
+                      },
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    Wrap(
+                      spacing: AppSpacing.md,
+                      runSpacing: AppSpacing.sm,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
                         SizedBox(
-                          width: 280.w,
-                          child: TextField(
-                            controller: _standaloneSample,
+                          width: 220.w,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: state.sourceType,
+                            isExpanded: true,
+                            menuMaxHeight: 320,
                             decoration: InputDecoration(
-                              labelText: AppText.t('اسم العينة', 'Sample name'),
-                              hintText: AppText.t(
-                                'مثال: عينة تشغيلية',
-                                'e.g. production sample',
+                              labelText: AppText.t('المصدر', 'Source'),
+                              isDense: true,
+                            ),
+                            items: [
+                              DropdownMenuItem(
+                                value: 'raw_material',
+                                child: Text(
+                                  AppText.t('مادة خام', 'Raw material'),
+                                ),
                               ),
-                              prefixIcon: const Icon(Icons.science_outlined),
-                            ),
+                              DropdownMenuItem(
+                                value: 'product',
+                                child: Text(AppText.t('منتج', 'Product')),
+                              ),
+                              DropdownMenuItem(
+                                value: 'sample',
+                                child: Text(
+                                  AppText.t('عينة جديدة', 'New sample'),
+                                ),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v != null) cubit.setSourceType(v);
+                            },
                           ),
                         ),
-                      if (state.sourceType == 'raw_material') ...[
-                        SizedBox(
-                          width: 300.w,
-                          child: AppEntityAutocomplete(
-                            options: state.rawMaterials,
-                            selectedId: state.rawMaterialId,
-                            label: AppText.t('الخامة', 'Raw material'),
-                            hint: AppText.t(
-                              'ابحث باسم الخامة أو الكود…',
-                              'Search materials…',
+                        if (state.sourceType != 'sample')
+                          SwitchListTile.adaptive(
+                            contentPadding: EdgeInsets.zero,
+                            value: state.selectedInspection.isNotEmpty,
+                            title: Text(
+                              AppText.t(
+                                'ربط التحليل بمحضر فحص',
+                                'Link to inspection record',
+                              ),
                             ),
-                            prefixIcon: Icons.inventory_2_outlined,
-                            displayOf: (m) =>
-                                '${m['material_name']} (${m['material_code']})',
-                            filter: (m, q) => entityMatches(m, q, [
-                              (r) => '${r['material_name'] ?? ''}',
-                              (r) => '${r['material_code'] ?? ''}',
-                            ]),
-                            onSelected: (id) {
-                              if (id != null) {
-                                cubit.selectRawMaterial((id as num).toInt());
+                            subtitle: Text(
+                              AppText.t(
+                                'اختياري — يمكنك إجراء التحليل مباشرة على المنتج أو الخامة.',
+                                'Optional — run the analysis directly against the product or raw material.',
+                              ),
+                            ),
+                            onChanged: (linked) {
+                              if (!linked) {
+                                cubit.clearInspection();
                               }
                             },
-                            onCleared: cubit.clearRawMaterial,
                           ),
-                        ),
-                        SizedBox(
-                          width: 350.w,
-                          child: AppEntityAutocomplete(
-                            options: state.inspections,
-                            selectedId: state.selectedInspection['id'],
-                            label: AppText.t(
-                              'رقم محضر الفحص',
-                              'Inspection record',
-                            ),
-                            hint: AppText.t(
-                              'ابحث برقم القيد أو المورد…',
-                              'Search records…',
-                            ),
-                            prefixIcon: Icons.receipt_long_outlined,
-                            helperText: state.loadingInspections
-                                ? AppText.t(
-                                    'جارٍ تحميل المحاضر…',
-                                    'Loading inspection records…',
-                                  )
-                                : null,
-                            enabled: !state.loadingInspections,
-                            displayOf: (r) =>
-                                '${r['entry_code']} · ${r['inspection_date']}',
-                            subtitleOf: (r) =>
-                                '${AppText.t('المورد', 'Supplier')}: '
-                                '${r['supplier'] ?? '—'} · '
-                                '${AppText.t('السيارة', 'Vehicle')}: '
-                                '${r['truck_number'] ?? '—'}',
-                            filter: (r, q) => entityMatches(r, q, [
-                              (x) => '${x['entry_code'] ?? ''}',
-                              (x) => '${x['supplier'] ?? ''}',
-                              (x) => '${x['truck_number'] ?? ''}',
-                              (x) => '${x['inspection_date'] ?? ''}',
-                            ]),
-                            onSelected: (id) {
-                              if (id != null) {
-                                cubit.selectInspection((id as num).toInt());
-                              }
-                            },
-                            onCleared: cubit.clearInspection,
-                          ),
-                        ),
-                        if (state.rawMaterialId != null &&
-                            !state.loadingInspections &&
-                            state.inspections.isEmpty)
-                          Text(
-                            AppText.t(
-                              'لا توجد محاضر فحص لهذه الخامة.',
-                              'No inspection records exist for this raw material.',
-                            ),
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 12.spMax,
+                        if (state.selectedInspection.isEmpty)
+                          SizedBox(
+                            width: 280.w,
+                            child: TextField(
+                              controller: _standaloneSample,
+                              decoration: InputDecoration(
+                                labelText: AppText.t(
+                                  'اسم العينة',
+                                  'Sample name',
+                                ),
+                                hintText: AppText.t(
+                                  'مثال: عينة تشغيلية',
+                                  'e.g. production sample',
+                                ),
+                                prefixIcon: const Icon(Icons.science_outlined),
+                              ),
                             ),
                           ),
-                        if (state.selectedInspection.isNotEmpty) ...[
-                          _inspectionTraceCard(state.selectedInspection),
-                          if (state.selectedSampleName.isEmpty)
+                        if (state.sourceType == 'raw_material') ...[
+                          SizedBox(
+                            width: 300.w,
+                            child: AppEntityAutocomplete(
+                              options: state.rawMaterials,
+                              selectedId: state.rawMaterialId,
+                              label: AppText.t('الخامة', 'Raw material'),
+                              hint: AppText.t(
+                                'ابحث باسم الخامة أو الكود…',
+                                'Search materials…',
+                              ),
+                              prefixIcon: Icons.inventory_2_outlined,
+                              displayOf: (m) =>
+                                  '${m['material_name']} (${m['material_code']})',
+                              filter: (m, q) => entityMatches(m, q, [
+                                (r) => '${r['material_name'] ?? ''}',
+                                (r) => '${r['material_code'] ?? ''}',
+                              ]),
+                              onSelected: (id) {
+                                if (id != null) {
+                                  cubit.selectRawMaterial((id as num).toInt());
+                                }
+                              },
+                              onCleared: cubit.clearRawMaterial,
+                            ),
+                          ),
+                          SizedBox(
+                            width: 350.w,
+                            child: AppEntityAutocomplete(
+                              options: state.inspections,
+                              selectedId: state.selectedInspection['id'],
+                              label: AppText.t(
+                                'رقم محضر الفحص',
+                                'Inspection record',
+                              ),
+                              hint: AppText.t(
+                                'ابحث برقم القيد أو المورد…',
+                                'Search records…',
+                              ),
+                              prefixIcon: Icons.receipt_long_outlined,
+                              helperText: state.loadingInspections
+                                  ? AppText.t(
+                                      'جارٍ تحميل المحاضر…',
+                                      'Loading inspection records…',
+                                    )
+                                  : null,
+                              enabled: !state.loadingInspections,
+                              displayOf: (r) =>
+                                  '${r['entry_code']} · ${r['inspection_date']}',
+                              subtitleOf: (r) =>
+                                  '${AppText.t('المورد', 'Supplier')}: '
+                                  '${r['supplier'] ?? '—'} · '
+                                  '${AppText.t('السيارة', 'Vehicle')}: '
+                                  '${r['truck_number'] ?? '—'}',
+                              filter: (r, q) => entityMatches(r, q, [
+                                (x) => '${x['entry_code'] ?? ''}',
+                                (x) => '${x['supplier'] ?? ''}',
+                                (x) => '${x['truck_number'] ?? ''}',
+                                (x) => '${x['inspection_date'] ?? ''}',
+                              ]),
+                              onSelected: (id) {
+                                if (id != null) {
+                                  cubit.selectInspection((id as num).toInt());
+                                }
+                              },
+                              onCleared: cubit.clearInspection,
+                            ),
+                          ),
+                          if (state.rawMaterialId != null &&
+                              !state.loadingInspections &&
+                              state.inspections.isEmpty)
                             Text(
                               AppText.t(
-                                'لا يحتوي المحضر على عينات مسجلة؛ أضف عينة إلى المحضر قبل تسجيل التحليل.',
-                                'This record has no registered samples. Add a sample to the inspection before recording an analysis.',
+                                'لا توجد محاضر فحص لهذه الخامة.',
+                                'No inspection records exist for this raw material.',
                               ),
                               style: TextStyle(
                                 color: AppColors.textMuted,
                                 fontSize: 12.spMax,
                               ),
-                            )
-                          else
-                            SizedBox(
-                              width: 220.w,
-                              child: AppEntityAutocomplete(
-                                options: [
-                                  for (final name
-                                      in (state.selectedInspection['sample_names']
-                                              as List? ??
-                                          const []))
-                                    if ('$name'.trim().isNotEmpty)
-                                      {
-                                        'id': '$name'.trim(),
-                                        'name': '$name'.trim(),
-                                      },
-                                ],
-                                selectedId: state.selectedSampleName,
-                                label: AppText.t(
-                                  'العينة في المحضر',
-                                  'Inspection sample',
+                            ),
+                          if (state.selectedInspection.isNotEmpty) ...[
+                            _inspectionTraceCard(state.selectedInspection),
+                            if (sampleNames.isEmpty)
+                              Text(
+                                AppText.t(
+                                  'لا يحتوي المحضر على عينات مسجلة؛ أضف عينة إلى المحضر قبل تسجيل التحليل.',
+                                  'This record has no registered samples. Add a sample to the inspection before recording an analysis.',
                                 ),
-                                hint: AppText.t(
-                                  'ابحث باسم العينة…',
-                                  'Search samples…',
+                                style: TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 12.spMax,
                                 ),
-                                displayOf: (r) => '${r['name']}',
-                                filter: (r, q) => entityMatches(r, q, [
-                                  (x) => '${x['name'] ?? ''}',
-                                ]),
-                                onSelected: (name) {
-                                  cubit.selectInspectionSample('$name');
-                                },
-                                onCleared: cubit.clearInspectionSample,
+                              )
+                            else
+                              _inspectionSamplePicker(cubit, state),
+                          ],
+                        ] else if (state.sourceType == 'product') ...[
+                          SizedBox(
+                            width: 280.w,
+                            child: AppEntityAutocomplete(
+                              options: state.products,
+                              selectedId: state.productId,
+                              label: AppText.t('المنتج', 'Product'),
+                              hint: AppText.t(
+                                'ابحث باسم المنتج…',
+                                'Search products…',
                               ),
-                            ),
-                        ],
-                      ] else ...[
-                        SizedBox(
-                          width: 280.w,
-                          child: AppEntityAutocomplete(
-                            options: state.products,
-                            selectedId: state.productId,
-                            label: AppText.t('المنتج', 'Product'),
-                            hint: AppText.t(
-                              'ابحث باسم المنتج…',
-                              'Search products…',
-                            ),
-                            prefixIcon: Icons.category_outlined,
-                            displayOf: (p) => '${p['name']}',
-                            filter: (p, q) => entityMatches(p, q, [
-                              (r) => '${r['name'] ?? ''}',
-                            ]),
-                            onSelected: (v) {
-                              if (v != null) {
-                                cubit.selectProduct((v as num).toInt());
-                              }
-                            },
-                            onCleared: cubit.clearProduct,
-                          ),
-                        ),
-                        SizedBox(
-                          width: 350.w,
-                          child: AppEntityAutocomplete(
-                            options: state.inspections,
-                            selectedId: state.selectedInspection['id'],
-                            label: AppText.t(
-                              'رقم محضر الفحص',
-                              'Inspection record',
-                            ),
-                            hint: AppText.t(
-                              'ابحث برقم القيد أو التشغيلة…',
-                              'Search records…',
-                            ),
-                            prefixIcon: Icons.receipt_long_outlined,
-                            helperText: state.loadingInspections
-                                ? AppText.t(
-                                    'جارٍ تحميل المحاضر…',
-                                    'Loading inspection records…',
-                                  )
-                                : null,
-                            enabled: !state.loadingInspections,
-                            displayOf: (r) =>
-                                '${r['entry_code']} · ${r['inspection_date']}',
-                            subtitleOf: (r) =>
-                                '${AppText.t('الفورمولا', 'Formula')}: '
-                                '${r['formula_number'] ?? '—'} · '
-                                '${AppText.t('التشغيلة', 'Batch')}: '
-                                '${r['batch_number'] ?? '—'}',
-                            filter: (r, q) => entityMatches(r, q, [
-                              (x) => '${x['entry_code'] ?? ''}',
-                              (x) => '${x['formula_number'] ?? ''}',
-                              (x) => '${x['batch_number'] ?? ''}',
-                              (x) => '${x['inspection_date'] ?? ''}',
-                            ]),
-                            onSelected: (id) {
-                              if (id != null) {
-                                cubit.selectInspection((id as num).toInt());
-                              }
-                            },
-                            onCleared: cubit.clearInspection,
-                          ),
-                        ),
-                        if (state.productId != null &&
-                            !state.loadingInspections &&
-                            state.inspections.isEmpty)
-                          Text(
-                            AppText.t(
-                              'لا توجد محاضر فحص لهذا المنتج. أنشئ محضر فحص منتج أولاً من تبويب فحص المنتجات.',
-                              'No inspection records exist for this product. Create a product inspection first.',
-                            ),
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 12.spMax,
+                              prefixIcon: Icons.category_outlined,
+                              displayOf: (p) => '${p['name']}',
+                              filter: (p, q) => entityMatches(p, q, [
+                                (r) => '${r['name'] ?? ''}',
+                              ]),
+                              onSelected: (v) {
+                                if (v != null) {
+                                  cubit.selectProduct((v as num).toInt());
+                                }
+                              },
+                              onCleared: cubit.clearProduct,
                             ),
                           ),
-                        if (state.selectedInspection.isNotEmpty) ...[
-                          _productInspectionTraceCard(state.selectedInspection),
-                          if (state.selectedSampleName.isEmpty)
+                          SizedBox(
+                            width: 350.w,
+                            child: AppEntityAutocomplete(
+                              options: state.inspections,
+                              selectedId: state.selectedInspection['id'],
+                              label: AppText.t(
+                                'رقم محضر الفحص',
+                                'Inspection record',
+                              ),
+                              hint: AppText.t(
+                                'ابحث برقم القيد أو التشغيلة…',
+                                'Search records…',
+                              ),
+                              prefixIcon: Icons.receipt_long_outlined,
+                              helperText: state.loadingInspections
+                                  ? AppText.t(
+                                      'جارٍ تحميل المحاضر…',
+                                      'Loading inspection records…',
+                                    )
+                                  : null,
+                              enabled: !state.loadingInspections,
+                              displayOf: (r) =>
+                                  '${r['entry_code']} · ${r['inspection_date']}',
+                              subtitleOf: (r) =>
+                                  '${AppText.t('الفورمولا', 'Formula')}: '
+                                  '${r['formula_number'] ?? '—'} · '
+                                  '${AppText.t('التشغيلة', 'Batch')}: '
+                                  '${r['batch_number'] ?? '—'}',
+                              filter: (r, q) => entityMatches(r, q, [
+                                (x) => '${x['entry_code'] ?? ''}',
+                                (x) => '${x['formula_number'] ?? ''}',
+                                (x) => '${x['batch_number'] ?? ''}',
+                                (x) => '${x['inspection_date'] ?? ''}',
+                              ]),
+                              onSelected: (id) {
+                                if (id != null) {
+                                  cubit.selectInspection((id as num).toInt());
+                                }
+                              },
+                              onCleared: cubit.clearInspection,
+                            ),
+                          ),
+                          if (state.productId != null &&
+                              !state.loadingInspections &&
+                              state.inspections.isEmpty)
                             Text(
                               AppText.t(
-                                'لا يحتوي المحضر على عينات مسجلة؛ أضف عينة إلى المحضر قبل تسجيل التحليل.',
-                                'This record has no registered samples. Add a sample to the inspection before recording an analysis.',
+                                'لا توجد محاضر فحص لهذا المنتج. أنشئ محضر فحص منتج أولاً من تبويب فحص المنتجات.',
+                                'No inspection records exist for this product. Create a product inspection first.',
                               ),
                               style: TextStyle(
                                 color: AppColors.textMuted,
                                 fontSize: 12.spMax,
                               ),
-                            )
-                          else
-                            SizedBox(
-                              width: 220.w,
-                              child: AppEntityAutocomplete(
-                                options: [
-                                  for (final name
-                                      in (state.selectedInspection['sample_names']
-                                              as List? ??
-                                          const []))
-                                    if ('$name'.trim().isNotEmpty)
-                                      {
-                                        'id': '$name'.trim(),
-                                        'name': '$name'.trim(),
-                                      },
-                                ],
-                                selectedId: state.selectedSampleName,
-                                label: AppText.t(
-                                  'العينة في المحضر',
-                                  'Inspection sample',
-                                ),
-                                hint: AppText.t(
-                                  'ابحث باسم العينة…',
-                                  'Search samples…',
-                                ),
-                                displayOf: (r) => '${r['name']}',
-                                filter: (r, q) => entityMatches(r, q, [
-                                  (x) => '${x['name'] ?? ''}',
-                                ]),
-                                onSelected: (name) {
-                                  cubit.selectInspectionSample('$name');
-                                },
-                                onCleared: cubit.clearInspectionSample,
-                              ),
                             ),
+                          if (state.selectedInspection.isNotEmpty) ...[
+                            _productInspectionTraceCard(
+                              state.selectedInspection,
+                            ),
+                            if (sampleNames.isEmpty)
+                              Text(
+                                AppText.t(
+                                  'لا يحتوي المحضر على عينات مسجلة؛ أضف عينة إلى المحضر قبل تسجيل التحليل.',
+                                  'This record has no registered samples. Add a sample to the inspection before recording an analysis.',
+                                ),
+                                style: TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 12.spMax,
+                                ),
+                              )
+                            else
+                              _inspectionSamplePicker(cubit, state),
+                          ],
                         ],
                       ],
-                    ],
-                  ),
-                ],
+                    ),
+                  ],
+                ),
               ),
-            ),
+            ],
             const SizedBox(height: AppSpacing.lg),
             _sectionTitle('2', AppText.t('قيم الحقول', 'Field values')),
             AppCard(
@@ -1143,13 +1347,44 @@ class _RunTestTabState extends State<RunTestTab> {
                     ),
                   ],
                   const SizedBox(height: AppSpacing.lg),
-                  AppButton(
-                    expanded: true,
-                    label: AppStrings.runTest,
-                    icon: Icon(Icons.play_arrow, size: 18.r),
-                    loading: state.running,
-                    onPressed: state.running ? null : _run,
-                  ),
+                  if (!_editing)
+                    AppButton(
+                      expanded: true,
+                      label: AppStrings.runTest,
+                      icon: Icon(Icons.play_arrow, size: 18.r),
+                      loading: state.running,
+                      onPressed: state.running ? null : _run,
+                    )
+                  else
+                    // Wrap (not Row): the three edit CTAs fold onto a second
+                    // line on a 360dp phone instead of overflowing.
+                    Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.sm,
+                      alignment: WrapAlignment.end,
+                      children: [
+                        AppButton(
+                          label: AppText.t('حفظ التعديلات', 'Save changes'),
+                          icon: Icon(Icons.check, size: 18.r),
+                          loading: state.running,
+                          onPressed: state.running ? null : _run,
+                        ),
+                        if (widget.onDelete != null)
+                          AppButton(
+                            style: AppButtonStyle.danger,
+                            label: AppText.t('حذف', 'Delete'),
+                            icon: Icon(Icons.delete_outline, size: 18.r),
+                            onPressed: state.running ? null : widget.onDelete,
+                          ),
+                        AppButton(
+                          style: AppButtonStyle.secondary,
+                          label: AppText.t('إغلاق', 'Close'),
+                          onPressed: state.running
+                              ? null
+                              : () => Navigator.of(context).pop(false),
+                        ),
+                      ],
+                    ),
                 ],
               ),
             ),

@@ -34,11 +34,15 @@ class InventoryCards extends StatelessWidget {
     required this.rows,
     required this.onEdit,
     required this.onAdjust,
+    required this.onReceive,
+    required this.onLog,
   });
 
   final List<Map<String, dynamic>> rows;
   final void Function(Map<String, dynamic> row) onEdit;
   final void Function(Map<String, dynamic> row) onAdjust;
+  final void Function(Map<String, dynamic> row) onReceive;
+  final void Function(Map<String, dynamic> row) onLog;
 
   @override
   Widget build(BuildContext context) {
@@ -54,8 +58,12 @@ class InventoryCards extends StatelessWidget {
           qty: '${r['current_qty'] ?? 0} ${r['unit'] ?? ''}',
           status: inventoryStatusText(r),
           statusColor: inventoryStatusColor(r),
+          expiredQty: ((r['expired_qty'] as num?)?.toDouble() ?? 0.0),
+          nearestExpiry: '${r['nearest_expiry'] ?? ''}',
           onEdit: () => onEdit(r),
           onAdjust: () => onAdjust(r),
+          onReceive: () => onReceive(r),
+          onLog: () => onLog(r),
         );
       },
     );
@@ -72,6 +80,10 @@ class InventoryCard extends StatelessWidget {
     required this.statusColor,
     required this.onEdit,
     required this.onAdjust,
+    required this.onReceive,
+    required this.onLog,
+    this.expiredQty = 0,
+    this.nearestExpiry = '',
   });
 
   final String name;
@@ -81,6 +93,14 @@ class InventoryCard extends StatelessWidget {
   final Color statusColor;
   final VoidCallback onEdit;
   final VoidCallback onAdjust;
+  final VoidCallback onReceive;
+  final VoidCallback onLog;
+
+  /// Remaining quantity sitting in expired lots.
+  final double expiredQty;
+
+  /// Nearest lot expiry (`yyyy-MM-dd`) or ''.
+  final String nearestExpiry;
 
   @override
   Widget build(BuildContext context) {
@@ -121,24 +141,63 @@ class InventoryCard extends StatelessWidget {
               ),
               IconButton(
                 tooltip: AppText.t('تسوية الكمية', 'Adjust'),
-                constraints: const BoxConstraints(
-                  minWidth: 48,
-                  minHeight: 48,
-                ),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 onPressed: onAdjust,
                 icon: Icon(Icons.swap_vert, size: 20.r),
               ),
               IconButton(
                 tooltip: AppStrings.edit,
-                constraints: const BoxConstraints(
-                  minWidth: 48,
-                  minHeight: 48,
-                ),
+                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                 onPressed: onEdit,
                 icon: Icon(Icons.edit_outlined, size: 20.r),
               ),
+              PopupMenuButton<String>(
+                icon: Icon(Icons.more_vert, size: 20.r),
+                tooltip: AppText.t('المزيد', 'More'),
+                onSelected: (v) {
+                  if (v == 'receive') onReceive();
+                  if (v == 'adjust') onAdjust();
+                  if (v == 'log') onLog();
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'receive',
+                    child: Text(AppText.t('استلام كمية', 'Receive stock')),
+                  ),
+                  PopupMenuItem(
+                    value: 'adjust',
+                    child: Text(AppText.t('تسوية الكمية', 'Adjust')),
+                  ),
+                  PopupMenuItem(
+                    value: 'log',
+                    child: Text(AppText.t('السجل', 'Log')),
+                  ),
+                ],
+              ),
             ],
           ),
+          if (expiredQty > 1e-9 || nearestExpiry.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                if (expiredQty > 1e-9)
+                  _Badge(
+                    icon: Icons.warning_amber_outlined,
+                    text: '${AppText.t('منتهي', 'Expired')}: $expiredQty',
+                    color: AppColors.danger,
+                  ),
+                if (nearestExpiry.isNotEmpty)
+                  _Badge(
+                    icon: Icons.event_outlined,
+                    text:
+                        '${AppText.t('أقرب صلاحية', 'Nearest expiry')}: $nearestExpiry',
+                    color: AppColors.textMuted,
+                  ),
+              ],
+            ),
+          ],
           const Divider(height: AppSpacing.lg),
           Row(
             children: [
@@ -156,10 +215,7 @@ class InventoryCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
                   color: statusColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
@@ -176,6 +232,42 @@ class InventoryCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Badge extends StatelessWidget {
+  const _Badge({required this.icon, required this.text, required this.color});
+
+  final IconData icon;
+  final String text;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13.r, color: color),
+          const SizedBox(width: 4),
+          Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11.spMax,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
           ),
         ],
       ),

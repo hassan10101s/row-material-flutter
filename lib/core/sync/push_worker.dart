@@ -365,7 +365,7 @@ class PushWorker {
       final db = await queue.dbHelper.database;
       final rows = await db.query(
         entity.localTable,
-        where: 'id = ?',
+        where: '${entity.pkColumn} = ?',
         whereArgs: [entry.localRef],
         limit: 1,
       );
@@ -541,10 +541,10 @@ class PushWorker {
       entity.localTable,
       {
         for (final e in row.entries)
-          if (e.key != 'id' && columns.contains(e.key)) e.key: e.value,
+          if (e.key != entity.pkColumn && columns.contains(e.key)) e.key: e.value,
       },
-      where: 'id = ?',
-      whereArgs: [local['id']],
+      where: '${entity.pkColumn} = ?',
+      whereArgs: [local[entity.pkColumn]],
     );
     await _auditAuto(
       entry,

@@ -119,10 +119,7 @@ class QcSopDetailScreen extends StatelessWidget {
                 IconButton(
                   tooltip: AppText.t('حذف', 'Delete'),
                   onPressed: () => _confirmDelete(context, sop),
-                  icon: Icon(
-                    Icons.delete_outline,
-                    color: AppColors.danger,
-                  ),
+                  icon: Icon(Icons.delete_outline, color: AppColors.danger),
                 ),
             ],
           ),
@@ -520,14 +517,12 @@ class _RevisionsCard extends StatelessWidget {
                             small: true,
                             style: AppButtonStyle.secondary,
                             label: AppText.t('إلغاء', 'Cancel'),
-                            onPressed: () =>
-                                Navigator.of(context).pop(false),
+                            onPressed: () => Navigator.of(context).pop(false),
                           ),
                           AppButton(
                             small: true,
                             label: AppText.t('حفظ', 'Save'),
-                            onPressed: () =>
-                                Navigator.of(context).pop(true),
+                            onPressed: () => Navigator.of(context).pop(true),
                           ),
                         ],
                         builder: (context, close) => AppField(
@@ -602,5 +597,3 @@ class _ReadsCard extends StatelessWidget {
     );
   }
 }
-
-

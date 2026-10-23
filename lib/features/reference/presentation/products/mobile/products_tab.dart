@@ -117,19 +117,22 @@ class _MobileProductsTabState extends State<MobileProductsTab> {
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            ProductsHeader(
-              compact: true,
-              showAdd: false,
-              subtitle:
-                  '${state.hasMore ? '${state.rows.length}+' : '${state.rows.length}'} ${AppText.t('منتج', 'products')}',
-              onAdd: () => _openEditor(context),
-              canExport: state.rows.isNotEmpty,
-              onExportTable: () => TableHtmlExport.export(
-                context,
-                filePrefix: 'products',
-                title: ProductsTable.exportTitle(),
-                headers: ProductsTable.exportHeaders(),
-                rows: ProductsTable.exportRows(state.rows),
+            // Header entrance only (see params_tab for the rationale).
+            AppEntrance(
+              child: ProductsHeader(
+                compact: true,
+                showAdd: false,
+                subtitle:
+                    '${state.hasMore ? '${state.rows.length}+' : '${state.rows.length}'} ${AppText.t('منتج', 'products')}',
+                onAdd: () => _openEditor(context),
+                canExport: state.rows.isNotEmpty,
+                onExportTable: () => TableHtmlExport.export(
+                  context,
+                  filePrefix: 'products',
+                  title: ProductsTable.exportTitle(),
+                  headers: ProductsTable.exportHeaders(),
+                  rows: ProductsTable.exportRows(state.rows),
+                ),
               ),
             ),
             const SizedBox(height: AppSpacing.md),

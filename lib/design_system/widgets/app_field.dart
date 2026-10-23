@@ -1,16 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../core/constants/app_strings.dart';
 import '../feedback/app_feedback.dart';
-import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
 
 /// Labeled form field with error display (mirrors .field / .field-error).
 /// Owns an internal [TextEditingController] when none is provided so a
 /// controller-less field (e.g. a search box) does not allocate a new
 /// controller on every rebuild.
+///
+/// Field styling (fill, borders across every state, padding, hint/error
+/// typography) comes entirely from `InputDecorationTheme` in
+/// `core/theme/app_theme.dart`, so `AppField` and bare `TextField`s cannot
+/// drift apart. Only the widget-owned slots (hint, error, suffix) are set
+/// here.
 ///
 /// Form integration: pass [validator] inside a [Form] to get inline errors +
 /// `AutovalidateMode` instead of the legacy single-toast `Validators.require`
@@ -94,10 +98,11 @@ class _AppFieldState extends State<AppField> {
   Widget build(BuildContext context) {
     final effectiveController = _effectiveController;
     final repoError = widget.error;
+    final decorationTheme = InputDecorationTheme.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(widget.label, style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax)),
+        Text(widget.label, style: decorationTheme.labelStyle),
         const SizedBox(height: AppSpacing.xs),
         TextFormField(
           controller: effectiveController,
@@ -120,27 +125,13 @@ class _AppFieldState extends State<AppField> {
             return widget.validator?.call(value);
           },
           decoration: InputDecoration(
-            isDense: true,
             hintText: widget.hint,
+            // When no Form validator runs, the repository error must reach
+            // the field through `errorText`; with a validator set, the
+            // validator above returns it on every pass instead.
             errorText: widget.validator == null ? repoError : null,
             suffixIcon: widget.suffix,
             suffixText: widget.suffixText,
-            contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
-            filled: true,
-            fillColor: AppColors.surface,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-              borderSide: BorderSide(
-                  color: widget.error != null ? AppColors.danger : AppColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-              borderSide: BorderSide(color: AppColors.primary, width: 1.6),
-            ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-              borderSide: BorderSide(color: AppColors.danger),
-            ),
           ),
         ),
       ],

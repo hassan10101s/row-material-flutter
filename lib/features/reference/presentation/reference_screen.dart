@@ -73,7 +73,7 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
     final labConfig = getIt<LabConfigurationRepository>();
     final tabs = <_RefTab>[
       _RefTab(
-        AppText.t('المواد المرجعية', 'Materials'),
+        AppText.t('خامات مرجعية', 'Materials'),
         Icons.science_outlined,
         (context) => BlocProvider(
           create: (_) => ReferenceCubit(repo: refRepo)..load(),

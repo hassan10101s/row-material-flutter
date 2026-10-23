@@ -26,6 +26,7 @@ class AnalysesHeader extends StatelessWidget {
     this.compact = false,
     this.onExportTable,
     this.canExport = false,
+    this.search,
   });
 
   final VoidCallback onAdd;
@@ -34,6 +35,11 @@ class AnalysesHeader extends StatelessWidget {
   /// Export-all action (HTML table file). Shown when [canExport] is true.
   final VoidCallback? onExportTable;
   final bool canExport;
+
+  /// Optional search field for the desktop layout: it shares the actions row
+  /// so the table gets a search box without spending an extra row. The mobile
+  /// layout renders its own search above the cards and leaves this null.
+  final Widget? search;
 
   @override
   Widget build(BuildContext context) {
@@ -50,10 +56,12 @@ class AnalysesHeader extends StatelessWidget {
           )
         : const SizedBox.shrink();
     if (!compact) {
-      // Desktop title lives in the shell topbar; only actions stay.
+      // Desktop title lives in the shell topbar; the search takes the free
+      // width and the actions stay on the same row (no wasted vertical space).
       return Row(
         children: [
-          const Spacer(),
+          Expanded(child: search ?? const SizedBox.shrink()),
+          const SizedBox(width: AppSpacing.sm),
           exportButton,
           AppButton(
             small: true,

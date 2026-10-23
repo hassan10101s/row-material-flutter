@@ -6,9 +6,11 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../app/auth_gate.dart';
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/constants/report_form_keys.dart';
 import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../core/utils/reference_range.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
+import '../../../../../design_system/feedback/app_feedback_export.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
@@ -17,6 +19,8 @@ import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_page_header.dart';
 import '../../../../../design_system/widgets/app_status_badge.dart';
 import '../../../../../di/service_locator.dart';
+import '../../../../lab/core/lab_result_format.dart';
+import '../../../../lab/presentation/equipment/equipment_dialogs.dart';
 import '../../cubit/inspection_detail_cubit.dart';
 import '../../cubit/inspection_detail_state.dart';
 import 'inspection_widgets.dart';
@@ -141,10 +145,34 @@ class DetailHeader extends StatelessWidget {
         ),
         AppButton(
           style: AppButtonStyle.secondary,
-          label: AppText.t('ملصق', 'Label'),
+          label: AppText.t('QR', 'QR'),
           icon: Icon(Icons.label_outline, size: 18.r),
           loading: state.busy == 'label',
           onPressed: state.busy.isEmpty ? () => onExportPdf('label') : null,
+        ),
+        IconButton(
+          tooltip: AppText.t('أرقام فورم الجودة', 'QA form numbers'),
+          onPressed: () => showFormNumbersDialog(
+            context,
+            title: AppText.t('أرقام فورم الفحص', 'Inspection form numbers'),
+            fields: [
+              FormNoField(
+                key: ReportFormKeys.inspectionReport,
+                label: AppText.t(
+                  'رقم فورم تقرير الفحص (PDF)',
+                  'Inspection report (PDF) form no.',
+                ),
+              ),
+              FormNoField(
+                key: ReportFormKeys.inspectionLabel,
+                label: AppText.t(
+                  'رقم فورم الملصق / QR',
+                  'Label / QR form no.',
+                ),
+              ),
+            ],
+          ),
+          icon: Icon(Icons.settings_outlined, size: 20.r),
         ),
       ],
     );
@@ -327,7 +355,7 @@ class LabAnalysesCard extends StatelessWidget {
                   '${'${analyses[i]['tested_at'] ?? ''}'.trim().isEmpty ? '' : ' · ${analyses[i]['tested_at']}'}',
                 ),
                 trailing: Text(
-                  '${analyses[i]['result_text'] ?? ''}'
+                  '${formatLabResult(analyses[i]['result_text'])}'
                   '${'${analyses[i]['analysis_unit'] ?? ''}'.isEmpty ? '' : ' ${analyses[i]['analysis_unit']}'}',
                   style: const TextStyle(fontWeight: FontWeight.w700),
                   textAlign: TextAlign.end,
@@ -689,14 +717,18 @@ class _ParamCard extends StatelessWidget {
   }
 }
 
-/// Exports a PDF or label through the cubit and reports the saved file.
+/// Exports a PDF or label through the cubit, then opens the delivery sheet
+/// (`AppFeedbackExport.actions`) exactly like every other export: open/share
+/// on a phone, open/reveal or share on desktop. The saved path alone is a
+/// dead end inside the mobile sandbox, so a path-only banner is not enough.
 Future<void> exportInspectionPdf(BuildContext context, String kind) async {
   try {
     final path = await context.read<InspectionDetailCubit>().exportPdf(kind);
-    if (!context.mounted) return;
-    AppFeedback.success(
+    if (!context.mounted || path == null) return;
+    await AppFeedbackExport.actions(
       context,
-      '${AppText.t('تم التصدير', 'Exported')}: $path',
+      filePath: path,
+      documentName: path.split(RegExp(r'[/\\]')).last,
     );
   } on AppError catch (e) {
     if (context.mounted) AppFeedback.error(context, e.message);
@@ -722,7 +754,8 @@ Future<void> deleteInspection(BuildContext context) async {
   try {
     await context.read<InspectionDetailCubit>().delete();
     if (!context.mounted) return;
-    AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
+    // The list behind the closed detail window reflecting the removal is
+    // the confirmation; a "Deleted." toast before the pop was noise.
     Navigator.of(context).pop(true);
   } on AppError catch (e) {
     if (context.mounted) AppFeedback.error(context, e.message);

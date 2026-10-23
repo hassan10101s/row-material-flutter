@@ -7,6 +7,7 @@ import '../../../design_system/tokens/app_spacing.dart';
 import '../../../di/service_locator.dart';
 import '../domain/lab_local_repository.dart';
 import '../domain/lab_result_repository.dart';
+import '../domain/nir_validation_repository.dart';
 import '../../reports/domain/report_repository.dart';
 import 'activity/activity_tab.dart';
 import 'analyses/analyses_tab.dart';
@@ -15,10 +16,12 @@ import 'cubit/analyses_cubit.dart';
 import 'cubit/inventory_cubit.dart';
 import 'cubit/lab_cubit.dart';
 import 'cubit/lab_reports_cubit.dart';
+import 'cubit/nir_validation_cubit.dart';
 import 'cubit/test_history_cubit.dart';
 import 'equipment/equipment_tab.dart';
 import 'inventory/inventory_tab.dart';
 import 'lab_reports/lab_reports_tab.dart';
+import 'nir_validation/nir_validation_tab.dart';
 import 'test_history/test_history_tab.dart';
 
 class _LabTab {
@@ -87,7 +90,7 @@ class LabScreen extends StatelessWidget {
     final results = getIt<LabResultRepository>();
     final tabs = <_LabTab>[
       _LabTab(
-        AppText.t('سجل الفحوصات', 'Tests'),
+        AppText.t('سجل التحاليل', 'Test log'),
         Icons.history,
         (context) => BlocProvider(
           create: (_) =>
@@ -133,7 +136,20 @@ class LabScreen extends StatelessWidget {
           child: const InventoryTab(),
         ),
       ),
+      _LabTab(
+        AppText.t('فلديشن NIR', 'NIR Validation'),
+        Icons.query_stats_outlined,
+        (context) => BlocProvider(
+          create: (_) => NirValidationCubit(
+            repo: getIt<NirValidationRepository>(),
+          )..load(),
+          child: const NirValidationTab(),
+        ),
+      ),
     ];
+    // A stale notification deep-link (`?tab=9`) must not index the
+    // `IndexedStack` out of range — clamp to the real tab count.
+    final tab = state.tab.clamp(0, tabs.length - 1);
     // Title lives in the shell topbar (both experiences); the tab chips
     // below already say where you are.
     return Column(
@@ -192,7 +208,7 @@ class LabScreen extends StatelessWidget {
                     child: ChoiceChip(
                       label: Text(tabs[i].label),
                       avatar: Icon(tabs[i].icon, size: 18.r),
-                      selected: state.tab == i,
+                      selected: tab == i,
                       onSelected: (_) => cubit.setTab(i),
                     ),
                   ),
@@ -203,17 +219,35 @@ class LabScreen extends StatelessWidget {
         Expanded(
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.page),
-            child: IndexedStack(
-              index: state.tab,
-              children: [
-                for (var i = 0; i < tabs.length; i++)
-                  _LazyTab(
-                    key: ValueKey('lab-tab-$i'),
-                    index: i,
-                    active: state.tab == i,
-                    builder: tabs[i].builder,
-                  ),
-              ],
+            // Soft fade between tabs; the IndexedStack underneath keeps
+            // every visited tab's scroll position and running state.
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              switchInCurve: Curves.easeOutCubic,
+              // The default layout builder is a `Stack(alignment: center)`:
+              // a tab whose content is shorter than the viewport (the test
+              // log before any results, for one) was vertically centred and
+              // appeared to start halfway down the page. Pinning the stack to
+              // the top makes every tab begin where it is expected to.
+              layoutBuilder: (currentChild, previousChildren) => Stack(
+                alignment: AlignmentDirectional.topStart,
+                children: [...previousChildren, ?currentChild],
+              ),
+              child: KeyedSubtree(
+                key: ValueKey('lab-tab-body-$tab'),
+                child: IndexedStack(
+                  index: tab,
+                  children: [
+                    for (var i = 0; i < tabs.length; i++)
+                      _LazyTab(
+                        key: ValueKey('lab-tab-$i'),
+                        index: i,
+                        active: tab == i,
+                        builder: tabs[i].builder,
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),

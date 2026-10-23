@@ -36,9 +36,7 @@ class DesktopProductsTab extends StatelessWidget {
     );
     if (saved != true || !context.mounted) return;
     await context.read<ProductsCubit>().load();
-    if (context.mounted) {
-      AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved'));
-    }
+    // The refreshed list is the confirmation; no "Saved." toast.
   }
 
   Future<void> _delete(
@@ -108,6 +106,16 @@ class DesktopProductsTab extends StatelessWidget {
             AppEmptyState(
               icon: Icons.inventory_2_outlined,
               title: AppText.t('لا توجد منتجات.', 'No products.'),
+              subtitle: AppText.t(
+                'أضف أول منتج لبدء تتبع دفعاته.',
+                'Add your first product to start tracking its batches.',
+              ),
+              action: AppButton(
+                small: true,
+                label: AppText.t('منتج جديد', 'New product'),
+                icon: Icon(Icons.add, size: 18.r),
+                onPressed: () => _openEditor(context),
+              ),
             )
           else ...[
             if (state.loading) const LinearProgressIndicator(),

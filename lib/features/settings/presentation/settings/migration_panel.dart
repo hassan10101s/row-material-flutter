@@ -36,10 +36,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
     final picked = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['db'],
-      dialogTitle: AppText.t(
-        'اختر ملف قاعدة البيانات',
-        'Choose the database file',
-      ),
+      dialogTitle: AppText.t('اختر ملف البيانات', 'Choose the data file'),
     );
     final path = picked?.files.single.path;
     if (path == null || !mounted) return;
@@ -87,7 +84,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
   }
 
   static String get _needDbFirst =>
-      AppText.t('اختر قاعدة بيانات أولاً', 'Choose a database first');
+      AppText.t('اختر ملف البيانات أولاً', 'Choose the data file first');
 
   Future<void> _importCombined() async {
     final path = _combinedPath;
@@ -101,10 +98,10 @@ class _MigrationPanelState extends State<MigrationPanel> {
         'Import users and inspections',
       ),
       message: AppText.t(
-        'سيتم استيراد المستخدمين الجدد والفحوصات فقط من قاعدة البيانات المحددة. '
-        'الخامات المطلوبة تُنشأ تلقائياً. لا تتأثر الإعدادات أو البيانات المرجعية الموجودة.',
-        'Only new users and inspections will be imported from the chosen database. '
-        'Required materials are auto-created. Existing settings and reference data are untouched.',
+        'سيتم استيراد المستخدمين الجدد والفحوصات فقط من ملف البيانات المحدد. '
+            'الخامات المطلوبة تُنشأ تلقائياً. لا تتأثر الإعدادات أو البيانات المرجعية الموجودة.',
+        'Only new users and inspections will be imported from the chosen data file. '
+            'Required materials are auto-created. Existing settings and reference data are untouched.',
       ),
       confirmText: AppText.t('استيراد', 'Import'),
       danger: false,
@@ -135,10 +132,10 @@ class _MigrationPanelState extends State<MigrationPanel> {
     final ok = await _confirm(
       title: AppText.t('استيراد المستخدمين', 'Import users'),
       message: AppText.t(
-        'سيتم نسخ المستخدمين من الملف المحدد إلى القاعدة المحلية. '
-        'المستخدمون الموجودون مسبقاً لن يتأثروا.',
-        'Users are copied from the chosen file into the local database. '
-        'Existing users will not be affected.',
+        'سيتم نسخ المستخدمين من الملف المحدد إلى بيانات التطبيق. '
+            'المستخدمون الموجودون مسبقاً لن يتأثروا.',
+        'Users are copied from the chosen file into the app. '
+            'Existing users will not be affected.',
       ),
       confirmText: AppText.t('استيراد', 'Import'),
       danger: false,
@@ -157,24 +154,26 @@ class _MigrationPanelState extends State<MigrationPanel> {
         ),
       ];
       if ((result['users_skipped'] as num? ?? 0) > 0) {
-        parts.add(AppText.t(
-          'تم تخطي ${result['users_skipped']} مستخدم موجود سابقاً',
-          'Skipped ${result['users_skipped']} existing users',
-        ));
+        parts.add(
+          AppText.t(
+            'تم تخطي ${result['users_skipped']} مستخدم موجود سابقاً',
+            'Skipped ${result['users_skipped']} existing users',
+          ),
+        );
       }
       if ((result['legacy_count'] as num? ?? 0) > 0) {
         parts.add(
           AppText.t(
-            '${result['legacy_count']} كلمة مرور قديمة (سيتم ترقيتها عند أول تسجيل دخول)',
-            '${result['legacy_count']} legacy passwords (upgraded on first login)',
+            '${result['legacy_count']} كلمة مرور قديمة سيتم تحديثها عند أول تسجيل دخول',
+            '${result['legacy_count']} old passwords will be updated on first sign-in',
           ),
         );
       }
       if ((result['v2_count'] as num? ?? 0) > 0) {
         parts.add(
           AppText.t(
-            '${result['v2_count']} كلمة مرور مشفرة من جهاز آخر (قد تحتاج إعادة تعيين)',
-            '${result['v2_count']} encrypted passwords from another device (may need reset)',
+            '${result['v2_count']} كلمة مرور من جهاز آخر قد تحتاج إعادة تعيين',
+            '${result['v2_count']} passwords from another device may need a reset',
           ),
         );
       }
@@ -189,12 +188,15 @@ class _MigrationPanelState extends State<MigrationPanel> {
       return;
     }
     final ok = await _confirm(
-      title: AppText.t('استيراد الخامات والوحدات', 'Import materials and units'),
+      title: AppText.t(
+        'استيراد الخامات والوحدات',
+        'Import materials and units',
+      ),
       message: AppText.t(
-        'سيتم دمج الخامات والوحدات من قاعدة البيانات المحددة بشكل تراكمي (تحديث حسب الاسم). '
-        'لن تتغير الإعدادات أو المسارات المحلية.',
-        'Materials and units are upserted by name from the chosen database. '
-        'Local settings and paths stay unchanged.',
+        'سيتم دمج الخامات والوحدات من ملف البيانات المحدد بشكل تراكمي (تحديث حسب الاسم). '
+            'لن تتغير الإعدادات أو المسارات المحلية.',
+        'Materials and units are merged by name from the chosen data file. '
+            'Local settings and paths stay unchanged.',
       ),
       confirmText: AppText.t('استيراد', 'Import'),
       danger: false,
@@ -275,16 +277,16 @@ class _MigrationPanelState extends State<MigrationPanel> {
       children: [
         Text(
           AppText.t(
-            'استيراد من قاعدة بيانات خارجية',
-            'Import from an external database',
+            'استيراد من ملف بيانات خارجي',
+            'Import from an external data file',
           ),
           style: TextStyle(fontSize: 16.spMax, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
           AppText.t(
-            'وتستورد المستخدمين والفحوصات أو الخامات من قاعدة بيانات أخرى، لترقية البيانات إلى النسخة الجديدة من البرنامج.',
-            'Import users and inspections, or materials, from another database to upgrade the data to the new app version.',
+            'وتستورد المستخدمين والفحوصات أو الخامات من ملف بيانات آخر، لترقية البيانات إلى النسخة الجديدة من البرنامج.',
+            'Import users and inspections, or materials, from another data file to upgrade the data to the new app version.',
           ),
           style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
         ),

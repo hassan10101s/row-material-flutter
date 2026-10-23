@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../tokens/app_colors.dart';
 import '../../core/constants/app_strings.dart';
@@ -46,6 +47,18 @@ class AppFeedback {
     if (text.isEmpty) return;
 
     final kind = isError ? AppFeedbackType.error : type;
+    // UX: subtle haptic so a user not facing the screen still notices a
+    // result. A light tick for routine confirmations, one firm pulse when a
+    // save failed — nothing for plain info. HapticFeedback no-ops on desktop
+    // and is a bare channel send in tests, so no platform gate is needed.
+    switch (kind) {
+      case AppFeedbackType.error:
+        HapticFeedback.mediumImpact();
+      case AppFeedbackType.success:
+        HapticFeedback.selectionClick();
+      case AppFeedbackType.neutral || AppFeedbackType.info:
+        break;
+    }
     final overlay = Overlay.maybeOf(context, rootOverlay: true);
     if (overlay == null) {
       // No overlay (unit test, or a context detached from the tree).
@@ -53,7 +66,8 @@ class AppFeedback {
       return;
     }
 
-    final seconds = (durationSeconds ?? _defaultSeconds[kind]!) +
+    final seconds =
+        (durationSeconds ?? _defaultSeconds[kind]!) +
         (text.length > 160 ? 4 : (text.length > 80 ? 2 : 0));
 
     _dismissCurrent();
@@ -71,21 +85,24 @@ class AppFeedback {
     overlay.insert(entry);
   }
 
-  /// Reports a caught [error] in a form a person can act on: a one-line summary
-  /// on top, the untouched technical detail underneath it, and the raw error
-  /// in the log so nothing is lost.
-  static void errorFrom(
-    BuildContext context,
-    Object error, {
-    String? summary,
-  }) {
+  /// Reports a caught [error] without ever exposing its technical detail.
+  ///
+  /// Only errors that explicitly mark themselves as [UserFacingError] carry a
+  /// message safe for people; everything else (driver exceptions, auth
+  /// providers, parser failures) is reduced to the generic "something went
+  /// wrong" text. The full detail still goes to the log.
+  static void errorFrom(BuildContext context, Object error, {String? summary}) {
     final detail = describeError(error);
     debugPrint('AppFeedback error: $detail');
-    show(
-      context,
-      summary == null ? detail : '$summary\n$detail',
-      isError: true,
-    );
+    final userText = summary ?? _userText(error);
+    show(context, userText, isError: true);
+  }
+
+  /// The message the banner may show for [error].
+  static String _userText(Object error) {
+    if (error is! UserFacingError) return _unexpected();
+    final message = error.userMessage.trim();
+    return message.isEmpty ? _unexpected() : message;
   }
 
   /// Best-effort human text for anything thrown in the app. `AppError` already
@@ -100,8 +117,10 @@ class AppFeedback {
     final text = error.toString().trim();
     if (text.isEmpty) return _unexpected();
 
-    final unwrapped =
-        text.replaceFirst(RegExp(r'^(DatabaseException|PlatformException)\s*[:(]\s*'), '');
+    final unwrapped = text.replaceFirst(
+      RegExp(r'^(DatabaseException|PlatformException)\s*[:(]\s*'),
+      '',
+    );
     if (unwrapped != text) {
       // Drop the `)` that closed the wrapper we just removed.
       return unwrapped.endsWith(')')
@@ -166,6 +185,11 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
     reverseDuration: const Duration(milliseconds: 180),
   );
   Timer? _timer;
+  Timer? _copyFeedbackTimer;
+
+  /// UX feedback for the copy affordance: true for two blinks after a copy,
+  /// then reverts so the icon reads "copy" again for the next one.
+  bool _copied = false;
 
   @override
   void initState() {
@@ -187,6 +211,7 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
   @override
   void dispose() {
     _timer?.cancel();
+    _copyFeedbackTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -251,8 +276,9 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
                               child: ConstrainedBox(
                                 // A raw SQLite/Firebase error can be very long; keep
                                 // the banner from swallowing the whole screen.
-                                constraints:
-                                    const BoxConstraints(maxHeight: 240),
+                                constraints: const BoxConstraints(
+                                  maxHeight: 240,
+                                ),
                                 child: SingleChildScrollView(
                                   child: SelectableText(
                                     widget.message,
@@ -265,12 +291,53 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
                                 ),
                               ),
                             ),
+                            // UX: a long exception is painful to select on a
+                            // phone's small banner; a one-tap copy hands it to
+                            // the clipboard for pasting into a support chat.
+                            // The icon flips to a check for two seconds as the
+                            // confirmation — raising a new AppFeedback here
+                            // would replace the very banner that is being
+                            // copied.
+                            if (widget.type == AppFeedbackType.error ||
+                                widget.message.length > 80)
+                              IconButton(
+                                onPressed: _copied
+                                    ? null
+                                    : () async {
+                                        await Clipboard.setData(
+                                          ClipboardData(text: widget.message),
+                                        );
+                                        if (!mounted) return;
+                                        setState(() => _copied = true);
+                                        _copyFeedbackTimer?.cancel();
+                                        _copyFeedbackTimer = Timer(
+                                          const Duration(seconds: 2),
+                                          () {
+                                            if (!mounted) return;
+                                            setState(() => _copied = false);
+                                          },
+                                        );
+                                      },
+                                icon: Icon(
+                                  _copied
+                                      ? Icons.check
+                                      : Icons.copy_all_outlined,
+                                  size: 18,
+                                ),
+                                color: Colors.white70,
+                                tooltip: AppText.t(
+                                  _copied ? 'تم النسخ' : 'نسخ',
+                                  _copied ? 'Copied' : 'Copy',
+                                ),
+                                visualDensity: VisualDensity.compact,
+                              ),
                             IconButton(
                               onPressed: _close,
                               icon: const Icon(Icons.close, size: 18),
                               color: Colors.white70,
-                              tooltip: MaterialLocalizations.of(context)
-                                  .closeButtonTooltip,
+                              tooltip: MaterialLocalizations.of(
+                                context,
+                              ).closeButtonTooltip,
                               visualDensity: VisualDensity.compact,
                             ),
                           ],

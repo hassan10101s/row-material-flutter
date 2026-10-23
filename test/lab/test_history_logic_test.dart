@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/features/lab/core/test_history_logic.dart';
 
 void main() {
@@ -49,37 +50,54 @@ void main() {
     final rows = [
       {'id': 1, 'analysis_id': 7, 'source_type': 'raw_material', 'range_state': 'out', 'result_text': 'pH 7.2', 'sample_name': 'S1'},
       {'id': 2, 'analysis_id': 8, 'source_type': 'product', 'range_state': 'in', 'result_text': '99%', 'sample_name': 'S2'},
+      {'id': 3, 'analysis_id': 7, 'source_type': 'product', 'range_state': 'in', 'result_text': '9%', 'sample_name': 'S3', 'decision_reason': 'جودة الخام'},
     ];
 
     test('filters by analysis, source, range and query', () {
       var out = thApplyRowFilters(rows,
-          analysisId: '7', sourceType: '', chemicalId: '', rangeState: '', query: '', chemTestMap: {});
-      expect(out, hasLength(1));
+          analysisId: '7', sourceType: '', chemicalId: '', rangeState: '', reasonState: '', query: '', chemTestMap: {});
+      expect(out, hasLength(2));
 
       out = thApplyRowFilters(rows,
-          analysisId: '', sourceType: 'product', chemicalId: '', rangeState: '', query: '', chemTestMap: {});
-      expect(out.map((r) => r['id']), [2]);
+          analysisId: '', sourceType: 'product', chemicalId: '', rangeState: '', reasonState: '', query: '', chemTestMap: {});
+      expect(out.map((r) => r['id']), [2, 3]);
 
       out = thApplyRowFilters(rows,
-          analysisId: '', sourceType: '', chemicalId: '', rangeState: 'out', query: '', chemTestMap: {});
+          analysisId: '', sourceType: '', chemicalId: '', rangeState: 'out', reasonState: '', query: '', chemTestMap: {});
       expect(out.map((r) => r['id']), [1]);
 
       out = thApplyRowFilters(rows,
-          analysisId: '', sourceType: '', chemicalId: '', rangeState: '', query: 's2', chemTestMap: {});
+          analysisId: '', sourceType: '', chemicalId: '', rangeState: '', reasonState: '', query: 's2', chemTestMap: {});
       expect(out.map((r) => r['id']), [2]);
     });
 
     test('filters by consumed chemical via chemTestMap', () {
       final map = {'1': {'10'}};
       final out = thApplyRowFilters(rows,
-          analysisId: '', sourceType: '', chemicalId: '10', rangeState: '', query: '', chemTestMap: map);
+          analysisId: '', sourceType: '', chemicalId: '10', rangeState: '', reasonState: '', query: '', chemTestMap: map);
       expect(out.map((r) => r['id']), [1]);
     });
 
     test('and-style OR search with &', () {
       final out = thApplyRowFilters(rows,
-          analysisId: '', sourceType: '', chemicalId: '', rangeState: '', query: 's1 & 99', chemTestMap: {});
+          analysisId: '', sourceType: '', chemicalId: '', rangeState: '', reasonState: '', query: 's1 & 99', chemTestMap: {});
       expect(out, hasLength(2));
+    });
+
+    test('reasonState=has keeps only rows carrying a decision reason', () {
+      final out = thApplyRowFilters(rows,
+          analysisId: '', sourceType: '', chemicalId: '', rangeState: '', reasonState: 'has', query: '', chemTestMap: {});
+      expect(out.map((r) => r['id']), [3]);
+    });
+
+    test('reason search matches Arabic variants after normalization', () {
+      // جودة with a diacritic and ه/ة variants still matches.
+      final rowsWithReason = [
+        {'id': 5, 'decision_reason': 'جُودة الخَامَاتِ'},
+      ];
+      final out = thApplyRowFilters(rowsWithReason,
+          analysisId: '', sourceType: '', chemicalId: '', rangeState: '', reasonState: 'has', query: '', chemTestMap: {});
+      expect(out, hasLength(1));
     });
   });
 
@@ -136,6 +154,7 @@ void main() {
         sourceType: 'product',
         chemicalId: '10',
         rangeState: '',
+        reasonState: 'has',
         analyses: [
           {'id': 7, 'name': 'Moisture'},
         ],
@@ -143,7 +162,10 @@ void main() {
           (value: '10', label: 'A'),
         ],
       );
-      expect(chips.map((c) => c.key), ['mode', 'analysis', 'source', 'chemical']);
+      expect(
+        chips.map((c) => c.key),
+        ['mode', 'analysis', 'source', 'chemical', 'reason'],
+      );
     });
 
     test('clearChip resets the matching filter', () {
@@ -154,12 +176,23 @@ void main() {
         sourceType: '',
         chemicalId: '',
         rangeState: 'out',
+        reasonState: 'has',
         query: '',
-        key: 'mode',
+        key: 'reason',
       );
-      expect(next.filterMode, 'all');
-      expect(next.specificDate, '');
+      expect(next.filterMode, 'specific-date');
       expect(next.rangeState, 'out');
+      expect(next.reasonState, '');
+    });
+  });
+
+  group('thSourceLabel', () {
+    test('labels the three source kinds', () {
+      AppText.useLanguage('en');
+      expect(thSourceLabel('raw_material'), 'Raw');
+      expect(thSourceLabel('product'), 'Product');
+      expect(thSourceLabel('sample'), 'Sample');
+      AppText.useLanguage('ar');
     });
   });
 }

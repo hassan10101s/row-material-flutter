@@ -426,6 +426,7 @@ class DatabaseHelper {
         name TEXT NOT NULL UNIQUE,
         unit TEXT NOT NULL DEFAULT '%',
         description TEXT,
+        reference TEXT NOT NULL DEFAULT '',
         dynamic_fields_json TEXT NOT NULL DEFAULT '[]',
         formula_json TEXT NOT NULL DEFAULT '{}',
         parameter_id INTEGER REFERENCES parameters(id),
@@ -506,6 +507,10 @@ class DatabaseHelper {
       )
     ''');
     await _createLabEquipmentTables(db);
+    // NIR فلديشن (validation) settings: one row per reset ("zero point").
+    // Each reset appends a NEW row (history is preserved); the active
+    // validation horizon is the row with the greatest id.
+    await _createNirValidationSettingsTable(db);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS lab_worksheet (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -643,7 +648,8 @@ class DatabaseHelper {
         retry_count INTEGER NOT NULL DEFAULT 0,
         next_attempt_at TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
-        last_error TEXT
+        last_error TEXT,
+        revision INTEGER NOT NULL DEFAULT 0
       )
     ''');
     await db.execute('''
@@ -790,16 +796,78 @@ class DatabaseHelper {
     // no collection and is never enqueued/pulled. Keeping it here only added
     // sync bookkeeping columns + backfill/index work for nothing.
     'lab_inventory',
+    'inventory_lots',
     'inventory_transactions',
     'lab_consumption_log',
     'lab_stock_adjustments',
     'lab_worksheet',
     'lab_equipment',
     'lab_equipment_events',
+    // NIR validation horizon (reset history): appended rows, mirrored as
+    // labConfig documents (`lc_nir_validation_settings_<id>`).
+    'nir_validation_settings',
+    // QC user-authored tables (definition + typed columns + records). The
+    // envelope columns are stamped by the loop below; the children carry
+    // `table_remote_id` as their own column because the parent identity
+    // must exist before the first row is written.
+    'qc_custom_tables',
+    'qc_custom_table_fields',
+    'qc_custom_table_rows',
+    // QC checklists + their execution and the NCR/CAPA pipeline (plan P8).
+    // Same sync bookkeeping as above; the foreign keys are remapped on pull
+    // through the parent remote stamps ensured right after this loop.
+    'qc_templates',
+    'qc_sections',
+    'qc_items',
+    'qc_inspections',
+    'qc_responses',
+    'qc_task_log',
+    'qc_findings_nc',
+    'qc_capa',
     // The audit outbox is never pulled back, but its rows are pushed as
     // `organizations/{orgId}/auditLogs` documents, so `SyncQueue.markDone`
     // stamps the same per-row bookkeeping on them.
     'audit_logs',
+  ];
+
+  /// Primary keys of the synced tables that are not called `id` (the QC
+  /// family + the user-authored custom tables). Without this,
+  /// `_backfillRemoteIds` — and every other helper that addresses a local
+  /// row — would write `WHERE id = ?` on a table that has no such column.
+  static const Map<String, String> _syncedTablePk = {
+    'qc_templates': 'template_id',
+    'qc_sections': 'section_id',
+    'qc_items': 'item_id',
+    'qc_inspections': 'inspection_id',
+    'qc_responses': 'resp_id',
+    'qc_task_log': 'log_id',
+    'qc_findings_nc': 'finding_id',
+    'qc_capa': 'capa_id',
+    'qc_custom_tables': 'table_id',
+    'qc_custom_table_fields': 'field_id',
+    'qc_custom_table_rows': 'row_id',
+  };
+
+  /// `(child table, parent-identity stamp column)` pairs ensured together by
+  /// the open-time guarantee (plan P8). The value of the column is the
+  /// parent's cross-device `remote_id`, stamped by the write path and
+  /// remapped on pull (see `resolveRemoteRowRefs` in `entity_registry.dart`).
+  static const List<(String, String)> _qcParentStamps = [
+    ('qc_sections', 'template_remote_id'),
+    ('qc_items', 'template_remote_id'),
+    ('qc_items', 'section_remote_id'),
+    ('qc_inspections', 'template_remote_id'),
+    ('qc_responses', 'inspection_remote_id'),
+    ('qc_responses', 'item_remote_id'),
+    ('qc_responses', 'section_remote_id'),
+    ('qc_task_log', 'inspection_remote_id'),
+    ('qc_task_log', 'template_remote_id'),
+    ('qc_task_log', 'item_remote_id'),
+    ('qc_findings_nc', 'inspection_remote_id'),
+    ('qc_findings_nc', 'item_remote_id'),
+    ('qc_findings_nc', 'resp_remote_id'),
+    ('qc_findings_nc', 'capa_remote_id'),
+    ('qc_capa', 'finding_remote_id'),
   ];
 
   Future<void> _createIndexes(Database db) async {
@@ -1102,6 +1170,10 @@ class DatabaseHelper {
     await db.execute(
       'CREATE UNIQUE INDEX IF NOT EXISTS idx_qc_resps_insp_item ON qc_responses(inspection_id, item_id)',
     );
+    // Routine-list history filters by who checked the item.
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_resps_answered ON qc_responses(answered_by, measured_at)',
+    );
     // NC / CAPA - (status, severity) and (assigned_to, status) are the two
     // columns the NCR dashboard groups and filters on.
     await db.execute(
@@ -1150,39 +1222,20 @@ class DatabaseHelper {
     await db.execute(
       'CREATE INDEX IF NOT EXISTS idx_qc_defcodes_active ON qc_defect_codes(is_active, category)',
     );
-    // Goals
+    // Custom tables: the chips row reads every alive definition, the field
+    // list is walked in display order, and the records page is a keyset
+    // scan over one table (`table_id`) newest-first.
     await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goals_status ON qc_goals(status, due_date)',
+      'CREATE INDEX IF NOT EXISTS idx_qc_custom_tables_deleted ON qc_custom_tables(deleted_at)',
     );
     await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goals_dept ON qc_goals(dept)',
+      'CREATE INDEX IF NOT EXISTS idx_qc_custom_fields_table ON qc_custom_table_fields(table_id, sort_order, field_id)',
     );
     await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goals_owner ON qc_goals(owner_id, status)',
+      'CREATE INDEX IF NOT EXISTS idx_qc_custom_rows_table ON qc_custom_table_rows(table_id, row_id DESC)',
     );
     await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goals_due ON qc_goals(due_date)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goals_deleted ON qc_goals(deleted_at)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goal_assign_goal ON qc_goal_assignments(goal_id, status)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goal_assign_user ON qc_goal_assignments(assignee_id, status)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goal_actions_goal ON qc_goal_actions(goal_id, status)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goal_kpis_goal ON qc_goal_kpis(goal_id)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goal_links_goal ON qc_goal_links(goal_id)',
-    );
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS idx_qc_goal_links_ref ON qc_goal_links(link_type, ref_id)',
+      'CREATE INDEX IF NOT EXISTS idx_qc_custom_rows_recorded ON qc_custom_table_rows(table_id, recorded_at DESC, row_id DESC)',
     );
   }
 
@@ -1234,10 +1287,26 @@ class DatabaseHelper {
     // This runs on *every* open, and that is the point. The schema version is
     // pinned at 1, so `onUpgrade` never fires and a `CREATE TABLE` added here
     // alone would only ever reach a brand-new database - every user who already
-    // installed the app would keep a file with no `qc_goals`, and the first QC
-    // query would fail with "no such table". Putting the tables under the
-    // existing every-open guarantee is what makes the addition safe to ship
+    // installed the app would keep a file without the newest tables, and the
+    // first QC query would fail with "no such table". Putting the tables under
+    // the existing every-open guarantee is what makes the addition safe to ship
     // without a version bump.
+    // Routine lists: who tapped the check. These run BEFORE the tables and
+    // indexes below because `idx_qc_resps_answered` resolves its columns at
+    // creation time — on an existing install the columns only exist after
+    // this point. Missing tables are skipped inside `_ensureColumn`.
+    await _ensureColumn(
+      db,
+      'qc_responses',
+      'answered_by',
+      "answered_by TEXT NOT NULL DEFAULT ''",
+    );
+    await _ensureColumn(
+      db,
+      'qc_responses',
+      'answered_by_name',
+      "answered_by_name TEXT NOT NULL DEFAULT ''",
+    );
     await _createQcTables(db);
     await _createQcIndexes(db);
     await _createQcAuditGuards(db);
@@ -1261,12 +1330,10 @@ class DatabaseHelper {
       "edited_by_name TEXT NOT NULL DEFAULT ''",
     );
 
-    // The same story for three more columns P3 writes but P1 never declared:
+    // The same story for two more columns P3 writes but P1 never declared:
     // `published_at` when an SOP is published, `deleted_at` on the two checklist
     // child tables so a template edit can retire its old sections and items
-    // instead of destroying rows that a past inspection still points at, and
-    // `qc_goals.version` so a goal edit can be made the same way an SOP edit
-    // is: optimistic-concurrency checked instead of last-writer-wins.
+    // instead of destroying rows that a past inspection still points at.
     await _ensureColumn(db, 'qc_sops', 'published_at', 'published_at TEXT');
     await _ensureColumn(db, 'qc_sections', 'deleted_at', 'deleted_at TEXT');
     await _ensureColumn(db, 'qc_items', 'deleted_at', 'deleted_at TEXT');
@@ -1276,18 +1343,6 @@ class DatabaseHelper {
       'qc_templates',
       'recurrence',
       "recurrence TEXT NOT NULL DEFAULT 'once'",
-    );
-    await _ensureColumn(
-      db,
-      'qc_goals',
-      'version',
-      'version INTEGER NOT NULL DEFAULT 1',
-    );
-    await _ensureColumn(
-      db,
-      'qc_goal_kpis',
-      'higher_is_better',
-      'higher_is_better INTEGER NOT NULL DEFAULT 1',
     );
 
     await _ensureColumn(db, 'inspections', 'expiry_date', 'expiry_date TEXT');
@@ -1308,6 +1363,12 @@ class DatabaseHelper {
       'lab_analyses',
       'formula_json',
       "formula_json TEXT NOT NULL DEFAULT '{}'",
+    );
+    await _ensureColumn(
+      db,
+      'lab_analyses',
+      'reference',
+      "reference TEXT NOT NULL DEFAULT ''",
     );
     await _ensureColumn(db, 'lab_constants', 'unit_dim', 'unit_dim TEXT');
     await _ensureColumn(
@@ -1417,6 +1478,10 @@ class DatabaseHelper {
     // `count` category (pieces only) can be stored. Existing rows are
     // liquid/powder, so no data changes — only the constraint widens.
     await _migrateInventoryCategoryCheck(db);
+    // Standalone NC findings (create-NCR window, no inspection linked) need a
+    // nullable `inspection_id`; the FK itself stays - a NULL child is its own
+    // "no context" marker. Same guarded rebuild pattern as above.
+    await _migrateQcFindingsStandalone(db);
     // مطلوب flag per field: which physical/chemical params must have a value
     // at inspection time. JSON-embedded for materials (no backfill needed),
     // column-backed for product ranges + material bounds.
@@ -1435,6 +1500,33 @@ class DatabaseHelper {
     // Lab equipment registry (fully synced, like inventory): master table +
     // event log. Idempotent so existing installs gain them on next open.
     await _createLabEquipmentTables(db);
+    // NIR فلديشن horizon table: created on every open so existing installs
+    // gain it without a version bump (same rule as the equipment/lot tables
+    // above; `syncedTables` then adds its columns right after).
+    await _createNirValidationSettingsTable(db);
+    // Per-item horizon (فلديشن): a reset can target one parameter inside one
+    // خامة/منتج instead of the whole calibration. Existing installs gain the
+    // scoping columns on next open (NULL/empty = a global reset, the legacy
+    // behaviour).
+    await _ensureColumn(db, 'nir_validation_settings', 'scope', 'scope TEXT');
+    await _ensureColumn(
+      db,
+      'nir_validation_settings',
+      'entity_id',
+      'entity_id INTEGER',
+    );
+    await _ensureColumn(
+      db,
+      'nir_validation_settings',
+      'entity_name',
+      "entity_name TEXT NOT NULL DEFAULT ''",
+    );
+    await _ensureColumn(
+      db,
+      'nir_validation_settings',
+      'parameter',
+      "parameter TEXT NOT NULL DEFAULT ''",
+    );
     // Cross-device link for event rows: the parent's `remote_id` at write
     // time. Lets the pull remap `equipment_id` (a per-device autoincrement
     // id) instead of writing the origin device's id raw.
@@ -1445,9 +1537,41 @@ class DatabaseHelper {
       'equipment_remote_id TEXT',
     );
     await _backfillEquipmentRemoteIds(db);
+    // Equipment label fields (serial + next calibration): existing installs
+    // gain them on next open; fresh installs get them from the CREATE above.
+    await _ensureColumn(
+      db,
+      'lab_equipment',
+      'serial_number',
+      "serial_number TEXT NOT NULL DEFAULT ''",
+    );
+    await _ensureColumn(
+      db,
+      'lab_equipment',
+      'next_calibration_date',
+      "next_calibration_date TEXT NOT NULL DEFAULT ''",
+    );
     // Unified inventory ledger (comprehensive sync plan §4): created on every
     // open so existing installs gain it without a version bump.
     await _createInventoryTransactionsTable(db);
+    // Lot-tracked inventory (FEFO consumption): one row per receipt with a
+    // mandatory expiry. Created on every open so existing installs gain it
+    // without a version bump; legacy pool quantities become one undated lot
+    // each (see `_backfillLegacyLots`, which sorts last in FEFO order).
+    await _createInventoryLotsTable(db);
+    await _ensureColumn(db, 'lab_consumption_log', 'lot_id', 'lot_id INTEGER');
+    await _ensureColumn(
+      db,
+      'lab_consumption_log',
+      'lot_no',
+      "lot_no TEXT NOT NULL DEFAULT ''",
+    );
+    await _ensureColumn(
+      db,
+      'lab_consumption_log',
+      'lot_remote_id',
+      "lot_remote_id TEXT NOT NULL DEFAULT ''",
+    );
     // Product batch samples (محضر التشغيلة): one row per sample inside a
     // product inspection (the batch header). Created on every open so
     // existing installs gain it without a version bump. Raw-material
@@ -1510,6 +1634,16 @@ class DatabaseHelper {
     // V2: identity + sync bookkeeping.
     await _migrateUsersTable(db);
     await _createSyncTables(db);
+    // Optimistic-concurrency token for queue settlement (plan §9.6): a claim
+    // stamps the revision it read, and the settlement only applies when the
+    // row still carries it - so an edit that landed while the push was in
+    // flight is never clobbered by the older push's outcome.
+    await _ensureColumn(
+      db,
+      'sync_queue',
+      'revision',
+      'revision INTEGER NOT NULL DEFAULT 0',
+    );
     for (final table in syncedTables) {
       // The per-row sync version mirrored from the Firestore envelope
       // (`remoteToLocalRow` writes it on every pull). `users` and
@@ -1552,8 +1686,51 @@ class DatabaseHelper {
       // registry remap). New columns are TEXT.
       await _ensureColumn(db, table, 'updated_by', 'updated_by TEXT');
       await _ensureColumn(db, table, 'device_id', 'device_id TEXT');
-      await _backfillRemoteIds(db, table);
+      await _backfillRemoteIds(db, table, pkColumn: _syncedTablePk[table]);
     }
+    // QC parent-identity stamps (plan P8): the QC child tables are remapped on
+    // pull through the parent's cross-device identity the same way inventory
+    // lots and equipment events are. Each `<link>_remote_id` carries the
+    // parent's `remote_id` from write time; the pull-side fallback resolves
+    // legacy rows through the deterministic `legacy_<parent_table>_<id>`
+    // names this loop's backfill stamped onto the parents above. Empty-string
+    // defaults so new writes always know the column exists.
+    for (final (table, column) in _qcParentStamps) {
+      await _ensureColumn(
+        db,
+        table,
+        column,
+        '$column TEXT NOT NULL DEFAULT \'\'',
+      );
+    }
+    // Legacy lot repair runs AFTER the `syncedTables` loop above, not after
+    // `_createInventoryLotsTable`: on a file old enough that `lab_inventory`
+    // predates `remote_id`, the two helpers below read `i.remote_id` of the
+    // parent item and the `legacy_lab_inventory_<id>` names (_backfillRemoteIds)
+    // — all of which only exist once this loop has run. Before the move both
+    // helpers no-oped with "no such column" on exactly the installs that
+    // needed them (first open after the update), and the bruised lots kept
+    // pushing unpullable payloads for a whole session.
+    await _backfillLegacyLots(db);
+    // Lots written before the parent-identity stamping (and the legacy
+    // backfill above) carry an empty `inventory_remote_id` — their pushes
+    // are then unpullable anywhere. Heal from the parent item's remote id on
+    // every open; a device that already pushed its bruised docs heals here
+    // too, so later pushes carry full identity.
+    await _healLegacyLotParentIds(db);
+    // Product batch samples (محضر التشغيلة): samples pushed before the
+    // parent-identity stamp existed carry an empty `batch_remote_id` —
+    // receiving devices can then never remap `batch_id` (per-device) and the
+    // pull fails on the FK. Heal from the parent inspection's remote id on
+    // every open, exactly like the bruised lots above.
+    await _ensureColumn(
+      db,
+      'product_batch_samples',
+      'batch_remote_id',
+      "batch_remote_id TEXT NOT NULL DEFAULT ''",
+    );
+    await _backfillEquipmentRemoteIds(db);
+    await _healBatchSampleParentIds(db);
     // Product inspections (same `inspections` table, `inspection_kind='product'`):
     // the kind/product/formula/batch columns for existing installs. The
     // sentinel material row that product rows point at (`material_id` is
@@ -1596,7 +1773,7 @@ class DatabaseHelper {
   ///
   /// Idempotent (`INSERT OR IGNORE` on the UNIQUE symbol): runs on every open
   /// so a unit typed anywhere — parameters, analyses, inventory, constants,
-  /// QC checklists/goals — shows up in the Units table and becomes pickable
+  /// QC checklists — shows up in the Units table and becomes pickable
   /// everywhere else. Each source is guarded so a missing table/column on an
   /// old install skips instead of failing the open.
   static const List<(String, String)> _unitSources = [
@@ -1611,8 +1788,6 @@ class DatabaseHelper {
     ('qc_items', 'unit'),
     ('qc_inspections', 'qty_unit'),
     ('qc_findings_nc', 'qty_unit'),
-    ('qc_goals', 'target_unit'),
-    ('qc_goal_kpis', 'unit'),
   ];
 
   /// Fallback symbols that must exist even on an empty database (the old
@@ -1850,6 +2025,95 @@ class DatabaseHelper {
     }
   }
 
+  /// Relaxes `qc_findings_nc.inspection_id` so a standalone finding can carry
+  /// NULL (the create-NCR window raises findings with no inspection linked).
+  ///
+  /// SQLite cannot ALTER a NOT NULL off a column, so this is the same guarded
+  /// rebuild as [_migrateUsersTable]: FKs off, rename, recreate, copy all
+  /// columns by name (pragma-derived, so columns added later travel too),
+  /// drop, integrity check, FKs back on. Runs only when the stored table SQL
+  /// still has the NOT NULL; fresh databases already create the relaxed one.
+  Future<void> _migrateQcFindingsStandalone(Database db) async {
+    final schema = await db.rawQuery(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' "
+      "AND name = 'qc_findings_nc'",
+    );
+    if (schema.isEmpty) return;
+    final sql = '${schema.first['sql'] ?? ''}';
+    if (!sql.contains('inspection_id INTEGER NOT NULL')) return;
+    await db.rawQuery('PRAGMA foreign_keys=OFF');
+    await db.rawQuery('PRAGMA legacy_alter_table=ON');
+    try {
+      await db.transaction((txn) async {
+        const legacy = 'qc_findings_nc_legacy_v1';
+        await txn.execute('ALTER TABLE qc_findings_nc RENAME TO $legacy');
+        final cols = await txn.rawQuery('PRAGMA table_info($legacy)');
+        final names = [
+          for (final col in cols) '${col['name']}',
+        ].join(', ');
+        await txn.execute('''
+          CREATE TABLE qc_findings_nc (
+            finding_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            inspection_id INTEGER,
+            item_id INTEGER,
+            resp_id INTEGER,
+            code TEXT,
+            severity TEXT CHECK(severity IN ('Minor','Major','Critical')) NOT NULL,
+            category TEXT,
+            description TEXT NOT NULL,
+            status TEXT CHECK(status IN ('Open','Assigned','InProgress','Verified','Closed','Rejected')) DEFAULT 'Open',
+            type TEXT CHECK(type IN ('NonConformance','Observation','Deviation')) DEFAULT 'NonConformance',
+            due_date TEXT,
+            assigned_to TEXT,
+            assigned_to_name TEXT,
+            assigned_at TEXT,
+            root_cause TEXT,
+            action_plan TEXT,
+            proposed_action TEXT,
+            qty_affected REAL,
+            qty_unit TEXT,
+            disposition TEXT CHECK(disposition IN ('Rework','Scrap','UseAsIs','Return','Concession','Pending')) DEFAULT 'Pending',
+            verified_by TEXT,
+            verified_by_name TEXT,
+            verified_at TEXT,
+            closed_at TEXT,
+            closed_by TEXT,
+            rejected_at TEXT,
+            rejection_reason TEXT,
+            evidence_json TEXT,
+            capa_id INTEGER,
+            deleted_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            created_by TEXT,
+            updated_by TEXT,
+            FOREIGN KEY(inspection_id) REFERENCES qc_inspections(inspection_id) ON DELETE CASCADE,
+            FOREIGN KEY(resp_id) REFERENCES qc_responses(resp_id)
+          )
+        ''');
+        await txn.execute(
+          'INSERT INTO qc_findings_nc ($names) '
+          'SELECT $names FROM $legacy',
+        );
+        await txn.execute('DROP TABLE $legacy');
+        await txn.execute(
+          'UPDATE sqlite_sequence SET seq = '
+          '(SELECT MAX(finding_id) FROM qc_findings_nc) '
+          "WHERE name = 'qc_findings_nc'",
+        );
+      });
+      final check = await db.rawQuery('PRAGMA integrity_check');
+      final ok =
+          check.isNotEmpty && '${check.first.values.first}'.trim() == 'ok';
+      if (!ok) {
+        throw StateError('integrity_check failed after findings migration');
+      }
+    } finally {
+      await db.rawQuery('PRAGMA legacy_alter_table=OFF');
+      await db.rawQuery('PRAGMA foreign_keys=ON');
+    }
+  }
+
   Future<void> _ensureUnknownUserRow(Database db) async {
     final existing = await db.query('users', where: 'id = 0', limit: 1);
     if (existing.isNotEmpty) return;
@@ -1984,6 +2248,139 @@ class DatabaseHelper {
     ''');
   }
 
+  /// Lot-tracked inventory: one row per receipt with a mandatory expiry.
+  /// FEFO consumption draws earliest-expiry first; `current_qty` on
+  /// `lab_inventory` stays as the cache (`SUM(qty_remaining)`).
+  ///
+  /// Idempotent (`IF NOT EXISTS`): called from `_runLegacyGuarantees` on
+  /// every open, so existing installs gain the table without a version bump.
+  /// Sync bookkeeping columns + `remote_id` arrive through `syncedTables`.
+  Future<void> _createInventoryLotsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS inventory_lots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remote_id TEXT UNIQUE,
+        inventory_id INTEGER NOT NULL REFERENCES lab_inventory(id),
+        inventory_remote_id TEXT,
+        lot_no TEXT NOT NULL DEFAULT '',
+        qty_received REAL NOT NULL DEFAULT 0,
+        qty_remaining REAL NOT NULL DEFAULT 0,
+        expiry_date TEXT NOT NULL DEFAULT '',
+        supplier TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        received_by INTEGER,
+        received_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        updated_by INTEGER,
+        device_id TEXT,
+        version INTEGER NOT NULL DEFAULT 1,
+        remote_version INTEGER NOT NULL DEFAULT 0,
+        remote_synced_at TEXT,
+        sync_state TEXT NOT NULL DEFAULT 'local',
+        deleted_at TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_inventory_lots_inventory
+        ON inventory_lots(inventory_id, expiry_date ASC, received_at ASC, id ASC)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_lots_remote_id
+        ON inventory_lots(remote_id)
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_inventory_lots_lot_no
+        ON inventory_lots(lot_no)
+    ''');
+  }
+
+  /// One undated legacy lot per inventory row that still carries a pooled
+  /// quantity but has no lots yet. Idempotent: rows that already have lots
+  /// (or nothing to convert) are skipped. Empty expiry sorts last in FEFO
+  /// order, so dated receipts always consume first.
+  Future<void> _backfillLegacyLots(Database db) async {
+    try {
+      // `inventory_remote_id` is stamped with the parent item so the lot is
+      // born with its cross-device parent identity (without it the push is
+      // permanently unpullable on other devices:
+      // "transient: inventory lot without parent identity").
+      final rows = await db.rawQuery(
+        'SELECT i.id AS id, i.remote_id AS inventory_remote_id, '
+        'i.current_qty AS qty, i.created_at AS created_at '
+        'FROM lab_inventory i LEFT JOIN inventory_lots l '
+        'ON l.inventory_id = i.id '
+        'WHERE l.id IS NULL AND COALESCE(i.current_qty, 0) > 0 '
+        'GROUP BY i.id',
+      );
+      for (final r in rows) {
+        final id = (r['id'] as num).toInt();
+        final qty = ((r['qty'] as num?)?.toDouble() ?? 0.0);
+        if (qty <= 0) continue;
+        final at = '${r['created_at'] ?? ''}';
+        final now = DateTime.now();
+        final stamp =
+            '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')} '
+            '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+        final lotId = await db.rawInsert(
+          'INSERT INTO inventory_lots (inventory_id, inventory_remote_id, '
+          'lot_no, qty_received, qty_remaining, expiry_date, received_at, '
+          'created_at) '
+          'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+          [
+            id,
+            '${r['inventory_remote_id'] ?? ''}',
+            'LEGACY-$id',
+            qty,
+            qty,
+            '',
+            at.isEmpty ? stamp : at,
+            stamp,
+          ],
+        );
+        await db.rawUpdate(
+          'UPDATE inventory_lots SET lot_no = ? WHERE id = ?',
+          ['L-${lotId.toString().padLeft(4, '0')}', lotId],
+        );
+      }
+    } on Object catch (e) {
+      debugPrint('[DatabaseHelper] legacy lots backfill skipped: $e');
+    }
+  }
+
+  /// Fills `inventory_lots.inventory_remote_id` from the parent item for
+  /// rows written before the parent-identity stamping existed. Read-only
+  /// repair (no sync bump): the pull resolver also salvages such documents
+  /// from local/heuristic knowledge, and the next push of the healed row
+  /// carries full identity.
+  Future<void> _healLegacyLotParentIds(Database db) async {
+    try {
+      final names = {
+        for (final c in (await db.rawQuery('PRAGMA table_info(inventory_lots)')))
+          '${c['name']}'
+      };
+      if (!names.contains('inventory_remote_id')) return;
+      await db.execute('''
+        UPDATE inventory_lots
+        SET inventory_remote_id = (
+          SELECT i.remote_id FROM lab_inventory i
+          WHERE i.id = inventory_lots.inventory_id
+            AND i.remote_id IS NOT NULL
+            AND i.remote_id != ''
+        )
+        WHERE (inventory_remote_id IS NULL OR inventory_remote_id = '')
+          AND EXISTS (
+            SELECT 1 FROM lab_inventory i
+            WHERE i.id = inventory_lots.inventory_id
+              AND i.remote_id IS NOT NULL
+              AND i.remote_id != ''
+          )
+      ''');
+    } on Object catch (e) {
+      debugPrint('[DatabaseHelper] lot parent-id heal skipped: $e');
+    }
+  }
+
   /// Product batch samples: the "table inside the report" for product
   /// inspections (محضر التشغيلة).
   ///
@@ -2018,6 +2415,7 @@ class DatabaseHelper {
         created_at TEXT NOT NULL,
         updated_at TEXT,
         updated_by INTEGER,
+        batch_remote_id TEXT NOT NULL DEFAULT '',
         remote_id TEXT UNIQUE,
         device_id TEXT,
         version INTEGER NOT NULL DEFAULT 1,
@@ -2050,8 +2448,10 @@ class DatabaseHelper {
         name TEXT NOT NULL UNIQUE,
         code TEXT NOT NULL UNIQUE,
         manufacturer TEXT NOT NULL DEFAULT '',
+        serial_number TEXT NOT NULL DEFAULT '',
         description TEXT NOT NULL DEFAULT '',
         last_calibration_date TEXT NOT NULL DEFAULT '',
+        next_calibration_date TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         remote_id TEXT UNIQUE,
@@ -2098,6 +2498,24 @@ class DatabaseHelper {
     ''');
   }
 
+  Future<void> _createNirValidationSettingsTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS nir_validation_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        start_date TEXT NOT NULL,
+        reset_note TEXT,
+        reset_by TEXT,
+        reset_by_name TEXT,
+        scope TEXT,
+        entity_id INTEGER,
+        entity_name TEXT NOT NULL DEFAULT '',
+        parameter TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+  }
+
   Future<void> _ensureColumn(
     Database db,
     String table,
@@ -2122,18 +2540,35 @@ class DatabaseHelper {
   }
 
   /// Backfills `remote_id` for rows written before comprehensive sync
-  /// (plan §1): `legacy_<table>_<id>`. New rows get a UUID from the
+  /// (plan §1): `legacy_<table>_<pk>`. New rows get a UUID from the
   /// repository layer. Idempotent: only NULL/empty cells are touched.
   /// A unique index is created best-effort (skipped for stub tables).
-  Future<void> _backfillRemoteIds(Database db, String table) async {
+  /// [pkColumn] defaults to `id`; the QC family (and the user-authored
+  /// custom tables) use their own names (`template_id`, `resp_id`, ... —
+  /// `_syncedTablePk`), so the SQL interpolates the real column everywhere.
+  Future<void> _backfillRemoteIds(
+    Database db,
+    String table, {
+    String? pkColumn,
+  }) async {
+    final pk = pkColumn ?? 'id';
     final cols = await db.rawQuery('PRAGMA table_info($table)');
     if (cols.isEmpty) return;
     final names = cols.map((c) => '${c['name']}').toSet();
-    if (!names.contains('remote_id') || !names.contains('id')) return;
+    if (!names.contains('remote_id') || !names.contains(pk)) return;
     try {
+      // Legacy imports can pre-fill `legacy_<table>_<pk>` for rows whose
+      // imported ids differ from the local ones; a plain bulk UPDATE then
+      // hits the UNIQUE constraint, aborts entirely, and would retry — and
+      // fail — on every open. Skip the ids that are already taken instead;
+      // any leftover rows get a UUID at push time from the sync layer.
       await db.execute(
-        "UPDATE $table SET remote_id = 'legacy_${table}_' || id "
-        "WHERE remote_id IS NULL OR remote_id = ''",
+        "UPDATE $table SET remote_id = 'legacy_${table}_' || $pk "
+        "WHERE (remote_id IS NULL OR remote_id = '') "
+        "AND NOT EXISTS ("
+        'SELECT 1 FROM $table other '
+        "WHERE other.remote_id = 'legacy_${table}_' || $table.$pk"
+        ')',
       );
     } on Object catch (e) {
       debugPrint(
@@ -2172,6 +2607,33 @@ class DatabaseHelper {
     } on Object catch (e) {
       debugPrint(
         '[DatabaseHelper] equipment_remote_id backfill skipped: $e',
+      );
+    }
+  }
+
+  /// Product-batch samples (محضر التشغيلة), same idea as
+  /// [_backfillEquipmentRemoteIds]: samples written before the injection of
+  /// `batch_remote_id` in `addBatchSample` get the parent inspection's
+  /// `remote_id`, so their pushes carry a pullable parent identity.
+  Future<void> _healBatchSampleParentIds(Database db) async {
+    try {
+      final cols = await db.rawQuery(
+        'PRAGMA table_info(product_batch_samples)',
+      );
+      if (cols.isEmpty) return;
+      final names = cols.map((c) => '${c['name']}').toSet();
+      if (!names.contains('batch_remote_id')) return;
+      await db.execute('''
+        UPDATE product_batch_samples
+        SET batch_remote_id = (
+          SELECT i.remote_id FROM inspections i
+          WHERE i.id = product_batch_samples.batch_id
+        )
+        WHERE (batch_remote_id IS NULL OR batch_remote_id = '')
+      ''');
+    } on Object catch (e) {
+      debugPrint(
+        '[DatabaseHelper] batch-sample parent-id heal skipped: $e',
       );
     }
   }
@@ -2441,18 +2903,49 @@ class DatabaseHelper {
         measured_value REAL,
         defect_code TEXT,
         is_critical_failure INTEGER NOT NULL DEFAULT 0,
+        answered_by TEXT NOT NULL DEFAULT '',
+        answered_by_name TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY(inspection_id) REFERENCES qc_inspections(inspection_id) ON DELETE CASCADE,
         FOREIGN KEY(item_id) REFERENCES qc_items(item_id)
       )
     ''');
+    // Routine-task done-log (زر إنجاز المهمة): append-only — every press
+    // of the per-task "done" button inserts one row (when + who). The
+    // checkbox response above is ONE row per item per period (overwritten on
+    // re-check), so it cannot answer "how many times today, by whom"; this
+    // table can. Created beside _createQcTables (every open) so existing
+    // installs gain it without a version bump.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_task_log (
+        log_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        inspection_id INTEGER NOT NULL,
+        template_id INTEGER NOT NULL,
+        item_id INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        logged_by TEXT NOT NULL DEFAULT '',
+        logged_by_name TEXT NOT NULL DEFAULT '',
+        logged_at TEXT NOT NULL,
+        FOREIGN KEY(inspection_id) REFERENCES qc_inspections(inspection_id) ON DELETE CASCADE,
+        FOREIGN KEY(item_id) REFERENCES qc_items(item_id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX IF NOT EXISTS idx_qc_task_log_row '
+      'ON qc_task_log(inspection_id, item_id, log_id)',
+    );
 
     // ── Non-Conformance & CAPA ─────────────────────────────────────
+    // `inspection_id` is nullable on purpose: the create-NCR window can raise
+    // a finding with no inspection attached ("standalone"). A NULL child key
+    // satisfies the FK to qc_inspections; a 0 sentinel does not (row 0 never
+    // exists), so the sentinel would trip the FK every insert under
+    // PRAGMA foreign_keys=ON.
     await db.execute('''
       CREATE TABLE IF NOT EXISTS qc_findings_nc (
         finding_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        inspection_id INTEGER NOT NULL,
+        inspection_id INTEGER,
         item_id INTEGER,
         resp_id INTEGER,
         code TEXT,
@@ -2570,126 +3063,72 @@ class DatabaseHelper {
       )
     ''');
 
-    // ── Goal Tracking (V6_ENHANCED §12.1) ──────────────────────────
+    // ── User-authored custom tables (the QC "settings" feature) ────────
+    //
+    // A user can define a register (a "table") with an arbitrary set of
+    // typed columns (number / text / date) and record rows into it. The
+    // schema is deliberately *generic*: the definition lives in three host
+    // tables, so adding a table never means ALTERing the schema.
+    //
+    // Sync contract (first QC family in the sync stack):
+    //  * `remote_id` is generated at creation time and IS the cross-device
+    //    identity (envelope `localId` means nothing on another device).
+    //  * children carry `table_remote_id` — the parent's cross-device
+    //    identity — stamped at write time, so the pull can remap the
+    //    per-device autoincrement `table_id` (same rule the inventory lots
+    //    and equipment events follow).
+    //  * `values_json` is keyed by the COLUMN's `remote_id`, never by the
+    //    per-device column surrogate, so values stay attached to the right
+    //    column on every device without an additional remap pass.
+    //  * The `syncedTables` loop adds the envelope columns on every open.
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS qc_goals (
-        goal_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        code TEXT NOT NULL UNIQUE,
+      CREATE TABLE IF NOT EXISTS qc_custom_tables (
+        table_id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL,
         description TEXT,
-        goal_type TEXT CHECK(goal_type IN ('SOP','Training','NC','CAPA','Audit','KPI','Compliance','Other')) DEFAULT 'Other',
-        dept TEXT,
-        site TEXT,
-        priority TEXT CHECK(priority IN ('Low','Medium','High','Critical')) DEFAULT 'Medium',
-        status TEXT NOT NULL CHECK(status IN ('Draft','Active','OnHold','Completed','Cancelled','Archived')) DEFAULT 'Draft',
-        target_value REAL,
-        target_unit TEXT,
-        baseline_value REAL,
-        current_value REAL,
-        start_date TEXT NOT NULL,
-        due_date TEXT,
-        completed_at TEXT,
-        completed_by TEXT,
-        completed_by_name TEXT,
-        completion_notes TEXT,
-        completion_evidence_json TEXT,
-        owner_id TEXT,
-        owner_name TEXT,
-        approver_id TEXT,
-        approver_name TEXT,
-        approved_at TEXT,
-        tags TEXT,
-        is_active INTEGER NOT NULL DEFAULT 1,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        deleted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        created_by TEXT,
+        updated_by TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS qc_custom_table_fields (
+        field_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        table_id INTEGER NOT NULL,
+        table_remote_id TEXT NOT NULL DEFAULT '',
+        label TEXT NOT NULL,
+        col_type TEXT NOT NULL CHECK(col_type IN ('number','text','date')),
+        required INTEGER NOT NULL DEFAULT 0,
+        sort_order INTEGER NOT NULL DEFAULT 0,
         deleted_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         created_by TEXT,
         updated_by TEXT,
-        version INTEGER NOT NULL DEFAULT 1
+        FOREIGN KEY(table_id) REFERENCES qc_custom_tables(table_id) ON DELETE CASCADE
       )
     ''');
-    // One row per person per goal: who is accountable, and once finished, who
-    // finished it (`completed_by` / `completed_by_name` / `completed_at`).
+    // `values_json` keys are column remote_ids (UUID), values are typed:
+    // number → num, text → String, date → ISO-8601 string.
     await db.execute('''
-      CREATE TABLE IF NOT EXISTS qc_goal_assignments (
-        assign_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        goal_id INTEGER NOT NULL,
-        assignee_id TEXT NOT NULL,
-        assignee_name TEXT,
-        role TEXT CHECK(role IN ('Owner','Lead','Member','Reviewer')) DEFAULT 'Member',
-        assigned_at TEXT NOT NULL,
-        assigned_by TEXT,
-        assigned_by_name TEXT,
-        due_date TEXT,
-        status TEXT CHECK(status IN ('Pending','InProgress','Completed','Rejected','Cancelled')) DEFAULT 'Pending',
-        completed_at TEXT,
-        completed_by TEXT,
-        completed_by_name TEXT,
-        completion_notes TEXT,
-        completion_evidence_json TEXT,
-        deleted_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(goal_id) REFERENCES qc_goals(goal_id) ON DELETE CASCADE,
-        UNIQUE(goal_id, assignee_id)
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS qc_goal_actions (
-        action_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        goal_id INTEGER NOT NULL,
-        assign_id INTEGER,
-        action_text TEXT NOT NULL,
-        status TEXT CHECK(status IN ('Todo','InProgress','Done','Blocked','Cancelled')) DEFAULT 'Todo',
-        priority TEXT CHECK(priority IN ('Low','Medium','High')) DEFAULT 'Medium',
-        due_date TEXT,
-        done_at TEXT,
-        done_by TEXT,
-        done_by_name TEXT,
-        blocked_reason TEXT,
-        evidence_json TEXT,
+      CREATE TABLE IF NOT EXISTS qc_custom_table_rows (
+        row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        table_id INTEGER NOT NULL,
+        table_remote_id TEXT NOT NULL DEFAULT '',
+        values_json TEXT NOT NULL DEFAULT '{}',
+        note TEXT,
+        recorded_at TEXT NOT NULL,
+        recorded_by TEXT,
+        recorded_by_name TEXT,
         deleted_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         created_by TEXT,
         updated_by TEXT,
-        FOREIGN KEY(goal_id) REFERENCES qc_goals(goal_id) ON DELETE CASCADE,
-        FOREIGN KEY(assign_id) REFERENCES qc_goal_assignments(assign_id) ON DELETE SET NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS qc_goal_kpis (
-        kpi_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        goal_id INTEGER NOT NULL,
-        name TEXT NOT NULL,
-        target REAL NOT NULL,
-        actual REAL,
-        unit TEXT,
-        measure_date TEXT,
-        measured_by TEXT,
-        measured_by_name TEXT,
-        notes TEXT,
-        higher_is_better INTEGER NOT NULL DEFAULT 1,
-        deleted_at TEXT,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(goal_id) REFERENCES qc_goals(goal_id) ON DELETE CASCADE
-      )
-    ''');
-    // Goal → SOP / inspection / finding / CAPA / template, so a goal can be
-    // closed out against the records that evidence it.
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS qc_goal_links (
-        link_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        goal_id INTEGER NOT NULL,
-        link_type TEXT NOT NULL CHECK(link_type IN ('SOP','INSPECTION','FINDING','CAPA','TEMPLATE','AUDIT','OTHER')),
-        ref_id TEXT NOT NULL,
-        ref_table TEXT,
-        notes TEXT,
-        deleted_at TEXT,
-        created_at TEXT NOT NULL,
-        created_by TEXT,
-        FOREIGN KEY(goal_id) REFERENCES qc_goals(goal_id) ON DELETE CASCADE
+        FOREIGN KEY(table_id) REFERENCES qc_custom_tables(table_id) ON DELETE CASCADE
       )
     ''');
   }

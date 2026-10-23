@@ -75,7 +75,7 @@ class ConflictResolver {
                 'remote_version': remoteVersion,
                 if (columns.contains('version')) 'version': remoteVersion + 1,
               },
-              where: 'id = ?',
+              where: '${entity.pkColumn} = ?',
               whereArgs: [localRef],
             );
           }
@@ -134,7 +134,7 @@ class ConflictResolver {
             // No local row (deleted locally, or never pulled): insert instead
             // of updating nothing. Fresh id for natural-key tables so the
             // origin id cannot replace an unrelated row.
-            if (entity.naturalKeyIdentity) row.remove('id');
+            if (entity.naturalKeyIdentity) row.remove(entity.pkColumn);
             await txn.insert(
               entity.localTable,
               {
@@ -148,10 +148,10 @@ class ConflictResolver {
               entity.localTable,
               {
                 for (final entry in row.entries)
-                  if (entry.key != 'id' && columns.contains(entry.key))
+                  if (entry.key != entity.pkColumn && columns.contains(entry.key))
                     entry.key: entry.value,
               },
-              where: 'id = ?',
+              where: '${entity.pkColumn} = ?',
               whereArgs: [localRef],
             );
           }

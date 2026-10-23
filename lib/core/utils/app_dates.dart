@@ -60,6 +60,18 @@ String? parseIsoToDisplay(String? value) {
   return '${_pad2(d.day)}/${_pad2(d.month)}/${d.year}';
 }
 
+/// Adds one calendar year to a bare ISO date (`yyyy-MM-dd`), keeping the
+/// result a bare date. Feb 29 lands on Feb 28 in non-leap years. Empty string
+/// when the input does not parse — the equipment label default.
+String plusOneYearIso(String date) {
+  final d = parseIsoDate(date);
+  if (d == null) return '';
+  final year = d.year + 1;
+  final lastDay = DateTime(year, d.month + 1, 0).day;
+  final day = d.day > lastDay ? lastDay : d.day;
+  return '${year.toString().padLeft(4, '0')}-${_pad2(d.month)}-${_pad2(day)}';
+}
+
 /// Shift window for daily reports: 8:00 today -> 8:00 next day.
 DateTime dailyShiftStart(DateTime date) =>
     DateTime(date.year, date.month, date.day, 8, 0);

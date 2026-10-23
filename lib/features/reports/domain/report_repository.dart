@@ -28,6 +28,14 @@ abstract interface class ReportRepository {
   /// The small label/PDF sticker for one sample.
   Future<ReportDoc> sampleLabelPdf(int inspectionId);
 
+  /// The device sticker for one lab equipment: name, manufacturer, serial,
+  /// calibrations + the QR that opens the device file on a scan.
+  Future<ReportDoc> equipmentLabelPdf(int equipmentId);
+
+  /// Labels for a selected set of lab equipment, packed N-up on A4 pages
+  /// (same sheet the sample batch labels use).
+  Future<ReportDoc> equipmentLabelsPdf(List<int> equipmentIds);
+
   /// Labels for a filtered set of inspections, in one document.
   Future<ReportDoc> batchLabelsPdf(List<int> inspectionIds);
 
@@ -56,6 +64,16 @@ abstract interface class ReportRepository {
     int? analysisId,
     String? sourceType,
     int? sourceRefId,
+  });
+
+  /// Generic register table (e.g. the test log) as a PDF: [headers] + [rows]
+  /// of already-formatted strings. Rendered through the shared HTML→PDF
+  /// pipeline when a headless browser exists, else the native dart-pdf table.
+  Future<ReportDoc> tableReport({
+    required String filename,
+    required String title,
+    required List<String> headers,
+    required List<List<String>> rows,
   });
 
   // ── Disk output ────────────────────────────────────────────────

@@ -186,11 +186,10 @@ class _ProductsTableState extends State<ProductsTable> {
             // The parent supplies a loose Flexible constraint; a concrete height
             // keeps the table's internal body Expanded bounded.
             height: 520,
-            minTableWidth: 920,
-            columnFlex: const [1.1, 0.8, 1.1, 2.2, 1.0],
+            minTableWidth: 760,
+            columnFlex: const [1.2, 0.9, 2.4, 1.0],
             headers: [
               ...ProductsTable.exportHeaders(),
-              AppText.t('النطاقات', 'Ranges'),
               AppText.t('الإجراءات', 'Actions'),
             ],
             rows: [
@@ -211,7 +210,6 @@ class _ProductsTableState extends State<ProductsTable> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  ProductRefChips(p, compact: true),
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [

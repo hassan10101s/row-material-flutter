@@ -133,7 +133,10 @@ class AppProgressStepper extends StatelessWidget {
   }
 }
 
-/// Bottom action bar: Back + Next/Save, 52h primary CTA (pernit sizing).
+/// Bottom action bar for phone wizards: the primary Next/Save CTA takes the
+/// full width on top, Back sits full-width below it. Stacked (not
+/// side-by-side) so both labels stay on one line in either language and the
+/// primary action is always the easy thumb reach.
 class AppWizardBottomBar extends StatelessWidget {
   const AppWizardBottomBar({
     super.key,
@@ -157,39 +160,36 @@ class AppWizardBottomBar extends StatelessWidget {
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.pageMobile),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (onBack != null) ...[
-              Expanded(
-                child: SizedBox(
-                  height: AppSpacing.mobileCtaHeight.h,
-                  child: OutlinedButton(
-                    onPressed: onBack,
-                    child: Text(backLabel ?? AppText.t('رجوع', 'Back')),
-                  ),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-            ],
-            Expanded(
-              flex: 2,
-              child: SizedBox(
-                height: AppSpacing.mobileCtaHeight.h,
-                child: FilledButton(
-                  onPressed: (nextEnabled && !nextLoading) ? onNext : null,
-                  child: nextLoading
-                      ? SizedBox(
-                          width: 18.r,
-                          height: 18.r,
-                          child: const CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.white,
-                          ),
-                        )
-                      : Text(nextLabel),
-                ),
+            SizedBox(
+              height: AppSpacing.mobileCtaHeight.h,
+              child: FilledButton(
+                onPressed: (nextEnabled && !nextLoading) ? onNext : null,
+                child: nextLoading
+                    ? SizedBox(
+                        width: 18.r,
+                        height: 18.r,
+                        child: const CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : Text(nextLabel),
               ),
             ),
+            if (onBack != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              SizedBox(
+                height: AppSpacing.mobileCtaHeight.h,
+                child: OutlinedButton(
+                  onPressed: onBack,
+                  child: Text(backLabel ?? AppText.t('رجوع', 'Back')),
+                ),
+              ),
+            ],
           ],
         ),
       ),

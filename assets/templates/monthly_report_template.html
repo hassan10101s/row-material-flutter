@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>التقرير الشهري - {{ month_name }} {{ year }}</title>
+    <title>{% if is_en %}Monthly Report - {% else %}التقرير الشهري - {% endif %}{{ month_name }} {{ year }}</title>
     {% if base_url %}<base href="{{ base_url }}">{% endif %}
     <link rel="stylesheet" href="fonts/fonts.css">
     <style>
@@ -389,71 +389,72 @@
                 <img src="{{ report_logo_data_uri }}" alt="Report Logo" style="max-height: 80px; max-width: 100%;">
             </div>
             {% endif %}
-            <h1>التقرير الشهري لمعامل الجودة</h1>
+            <h1>{% if is_en %}Quality Labs Monthly Report{% else %}التقرير الشهري لمعامل الجودة{% endif %}</h1>
             <p>{{ month_name_ar }} {{ year }}</p>
             <p style="font-size: 10px;">{{ department_label }}</p>
+            {% if form_no %}<p style="font-size: 10px;">{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
         </div>
         
         <div class="accent-strip"></div>
         
         <div class="meta-grid">
             <div class="meta-card">
-                <span class="label">إجمالي الفحوصات</span>
+                <span class="label">{% if is_en %}Total Inspections{% else %}إجمالي الفحوصات{% endif %}</span>
                 <span class="value">{{ total }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">✅ مقبول</span>
+                <span class="label">{% if is_en %}✅ Accepted{% else %}✅ مقبول{% endif %}</span>
                 <span class="value">{{ approved }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">⚠️ متابعة / جزئي</span>
+                <span class="label">{% if is_en %}⚠️ Follow-up / Partial{% else %}⚠️ متابعة / جزئي{% endif %}</span>
                 <span class="value">{{ conditional_partial }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">❌ مرفوض كلي</span>
+                <span class="label">{% if is_en %}❌ Fully Rejected{% else %}❌ مرفوض كلي{% endif %}</span>
                 <span class="value">{{ rejected }}</span>
             </div>
         </div>
 
         <div class="meta-grid" style="grid-template-columns: repeat(3, 1fr); margin-top: -4px;">
             <div class="meta-card">
-                <span class="label">إجمالي الكمية</span>
-                <span class="value">{{ total_quantity }} <span style="font-size: 11px;">(طن)</span></span>
+                <span class="label">{% if is_en %}Total Quantity{% else %}إجمالي الكمية{% endif %}</span>
+                <span class="value">{{ total_quantity }} <span style="font-size: 11px;">{% if is_en %}(ton){% else %}(طن){% endif %}</span></span>
             </div>
             <div class="meta-card">
-                <span class="label">الكمية المقبولة</span>
-                <span class="value" style="color: var(--success-text);">{{ total_accepted_quantity }} <span style="font-size: 11px;">(طن)</span></span>
+                <span class="label">{% if is_en %}Accepted Quantity{% else %}الكمية المقبولة{% endif %}</span>
+                <span class="value" style="color: var(--success-text);">{{ total_accepted_quantity }} <span style="font-size: 11px;">{% if is_en %}(ton){% else %}(طن){% endif %}</span></span>
             </div>
             <div class="meta-card">
-                <span class="label">الكمية المرفوضة</span>
-                <span class="value" style="color: var(--danger-text);">{{ total_rejected_quantity }} <span style="font-size: 11px;">(طن)</span></span>
+                <span class="label">{% if is_en %}Rejected Quantity{% else %}الكمية المرفوضة{% endif %}</span>
+                <span class="value" style="color: var(--danger-text);">{{ total_rejected_quantity }} <span style="font-size: 11px;">{% if is_en %}(ton){% else %}(طن){% endif %}</span></span>
             </div>
         </div>
 
         <div class="meta-grid" style="grid-template-columns: repeat(3, 1fr); margin-top: -4px;">
             <div class="meta-card">
-                <span class="label">معدل القبول</span>
+                <span class="label">{% if is_en %}Acceptance Rate{% else %}معدل القبول{% endif %}</span>
                 <span class="value" style="color: var(--success-text);">{{ approval_rate }}%</span>
             </div>
             <div class="meta-card">
-                <span class="label">معدل الرفض</span>
+                <span class="label">{% if is_en %}Rejection Rate{% else %}معدل الرفض{% endif %}</span>
                 <span class="value" style="color: var(--danger-text);">{{ rejection_rate }}%</span>
             </div>
             <div class="meta-card">
-                <span class="label">الموردين | الخامات</span>
+                <span class="label">{% if is_en %}Suppliers | Materials{% else %}الموردين | الخامات{% endif %}</span>
                 <span class="value">{{ unique_suppliers }} | {{ unique_materials }}</span>
             </div>
         </div>
         
         {% if materials %}
-        <div class="section-title">إحصائيات الخامات المستلمة | Received Materials Statistics</div>
+        <div class="section-title">{% if is_en %}Received Materials Statistics{% else %}إحصائيات الخامات المستلمة | Received Materials Statistics{% endif %}</div>
         
         {% for material in materials %}
         <div class="material-item">
             <div class="material-name">
                 <span>{{ material.name }}</span>
                 <span style="font-size: 10px; font-weight: normal;">
-                    {{ material.count }} سجل
+                    {{ material.count }}{% if is_en %} records{% else %} سجل{% endif %}
                     <span class="rate-badge {{ 'high' if material.approval_rate >= 90 else ('medium' if material.approval_rate >= 70 else 'low') }}" style="margin-right: 6px;">
                         {{ material.approval_rate }}%
                     </span>
@@ -461,46 +462,46 @@
             </div>
             <div class="material-stats">
                 <div class="stat-box">
-                    <div class="label"> اجمالي الكمية</div>
-                    <div class="value">{{ material.total_qty }} طن</div>
+                    <div class="label"> {% if is_en %}Total Quantity{% else %}اجمالي الكمية{% endif %}</div>
+                    <div class="value">{{ material.total_qty }} {% if is_en %}ton{% else %}طن{% endif %}</div>
                 </div>
                 <div class="stat-box">
-                    <div class="label"> الكمية المقبولة</div>
-                    <div class="value" style="color: #10B981;">{{ material.accepted_qty }} طن</div>
+                    <div class="label"> {% if is_en %}Accepted Quantity{% else %}الكمية المقبولة{% endif %}</div>
+                    <div class="value" style="color: #10B981;">{{ material.accepted_qty }} {% if is_en %}ton{% else %}طن{% endif %}</div>
                 </div>
                 <div class="stat-box">
-                    <div class="label">الكمية المرفوضة </div>
-                    <div class="value" style="color: #EF4444;">{{ material.rejected_qty }} طن</div>
+                    <div class="label">{% if is_en %}Rejected Quantity{% else %}الكمية المرفوضة{% endif %} </div>
+                    <div class="value" style="color: #EF4444;">{{ material.rejected_qty }} {% if is_en %}ton{% else %}طن{% endif %}</div>
                 </div>
                 <div class="stat-box approved">
-                    <div class="label">✅ مقبول</div>
+                    <div class="label">{% if is_en %}✅ Accepted{% else %}✅ مقبول{% endif %}</div>
                     <div class="value">{{ material.approved }}</div>
                 </div>
                 <div class="stat-box warning">
-                    <div class="label">📦 جزئي</div>
+                    <div class="label">{% if is_en %}📦 Partial{% else %}📦 جزئي{% endif %}</div>
                     <div class="value">{{ material.partial }}</div>
                 </div>
                 <div class="stat-box rejected">
-                    <div class="label">❌ مرفوض</div>
+                    <div class="label">{% if is_en %}❌ Rejected{% else %}❌ مرفوض{% endif %}</div>
                     <div class="value">{{ material.rejected }}</div>
                 </div>
             </div>
             
             {% if material.suppliers %}
             <div style="padding: 8px 12px;">
-                <h4 style="font-size: 11px; font-weight: 700; color: #0F0F10; margin-bottom: 8px;">الموردين لهذه الخامة</h4>
+                <h4 style="font-size: 11px; font-weight: 700; color: #0F0F10; margin-bottom: 8px;">{% if is_en %}Suppliers for this material{% else %}الموردين لهذه الخامة{% endif %}</h4>
                 <table class="supplier-table" style="margin-bottom: 0;">
                     <thead>
                         <tr>
-                            <th>المورد | Supplier</th>
-                            <th>عدد الفحوصات</th>
-                            <th>إجمالي الكمية</th>
-                            <th>الكمية المقبولة</th>
-                            <th>الكمية المرفوضة</th>
-                            <th>✅ مقبول</th>
-                            <th>📦 جزئي</th>
-                            <th>❌ مرفوض</th>
-                            <th>معدل القبول</th>
+                            <th>{% if is_en %}Supplier{% else %}المورد | Supplier{% endif %}</th>
+                            <th>{% if is_en %}Inspections Count{% else %}عدد الفحوصات{% endif %}</th>
+                            <th>{% if is_en %}Total Quantity{% else %}إجمالي الكمية{% endif %}</th>
+                            <th>{% if is_en %}Accepted Quantity{% else %}الكمية المقبولة{% endif %}</th>
+                            <th>{% if is_en %}Rejected Quantity{% else %}الكمية المرفوضة{% endif %}</th>
+                            <th>{% if is_en %}✅ Accepted{% else %}✅ مقبول{% endif %}</th>
+                            <th>{% if is_en %}📦 Partial{% else %}📦 جزئي{% endif %}</th>
+                            <th>{% if is_en %}❌ Rejected{% else %}❌ مرفوض{% endif %}</th>
+                            <th>{% if is_en %}Acceptance Rate{% else %}معدل القبول{% endif %}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -508,9 +509,9 @@
                         <tr>
                             <td style="font-weight: 600; text-align: right;">{{ supplier.name }}</td>
                             <td>{{ supplier.count }}</td>
-                            <td>{{ supplier.total_qty }} طن</td>
-                            <td style="color: var(--success-text);">{{ supplier.accepted_qty }} طن</td>
-                            <td style="color: var(--danger-text);">{{ supplier.rejected_qty }} طن</td>
+                            <td>{{ supplier.total_qty }} {% if is_en %}ton{% else %}طن{% endif %}</td>
+                            <td style="color: var(--success-text);">{{ supplier.accepted_qty }} {% if is_en %}ton{% else %}طن{% endif %}</td>
+                            <td style="color: var(--danger-text);">{{ supplier.rejected_qty }} {% if is_en %}ton{% else %}طن{% endif %}</td>
                             <td>{{ supplier.approved }}</td>
                             <td>{{ supplier.partial }}</td>
                             <td>{{ supplier.rejected }}</td>
@@ -529,23 +530,23 @@
         {% endfor %}
         {% else %}
         <div class="empty-state">
-            <h3>لا توجد بيانات لهذا الشهر</h3>
+            <h3>{% if is_en %}No data for this month{% else %}لا توجد بيانات لهذا الشهر{% endif %}</h3>
         </div>
         {% endif %}
 
         {% if trend_months %}
-        <div class="section-title">اتجاه الموثوقية الشهري | Monthly Reliability Trend</div>
+        <div class="section-title">{% if is_en %}Monthly Reliability Trend{% else %}اتجاه الموثوقية الشهري | Monthly Reliability Trend{% endif %}</div>
         <table class="trend-table">
             <thead>
                 <tr>
-                    <th>الشهر</th>
-                    <th>عدد الفحوصات</th>
-                    <th>الكمية</th>
-                    <th>✅ مقبول</th>
-                    <th>❌ مرفوض</th>
-                    <th>معدل القبول</th>
-                    <th>معدل الرفض</th>
-                    <th>التوزيع</th>
+                    <th>{% if is_en %}Month{% else %}الشهر{% endif %}</th>
+                    <th>{% if is_en %}Inspections Count{% else %}عدد الفحوصات{% endif %}</th>
+                    <th>{% if is_en %}Quantity{% else %}الكمية{% endif %}</th>
+                    <th>{% if is_en %}✅ Accepted{% else %}✅ مقبول{% endif %}</th>
+                    <th>{% if is_en %}❌ Rejected{% else %}❌ مرفوض{% endif %}</th>
+                    <th>{% if is_en %}Acceptance Rate{% else %}معدل القبول{% endif %}</th>
+                    <th>{% if is_en %}Rejection Rate{% else %}معدل الرفض{% endif %}</th>
+                    <th>{% if is_en %}Distribution{% else %}التوزيع{% endif %}</th>
                 </tr>
             </thead>
             <tbody>
@@ -553,7 +554,7 @@
                 <tr class="{{ 'current-month' if month.is_current else '' }}">
                     <td style="font-weight: 600;">{{ month.label }}</td>
                     <td>{{ month.count }}</td>
-                    <td>{{ month.total_qty }} طن</td>
+                    <td>{{ month.total_qty }} {% if is_en %}ton{% else %}طن{% endif %}</td>
                     <td>{{ month.approved }}</td>
                     <td>{{ month.rejected }}</td>
                     <td>
@@ -579,9 +580,9 @@
         {% endif %}
 
         {% if recommendations %}
-        <div class="section-title">توصيات ادارية احصائية | Statistical Administrative Recommendations</div>
-        <p class="section-note">التوصيات التالية مستندة إلى تحليل بيانات دقيق للادارة الجودة وتقديم رؤية مهنية مستندة إلى الإحصائيات لدعم قرارات إدارة المشتريات والجودة.</p>
-        <p class="section-note">الجهات التي تطلع على التقرير: الادارة العالية - ادارة المشتريات و التوريدات</p>
+        <div class="section-title">{% if is_en %}Statistical Administrative Recommendations{% else %}توصيات ادارية احصائية | Statistical Administrative Recommendations{% endif %}</div>
+        <p class="section-note">{% if is_en %}The following recommendations are based on a detailed analysis of quality-management data and provide a professional, statistics-based view to support purchasing and quality management decisions.{% else %}التوصيات التالية مستندة إلى تحليل بيانات دقيق للادارة الجودة وتقديم رؤية مهنية مستندة إلى الإحصائيات لدعم قرارات إدارة المشتريات والجودة.{% endif %}</p>
+        <p class="section-note">{% if is_en %}Report audiences: senior management; purchasing and supply management.{% else %}الجهات التي تطلع على التقرير: الادارة العالية - ادارة المشتريات و التوريدات{% endif %}</p>
         <div class="section-box">
             <ul class="recommendations-list">
                 {% for rec in recommendations %}
@@ -592,8 +593,8 @@
         {% endif %}
         
         <div class="footer">
-            <p style="margin-bottom: 8px; font-weight: 600; color: #d97706;">⚠️ ملاحظة هامة: الكميات الموجودة في هذا التقرير لا تأخذ كوثيقة رسمية | Important: Quantities in this report are estimates and should not be used as official documentation</p>
-            <p>تم إنشاء التقرير بواسطة نظام إدارة الجودة الداخلي | {{ now }}</p>
+            <p style="margin-bottom: 8px; font-weight: 600; color: #d97706;">{% if is_en %}⚠️ Important: Quantities in this report are estimates and should not be used as official documentation{% else %}⚠️ ملاحظة هامة: الكميات الموجودة في هذا التقرير لا تأخذ كوثيقة رسمية | Important: Quantities in this report are estimates and should not be used as official documentation{% endif %}</p>
+            <p>{% if is_en %}Report generated by the internal quality management system{% else %}تم إنشاء التقرير بواسطة نظام إدارة الجودة الداخلي{% endif %} | {{ now }}</p>
         </div>
     </div>
     <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">

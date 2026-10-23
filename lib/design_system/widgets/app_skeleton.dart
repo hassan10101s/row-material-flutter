@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../animations/app_animations.dart';
@@ -67,38 +69,67 @@ class AppSkeletonList extends StatelessWidget {
         height: height,
         child: Padding(
           padding: padding,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
+          // Inside the fixed box only as many rows are rendered as actually
+          // fit: a caller asking for 6 rows inside a 96-120dp strip used to
+          // overflow the stretched Column (the inspections mobile skeleton).
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final boxHeight =
+                  constraints.maxHeight.isFinite
+                  ? constraints.maxHeight
+                  : height - padding.vertical;
+              // Header block: 36dp avatar tile + one lg gap below it.
+              const headerBlock = 36 + AppSpacing.lg;
+              // One row block = the tallest line variant (14dp) + its bottom
+              // md spacer.
+              const perRow = 14 + AppSpacing.md;
+              // A very short strip (e.g. the 64dp routine sheet uses minus
+              // the card padding leaves 32dp) cannot hold the header at all:
+              // the header would overflow by 20dp no matter how the row
+              // count is clamped. So a header is only laid out when room
+              // besides it remains for at least one row; otherwise the strip
+              // degrades into bare lines filling the whole height.
+              final withHeader = boxHeight - headerBlock - 1 >= perRow;
+              final available = boxHeight - (withHeader ? headerBlock : 0);
+              final shown = (available / perRow).floor().clamp(0, rows);
+              final linesShown = math.min(lines, 6);
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  AppSkeleton(width: 36, height: 36, radius: 18),
-                  const SizedBox(width: AppSpacing.md),
-                  AppSkeletonLine(width: 160, height: 18),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              for (var i = 0; i < rows; i++)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.md),
-                  child: Row(
-                    children: [
-                      for (var l = 0; l < lines; l++)
-                        Expanded(
-                          child: Padding(
-                            padding: EdgeInsets.only(
-                              left: l == 0 ? 0 : AppSpacing.md,
-                              right: l == 0 ? 0 : AppSpacing.md,
+                  if (withHeader) ...[
+                    Row(
+                      children: [
+                        AppSkeleton(width: 36, height: 36, radius: 18),
+                        const SizedBox(width: AppSpacing.md),
+                        AppSkeletonLine(width: 160, height: 18),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                  ],
+                  const SizedBox(height: 1),
+                  for (var i = 0; i < shown; i++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+                      child: Row(
+                        children: [
+                          for (var l = 0; l < linesShown; l++)
+                            Expanded(
+                              child: Padding(
+                                // RTL-aware: mirrors to the text direction.
+                                padding: EdgeInsetsDirectional.only(
+                                  start: l == 0 ? 0 : AppSpacing.md,
+                                ),
+                                child: AppSkeletonLine(
+                                    width: double.infinity,
+                                    height: i.isEven ? 14 : 12),
+                              ),
                             ),
-                            child: AppSkeletonLine(
-                                width: double.infinity,
-                                height: i.isEven ? 14 : 12),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-            ],
+                        ],
+                      ),
+                    ),
+                ],
+              );
+            },
           ),
         ),
       ),

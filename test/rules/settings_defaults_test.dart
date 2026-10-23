@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'package:material_lab/core/app_paths.dart';
+import 'package:material_lab/core/constants/report_form_keys.dart';
 import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/core/security/local_secret.dart';
 import 'package:material_lab/features/settings/data/settings_repo.dart';
@@ -46,7 +47,11 @@ void main() {
       'security_max_seen_date',
       'security_last_online_check',
     ]));
-    expect(settings.length, 10);
+    // The 10 legacy reference keys …
+    expect(settings.keys,
+        containsAllInOrder(ReportFormKeys.all));
+    // … plus the 12 per-form QA form numbers added later, and nothing else.
+    expect(settings.length, 10 + ReportFormKeys.all.length);
   });
 
   test('reference_seed_done defaults to "0" not empty (settings.py:32-45)', () async {
@@ -81,6 +86,8 @@ void main() {
     await _repo.ensureDefaults();
     final settings = await _repo.getSettings();
     expect(settings['department_label'], 'My Lab');
-    expect(settings.length, 10);
+    // `ensureDefaults` still inserts every missing default, including the
+    // per-form keys; only the pre-existing `department_label` survives as-is.
+    expect(settings.length, 10 + ReportFormKeys.all.length);
   });
 }

@@ -1,6 +1,7 @@
 import 'dart:convert' show jsonDecode;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -23,6 +24,7 @@ import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_history_autocomplete.dart';
 import '../../../../design_system/widgets/app_quantity_field.dart';
 import '../../../../design_system/widgets/app_required_toggle.dart';
+import '../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../di/service_locator.dart';
 import '../../../lab/core/formula_engine.dart';
@@ -330,9 +332,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   final _decisionReason = TextEditingController();
   final _followUp = TextEditingController();
   final _rejectedQty = TextEditingController();
-  final List<TextEditingController> _sampleNames = [
-    TextEditingController(text: 'Result'),
-  ];
+  final List<TextEditingController> _sampleNames = [TextEditingController()];
   final Map<String, List<TextEditingController>> _physical = {};
   final Map<String, List<TextEditingController>> _chemical = {};
   final _materialController = TextEditingController();
@@ -343,6 +343,11 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   /// [PopScope] below so a half-typed inspection is not discarded by a
   /// back gesture or an app-bar back button.
   bool _dirty = false;
+
+  /// Inline validation errors from the save gate, keyed by field. Rendered
+  /// next to the failing field by `_FormBody` / `InspectionFormSections`
+  /// (both form factors) instead of a transient toast.
+  Map<String, String> _fieldErrors = const {};
 
   /// Set while the screen writes to a controller itself, so the auto-filled
   /// entry code and material label do not count as user edits. Listeners fire
@@ -563,13 +568,33 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     final Map<String, dynamic> refMap = ref is Map
         ? Map<String, dynamic>.from(ref)
         : {};
-    refMap.forEach((key, _) {
-      if (key.toString().trim().isEmpty) return;
+    // Edit-prefill: restore the stored values for this grid. Keys the
+    // reference dropped (or never had) are kept too, so saving an opened
+    // record never silently discards a column the catalog no longer lists.
+    final storedRaw = widget.inspection?['${type}_results'];
+    final stored = storedRaw is Map ? storedRaw : const {};
+    final keys = <String>{
+      ...refMap.keys.map((k) => k.toString()).where((k) => k.trim().isNotEmpty),
+      ...stored.keys.map((k) => k.toString()).where((k) => k.trim().isNotEmpty),
+    };
+    for (final key in keys) {
+      final values = _storedValues(stored[key]);
       target[key] = [
-        for (var i = 0; i < _sampleCount; i++) TextEditingController(),
+        for (var i = 0; i < _sampleCount; i++)
+          TextEditingController(
+            text: i < values.length ? values[i] : '',
+          ),
       ];
-    });
+    }
     _watch(target.values.expand((l) => l));
+  }
+
+  /// Normalizes a stored grid cell into per-sample display strings: a list
+  /// stays positional, a scalar (single-sample records) becomes `[value]`.
+  List<String> _storedValues(Object? value) {
+    if (value == null) return const [];
+    if (value is List) return [for (final v in value) '$v'];
+    return ['$value'];
   }
 
   void _addSample() {
@@ -624,50 +649,48 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
 
   Future<void> _save() async {
     final state = context.read<InspectionFormCubit>().state;
+    // Inline save gate: every validation failure is rendered next to its
+    // field on both form factors instead of as a transient toast.
+    final errors = <String, String>{};
     if (state.materialId == null) {
-      AppFeedback.error(
-        context,
-        _isProduct
-            ? AppText.t('يجب اختيار المنتج', 'Product selection is required.')
-            : AppText.t('يجب اختيار المادة', 'Material selection is required.'),
-      );
-      return;
+      errors['material'] = _isProduct
+          ? AppText.t('يجب اختيار المنتج', 'Product selection is required.')
+          : AppText.t('يجب اختيار المادة', 'Material selection is required.');
     }
     if (_isProduct) {
       if (_formula.text.trim().isEmpty) {
-        AppFeedback.error(
-          context,
-          AppText.t('رقم الفورمولا مطلوب', 'Formula number is required.'),
+        errors['formula'] = AppText.t(
+          'رقم الفورمولا مطلوب',
+          'Formula number is required.',
         );
-        return;
       }
       if (_batch.text.trim().isEmpty) {
-        AppFeedback.error(
-          context,
-          AppText.t('رقم التشغيلة مطلوب', 'Batch number is required.'),
+        errors['batch'] = AppText.t(
+          'رقم التشغيلة مطلوب',
+          'Batch number is required.',
         );
-        return;
       }
-    } else if (_supplier.text.trim().length < 3) {
-      AppFeedback.error(
-        context,
-        AppText.t(
+    } else {
+      if (_supplier.text.trim().length < 3) {
+        errors['supplier'] = AppText.t(
           'اسم المورد مطلوب (3 أحرف على الأقل)',
           'Supplier is required.',
-        ),
-      );
-      return;
-    }
-    // Header-level taker is raw-only; product batches track it per sample.
-    if (!_isProduct && _sampleTaker.text.trim().length < 3) {
-      AppFeedback.error(
-        context,
-        AppText.t(
+        );
+      }
+      // Header-level taker is raw-only; product batches track it per sample.
+      if (_sampleTaker.text.trim().length < 3) {
+        errors['sampleTaker'] = AppText.t(
           'اسم آخذ العينة مطلوب (3 أحرف على الأقل)',
           'Sample taker is required.',
-        ),
-      );
+        );
+      }
+    }
+    if (errors.isNotEmpty) {
+      setState(() => _fieldErrors = Map.of(errors));
       return;
+    }
+    if (_fieldErrors.isNotEmpty) {
+      setState(() => _fieldErrors = const {});
     }
     final user = getIt<AuthGate>().currentUser;
     if (user == null) {
@@ -826,6 +849,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
             await context.read<InspectionFormCubit>().regenerateEntryCode(date);
           },
           onSave: _save,
+          fieldErrors: _fieldErrors,
         ),
       ),
     );
@@ -866,6 +890,7 @@ class _FormBody extends StatelessWidget {
   final ValueChanged<int> onRemoveSample;
   final VoidCallback onRegenerateEntry;
   final VoidCallback onSave;
+  final Map<String, String> fieldErrors;
   const _FormBody({
     this.wizard = false,
     this.isProduct = false,
@@ -894,19 +919,21 @@ class _FormBody extends StatelessWidget {
     required this.onRemoveSample,
     required this.onRegenerateEntry,
     required this.onSave,
+    this.fieldErrors = const {},
   });
   @override
   Widget build(BuildContext context) {
     final state = context.watch<InspectionFormCubit>().state;
     Widget body;
     if (state.loading && state.materials.isEmpty) {
-      body = const Center(child: CircularProgressIndicator());
+      body = const AppSkeletonList(rows: 8);
     } else if (wizard) {
       // Stepped mobile chrome over the same controllers/cubit/save path.
       // The wizard owns its Scaffold + error feedback, so return directly.
       return InspectionFormWizard(
         sections: InspectionFormSections(
           isProduct: isProduct,
+          compact: true,
           date: date,
           expiry: expiry,
           supplier: supplier,
@@ -930,6 +957,7 @@ class _FormBody extends StatelessWidget {
           onAddSample: onAddSample,
           onRemoveSample: onRemoveSample,
           onRegenerateEntry: onRegenerateEntry,
+          fieldErrors: fieldErrors,
         ),
         onSave: onSave,
         title: title,
@@ -944,7 +972,12 @@ class _FormBody extends StatelessWidget {
             _Card(
               title: AppText.t('البيانات الأساسية', 'Basic data'),
               children: [
-                _materialPicker(state.materials, state.materialId, isProduct),
+                _materialPicker(
+              state.materials,
+              state.materialId,
+              isProduct,
+              error: fieldErrors['material'],
+            ),
                 const SizedBox(height: AppSpacing.md),
                 Row(
                   children: [
@@ -1001,6 +1034,7 @@ class _FormBody extends StatelessWidget {
                         child: AppField(
                           label: AppText.t('رقم الفورمولا', 'Formula no.'),
                           controller: formula,
+                          error: fieldErrors['formula'],
                         ),
                       ),
                       const SizedBox(width: AppSpacing.lg),
@@ -1008,6 +1042,7 @@ class _FormBody extends StatelessWidget {
                         child: AppField(
                           label: AppText.t('رقم التشغيلة', 'Batch no.'),
                           controller: batch,
+                          error: fieldErrors['batch'],
                         ),
                       ),
                     ] else ...[
@@ -1016,6 +1051,7 @@ class _FormBody extends StatelessWidget {
                           label: AppText.t('المورد', 'Supplier'),
                           controller: supplier,
                           options: state.supplierOptions,
+                          error: fieldErrors['supplier'],
                           hint: AppText.t(
                             'اكتب للبحث في موردي الخامة…',
                             'Type to search this material\u2019s suppliers…',
@@ -1053,6 +1089,7 @@ class _FormBody extends StatelessWidget {
                           label: AppText.t('آخذ العينة', 'Sample taker'),
                           controller: sampleTaker,
                           options: state.sampleTakerOptions,
+                          error: fieldErrors['sampleTaker'],
                           hint: AppText.t(
                             'اكتب للبحث في سجل الفنيين…',
                             'Type to search the technicians log…',
@@ -1219,14 +1256,23 @@ class _FormBody extends StatelessWidget {
     }
     return AppErrorFeedback<InspectionFormCubit, InspectionFormState>(
       selector: (s) => s.error,
-      child: Scaffold(
-        backgroundColor: AppColors.background,
-        appBar: AppTopAppBar(
-          title: title.isEmpty
-              ? AppText.t('فحص جديد', 'New Inspection')
-              : title,
+      // Desktop keyboard flow: Ctrl+Enter saves from any field. The TextFields
+      // only consume bare Enter, so the combo bubbles up to this host.
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
+            if (!state.saving) onSave();
+          },
+        },
+        child: Scaffold(
+          backgroundColor: AppColors.background,
+          appBar: AppTopAppBar(
+            title: title.isEmpty
+                ? AppText.t('فحص جديد', 'New Inspection')
+                : title,
+          ),
+          body: body,
         ),
-        body: body,
       ),
     );
   }
@@ -1234,8 +1280,9 @@ class _FormBody extends StatelessWidget {
   Widget _materialPicker(
     List<Map<String, dynamic>> materials,
     int? selectedId,
-    bool isProduct,
-  ) {
+    bool isProduct, {
+    String? error,
+  }) {
     final selected = selectedId != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1301,6 +1348,16 @@ class _FormBody extends StatelessWidget {
             ],
           ],
         ),
+        if (error != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            error,
+            style: TextStyle(
+              color: AppColors.danger,
+              fontSize: 12.spMax,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1585,16 +1642,6 @@ class _FormBody extends StatelessWidget {
   }
 
   Widget _sampleHeader(int index) {
-    if (sampleCount == 1) {
-      return Expanded(
-        flex: 3,
-        child: Text(
-          'Result',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-        ),
-      );
-    }
     return Expanded(
       flex: 3,
       child: Row(

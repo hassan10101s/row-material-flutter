@@ -83,8 +83,22 @@ service cloud.firestore {
 
     // An `invited`/`disabled` member can read nothing and write nothing: the
     // whole permission check is gated on the status, not only on the role.
+    //
+    // Trial-expiry gate: a `suspended` organization (30-day trial finished,
+    // waiting for manual activation by support) locks every member out of all
+    // reads and writes below, even though the member row itself is `active`.
+    // The owner can still `get` the org document itself (see below) so the
+    // app can show the trial-expired screen. Status flips
+    // (`trial` → `suspended` → `active`) happen only through the Admin SDK
+    // (scheduled cron / manual activation), which bypasses these rules; no
+    // client may change any lifecycle field.
+    function orgUsable(orgId) {
+      let org = get(/databases/$(database)/documents/organizations/$(orgId));
+      return org != null && org.data.status in ['trial', 'active'];
+    }
+
     function activeInOrg(orgId) {
-      return inOrg(orgId) && myStatus() == 'active';
+      return inOrg(orgId) && myStatus() == 'active' && orgUsable(orgId);
     }
 
     function can(orgId, perm) {
@@ -291,14 +305,28 @@ service cloud.firestore {
 
       // The organization id is derived from the owner uid, so creation is
       // idempotent; a second attempt hits `update` (owner-only) or is denied.
-      // `activeInOrg`: an invited/pending/disabled member reads nothing.
+      // `activeInOrg`: an invited/pending/disabled member reads nothing, and a
+      // member of a `suspended` company reads nothing below the org document.
       // Single-company policy (§2): a bound account
       // (invited/pending_activation/active) cannot create a second company —
       //sign-out alone never unblocks this, only leaving does. New companies
-      // start as `trial` (trial_owner); promotion to `active` is a separate
-      // approval action.
+      // start as `trial` with a one-time 30-day window (`trialStartedAt`,
+      // `trialEndsAt`); expiry flips them to `suspended` via the server cron
+      // and manual activation by support (`manuallyActivated=true`) is
+      // permanent and never auto-suspended again.
+      //
+      // The owner may always `get` the org document itself — even when
+      // suspended — so the app can render the trial-expired + support screen.
+      // A profile-bound member may also `get` the document, but only while the
+      // company is `suspended`: a fresh login after expiry must still see the
+      // suspension (the client gate reads this document). Members of usable
+      // companies keep the previous behavior (`activeInOrg` or nothing), so an
+      // invited/pending member still reads nothing.
+      // Everything below the org document stays locked by `activeInOrg`.
       allow get: if activeInOrg(orgId)
-        || (signedIn() && resource.data.ownerUid == request.auth.uid);
+        || (signedIn() && resource.data.ownerUid == request.auth.uid)
+        || (signedIn() && hasProfile() && myOrg() == orgId
+            && resource.data.status == 'suspended');
       allow list: if false;
       allow create: if signedIn()
         && verifiedEmail()
@@ -306,35 +334,31 @@ service cloud.firestore {
         && !blocksNewCompany(request.auth.uid)
         && request.resource.data.keys().hasOnly([
              'name','ownerUid','status','createdAt','createdBy','schemaVersion',
-             'updatedBy','updatedAt','version'])
+             'updatedBy','updatedAt','version',
+             'trialStartedAt','trialEndsAt','trialConsumed','manuallyActivated'])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 1
         && request.resource.data.name.size() <= 120
         && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.status in ['trial','active']
+        && request.resource.data.status == 'trial'
+        && request.resource.data.trialConsumed == false
+        && request.resource.data.manuallyActivated == false
         && request.resource.data.version == 1;
-      // Trial → active promotion keeps the owner pinned; only the name /
-      // schema / status move, and only an active admin of the org may do it.
-      // A trial founder (`trial_owner`, no `org.update`) can also promote
-      // their *own* trial company once: otherwise a trial company is stuck
-      // forever because nobody holding `org.update` exists yet.
-      allow update: if (can(orgId, 'org.update')
+      // No client may change the organization lifecycle: `status`,
+      // `trialStartedAt`, `trialEndsAt`, `trialConsumed` and
+      // `manuallyActivated` are pinned. `trial` → `suspended` (server cron)
+      // and `suspended` → `active` (manual activation by support) run through
+      // the Admin SDK, which bypasses these rules. An active admin of a usable
+      // org may still rename it or bump the schema version.
+      allow update: if can(orgId, 'org.update')
         && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.status == resource.data.status
+        && request.resource.data.get('trialStartedAt', null) == resource.data.get('trialStartedAt', null)
+        && request.resource.data.get('trialEndsAt', null) == resource.data.get('trialEndsAt', null)
+        && request.resource.data.get('trialConsumed', false) == resource.data.get('trialConsumed', false)
+        && request.resource.data.get('manuallyActivated', false) == resource.data.get('manuallyActivated', false)
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['name','status','schemaVersion','updatedBy','updatedAt','version'])
-        && request.resource.data.status in ['trial','active']
-        && (request.resource.data.status == resource.data.status
-            || (resource.data.status == 'trial'
-                && request.resource.data.status == 'active')))
-        || (verifiedEmail()
-        && resource.data.ownerUid == request.auth.uid
-        && request.resource.data.ownerUid == resource.data.ownerUid
-        && resource.data.status == 'trial'
-        && request.resource.data.status == 'active'
-        && request.resource.data.name == resource.data.name
-        && request.resource.data.schemaVersion == resource.data.schemaVersion
-        && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status','updatedBy','updatedAt','version']));
+             .hasOnly(['name','schemaVersion','updatedBy','updatedAt','version']);
       allow delete: if false;
 
       // Heartbeat written by the sync engine.
@@ -507,12 +531,21 @@ service cloud.firestore {
       }
 
       // Append-only decision log.
+      //
+      // `newStatus` is constrained to the four decision codes the app writes
+      // (`lib/core/domain/rules.dart` `decisionCodes`). Previously any string
+      // other than `'approved'` was accepted under `qc.reject`, so a member
+      // could write a bogus/near-miss decision state into the ledger. Approvals
+      // require `qc.approve`, rejections require `qc.reject`.
       match /qualityChecks/{docId} {
         allow read: if can(orgId, 'qc.read');
         allow create: if hasEnvelope(orgId)
-          && request.resource.data.newStatus is string
-          && ((request.resource.data.newStatus == 'approved' && can(orgId, 'qc.approve'))
-              || (request.resource.data.newStatus != 'approved' && can(orgId, 'qc.reject')));
+          && request.resource.data.newStatus in [
+               'APPROVED','CONDITIONAL_APPROVAL','PARTIAL_REJECTION','FULL_REJECTION']
+          && ((request.resource.data.newStatus in ['APPROVED','CONDITIONAL_APPROVAL']
+                 && can(orgId, 'qc.approve'))
+              || (request.resource.data.newStatus in ['PARTIAL_REJECTION','FULL_REJECTION']
+                 && can(orgId, 'qc.reject')));
         allow update: if false;
         allow delete: if false;
       }
@@ -545,6 +578,13 @@ service cloud.firestore {
         allow read: if can(orgId, 'lab_results.read');
         allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
         allow update: if false;
+        allow delete: if false;
+      }
+
+      match /inventoryLots/{docId} {
+        allow read: if can(orgId, 'lab_results.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
         allow delete: if false;
       }
 
@@ -597,6 +637,94 @@ service cloud.firestore {
         allow read: if can(orgId, 'lab_results.read');
         allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
         allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      // QC user-authored tables (the QC settings feature): definition,
+      // typed columns, records. Same envelope + version-bump contract;
+      // children carry the parent's remote id so the pull remaps the
+      // per-device `table_id`. Deletes stay tombstone-only.
+      match /qcCustomTables/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /qcCustomTableFields/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /qcCustomTableRows/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      // QC checklists and their execution + the NCR/CAPA pipeline (plan P8).
+      // Same envelope + tombstone-only delete contract as the QC custom
+      // tables; children carry the parent's remote id (`template_remote_id`,
+      // `inspection_remote_id`, ...) so the pull remaps the per-device
+      // autoincrement foreign keys.
+      match /qcTemplates/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /qcSections/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /qcItems/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /qcInspections/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /qcResponses/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      // Every press of the per-task "done" button appends one row: there is
+      // no edit path, so the collection is append-only.
+      match /qcTaskLogs/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if false;
+        allow delete: if false;
+      }
+
+      match /qcFindingsNc/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
+      match /qcCapa/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
         allow delete: if false;
       }
 

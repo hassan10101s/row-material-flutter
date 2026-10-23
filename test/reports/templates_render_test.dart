@@ -169,7 +169,12 @@ void main() {
         settings: settings,
       )..['qr_image_data_uri'] = '';
       final out = tinyJinjaRender(_tpl('report_template.html'), ctx);
-      expect(out, contains('عينات التشغيلة'));
+      expect(out, contains('عينات التشغيلية'));
+      expect(out, isNot(contains('محضر فحص خامات')));
+      expect(out, contains('محضر فحص منتجات'));
+      // Header-level physical/chemical tables stay empty for products —
+      // only the merged operational-samples table renders.
+      expect(out, isNot(contains('Requirement')));
       expect(out, contains('Karim'));
       expect(out, contains('Color'));
       expect(out, contains('Protein'));

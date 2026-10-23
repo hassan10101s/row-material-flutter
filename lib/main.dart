@@ -21,6 +21,7 @@ import 'design_system/animations/app_animations.dart';
 import 'design_system/tokens/app_colors.dart';
 import 'design_system/tokens/app_text_theme.dart';
 import 'di/service_locator.dart';
+import 'features/reports/data/pdf_renderer.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'router/app_router.dart';
 
@@ -37,57 +38,66 @@ Future<void> main() async {
     return true;
   };
   ErrorWidget.builder = (details) => _StartupErrorView(
-        message: 'حدث خطأ غير متوقع. أعد تشغيل التطبيق.\nUnexpected error — restart the app.',
-        details: kDebugMode ? '${details.exception}' : null,
-        retry: null,
-      );
+    message:
+        'حدث خطأ غير متوقع. أعد تشغيل التطبيق.\nUnexpected error — restart the app.',
+    details: kDebugMode ? '${details.exception}' : null,
+    retry: null,
+  );
 
-  await runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
+  await runZonedGuarded(
+    () async {
+      WidgetsFlutterBinding.ensureInitialized();
 
-    // First pixels ASAP: bootstrap (Firebase init, per-org DB open, seeds,
-    // backup) stays off the critical path behind a splash instead of a black
-    // screen. The splash is deliberately dependency-free — no theme service,
-    // no ScreenUtil, no localization — so it can paint before any of that.
-    runApp(const _BootstrapSplash());
-    try {
-      await appBootstrap();
-    } on Object catch (e) {
-      // Bootstrap (DB open, Firebase, seeds) failed: swap the spinner for a
-      // retry screen instead of hanging forever. Keeps MSIX/EXE + mobile
-      // parity — same widget on every platform.
-      debugPrint('[bootstrap] failed: $e');
-      runApp(_StartupErrorView(
-        message: 'تعذر بدء التشغيل (قاعدة البيانات أو الشبكة).\nStartup failed — check DB / network.',
-        details: kDebugMode ? '$e' : null,
-        retry: () => main(),
-      ));
-      return;
-    }
+      // First pixels ASAP: bootstrap (Firebase init, per-org DB open, seeds,
+      // backup) stays off the critical path behind a splash instead of a black
+      // screen. The splash is deliberately dependency-free — no theme service,
+      // no ScreenUtil, no localization — so it can paint before any of that.
+      runApp(const _BootstrapSplash());
+      try {
+        await appBootstrap();
+      } on Object catch (e) {
+        // Bootstrap (DB open, Firebase, seeds) failed: swap the spinner for a
+        // retry screen instead of hanging forever. Keeps MSIX/EXE + mobile
+        // parity — same widget on every platform.
+        debugPrint('[bootstrap] failed: $e');
+        runApp(
+          _StartupErrorView(
+            message:
+                'تعذر بدء التشغيل. تحقق من الاتصال ثم أعد المحاولة.\nStartup failed — check your connection and try again.',
+            details: kDebugMode ? '$e' : null,
+            retry: () => main(),
+          ),
+        );
+        return;
+      }
 
-  final themeService = getIt<ThemeService>();
-  await themeService.init();
+      final themeService = getIt<ThemeService>();
+      await themeService.init();
 
-  final localeService = getIt<LocaleService>();
-  await localeService.init();
-  AppText.arabic = localeService.isArabic;
-  AppPageRoute.appearanceChanges = Listenable.merge([
-    themeService,
-    localeService,
-  ]);
+      final localeService = getIt<LocaleService>();
+      await localeService.init();
+      AppText.arabic = localeService.isArabic;
+      AppPageRoute.appearanceChanges = Listenable.merge([
+        themeService,
+        localeService,
+      ]);
 
-  final router = AppRouter(authGate: getIt<AuthGate>()).router;
-  runApp(MaterialLabApp(router: router));
+      final router = AppRouter(authGate: getIt<AuthGate>()).router;
+      runApp(MaterialLabApp(router: router));
 
-  // Mobile-only bell + poll scheduling after the first frame (no-op on
-  // desktop): plugin init and the bell scans interleave with the first paint
-  // instead of delaying it.
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    unawaited(startNotifications());
-  });
-  }, (error, stack) {
-    debugPrint('[zone-error] $error');
-  });
+      // Mobile-only bell + poll scheduling after the first frame (no-op on
+      // desktop): plugin init and the bell scans interleave with the first paint
+      // instead of delaying it. PDF font warm-up rides along so the first export
+      // skips the rootBundle + shaping jank.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(startNotifications());
+        unawaited(PdfRenderer.precache());
+      });
+    },
+    (error, stack) {
+      debugPrint('[zone-error] $error');
+    },
+  );
 }
 
 /// Retry-capable fatal-startup view. Dependency-free like [_BootstrapSplash]
@@ -118,15 +128,32 @@ class _StartupErrorView extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.error_outline, size: 48, color: Color(0xFFB91C1C)),
+                  const Icon(
+                    Icons.error_outline,
+                    size: 48,
+                    color: Color(0xFFB91C1C),
+                  ),
                   const SizedBox(height: 16),
-                  Text(message, textAlign: TextAlign.center,
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
                     textDirection: TextDirection.rtl,
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Color(0xFF0F172A))),
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
                   if (details != null) ...[
                     const SizedBox(height: 8),
-                    Text(details!, textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    Text(
+                      details!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
                   ],
                   if (retry != null) ...[
                     const SizedBox(height: 20),
@@ -190,6 +217,35 @@ class MaterialLabApp extends StatefulWidget {
 }
 
 class _MaterialLabAppState extends State<MaterialLabApp> {
+  // Perf: cache singletons once instead of getIt<> on every rebuild.
+  // Instances are registered before runApp; live values are still read
+  // per-build from the same objects.
+  late final ThemeService _themeService = getIt<ThemeService>();
+  late final LocaleService _localeService = getIt<LocaleService>();
+  late final Listenable _themeLocaleListenable = Listenable.merge([
+    _themeService,
+    _localeService,
+  ]);
+  static const _chrome = WindowChrome();
+  String? _lastChromeTitle;
+  bool? _lastChromeDark;
+  bool _chromeDarkSet = false;
+
+  /// Perf: WindowChrome is a platform channel — only hit it when the resolved
+  /// title/brightness actually changes, not on every theme/locale rebuild.
+  /// Failures stay fire-and-forget (cosmetic only, see WindowChrome).
+  void _syncChrome(String title, bool? dark) {
+    if (_lastChromeTitle != title) {
+      _lastChromeTitle = title;
+      unawaited(_chrome.setTitle(title));
+    }
+    if (!_chromeDarkSet || _lastChromeDark != dark) {
+      _chromeDarkSet = true;
+      _lastChromeDark = dark;
+      unawaited(_chrome.setDarkMode(dark));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     // Applied *above* ScreenUtilInit on purpose: ScreenUtil latches its text
@@ -227,13 +283,10 @@ class _MaterialLabAppState extends State<MaterialLabApp> {
           // theme change must rebuild, not just an explicit toggle.
           final platformBrightness = MediaQuery.platformBrightnessOf(context);
           return ListenableBuilder(
-            listenable: Listenable.merge([
-              getIt<ThemeService>(),
-              getIt<LocaleService>(),
-            ]),
+            listenable: _themeLocaleListenable,
             builder: (context, _) {
-              final themeService = getIt<ThemeService>();
-              final localeService = getIt<LocaleService>();
+              final themeService = _themeService;
+              final localeService = _localeService;
               // `AppColors.brightness` must name the brightness the scheme
               // actually resolves. Inferring "not dark => light" silently
               // disagreed with MaterialApp whenever mode was ThemeMode.system
@@ -248,18 +301,15 @@ class _MaterialLabAppState extends State<MaterialLabApp> {
               // Push the resolved language and brightness to the native window
               // chrome. Fire-and-forget on purpose: a retitle that fails is
               // cosmetic and must not gate the first frame.
-              const chrome = WindowChrome();
-              chrome.setTitle(AppStrings.appTitle);
-              switch (themeService.mode) {
-                case ThemeMode.dark:
-                  chrome.setDarkMode(true);
-                case ThemeMode.light:
-                  chrome.setDarkMode(false);
-                case ThemeMode.system:
-                  // Let the OS registry value decide, so the title bar keeps
-                  // tracking a system-wide theme change.
-                  chrome.setDarkMode(null);
-              }
+              // Perf: _syncChrome dedupes the platform-channel calls so
+              // unrelated rebuilds don't re-hit the OS. Under ThemeMode.system
+              // null hands control back to the OS registry value.
+              final chromeDark = switch (themeService.mode) {
+                ThemeMode.dark => true,
+                ThemeMode.light => false,
+                ThemeMode.system => null,
+              };
+              _syncChrome(AppStrings.appTitle, chromeDark);
 
               return ResponsiveScope(
                 spec: LayoutSpec.of(FormFactor.current),

@@ -118,10 +118,7 @@ void main() {
         AppRoutes.qcNcrDetail,
         AppRoutes.qcInspections,
         AppRoutes.qcInspectionDetail,
-        AppRoutes.qcGoals,
-        AppRoutes.qcGoalDetail,
         AppRoutes.qcSops,
-        AppRoutes.qcTemplates,
       ];
 
       // `qc.read` is not granted to every built-in role: a lab user is outside the

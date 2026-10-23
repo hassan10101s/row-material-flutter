@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import 'audit_logger.dart';import 'audit_trail.dart';
+import 'audit_logger.dart';
+import 'audit_trail.dart';
 import 'conflict_resolver.dart';
 import 'entity_registry.dart';
 import '../network/connectivity_service.dart';
+import '../utils/app_dates.dart';
 import 'push_worker.dart';
 import 'pull_worker.dart';
 import 'remote/remote_data_source.dart';
@@ -90,10 +92,12 @@ class RestoreReport {
 }
 
 /// Orchestrates the offline-first lifecycle (plan §9.3, §13):
-/// timer every 60s · immediate run when connectivity returns · debounced run
-/// seconds after every local mutation · heartbeat probe every 10s that pulls
-/// only when another device wrote · manual "sync now" · dashboard-driven
-/// 5-minute pulls.
+/// timer every 60s (idle-gated: a full walk only when the outbox is not
+/// drained or the heartbeat/fallback window says something changed) ·
+/// immediate run when connectivity returns · debounced run seconds after
+/// every local mutation · heartbeat probe every 10s that pulls only when
+/// another device wrote · manual "sync now" · dashboard-driven 5-minute
+/// pulls.
 class SyncEngine {
   SyncEngine({
     required this.pushWorker,
@@ -108,6 +112,7 @@ class SyncEngine {
     this.dashboardInterval = const Duration(minutes: 5),
     this.heartbeatInterval = const Duration(seconds: 10),
     this.mutationDelay = const Duration(seconds: 2),
+    this.fullPullFallback = const Duration(minutes: 15),
   });
 
   final PushWorker pushWorker;
@@ -117,11 +122,6 @@ class SyncEngine {
   final AuditLogger audit;
   final ConnectivityService connectivity;
 
-  /// One recovery sweep per process, not per cycle: [SyncQueue.recoverStalled]
-  /// is cheap but touches every stranded row, and the point is to clean up after
-  /// *startup*, not on every manual "sync now".
-  bool _stalledRecovered = false;
-
   /// Hands rows stranded by a crashed push back to the pending pool.
   ///
   /// A row only reaches `in_flight` via [SyncQueue.claim], and the settlement
@@ -129,10 +129,18 @@ class SyncEngine {
   /// permanently un-drainable row that also cannot be retried by hand, because
   /// the Sync screen only surfaces `failed`/`conflict`.
   ///
+  /// Runs at the head of **every** cycle, not once per process: only then can a
+  /// batch stranded by a mid-cycle OS kill (or a mobile suspension whose
+  /// in-flight future never resumed) be recovered on the next app launch, and a
+  /// row stranded by an org switch can be recovered without a restart. The sweep
+  /// is a single indexed `status = 'in_flight'` read that finds nothing on the
+  /// normal path, so the earlier once-per-process concern (manual "sync now"
+  /// storms) was guarding a cost that does not exist. Single-flight [syncNow]
+  /// means no live claim can overlap this.
+  ///
   /// Best-effort: a failure here must never abort the data cycle, so the error
   /// goes through the same reporting path as the rest of [syncNow].
   Future<void> _recoverStalledRows() async {
-    if (_stalledRecovered) return;
     try {
       final recovered = await queue.recoverStalled();
       if (recovered > 0) {
@@ -140,8 +148,6 @@ class SyncEngine {
       }
     } on Object catch (e) {
       await _markErrorSafely('Push recovery failed: $e');
-    } finally {
-      _stalledRecovered = true;
     }
   }
 
@@ -164,6 +170,12 @@ class SyncEngine {
   /// a form save + its history rows) triggers one cycle, not one per row.
   final Duration mutationDelay;
 
+  /// Maximum idle age of the last full pull walk before the 60 s timer runs
+  /// one unconditionally — the safety net for a heartbeat bump that was lost
+  /// with its push. Idle minutes in between cost only the pending/blocked
+  /// count and the tiny heartbeat probe, never a full tree walk.
+  final Duration fullPullFallback;
+
   /// Mobile-only hook: fired after a pull that applied remote rows.
   /// Wired by the service locator to `NotificationController.refresh`;
   /// null in tests and on desktop.
@@ -181,6 +193,7 @@ class SyncEngine {
   bool _inFlight = false;
   bool _disposed = false;
   bool _degraded = false;
+  DateTime? _lastFullCycleAt;
 
   /// Single-flight guard: never two cycles at once.
   bool get isSyncing => _inFlight;
@@ -198,7 +211,7 @@ class SyncEngine {
         unawaited(_emit());
       }
     });
-    _timer = Timer.periodic(timerInterval, (_) => unawaited(syncNow(reason: 'timer')));
+    _timer = Timer.periodic(timerInterval, (_) => unawaited(_timerTick()));
     _heartbeatTimer = Timer.periodic(
       heartbeatInterval,
       (_) => unawaited(_pollHeartbeat()),
@@ -220,6 +233,43 @@ class SyncEngine {
       if (_disposed || !_running) return;
       unawaited(syncNow(reason: 'mutation', pullOnly: pullOnly));
     });
+  }
+
+  /// The 60 s timer leg, idle-gated.
+  ///
+  /// The old behavior ran a full cycle (push + pull walk + audit/parity
+  /// maintenance) every [timerInterval] forever, so a device left on the
+  /// dashboard burned a whole pull per minute although nothing had changed
+  /// anywhere. Now: work happens only when the outbox is not drained (a
+  /// failed push retried in place must not wait out the fallback window),
+  /// when the last full walk is older than [fullPullFallback], or when
+  /// [_pollHeartbeat] sees a marker bump — which is exactly the "another
+  /// device pushed" signal the heartbeat contract already carries.
+  Future<void> _timerTick() async {
+    if (_disposed || !_running || _inFlight) return;
+    try {
+      if (!connectivity.isOnline) {
+        await _emit();
+        return;
+      }
+      final last = _lastFullCycleAt;
+      if (last == null ||
+          DateTime.now().difference(last) >= fullPullFallback) {
+        await syncNow(reason: 'timer');
+        return;
+      }
+      final counts = await queue.countBadge();
+      if (counts.pending > 0 ||
+          counts.blocked > 0 ||
+          counts.failed > 0 ||
+          counts.conflicts > 0) {
+        await syncNow(reason: 'timer');
+        return;
+      }
+      await _pollHeartbeat();
+    } on Object {
+      // The timer never surfaces its own failures; the next tick retries.
+    }
   }
 
   /// Heartbeat leg of the realtime story: one tiny `meta/state` read per
@@ -327,13 +377,45 @@ class SyncEngine {
       }
       // The audit trail and its retention must never fail the data cycle.
       await _auditMaintenance();
+      // Same for the parity sweep: best-effort, never aborts the cycle.
+      await _parityMaintenance();
+      // A completed walk counts as "full and recent" for the timer gate,
+      // whatever reason started it (dashboard, heartbeat, manual…).
+      _lastFullCycleAt = DateTime.now();
     } on Object catch (e) {
       await _markErrorSafely('$e');
     } finally {
       _inFlight = false;
       await _emit();
     }
+    // Problem bell (mobile-only): when conflicts/blocked/failed CHANGE, tell
+    // the owner that some records never reached the other side — including
+    // the "cloud-only row stayed invisible" days (a row that only failed to
+    // pull is an error, not silence). Desktop leaves the hook null.
+    await _notifyProblems();
     return _safeCurrent();
+  }
+
+  /// Mobile-only hook: fired when the unresolved problem total changes
+  /// between two cycles. Wired by the service locator to
+  /// `NotificationService.notifySyncProblems`; null on desktop/tests.
+  void Function(int conflicts, int blocked, int failed)? onProblemsChanged;
+  int? _lastProblems;
+
+  Future<void> _notifyProblems() async {
+    final hook = onProblemsChanged;
+    if (hook == null) return;
+    try {
+      final snapshot = await _current();
+      final total = snapshot.conflicts + snapshot.blocked + snapshot.failed;
+      if (total == _lastProblems) return;
+      // Stash before firing: a crash inside the consumer must not resurface
+      // the same count on every cycle for the rest of the session.
+      _lastProblems = total;
+      if (total > 0) hook(snapshot.conflicts, snapshot.blocked, snapshot.failed);
+    } on Object {
+      // Reporting concern only; the badge on the shell already shows it.
+    }
   }
 
   /// [SyncStatusSnapshot] or a best-effort empty one; never throws.
@@ -374,6 +456,78 @@ class SyncEngine {
       await trail?.runRetention();
     } on Object catch (e) {
       debugPrint('[sync] audit retention skipped: $e');
+    }
+  }
+
+  /// Receiving-side parity sweep (plan §9.3-cross).
+  ///
+  /// Cursor-based pulls are deltas: any cursor that once advanced past a
+  /// document it failed to apply — a schema rejection, a database error, an
+  /// old bug — hides that document forever behind the cursor, and the device
+  /// stays out of sync while the badge shows "Synced". This sweep re-verifies
+  /// one entire collection per cycle by clearing that entity's pull cursor,
+  /// so the next pull walks it from the beginning: already-applied rows
+  /// re-fetch and skip cheaply (`remoteVersion == syncedVersion`), hidden
+  /// rows come back, and locally queued edits are untouched.
+  ///
+  /// Triggers (checked once per cycle): a pull that reported skipped
+  /// documents ("Pull skipped" in `last_error`), or `last_full_sync_at`
+  /// being unset (never verified) or older than [parityInterval]. One
+  /// entity per cycle keeps the cost bounded; after the last entity the
+  /// sweep stamps `last_full_sync_at`.
+  static const Duration parityInterval = Duration(days: 7);
+
+  Future<void> _parityMaintenance() async {
+    try {
+      final entities = pullWorker.entities;
+      if (entities.isEmpty) return;
+      var pending = await metadata.get(SyncMetadata.parityPendingKey);
+      if (pending != '1') {
+        if (!await _parityDue()) return;
+        await metadata.set(SyncMetadata.parityPendingKey, '1');
+        await metadata.set(SyncMetadata.parityIndexKey, '0');
+      }
+      final index =
+          int.tryParse(await metadata.get(SyncMetadata.parityIndexKey)) ?? 0;
+      if (index >= entities.length) {
+        await metadata.set(SyncMetadata.parityPendingKey, '0');
+        await metadata.set(SyncMetadata.lastFullSyncAtKey, nowIso());
+        return;
+      }
+      // While pulls are erroring, do not churn the cursor: re-walking from
+      // the beginning while the same document keeps failing repeats the
+      // failure against more documents. The sweep resumes once the error
+      // clears (a successful pull removes `last_error`).
+      final lastError = await metadata.lastError();
+      if (lastError.isNotEmpty) return;
+      final entity = entities[index];
+      await metadata.remove(SyncMetadata.cursorKey(entity.type));
+      await metadata.set(SyncMetadata.parityIndexKey, '${index + 1}');
+    } on Object catch (e) {
+      debugPrint('[sync] parity sweep skipped: $e');
+    }
+  }
+
+  /// True when a full re-verification is due: skipped-document pull errors
+  /// are live, or the last completed sweep is missing/stale.
+  Future<bool> _parityDue() async {
+    final lastError = await metadata.lastError();
+    if (lastError.contains('Pull skipped')) return true;
+    final last =
+        DateTime.tryParse(await metadata.get(SyncMetadata.lastFullSyncAtKey));
+    if (last == null) return true;
+    return DateTime.now().difference(last) > parityInterval;
+  }
+
+  /// Marks a full re-verification due (restore, or anything that makes the
+  /// local cursors untrustworthy). The sweep then advances one entity per
+  /// cycle through [SyncEngine._parityMaintenance].
+  Future<void> markParityDue() async {
+    try {
+      await metadata.set(SyncMetadata.parityPendingKey, '1');
+      await metadata.set(SyncMetadata.parityIndexKey, '0');
+    } on Object {
+      // Best-effort: the weekly trigger covers a failed write here.
     }
   }
 
@@ -421,16 +575,27 @@ class SyncEngine {
     // loop asked the shared background isolate once per entry, so a restore
     // with a few hundred queued rows spent that many round trips on a lookup
     // whose answer is a set membership test.
-    final refsByTable = <String, Set<int>>{};
+    final refsByTable = <String, ({SyncEntity entity, Set<int> refs})>{};
     for (final row in rows) {
       final entity = SyncEntity.byType('${row['entity_type']}');
       final localRef = (row['local_ref'] as num?)?.toInt();
       if (entity == null || localRef == null) continue;
-      refsByTable.putIfAbsent(entity.localTable, () => <int>{}).add(localRef);
+      refsByTable
+          .putIfAbsent(
+            entity.localTable,
+            () => (entity: entity, refs: <int>{}),
+          )
+          .refs
+          .add(localRef);
     }
     final presentRefs = <String, Set<int>>{};
     for (final entry in refsByTable.entries) {
-      presentRefs[entry.key] = await _existingRefs(db, entry.key, entry.value);
+      presentRefs[entry.key] = await _existingRefs(
+        db,
+        entry.key,
+        entry.value.refs,
+        pkColumn: entry.value.entity.pkColumn,
+      );
     }
 
     for (final row in rows) {
@@ -466,12 +631,16 @@ class SyncEngine {
       await db.update(
         entity.localTable,
         {'sync_state': 'queued'},
-        where: 'id = ?',
+        where: '${entity.pkColumn} = ?',
         whereArgs: [localRef],
       );
       requeued++;
     }
     await queue.purgeSolved();
+    // The restored file is a snapshot of the past: documents tombstoned or
+    // simply updated on other devices AFTER the backup was taken may sit
+    // behind this device's old cursors. Schedule a full re-verification.
+    await markParityDue();
     return RestoreReport(
       orphanedEntries: orphaned,
       requeuedRows: requeued,
@@ -479,15 +648,17 @@ class SyncEngine {
     );
   }
 
-  /// Which of [refs] exist in [table], as one `id IN (...)` query.
+  /// Which of [refs] exist in [table], as one `[pk] IN (...)` query.
   ///
   /// SQLite caps a host parameter at 999, so long lists are chunked rather than
-  /// silently truncated.
+  /// silently truncated. [pkColumn] is the table's primary key (`id` for every
+  /// table except the user-authored QC ones).
   static Future<Set<int>> _existingRefs(
     DatabaseExecutor db,
     String table,
-    Set<int> refs,
-  ) async {
+    Set<int> refs, {
+    String pkColumn = 'id',
+  }) async {
     const chunkSize = 500;
     final present = <int>{};
     final all = refs.toList(growable: false);
@@ -497,12 +668,12 @@ class SyncEngine {
       final chunk = all.sublist(offset, end);
       final found = await db.query(
         table,
-        columns: ['id'],
-        where: 'id IN (${List.filled(chunk.length, '?').join(',')})',
+        columns: [pkColumn],
+        where: '$pkColumn IN (${List.filled(chunk.length, '?').join(',')})',
         whereArgs: chunk,
       );
       for (final row in found) {
-        present.add((row['id'] as num).toInt());
+        present.add((row[pkColumn] as num).toInt());
       }
     }
     return present;

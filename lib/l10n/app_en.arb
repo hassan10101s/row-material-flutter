@@ -138,8 +138,6 @@
   "kpi_capa_overdue": "CAPA overdue",
   "kpi_sop_published": "SOP published",
   "kpi_sop_expiry": "Expired / soon",
-  "kpi_goals_active": "Active goals",
-  "kpi_goals_overdue_done": "Overdue / done",
   "kpi_stock_low": "Low",
   "kpi_stock_empty": "Empty",
   "kpi_stock_ok": "OK",

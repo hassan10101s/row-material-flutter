@@ -159,12 +159,12 @@ void main() {
       // appears once something is picked.
       expect(find.byType(AppPaginatedTable), findsOneWidget);
       expect(find.byType(Checkbox), findsNothing);
-      expect(find.byTooltip('Select'), findsOneWidget);
+      expect(find.byTooltip('Select (or long-press any row)'), findsOneWidget);
       expect(find.textContaining('Export report ('), findsNothing);
 
       // Header toggle reveals the circular boxes; the header box selects
       // both page rows.
-      await tester.tap(find.byTooltip('Select'));
+      await tester.tap(find.byTooltip('Select (or long-press any row)'));
       await tester.pumpAndSettle();
       expect(find.byType(Checkbox), findsNWidgets(3));
       await tester.tap(find.byType(Checkbox).first);
@@ -218,7 +218,7 @@ void main() {
       expect(cubit.state.selectedIds, {1});
       expect(find.byType(Checkbox), findsNWidgets(3));
 
-      await tester.tap(find.textContaining('Export labels (1)'));
+      await tester.tap(find.textContaining('Export QR (1)'));
       await tester.pumpAndSettle();
       verify(() => reports.batchLabelsPdf([1])).called(1);
       expect(cubit.state.selectedIds, isEmpty);

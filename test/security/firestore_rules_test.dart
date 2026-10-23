@@ -914,6 +914,10 @@ void main() {
             'status': 'trial',
             'schemaVersion': 2,
             'version': 1,
+            'trialStartedAt': '2026-01-01T00:00:00Z',
+            'trialEndsAt': '2026-01-31T00:00:00Z',
+            'trialConsumed': false,
+            'manuallyActivated': false,
           }),
         );
       });
@@ -931,6 +935,10 @@ void main() {
             'status': 'trial',
             'schemaVersion': 2,
             'version': 1,
+            'trialStartedAt': '2026-01-01T00:00:00Z',
+            'trialEndsAt': '2026-01-31T00:00:00Z',
+            'trialConsumed': false,
+            'manuallyActivated': false,
           }),
         );
         expectAllowed(
@@ -973,7 +981,171 @@ void main() {
             'status': 'trial',
             'schemaVersion': 2,
             'version': 1,
+            'trialStartedAt': '2026-01-01T00:00:00Z',
+            'trialEndsAt': '2026-01-31T00:00:00Z',
+            'trialConsumed': false,
+            'manuallyActivated': false,
           }),
+        );
+      });
+
+      test('org creation without trial fields is rejected', () async {
+        const email = 'nodates@trial.test';
+        final uid = await createAuthUser(email);
+        await signInAs(email);
+        expectDenied(
+          'trial organization without trialConsumed/manuallyActivated',
+          await userPatch('organizations/org_trial_nodates', <String, dynamic>{
+            'name': 'No Dates Co',
+            'ownerUid': uid,
+            'status': 'trial',
+            'schemaVersion': 2,
+            'version': 1,
+          }),
+        );
+      });
+
+      test('org creation with status active is rejected (trial only)', () async {
+        const email = 'activebypass@trial.test';
+        final uid = await createAuthUser(email);
+        await signInAs(email);
+        expectDenied(
+          'organization created directly as active',
+          await userPatch('organizations/org_trial_activebypass', <String, dynamic>{
+            'name': 'Bypass Co',
+            'ownerUid': uid,
+            'status': 'active',
+            'schemaVersion': 2,
+            'version': 1,
+            'trialStartedAt': '2026-01-01T00:00:00Z',
+            'trialEndsAt': '2026-01-31T00:00:00Z',
+            'trialConsumed': false,
+            'manuallyActivated': false,
+          }),
+        );
+      });
+    });
+
+    /// Trial lifecycle pinning: no client may change `status`,
+    /// `trialStartedAt`, `trialEndsAt`, `trialConsumed` or `manuallyActivated`.
+    /// `trial` → `suspended` (server cron) and `suspended` → `active` (manual
+    /// activation by support) run through the Admin SDK, which bypasses rules.
+    group('trial lifecycle', () {
+      test('a trial org cannot be flipped to active from the client', () async {
+        await seed('organizations/org_trial_flip', <String, dynamic>{
+          'name': 'Flip Co',
+          'ownerUid': adminUid,
+          'status': 'trial',
+          'schemaVersion': 2,
+          'version': 1,
+          'trialStartedAt': '2026-01-01T00:00:00Z',
+          'trialEndsAt': '2026-01-31T00:00:00Z',
+          'trialConsumed': false,
+          'manuallyActivated': false,
+        });
+        await signInAs('admin@lab.test');
+        expectDenied(
+          'trial org promoted to active',
+          await userPatch('organizations/org_trial_flip', <String, dynamic>{
+            'name': 'Flip Co',
+            'ownerUid': adminUid,
+            'status': 'active',
+            'schemaVersion': 2,
+            'version': 1,
+            'trialStartedAt': '2026-01-01T00:00:00Z',
+            'trialEndsAt': '2026-01-31T00:00:00Z',
+            'trialConsumed': true,
+            'manuallyActivated': true,
+          }),
+        );
+      });
+
+      test('an admin cannot touch trialConsumed/manuallyActivated', () async {
+        await signInAs('admin@lab.test');
+        expectDenied(
+          'admin forges trial flags',
+          await userPatch('organizations/$_org', <String, dynamic>{
+            'name': 'Acme',
+            'ownerUid': 'seed_owner',
+            'status': 'active',
+            'schemaVersion': 2,
+            'version': 1,
+            'trialConsumed': true,
+            'manuallyActivated': true,
+          }),
+        );
+      });
+
+      test('an admin can still rename the organization', () async {
+        await signInAs('admin@lab.test');
+        expectAllowed(
+          'admin renames the org',
+          await userPatch('organizations/$_org', <String, dynamic>{
+            'name': 'Acme Renamed',
+            'ownerUid': 'seed_owner',
+            'status': 'active',
+            'schemaVersion': 2,
+            'version': 1,
+          }),
+        );
+        // Restore the fixture name for the other groups.
+        await seed('organizations/$_org', <String, dynamic>{'name': 'Acme'});
+      });
+
+      test('members of a suspended org read and write nothing', () async {
+        const susEmail = 'suspended@lab.test';
+        final susUid = await createAuthUser(susEmail);
+        await seed('organizations/org_suspended', <String, dynamic>{
+          'name': 'Suspended Co',
+          'ownerUid': 'seed_owner',
+          'status': 'suspended',
+          'schemaVersion': 2,
+          'version': 1,
+          'trialConsumed': true,
+          'manuallyActivated': false,
+        });
+        await seed('users/$susUid', <String, dynamic>{
+          'email': susEmail,
+          'organizationId': 'org_suspended',
+          'role': 'lab',
+          'status': 'active',
+          'memberId': 'member_sus',
+          'version': 1,
+          'updatedBy': susUid,
+        });
+        await seed(
+          'organizations/org_suspended/members/member_sus',
+          memberPayload(
+            'member_sus',
+            uid: susUid,
+            email: susEmail,
+            role: 'lab',
+            status: 'active',
+            version: 1,
+            updatedBy: susUid,
+          ),
+        );
+        await signInAs(susEmail);
+        // The gate read stays open so the app can show the trial-expired
+        // screen with the support contacts.
+        expectAllowed(
+          'suspended member reads the org document',
+          await userGet('organizations/org_suspended'),
+        );
+        expectDenied(
+          'suspended member lists samples',
+          await userList('organizations/org_suspended/samples'),
+        );
+        expectDenied(
+          'suspended member writes a sample',
+          await userPatch(
+            'organizations/org_suspended/samples/s1',
+            envelope(uid: susUid, org: 'org_suspended'),
+          ),
+        );
+        expectDenied(
+          'suspended member lists the roster',
+          await userList('organizations/org_suspended/members'),
         );
       });
     });

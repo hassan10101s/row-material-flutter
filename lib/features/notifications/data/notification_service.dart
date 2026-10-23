@@ -1,12 +1,15 @@
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart' show Color;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../../core/database/database_helper.dart';
 import '../../../core/sync/sync_metadata.dart';
+import '../../../core/utils/app_dates.dart';
+import '../../../design_system/tokens/app_colors.dart';
+import '../../lab/core/lab_result_format.dart';
 import '../domain/notification_item.dart';
+import '../domain/notifications_port.dart';
 
 /// Detects new inspections + lab test results and fans out to the bell list
 /// and (Android only) OS notifications.
@@ -14,7 +17,7 @@ import '../domain/notification_item.dart';
 /// Watermarks are `MAX(id)` per table stored in `sync_metadata`, so a pull
 /// that inserts rows with fresh local ids and a local save are both caught.
 /// Dedupe inside `notifications` is `(type, entry_code, ref_id)`.
-class NotificationService {
+class NotificationService implements NotificationsPort {
   NotificationService({required this.dbHelper, required this.metadata});
 
   final DatabaseHelper dbHelper;
@@ -38,7 +41,37 @@ class NotificationService {
 
   /// Pending deep-link payload from an OS tap when the app was killed.
   /// Consumed once by the router after `AuthState.ready`.
+  @override
   String? pendingPayload;
+
+  /// Listeners notified on every push / local-notification tap. The shell
+  /// registers one and routes the payload; unlike the one-shot
+  /// [pendingPayload] read this keeps working for taps made later in the
+  /// session, not only the very first one after a cold start.
+  final List<void Function(String payload)> _payloadListeners = [];
+
+  @override
+  void addPayloadListener(void Function(String payload) callback) {
+    _payloadListeners.add(callback);
+  }
+
+  @override
+  void removePayloadListener(void Function(String payload) callback) {
+    _payloadListeners.remove(callback);
+  }
+
+  /// Stashes and broadcasts a tap payload. Safe to call from any platform
+  /// (listener failing is swallowed — routing must never crash a tap).
+  void deliverPayload(String payload) {
+    pendingPayload = payload;
+    for (final callback in List.of(_payloadListeners)) {
+      try {
+        callback(payload);
+      } on Object catch (e) {
+        debugPrint('[notif] payload listener skipped: $e');
+      }
+    }
+  }
 
   Future<void> initOs({bool requestPermission = true}) async {
     if (!Platform.isAndroid && !Platform.isIOS) return;
@@ -48,7 +81,7 @@ class NotificationService {
       const InitializationSettings(android: android, iOS: ios),
       onDidReceiveNotificationResponse: (r) {
         if (r.payload != null && r.payload!.isNotEmpty) {
-          pendingPayload = r.payload;
+          deliverPayload(r.payload!);
         }
       },
     );
@@ -75,7 +108,7 @@ class NotificationService {
     final launch = await _os.getNotificationAppLaunchDetails();
     if (launch?.didNotificationLaunchApp == true &&
         launch?.notificationResponse?.payload?.isNotEmpty == true) {
-      pendingPayload = launch!.notificationResponse!.payload;
+      deliverPayload(launch!.notificationResponse!.payload!);
     }
     _osReady = true;
   }
@@ -83,6 +116,7 @@ class NotificationService {
   /// Scan both tables for rows newer than the watermarks, store them, advance
   /// watermarks. Returns the newly found items (newest first).
   /// Never throws: notification detection must not break sync or saves.
+  @override
   Future<List<NotificationItem>> checkForNew({
     bool inspectionEnabled = true,
     bool labEnabled = true,
@@ -224,11 +258,13 @@ class NotificationService {
       't.source_ref_id, t.tested_by, t.tested_at, t.analysis_id, '
       't.result_text, COALESCE(a.name, \'\') AS analysis_name, '
       'COALESCE(t.created_at, t.tested_at, \'\') AS created_at, '
-      'COALESCE(NULLIF(u.full_name, \'\'), NULLIF(u.display_name, \'\'), '
-      'u.email, \'\') AS tester_name, '
+      'COALESCE(NULLIF(ut.full_name, \'\'), NULLIF(ut.display_name, \'\'), '
+      'ut.email, NULLIF(uc.full_name, \'\'), NULLIF(uc.display_name, \'\'), '
+      'uc.email, \'\') AS tester_name, '
       's.decision_status AS sample_decision '
       'FROM lab_sample_tests t '
-      'LEFT JOIN users u ON u.id = t.tested_by '
+      'LEFT JOIN users ut ON ut.id = t.tested_by OR ut.uid = t.tested_by '
+      'LEFT JOIN users uc ON uc.id = t.created_by OR uc.uid = t.created_by '
       'LEFT JOIN lab_analyses a ON a.id = t.analysis_id '
       'LEFT JOIN product_batch_samples s ON s.id = t.source_ref_id '
       'AND t.source_type = \'product\' '
@@ -371,7 +407,10 @@ class NotificationService {
     final parts = <String>[];
     final code = '${r['entry_code'] ?? ''}'.trim();
     final analysis = '${r['analysis_name'] ?? ''}'.trim();
-    final result = '${r['result_text'] ?? ''}'.trim();
+    // Empty results must stay empty (the format helper returns '-'), or the
+    // isNotEmpty guards below would start printing '-' in the body.
+    final rawResult = '${r['result_text'] ?? ''}'.trim();
+    final result = rawResult.isEmpty ? '' : formatLabResult(rawResult);
     if ('${r['source_type'] ?? ''}' != 'product') {
       final sample = '${r['sample_name'] ?? r['source_name'] ?? ''}'.trim();
       if (sample.isNotEmpty) parts.add('الخامة: $sample');
@@ -511,6 +550,7 @@ class NotificationService {
     }
   }
 
+  @override
   Future<List<NotificationItem>> recent({int limit = 30}) async {
     try {
       final db = await dbHelper.database;
@@ -525,6 +565,7 @@ class NotificationService {
     }
   }
 
+  @override
   Future<int> unreadCount() async {
     try {
       final db = await dbHelper.database;
@@ -537,6 +578,7 @@ class NotificationService {
     }
   }
 
+  @override
   Future<void> markRead(int id) async {
     try {
       final db = await dbHelper.database;
@@ -555,6 +597,7 @@ class NotificationService {
   /// once the user acknowledges everything there is nothing left to keep).
   /// Watermarks still advance to MAX(id) so the same rows are never
   /// re-notified on the next scan — the delete is permanent, not a resurface.
+  @override
   Future<void> markAllRead() async {
     try {
       final db = await dbHelper.database;
@@ -572,6 +615,72 @@ class NotificationService {
 
   /// Explicit alias for the UI ("Clear all / مسح الكل").
   Future<void> clearAll() => markAllRead();
+
+  /// Bell + OS row for two-way sync problems (conflicts / blocked / failed).
+  /// Fired by the sync engine whenever the problem total CHANGES, so the
+  /// user learns that records did not reach the other side even on a day
+  /// with no new inspections (the pull-driven scans would stay silent).
+  /// Dedupe: `entry_code` carries the total, so an unchanged count never
+  /// re-inserts (UNIQUE type+entry_code+ref_id rejects it) and a change
+  /// always lands a fresh row on top of the bell.
+  Future<void> notifySyncProblems({
+    required int conflicts,
+    required int blocked,
+    required int failed,
+  }) async {
+    final total = conflicts + blocked + failed;
+    if (total <= 0) return;
+    final title = 'مشاكل مزامنة تحتاج مراجعة • Sync problems';
+    final subtitle =
+        'تعارضات: $conflicts • محظورة: $blocked • فاشلة: $failed — '
+        'Conflicts: $conflicts • Blocked: $blocked • Failed: $failed';
+    try {
+      final db = await dbHelper.database;
+      final rowId = await db.insert('notifications', {
+        'type': NotificationType.sync.storage,
+        'ref_id': 0,
+        'entry_code': 'sync-problems-$total',
+        'title': title,
+        'subtitle': subtitle,
+        'created_at': nowIso(),
+        'read': 0,
+      });
+      await _trim();
+      final item = NotificationItem(
+        id: rowId,
+        type: NotificationType.sync,
+        refId: 0,
+        entryCode: 'sync-problems-$total',
+        title: title,
+        subtitle: subtitle,
+        createdAt: nowIso(),
+        read: false,
+      );
+      // Own OS slot: reuse the same channel, but the heading must not go
+      // through [showOsNotifications]'s inspection/lab branch table.
+      if (_osReady && (Platform.isAndroid || Platform.isIOS)) {
+        await _os.show(
+          item.id,
+          'مشاكل مزامنة • Sync problems',
+          '$title\n$subtitle',
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              channelId,
+              channelName,
+              channelDescription: channelDescription,
+              importance: Importance.high,
+              priority: Priority.high,
+              styleInformation: BigTextStyleInformation('$title\n$subtitle'),
+            ),
+          ),
+          payload: item.payload,
+        );
+      }
+    } on Object catch (e) {
+      // Unchanged count (UNIQUE duplicate) or storage outage: not fatal.
+      debugPrint('[notif] sync problem skipped: $e');
+    }
+  }
 
   NotificationItem _fromRow(Map<String, Object?> r) => NotificationItem(
     id: (r['id'] as num).toInt(),
@@ -602,12 +711,13 @@ class NotificationService {
             ? 'متابعة تحليل منتج • Product follow-up'
             : 'نتيجة معمل (كيمياء) • Lab result (Chemistry)';
         final body = '${item.title}\n${item.subtitle}'.trim();
-        // Tray accent matches the bell: red when rejected, blue when
-        // accepted, default teal otherwise.
+        // Tray accent matches the bell: danger red when rejected, info blue
+        // when accepted, default (palette primary) otherwise. OS accents are
+        // not theme-aware, but the brand hues must stay in one place.
         final accent = item.isRejected
-            ? const Color(0xFFB91C1C)
+            ? AppColors.danger
             : item.isAccepted
-            ? const Color(0xFF1D4ED8)
+            ? AppColors.info
             : null;
         await _os.show(
           item.id,
@@ -645,11 +755,11 @@ class NotificationService {
     try {
       final text = '$title $body';
       final accent = text.contains('مرفوض') || text.contains('Rejected')
-          ? const Color(0xFFB91C1C)
+          ? AppColors.danger
           : (text.contains('مطابق') ||
                 text.contains('مقبول') ||
                 text.contains('Accepted'))
-          ? const Color(0xFF1D4ED8)
+          ? AppColors.info
           : null;
       await _os.show(
         DateTime.now().microsecondsSinceEpoch ~/ 1000,
@@ -675,7 +785,7 @@ class NotificationService {
     }
   }
 
-  /// Parse `inspection:12` / `lab:34` payloads.
+  /// Parse `inspection:12` / `lab:34` / `sync:*` payloads.
   static ({String route, String? highlight, int? tab})? routeForPayload(
     String payload,
   ) {
@@ -687,6 +797,9 @@ class NotificationService {
     }
     if (parts[0] == 'lab') {
       return (route: '/lab', highlight: id, tab: 0);
+    }
+    if (parts[0] == 'sync') {
+      return (route: '/sync', highlight: null, tab: null);
     }
     return null;
   }

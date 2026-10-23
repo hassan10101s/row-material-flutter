@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -63,6 +65,11 @@ class TestHistoryData {
 
 class TestHistoryScopeState extends State<TestHistoryScope> {
   final query = TextEditingController();
+
+  /// سبب القرار filter: `has` shows only the rows whose محضر carries a
+  /// decision reason (records without one are hidden; nothing new appears
+  /// in the table itself). `''` = all records.
+  String reasonState = '';
   String filterMode = 'last24h';
   String specificDate = '';
   String recordLimit = '100';
@@ -103,8 +110,11 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
     }
   }
 
+  Timer? _queryDebounce;
+
   @override
   void dispose() {
+    _queryDebounce?.cancel();
     query.dispose();
     super.dispose();
   }
@@ -112,10 +122,18 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
   void resetPage() => page = 1;
 
   /// Called on every keystroke (the controller already holds the text).
-  void onQueryChanged() => setState(() {
+  /// Perf: debounced 250ms so fast typing filters once instead of running
+  /// thBuildChemTestMap + filter + sort + pagination on every character.
+  void onQueryChanged() {
+    _queryDebounce?.cancel();
+    _queryDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      setState(() {
         resetPage();
         selectedIds.clear();
       });
+    });
+  }
 
   void clearQuery() => setState(() {
     query.clear();
@@ -144,6 +162,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
       sourceType = '';
       chemicalId = '';
       rangeState = '';
+      reasonState = '';
       query.clear();
       resetPage();
       selectedIds.clear();
@@ -157,6 +176,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
     required String source,
     required String chemical,
     required String range,
+    required String reason,
     required String limit,
   }) {
     setState(() {
@@ -166,6 +186,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
       sourceType = source;
       chemicalId = chemical;
       rangeState = range;
+      reasonState = reason;
       recordLimit = limit;
       resetPage();
       selectedIds.clear();
@@ -181,6 +202,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
         sourceType: sourceType,
         chemicalId: chemicalId,
         rangeState: rangeState,
+        reasonState: reasonState,
         query: query.text,
         key: key,
       );
@@ -246,6 +268,19 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
     });
   }
 
+  List<Map<String, dynamic>>? _lastLogIdentity;
+  Map<String, Set<String>> _cachedChemMap = const {};
+
+  Map<String, Set<String>> _chemMapFor(List<Map<String, dynamic>> log) {
+    // Perf: thBuildChemTestMap is O(log) and log only changes on cubit load.
+    // Reuse the map while the list identity is unchanged (same result).
+    if (!identical(log, _lastLogIdentity)) {
+      _lastLogIdentity = log;
+      _cachedChemMap = thBuildChemTestMap(log);
+    }
+    return _cachedChemMap;
+  }
+
   List<Map<String, dynamic>> buildRows(
     List<Map<String, dynamic>> history,
     List<Map<String, dynamic>> log,
@@ -258,8 +293,9 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
       sourceType: sourceType,
       chemicalId: chemicalId,
       rangeState: rangeState,
+      reasonState: reasonState,
       query: query.text,
-      chemTestMap: thBuildChemTestMap(log),
+      chemTestMap: _chemMapFor(log),
     );
     return thSortRows(rows, sortKey, sortDir);
   }
@@ -278,6 +314,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
       sourceType: sourceType,
       chemicalId: chemicalId,
       rangeState: rangeState,
+      reasonState: reasonState,
       analyses: state.analyses,
       chemicalOptions: chemOptions,
     );

@@ -83,6 +83,7 @@ abstract interface class LabResultRepository {
     String reason = '',
     Map<String, dynamic>? user,
     double? deltaQty,
+    String expiryDate = '',
   });
 
   /// Batch load used while building a result; honours the caller's transaction.
@@ -127,6 +128,7 @@ abstract interface class LabConfigurationRepository {
   Future<Map<String, dynamic>> createAnalysis({
     required String name,
     String description = '',
+    String reference = '',
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String unit = '%',
@@ -139,6 +141,7 @@ abstract interface class LabConfigurationRepository {
     required int analysisId,
     String? name,
     String? description,
+    String? reference,
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String? unit,

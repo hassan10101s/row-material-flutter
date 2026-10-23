@@ -178,6 +178,7 @@ class AppFilterBar extends StatelessWidget {
     this.onSearch,
     this.filters = const [],
     this.trailing,
+    this.searchFocusNode,
   });
 
   final String? searchHint;
@@ -186,6 +187,10 @@ class AppFilterBar extends StatelessWidget {
   final ValueChanged<String>? onSearch;
   final List<Widget> filters;
   final Widget? trailing;
+
+  /// Caller-owned focus handle for the inner [DebouncedSearchField], so a
+  /// page-level Ctrl+F shortcut can reach it.
+  final FocusNode? searchFocusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -203,6 +208,7 @@ class AppFilterBar extends StatelessWidget {
                 label: searchLabel,
                 initialValue: initialSearch,
                 onChanged: onSearch!,
+                focusNode: searchFocusNode,
               ),
             ),
           if (filters.isNotEmpty || trailing != null) ...[
@@ -231,6 +237,7 @@ class AppFilterBar extends StatelessWidget {
               label: searchLabel,
               initialValue: initialSearch,
               onChanged: onSearch!,
+              focusNode: searchFocusNode,
             ),
           ),
         ...filters,

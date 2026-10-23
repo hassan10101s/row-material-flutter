@@ -707,5 +707,27 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AppWindow), findsOneWidget);
     });
+
+    testWidgets('test log renders the shared paginated table on desktop', (
+      tester,
+    ) async {
+      final cubit = TestHistoryCubit(
+        results: labResults,
+        local: local,
+        config: labConfig,
+      );
+      addTearDown(cubit.close);
+
+      await pumpAs(
+        tester,
+        AppFormFactor.desktop,
+        BlocProvider.value(value: cubit, child: const TestHistoryTab()),
+      );
+
+      // The register rebuilt on the design-system table, never a DataTable.
+      expect(find.byType(DataTable), findsNothing);
+      expect(find.byType(AppPaginatedTable), findsOneWidget);
+      expect(find.text('Moisture'), findsOneWidget);
+    });
   });
 }

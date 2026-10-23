@@ -100,6 +100,8 @@ class NotificationBell extends StatelessWidget {
     if (!context.mounted) return;
     if (selected.type == NotificationType.inspection) {
       context.go('/inspections?highlight=${selected.refId}');
+    } else if (selected.type == NotificationType.sync) {
+      context.go('/sync');
     } else {
       context.go('/lab?tab=0&highlight=${selected.refId}');
     }

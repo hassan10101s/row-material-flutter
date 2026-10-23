@@ -16,6 +16,14 @@ class InspectionsState extends Equatable {
   final List<Map<String, dynamic>> visible;
   final String query;
   final String status;
+
+  /// Reason filter (`decision_reason` substring). Never rendered as a table
+  /// column — only used to narrow the register and shown back as a chip.
+  final String reason;
+  /// Exact supplier filter (dashboard drill-down seeds it); empty = all.
+  /// Unlike [materialId] it is a plain string — `supplier` is free text,
+  /// stored trimmed, so equality is identity here.
+  final String supplier;
   /// Inclusive `inspection_date` bounds (`yyyy-MM-dd`); empty = unbounded.
   final String dateFrom;
   final String dateTo;
@@ -39,6 +47,8 @@ class InspectionsState extends Equatable {
     this.visible = const [],
     this.query = '',
     this.status = '',
+    this.reason = '',
+    this.supplier = '',
     this.dateFrom = '',
     this.dateTo = '',
     this.materialId,
@@ -57,6 +67,8 @@ class InspectionsState extends Equatable {
     List<Map<String, dynamic>>? visible,
     String? query,
     String? status,
+    String? reason,
+    String? supplier,
     String? dateFrom,
     String? dateTo,
     int? materialId,
@@ -77,6 +89,8 @@ class InspectionsState extends Equatable {
         visible: visible ?? this.visible,
         query: query ?? this.query,
         status: status ?? this.status,
+        reason: reason ?? this.reason,
+        supplier: supplier ?? this.supplier,
         dateFrom: dateFrom ?? this.dateFrom,
         dateTo: dateTo ?? this.dateTo,
         materialId: clearMaterialId ? null : (materialId ?? this.materialId),
@@ -97,6 +111,8 @@ class InspectionsState extends Equatable {
         visible,
         query,
         status,
+        reason,
+        supplier,
         dateFrom,
         dateTo,
         materialId,

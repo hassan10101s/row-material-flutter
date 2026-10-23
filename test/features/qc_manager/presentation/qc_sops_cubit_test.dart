@@ -249,7 +249,11 @@ void main() {
       final cubit = QcSopsCubit(repo: repo);
       await cubit.load();
       expect(cubit.state.loading, isFalse);
-      expect(cubit.state.error, contains('db is gone'));
+      // Raw throwables never reach state: `AppError.friendly` flattens them.
+      expect(
+        cubit.state.error,
+        'حدث خطأ غير متوقع. حاول مرة أخرى.',
+      );
     });
 
     test('create adds a draft and reloads', () async {

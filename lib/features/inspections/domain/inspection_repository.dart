@@ -33,16 +33,19 @@ abstract interface class SampleRepository {
   /// [dateFrom]/[dateTo] bound `inspection_date` (inclusive, `yyyy-MM-dd`);
   /// empty means unbounded. [materialId] filters raw inspections by
   /// `material_id`, [productId] filters product inspections by `product_id`;
-  /// null means unfiltered.
+  /// null means unfiltered. [supplier] is an exact `supplier` match (stored
+  /// trimmed); empty = unfiltered.
   Future<List<Map<String, dynamic>>> list({
     String query = '',
     String status = '',
+    String reason = '',
     int limit = 50,
     int offset = 0,
     String orderBy = 'id DESC',
     String kind = '',
     String dateFrom = '',
     String dateTo = '',
+    String supplier = '',
     int? materialId,
     int? productId,
   });
@@ -50,14 +53,24 @@ abstract interface class SampleRepository {
   Future<int> count({
     String query = '',
     String status = '',
+    String reason = '',
     String kind = '',
     String dateFrom = '',
     String dateTo = '',
+    String supplier = '',
     int? materialId,
     int? productId,
   });
 
   Future<Map<String, dynamic>> getById(int id);
+
+  /// Distinct supplier names seen on real inspections, most recent first and
+  /// de-duplicated case-insensitively (form autocomplete + filter dialog).
+  /// Rows carry a `name` key.
+  Future<List<Map<String, dynamic>>> listSupplierHistory({
+    int? materialId,
+    int limit = 30,
+  });
 }
 
 /// Decision log: `inspection_status_history` rows sync append-only to
@@ -111,12 +124,14 @@ abstract interface class InspectionRepository {
   Future<List<Map<String, dynamic>>> list({
     String query = '',
     String status = '',
+    String reason = '',
     int limit = 50,
     int offset = 0,
     String orderBy = 'id DESC',
     String kind = '',
     String dateFrom = '',
     String dateTo = '',
+    String supplier = '',
     int? materialId,
     int? productId,
   });
@@ -124,9 +139,11 @@ abstract interface class InspectionRepository {
   Future<int> count({
     String query = '',
     String status = '',
+    String reason = '',
     String kind = '',
     String dateFrom = '',
     String dateTo = '',
+    String supplier = '',
     int? materialId,
     int? productId,
   });

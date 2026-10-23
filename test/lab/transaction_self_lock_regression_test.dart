@@ -127,7 +127,11 @@ void main() {
     final itemId = item['id'] as int;
 
     final adjusted = await repo
-        .adjustStock(itemId: itemId, newQty: 12.0)
+        .adjustStock(
+          itemId: itemId,
+          newQty: 12.0,
+          expiryDate: '2027-01-01',
+        )
         .timeout(const Duration(seconds: 15));
     expect(adjusted['current_qty'], 12.0);
 

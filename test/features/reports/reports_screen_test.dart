@@ -9,6 +9,8 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/design_system/widgets/app_button.dart';
+import 'package:material_lab/design_system/widgets/app_date_field.dart';
+import 'package:material_lab/design_system/widgets/app_field.dart';
 import 'package:material_lab/features/reports/domain/report_repository.dart';
 import 'package:material_lab/features/reports/presentation/cubit/reports_cubit.dart';
 import 'package:material_lab/features/reports/presentation/report/reports_screen.dart';
@@ -39,6 +41,12 @@ void main() {
   tearDown(() => cubit.close());
 
   Future<void> pump(WidgetTester tester) async {
+    // Full page must fit the test window: the default 800x600 leaves the
+    // yearly export button outside the root of the render tree and the tap
+    // never registers.
+    tester.view.physicalSize = const Size(1280, 2400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
     await tester.pumpWidget(ScreenUtilInit(
       designSize: const Size(1280, 720),
       minTextAdapt: true,
@@ -50,11 +58,20 @@ void main() {
     ));
   }
 
-  /// Text fields are addressed by their `labelText`, which is decoration data
-  /// rather than a `Text` descendant.
-  Finder field(String label) => find.byWidgetPredicate(
-        (w) => w is TextField && w.decoration?.labelText == label,
-        description: 'TextField labelled "$label"',
+  /// AppField/AppDateField render their label as a sibling Text, not
+  /// `labelText` data, so fields are addressed by the label shown on the
+  /// widget itself.
+  Finder appField(String label) => find.byWidgetPredicate(
+        (w) =>
+            (w is AppField && w.label == label) ||
+            (w is AppDateField && w.label == label),
+        description: 'Field labelled "$label"',
+      );
+
+  /// The EditableText inside a matching AppField (enterText's target).
+  Finder field(String label) => find.descendant(
+        of: appField(label),
+        matching: find.byType(TextFormField),
       );
 
   /// The three export buttons, in screen order: daily, monthly, yearly.
@@ -73,14 +90,13 @@ void main() {
 
       // Two "Year" fields, one per card. They used to share a controller, so
       // typing in one rewrote the other.
-      expect(field('Year'), findsNWidgets(2));
+      expect(appField('Year'), findsNWidgets(2));
 
       await tester.enterText(field('Year').first, '2021');
       await tester.pump();
 
       final years = tester
-          .widgetList<TextField>(find.byType(TextField))
-          .where((f) => f.decoration?.labelText == 'Year')
+          .widgetList<AppField>(appField('Year'))
           .map((f) => f.controller?.text)
           .toList();
       expect(years, ['2021', isNot('2021')]);

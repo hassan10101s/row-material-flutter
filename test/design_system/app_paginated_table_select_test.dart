@@ -79,10 +79,10 @@ void main() {
       await pumpHarness(tester, selectHidden: true);
 
       expect(find.byType(Checkbox), findsNothing);
-      expect(find.byTooltip('Select'), findsOneWidget);
+      expect(find.byTooltip('Select (or long-press any row)'), findsOneWidget);
 
       // Header toggle reveals circular boxes without picking anything.
-      await tester.tap(find.byTooltip('Select'));
+      await tester.tap(find.byTooltip('Select (or long-press any row)'));
       await tester.pumpAndSettle();
       expect(find.byType(Checkbox), findsNWidgets(3));
       final box = tester.widget<Checkbox>(find.byType(Checkbox).first);
@@ -128,7 +128,7 @@ void main() {
       await tester.tap(find.byType(Checkbox).first);
       await tester.pumpAndSettle();
       expect(find.byType(Checkbox), findsNothing);
-      expect(find.byTooltip('Select'), findsOneWidget);
+      expect(find.byTooltip('Select (or long-press any row)'), findsOneWidget);
     });
 
     testWidgets('visible mode keeps the classic always-on column',
@@ -136,7 +136,7 @@ void main() {
       await pumpHarness(tester);
 
       expect(find.byType(Checkbox), findsNWidgets(3));
-      expect(find.byTooltip('Select'), findsNothing);
+      expect(find.byTooltip('Select (or long-press any row)'), findsNothing);
     });
   });
 }

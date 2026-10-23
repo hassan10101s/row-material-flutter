@@ -2,14 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 
-import '../data/notification_service.dart';
+import '../domain/notifications_port.dart';
 import '../domain/notification_item.dart';
 
-/// Bell-badge state fed by [NotificationService]. Mobile only.
+/// Bell-badge state fed by the [NotificationsPort] (the data-layer
+/// `NotificationService`, behind its contract). Mobile only.
 class NotificationController extends ChangeNotifier {
   NotificationController(this.service);
 
-  final NotificationService service;
+  final NotificationsPort service;
 
   List<NotificationItem> items = const [];
   int unread = 0;

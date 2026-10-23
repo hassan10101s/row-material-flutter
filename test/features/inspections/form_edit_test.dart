@@ -146,6 +146,12 @@ void main() {
     (w) => w is TextField && w.controller?.text == 'Acme',
   );
 
+  /// A result cell carrying [value]: the stored physical/chemical values must
+  /// survive the reference-grid rebuild in edit mode.
+  Finder resultField(String value) => find.byWidgetPredicate(
+    (w) => w is TextField && w.controller?.text == value,
+  );
+
   group('desktop edit', () {
     testWidgets('opens the prefilled design-system dialog and updates', (
       tester,
@@ -166,6 +172,9 @@ void main() {
       // Windows design-system chrome, prefilled from the stored row.
       expect(find.byType(AppWindow), findsOneWidget);
       expect(supplierField(), findsOneWidget);
+      // The stored physical result is restored into its grid cell, not lost
+      // when the reference grid rebuilds.
+      expect(resultField('12'), findsOneWidget);
 
       // The full form scrolls inside the window: drive to Save first.
       await tester.ensureVisible(find.text('Save'));
@@ -201,6 +210,11 @@ void main() {
       expect(find.byType(AppWindow), findsNothing);
       expect(find.byType(Dialog), findsNothing);
       expect(supplierField(), findsOneWidget);
+
+      // Step through to the results step: the stored value is restored there.
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      expect(resultField('12'), findsOneWidget);
     });
   });
 }

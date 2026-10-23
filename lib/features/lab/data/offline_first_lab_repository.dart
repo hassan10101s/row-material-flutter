@@ -4,6 +4,7 @@ import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_errors.dart';
 import '../../../core/sync/audit_logger.dart';
 import '../../../core/sync/entity_registry.dart';
+import '../../../core/sync/remote/remote_data_source.dart';
 import '../../../core/sync/sync_queue.dart';
 import '../../../core/sync/sync_write.dart' as sync_write;
 import '../../../core/utils/app_dates.dart';
@@ -74,6 +75,54 @@ class OfflineFirstLabRepository extends LabRepo
   static SyncEntity _entity(String type) =>
       SyncEntity.byType(type) ??
       (throw StateError('Unknown sync entity: $type'));
+
+  /// Enqueues `lab_units` rows auto-created by the base `registerUnit`
+  /// (INSERT OR IGNORE, no version bump, no queue entry). Sweeps rows that
+  /// are not already queued, so repeated saves do not churn versions and
+  /// every path that registers a unit (inventory, analyses, constants,
+  /// links, bootstrap) is covered from one place. Missing table/columns on
+  /// hand-built test databases are skipped.
+  Future<void> _syncUnitRows(
+    DatabaseExecutor txn, [
+    Iterable<String>? symbols,
+  ]) async {
+    try {
+      final wanted = symbols
+          ?.map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+      final rows = await txn.query(
+        'lab_units',
+        columns: ['id', 'symbol', 'sync_state'],
+        where: wanted == null
+            ? 'sync_state IS NULL OR sync_state != ?'
+            : 'symbol IN (${List.filled(wanted.isEmpty ? 1 : wanted.length, '?').join(', ')})',
+        whereArgs: wanted == null
+            ? ['queued']
+            : (wanted.isEmpty ? [''] : wanted.toList()),
+      );
+      for (final r in rows) {
+        if ('${r['sync_state'] ?? ''}' == 'queued') continue;
+        final id = (r['id'] as num?)?.toInt();
+        if (id == null) continue;
+        try {
+          await _enqueueConfig(
+            txn,
+            entity: _entity('labUnit'),
+            table: 'lab_units',
+            localId: id,
+            operation: 'upsert',
+            action: AuditAction.settingsUpdated,
+            details: {'localId': id, 'symbol': r['symbol']},
+          );
+        } on Object {
+          continue;
+        }
+      }
+    } on Object {
+      // Registry sync is best-effort; the business write already committed.
+    }
+  }
 
   /// Resolve the local numeric user id used by SQLite.  The authenticated
   /// user id is normally a Firebase UID (text), while the legacy tables use
@@ -332,6 +381,7 @@ class OfflineFirstLabRepository extends LabRepo
     String description = '',
     Map<String, dynamic>? user,
     DatabaseExecutor? executor,
+    String expiryDate = '',
   }) async {
     _check(Permission.labResultsUpdate);
     return _inTransaction(executor, (txn) async {
@@ -344,6 +394,7 @@ class OfflineFirstLabRepository extends LabRepo
         description: description,
         user: user,
         executor: txn,
+        expiryDate: expiryDate,
       );
       var stamped = await _withRemoteId(txn, 'lab_inventory', item);
       await _enqueue(
@@ -353,6 +404,19 @@ class OfflineFirstLabRepository extends LabRepo
         'create',
         AuditAction.settingsUpdated,
       );
+      await _syncUnitRows(txn);
+      // The opening balance lives in one lot (base): enqueue it so the new
+      // item converges whole on other devices.
+      final itemId = (stamped['id'] as num).toInt();
+      final freshLots = await txn.query(
+        'inventory_lots',
+        columns: ['id'],
+        where: 'inventory_id = ? AND sync_state = ?',
+        whereArgs: [itemId, 'local'],
+      );
+      await _enqueueLots(txn, [
+        for (final l in freshLots) (l['id'] as num).toInt(),
+      ]);
       // Opening balance ledger row (plan §4): the truth for cross-device
       // balance, `current_qty` stays as the local cache.
       final opening = (stamped['current_qty'] as num?)?.toDouble() ?? 0.0;
@@ -400,6 +464,7 @@ class OfflineFirstLabRepository extends LabRepo
         'update',
         AuditAction.settingsUpdated,
       );
+      await _syncUnitRows(txn);
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,
@@ -418,6 +483,7 @@ class OfflineFirstLabRepository extends LabRepo
     String reason = '',
     Map<String, dynamic>? user,
     double? deltaQty,
+    String expiryDate = '',
     DatabaseExecutor? executor,
   }) async {
     _check(Permission.labResultsUpdate);
@@ -429,8 +495,17 @@ class OfflineFirstLabRepository extends LabRepo
         reason: reason,
         user: user,
         deltaQty: deltaQty,
+        expiryDate: expiryDate,
         executor: txn,
       );
+      // A stock increase arrives as a lot (the base returns its id on the
+      // item map); enqueue it so balances converge cross-device. The key is
+      // stripped before the item itself is queued (no such column remotely).
+      final lotId = (item['lot_id'] as num?)?.toInt();
+      item.remove('lot_id');
+      if (lotId != null) {
+        await _enqueueLots(txn, [lotId]);
+      }
       var stamped = await _withRemoteId(txn, 'lab_inventory', item);
       final beforeQty = (before['current_qty'] as num?)?.toDouble() ?? 0.0;
       final afterQty = (stamped['current_qty'] as num?)?.toDouble() ?? 0.0;
@@ -483,7 +558,7 @@ class OfflineFirstLabRepository extends LabRepo
           txn,
           inventoryId: itemId,
           quantityDelta: delta,
-          transactionType: deltaQty != null ? 'RECEIPT' : 'ADJUSTMENT',
+          transactionType: delta > 0 ? 'RECEIPT' : 'ADJUSTMENT',
           reason: reason,
           createdBy: createdBy,
         );
@@ -504,14 +579,136 @@ class OfflineFirstLabRepository extends LabRepo
     });
   }
 
+  // ── Lot-tracked inventory (FEFO receipts) ──
+
+  @override
+  Future<Map<String, dynamic>> receiveLot({
+    required int inventoryId,
+    required double qty,
+    required String expiryDate,
+    String supplier = '',
+    String note = '',
+    Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
+  }) async {
+    _check(Permission.labResultsUpdate);
+    return _inTransaction(executor, (txn) async {
+      final lot = await super.receiveLot(
+        inventoryId: inventoryId,
+        qty: qty,
+        expiryDate: expiryDate,
+        supplier: supplier,
+        note: note,
+        user: user,
+        executor: txn,
+      );
+      final lotId = (lot['id'] as num).toInt();
+      final stamped = await _withRemoteId(
+        txn,
+        'inventory_lots',
+        Map<String, dynamic>.from(lot),
+      );
+      await _enqueue(
+        txn,
+        'inventoryLot',
+        stamped,
+        'create',
+        AuditAction.settingsUpdated,
+      );
+      final createdBy = await _resolveUserId(txn, user);
+      await _recordInventoryTransaction(
+        txn,
+        inventoryId: inventoryId,
+        quantityDelta: ((lot['qty_received'] as num?)?.toDouble() ?? 0.0),
+        transactionType: 'RECEIPT',
+        referenceType: 'lot',
+        referenceId: lotId,
+        referenceRemoteId: '${stamped['remote_id'] ?? ''}',
+        reason: note,
+        createdBy: createdBy,
+      );
+      await _syncInventoryCache(txn, inventoryId);
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'inventoryLot',
+        entityId: 'lot_$lotId',
+        details: {
+          'localId': lotId,
+          'inventoryId': inventoryId,
+          'qty': lot['qty_received'],
+          'expiryDate': lot['expiry_date'],
+        },
+      );
+      return stamped;
+    });
+  }
+
+  @override
+  Future<double> disposeExpiredLots(
+    int inventoryId, {
+    Map<String, dynamic>? user,
+    DatabaseExecutor? executor,
+  }) async {
+    _check(Permission.labResultsUpdate);
+    return _inTransaction(executor, (txn) async {
+      // Capture the lots first: the base zeroes them, then we enqueue the
+      // new balances + one ledger line for the disposed total.
+      final lots = await super.listInventoryLots(inventoryId, executor: txn);
+      final today = todayIso().substring(0, 10);
+      final expiredIds = <int>[];
+      for (final l in lots) {
+        final remaining = ((l['qty_remaining'] as num?)?.toDouble() ?? 0.0);
+        final expiry = '${l['expiry_date'] ?? ''}';
+        if (remaining > 1e-9 &&
+            expiry.isNotEmpty &&
+            expiry.substring(0, 10).compareTo(today) < 0) {
+          expiredIds.add((l['id'] as num).toInt());
+        }
+      }
+      final disposed = await super.disposeExpiredLots(
+        inventoryId,
+        user: user,
+        executor: txn,
+      );
+      if (disposed > 1e-9) {
+        await _enqueueLots(txn, expiredIds);
+        final createdBy = await _resolveUserId(txn, user);
+        await _recordInventoryTransaction(
+          txn,
+          inventoryId: inventoryId,
+          quantityDelta: -disposed,
+          transactionType: 'ADJUSTMENT',
+          reason: 'Expired disposal',
+          createdBy: createdBy,
+        );
+        await _syncInventoryCache(txn, inventoryId);
+        await audit.log(
+          txn,
+          action: AuditAction.settingsUpdated,
+          entityType: 'inventoryLot',
+          entityId: 'dispose_$inventoryId',
+          details: {
+            'inventoryId': inventoryId,
+            'disposedQty': disposed,
+            'lots': expiredIds.length,
+          },
+        );
+      }
+      return disposed;
+    });
+  }
+
   // ── Equipment (synced registry, plan §8) ──
 
   @override
   Future<Map<String, dynamic>> createEquipment({
     required String name,
     String manufacturer = '',
+    String serialNumber = '',
     String description = '',
     String lastCalibrationDate = '',
+    String nextCalibrationDate = '',
     DatabaseExecutor? executor,
   }) async {
     _check(Permission.labResultsUpdate);
@@ -520,8 +717,10 @@ class OfflineFirstLabRepository extends LabRepo
       final item = await super.createEquipment(
         name: name,
         manufacturer: manufacturer,
+        serialNumber: serialNumber,
         description: description,
         lastCalibrationDate: lastCalibrationDate,
+        nextCalibrationDate: nextCalibrationDate,
         executor: txn,
       );
       var stamped = await _withRemoteId(txn, 'lab_equipment', item);
@@ -586,6 +785,18 @@ class OfflineFirstLabRepository extends LabRepo
         whereArgs: [equipmentId],
         limit: 1,
       );
+      // Capture the calibration/maintenance events BEFORE the base delete
+      // hard-removes them: every one of them needs its own tombstone (with
+      // the parent's cross-device identity already stamped), otherwise
+      // receiving devices keep dangling event rows forever.
+      final events = await txn.query(
+        'lab_equipment_events',
+        where: 'equipment_id = ?',
+        whereArgs: [equipmentId],
+      );
+      final eventSnapshots = <Map<String, dynamic>>[
+        for (final event in events) await _withEquipmentParent(txn, event),
+      ];
       await super.deleteEquipment(equipmentId, txn);
       // Tombstone, never a hard remote delete (plan §8).
       if (existing.isNotEmpty) {
@@ -595,6 +806,17 @@ class OfflineFirstLabRepository extends LabRepo
           txn,
           'equipment',
           row,
+          'tombstone',
+          AuditAction.settingsUpdated,
+        );
+      }
+      for (final event in eventSnapshots) {
+        final tombstone = Map<String, dynamic>.from(event)
+          ..['deleted_at'] = nowIso();
+        await _enqueue(
+          txn,
+          'equipmentEvent',
+          tombstone,
           'tombstone',
           AuditAction.settingsUpdated,
         );
@@ -902,6 +1124,72 @@ class OfflineFirstLabRepository extends LabRepo
     });
   }
 
+  /// Re-enqueues a `lab_inventory` row after a local stock move. The cache is
+  /// first recomputed as SUM(lots) — never adjusted arithmetically — so a
+  /// repeated or reordered mirror can never drift the pool. `currentQty`
+  /// also rides on the synced `inventoryItem` document, so a restore that
+  /// skips the queue leaves other devices with a stale cache until their
+  /// next local write. Best-effort: never fails the business write.
+  Future<void> _syncInventoryCache(DatabaseExecutor txn, int inventoryId) async {
+    try {
+      await refreshInventoryCache(txn, inventoryId);
+      final rows = await txn.query(
+        'lab_inventory',
+        where: 'id = ?',
+        whereArgs: [inventoryId],
+        limit: 1,
+      );
+      if (rows.isEmpty) return;
+      final stamped = await _withRemoteId(
+        txn,
+        'lab_inventory',
+        Map<String, dynamic>.from(rows.first),
+      );
+      await _enqueue(
+        txn,
+        'inventoryItem',
+        stamped,
+        'update',
+        AuditAction.settingsUpdated,
+      );
+    } on Object {
+      // Cache mirror is best-effort; the ledger is the truth.
+    }
+  }
+
+  /// Enqueues touched lots (`create` for fresh receipts, `update` for drawn /
+  /// credited / disposed ones) so `qty_remaining` converges cross-device.
+  /// Best-effort like every other mirror.
+  Future<void> _enqueueLots(DatabaseExecutor txn, Iterable<int> lotIds) async {
+    for (final lotId in lotIds.toSet()) {
+      try {
+        final rows = await txn.query(
+          'inventory_lots',
+          where: 'id = ?',
+          whereArgs: [lotId],
+          limit: 1,
+        );
+        if (rows.isEmpty) continue;
+        final stamped = await _withRemoteId(
+          txn,
+          'inventory_lots',
+          Map<String, dynamic>.from(rows.first),
+        );
+        final isFirstPush =
+            ((stamped['remote_version'] as num?)?.toInt() ?? 0) == 0;
+        await _enqueue(
+          txn,
+          'inventoryLot',
+          stamped,
+          isFirstPush ? 'create' : 'update',
+          AuditAction.settingsUpdated,
+        );
+      } on Object {
+        continue;
+      }
+    }
+  }
+
   /// Post-pass after a worksheet save: stamps `remote_id` on touched rows,
   /// enqueues worksheet/consumption/result entities and mirrors every
   /// consumption delta into `inventory_transactions` (plan §5).
@@ -919,21 +1207,31 @@ class OfflineFirstLabRepository extends LabRepo
         whereArgs: [since, since],
         orderBy: 'id DESC',
       );
+      // All missing remote_id stamps go out in one batch and the same ids are
+      // reused in the enqueued payloads — the per-row UPDATE used to cost one
+      // isolate round trip each inside the save transaction.
+      final stamps = <int, String>{};
+      for (final r in wsRows) {
+        if ('${r['remote_id'] ?? ''}'.isEmpty) {
+          stamps[(r['id'] as num).toInt()] = sync_write.newRemoteId();
+        }
+      }
+      if (stamps.isNotEmpty) {
+        final batch = txn.batch();
+        for (final entry in stamps.entries) {
+          batch.update(
+            'lab_worksheet',
+            {'remote_id': entry.value},
+            where: 'id = ?',
+            whereArgs: [entry.key],
+          );
+        }
+        await batch.commit(noResult: true);
+      }
       for (final r in wsRows) {
         final row = Map<String, dynamic>.from(r);
-        if ('${row['remote_id'] ?? ''}'.isEmpty) {
-          row['remote_id'] = sync_write.newRemoteId();
-          try {
-            await txn.update(
-              'lab_worksheet',
-              {'remote_id': row['remote_id']},
-              where: 'id = ?',
-              whereArgs: [row['id']],
-            );
-          } on Object {
-            break;
-          }
-        }
+        final stamp = stamps[(row['id'] as num).toInt()];
+        if (stamp != null) row['remote_id'] = stamp;
         final status = '${row['status'] ?? 'ACTIVE'}';
         await _enqueue(
           txn,
@@ -953,6 +1251,8 @@ class OfflineFirstLabRepository extends LabRepo
     // newest ones and mirror them (idempotent: only rows without remote_id
     // get a ledger entry — re-saves of the same test produce new detail
     // rows, each mirrored exactly once).
+    final touchedInventory = <int>{};
+    final touchedLots = <int>{};
     try {
       final detailRows = await txn.rawQuery(
         'SELECT * FROM lab_consumption_log '
@@ -961,19 +1261,27 @@ class OfflineFirstLabRepository extends LabRepo
         ['', since],
       );
       final createdBy = await _resolveUserId(txn, user);
+      // All missing remote_id stamps in one batch (same ids reused in the
+      // swept mirrors below).
+      final stamps = <int, String>{};
+      for (final d in detailRows) {
+        stamps[(d['id'] as num).toInt()] = sync_write.newRemoteId();
+      }
+      if (stamps.isNotEmpty) {
+        final batch = txn.batch();
+        for (final entry in stamps.entries) {
+          batch.update(
+            'lab_consumption_log',
+            {'remote_id': entry.value},
+            where: 'id = ?',
+            whereArgs: [entry.key],
+          );
+        }
+        await batch.commit(noResult: true);
+      }
       for (final d in detailRows) {
         final row = Map<String, dynamic>.from(d);
-        row['remote_id'] = sync_write.newRemoteId();
-        try {
-          await txn.update(
-            'lab_consumption_log',
-            {'remote_id': row['remote_id']},
-            where: 'id = ?',
-            whereArgs: [row['id']],
-          );
-        } on Object {
-          break;
-        }
+        row['remote_id'] = stamps[(row['id'] as num).toInt()];
         await _enqueue(
           txn,
           'consumption',
@@ -1000,6 +1308,9 @@ class OfflineFirstLabRepository extends LabRepo
           reason: 'Worksheet consumption',
           createdBy: createdBy,
         );
+        touchedInventory.add((row['inventory_id'] as num).toInt());
+        final lotId = (row['lot_id'] as num?)?.toInt();
+        if (lotId != null) touchedLots.add(lotId);
       }
     } on Object {
       // Consumption mirror is best-effort; `current_qty` was already updated.
@@ -1007,6 +1318,140 @@ class OfflineFirstLabRepository extends LabRepo
     for (final _ in consumption) {
       // `consumption` list is informational; ledger rows above are the truth.
     }
+    // Result rows created by the save travel on `lab_sample_tests` — without
+    // this they stay device-local (`runSampleTest` enqueues its own row, but
+    // the worksheet path never did). The table has no `created_at`; the base
+    // save stamps `tested_at` (= now) on every insert/update it touches.
+    try {
+      final testRows = await txn.query(
+        'lab_sample_tests',
+        where: 'tested_at >= ?',
+        whereArgs: [since],
+        orderBy: 'id DESC',
+      );
+      for (final t in testRows) {
+        await _enqueueResult(txn, Map<String, dynamic>.from(t));
+      }
+    } on Object {
+      // Result mirror is best-effort.
+    }
+    // The base save already moved the lots; re-enqueue the touched lots
+    // and inventory rows so balances converge remotely too.
+    await _enqueueLots(txn, touchedLots);
+    for (final inventoryId in touchedInventory) {
+      await _syncInventoryCache(txn, inventoryId);
+    }
+  }
+
+  /// Deletes a single worksheet row. The base implementation owns its own
+  /// transaction (no `exec` parameter), so this runs the sync mirror in a
+  /// second transaction afterwards: without it the VOIDED header, the
+  /// REVERSAL consumption rows and their ledger entries stay device-local.
+  /// The mirror is idempotent (only `remote_id`-less rows are picked up), so
+  /// a retry after a crash can never double-ledger.
+  @override
+  Future<Map<String, dynamic>> deleteWorksheetRow({
+    required int rowId,
+    Map<String, dynamic>? user,
+    String reason = '',
+  }) async {
+    _check(Permission.labResultsUpdate);
+    final startedAt = nowIso();
+    final result = await super.deleteWorksheetRow(
+      rowId: rowId,
+      user: user,
+      reason: reason,
+    );
+    final db = await dbHelper.database;
+      try {
+        await db.transaction((txn) async {
+          final createdBy = await _resolveUserId(txn, user);
+          final now = nowIso();
+          final touchedInventory = <int>{};
+          final touchedLots = <int>{};
+        final reversals = await txn.query(
+          'lab_consumption_log',
+          where: 'event_type = ? AND created_at >= ? AND '
+              '(remote_id IS NULL OR remote_id = ?)',
+          whereArgs: ['REVERSAL', startedAt, ''],
+          orderBy: 'id DESC',
+        );
+        for (final d in reversals) {
+          final row = Map<String, dynamic>.from(d);
+          row['remote_id'] = sync_write.newRemoteId();
+          try {
+            await txn.update(
+              'lab_consumption_log',
+              {'remote_id': row['remote_id']},
+              where: 'id = ?',
+              whereArgs: [row['id']],
+            );
+          } on Object {
+            break;
+          }
+          await _enqueue(
+            txn,
+            'consumption',
+            row,
+            'create',
+            AuditAction.labResultSaved,
+          );
+          final applied =
+              ((row['applied_qty'] as num?)?.toDouble() ??
+                      ((row['qty_used'] as num?)?.toDouble() ?? 0.0))
+                  .abs();
+          if (applied > 0) {
+            await _recordInventoryTransaction(
+              txn,
+              inventoryId: (row['inventory_id'] as num).toInt(),
+              quantityDelta: applied,
+              transactionType: 'REVERSAL',
+              referenceType: 'sample_test',
+              referenceId: (row['sample_test_id'] as num?)?.toInt(),
+              reason: reason.isEmpty ? 'Worksheet row voided' : reason,
+              createdBy: createdBy,
+            );
+            touchedInventory.add((row['inventory_id'] as num).toInt());
+            final lotId = (row['lot_id'] as num?)?.toInt();
+            if (lotId != null) touchedLots.add(lotId);
+          }
+        }
+        final header = await txn.query(
+          'lab_worksheet',
+          where: 'id = ?',
+          whereArgs: [rowId],
+          limit: 1,
+        );
+        if (header.isNotEmpty) {
+          await _enqueue(
+            txn,
+            'worksheet',
+            Map<String, dynamic>.from(header.first),
+            'tombstone',
+            AuditAction.labResultSaved,
+          );
+        }
+        for (final inventoryId in touchedInventory) {
+          await _syncInventoryCache(txn, inventoryId);
+        }
+        await _enqueueLots(txn, touchedLots);
+        // Touch marker only — keeps `now` referenced for future attribution.
+        await audit.log(
+          txn,
+          action: AuditAction.labResultSaved,
+          entityType: 'worksheet',
+          entityId: 'ws_$rowId',
+          details: {
+            'localId': rowId,
+            'operation': 'deleteWorksheetRow',
+            'mirroredAt': now,
+          },
+        );
+      });
+    } on Object {
+      // Mirror is best-effort; the local void already committed.
+    }
+    return result;
   }
 
   /// Voids a worksheet: tombstones the header, reverses its consumption via
@@ -1033,7 +1478,8 @@ class OfflineFirstLabRepository extends LabRepo
         where: 'id = ?',
         whereArgs: [worksheetId],
       );
-      // Reverse every consumption linked to this worksheet's tests.
+      // Reverse every consumption linked to this worksheet's tests back
+      // into its source lots (base helper), then mirror the new lines.
       final tests = await txn.query(
         'lab_sample_tests',
         columns: ['id'],
@@ -1041,51 +1487,19 @@ class OfflineFirstLabRepository extends LabRepo
         whereArgs: [worksheetId],
       );
       for (final t in tests) {
-        final testId = (t['id'] as num).toInt();
-        final logs = await txn.query(
-          'lab_consumption_log',
-          where: 'sample_test_id = ?',
-          whereArgs: [testId],
+        await reverseConsumptionToLots(
+          txn,
+          (t['id'] as num).toInt(),
+          timestamp: now,
         );
-        for (final l in logs) {
-          final log = Map<String, dynamic>.from(l);
-          final applied =
-              ((log['applied_qty'] as num?)?.toDouble() ??
-                      ((log['qty_used'] as num?)?.toDouble() ?? 0.0))
-                  .abs();
-          if (applied <= 0) continue;
-          await _recordInventoryTransaction(
-            txn,
-            inventoryId: (log['inventory_id'] as num).toInt(),
-            quantityDelta: applied,
-            transactionType: 'REVERSAL',
-            referenceType: 'sample_test',
-            referenceId: testId,
-            reason: reason.isEmpty ? 'Worksheet voided' : reason,
-            createdBy: createdBy,
-          );
-          try {
-            final inv = await txn.query(
-              'lab_inventory',
-              columns: ['current_qty'],
-              where: 'id = ?',
-              whereArgs: [log['inventory_id']],
-              limit: 1,
-            );
-            if (inv.isNotEmpty) {
-              final cur = ((inv.first['current_qty'] as num?)?.toDouble() ?? 0);
-              await txn.update(
-                'lab_inventory',
-                {'current_qty': cur + applied, 'updated_at': now},
-                where: 'id = ?',
-                whereArgs: [log['inventory_id']],
-              );
-            }
-          } on Object {
-            // Cache restore is best-effort; the ledger is the truth.
-          }
-        }
       }
+      final swept = await _sweepConsumptionLines(
+        txn,
+        testIds: [for (final t in tests) (t['id'] as num).toInt()],
+        reason: reason.isEmpty ? 'Worksheet voided' : reason,
+        createdBy: createdBy,
+        reversalsOnly: true,
+      );
       final header = await txn.query(
         'lab_worksheet',
         where: 'id = ?',
@@ -1101,22 +1515,96 @@ class OfflineFirstLabRepository extends LabRepo
           AuditAction.labResultSaved,
         );
       }
+      await _enqueueLots(txn, swept.lots);
+      for (final inventoryId in swept.inventory) {
+        await _syncInventoryCache(txn, inventoryId);
+      }
     });
   }
 
-  /// Recomputes and stores the cached `current_qty` from the ledger truth.
+  /// Stamps + enqueues fresh consumption lines (no `remote_id` yet), mirrors
+  /// each into the ledger, and reports touched inventory + lots. Shared by
+  /// the run/update/void/delete paths so every stock move is mirrored
+  /// exactly once (idempotent via the `remote_id` stamp).
+  Future<({Set<int> inventory, Set<int> lots})> _sweepConsumptionLines(
+    DatabaseExecutor txn, {
+    required List<int> testIds,
+    required String reason,
+    required int? createdBy,
+    bool reversalsOnly = false,
+  }) async {
+    final touchedInventory = <int>{};
+    final touchedLots = <int>{};
+    for (final testId in testIds) {
+      final rows = await txn.query(
+        'lab_consumption_log',
+        where: 'sample_test_id = ? AND '
+            '(remote_id IS NULL OR remote_id = ?)'
+            '${reversalsOnly ? " AND event_type = 'REVERSAL'" : ''}',
+        whereArgs: [testId, ''],
+        orderBy: 'id DESC',
+      );
+      for (final d in rows) {
+        final row = Map<String, dynamic>.from(d);
+        row['remote_id'] = sync_write.newRemoteId();
+        try {
+          await txn.update(
+            'lab_consumption_log',
+            {'remote_id': row['remote_id']},
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+        } on Object {
+          break;
+        }
+        await _enqueue(
+          txn,
+          'consumption',
+          row,
+          'create',
+          AuditAction.labResultSaved,
+        );
+        final applied =
+            ((row['applied_qty'] as num?)?.toDouble() ??
+                    ((row['qty_used'] as num?)?.toDouble() ?? 0.0))
+                .abs();
+        if (applied > 1e-9) {
+          final isReversal =
+              '${row['event_type'] ?? 'CONSUMPTION'}' == 'REVERSAL';
+          await _recordInventoryTransaction(
+            txn,
+            inventoryId: (row['inventory_id'] as num).toInt(),
+            quantityDelta: isReversal ? applied : -applied,
+            transactionType: isReversal ? 'REVERSAL' : 'CONSUMPTION',
+            referenceType: 'sample_test',
+            referenceId: testId,
+            reason: reason,
+            createdBy: createdBy,
+          );
+          touchedInventory.add((row['inventory_id'] as num).toInt());
+          final lotId = (row['lot_id'] as num?)?.toInt();
+          if (lotId != null) touchedLots.add(lotId);
+        }
+      }
+    }
+    return (inventory: touchedInventory, lots: touchedLots);
+  }
+
+  /// Recomputes and stores the cached `current_qty` from the lot truth
+  /// (`SUM(qty_remaining)`). The unified ledger stays as history; the lots
+  /// are what the pool is recomputed from.
   Future<double> recomputeInventoryBalance(int inventoryId) async {
     final db = await dbHelper.database;
-    final balance = await sync_write.recomputeBalance(db, inventoryId);
+    final balance = await db.transaction((txn) async {
+      await refreshInventoryCache(txn, inventoryId);
+      return lotBalance(txn, inventoryId);
+    });
     try {
-      await db.update(
-        'lab_inventory',
-        {'current_qty': balance, 'updated_at': nowIso()},
-        where: 'id = ?',
-        whereArgs: [inventoryId],
-      );
+      await db.transaction((txn) async {
+        await _syncInventoryCache(txn, inventoryId);
+      });
     } on Object {
-      // Cache write is best-effort.
+      // Cache mirror is best-effort; the ledger is the truth.
     }
     return balance;
   }
@@ -1127,6 +1615,7 @@ class OfflineFirstLabRepository extends LabRepo
   Future<Map<String, dynamic>> createAnalysis({
     required String name,
     String description = '',
+    String reference = '',
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String unit = '%',
@@ -1142,6 +1631,7 @@ class OfflineFirstLabRepository extends LabRepo
       analysis = await super.createAnalysis(
         name: name,
         description: description,
+        reference: reference,
         dynamicFields: dynamicFields,
         items: items,
         unit: unit,
@@ -1161,7 +1651,11 @@ class OfflineFirstLabRepository extends LabRepo
           action: AuditAction.settingsUpdated,
           details: {'localId': id, 'analysisName': analysis['name']},
         );
-        await _refreshAnalysisChildren(txn, id);
+        // Fresh analysis: no before-ids to tombstone. Links were already
+        // enqueued by the [saveFieldChemicalLinks] override inside the base
+        // write, so only items are refreshed here.
+        await _refreshAnalysisChildren(txn, id, skipLinks: true);
+        await _syncUnitRows(txn);
       }
     });
     return analysis;
@@ -1172,6 +1666,7 @@ class OfflineFirstLabRepository extends LabRepo
     required int analysisId,
     String? name,
     String? description,
+    String? reference,
     List<String>? dynamicFields,
     List<Map<String, dynamic>>? items,
     String? unit,
@@ -1184,10 +1679,21 @@ class OfflineFirstLabRepository extends LabRepo
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
     return db.transaction((txn) async {
+      // Item/link ids captured before the base rewrite so rows that
+      // disappear get tombstones instead of silently surviving remotely.
+      // Links always flow through the [saveFieldChemicalLinks] override
+      // (virtual dispatch inside the base write), hence `skipLinks`.
+      final beforeItems = await txn.query(
+        'lab_analysis_items',
+        columns: ['id'],
+        where: 'analysis_id = ?',
+        whereArgs: [analysisId],
+      );
       final analysis = await super.updateAnalysis(
         analysisId: analysisId,
         name: name,
         description: description,
+        reference: reference,
         dynamicFields: dynamicFields,
         items: items,
         unit: unit,
@@ -1207,8 +1713,16 @@ class OfflineFirstLabRepository extends LabRepo
         details: {'localId': analysisId},
       );
       if (items != null || fieldChemicalLinks != null) {
-        await _refreshAnalysisChildren(txn, analysisId);
+        await _refreshAnalysisChildren(
+          txn,
+          analysisId,
+          beforeItemIds: {
+            for (final r in beforeItems) (r['id'] as num).toInt(),
+          },
+          skipLinks: true,
+        );
       }
+      await _syncUnitRows(txn);
       return analysis;
     });
   }
@@ -1232,6 +1746,64 @@ class OfflineFirstLabRepository extends LabRepo
         details: {'localId': analysisId},
       );
       return result;
+    });
+  }
+
+  /// `lab_field_chemical_links` is a synced (`labConfig`) table, but the base
+  /// `saveFieldChemicalLinks` rewrites it with a raw DELETE + INSERTs. Without
+  /// this override no queue entry is ever written, so link edits stay
+  /// device-local. Tombstones the removed rows and upserts the survivors.
+  @override
+  Future<void> saveFieldChemicalLinks(
+    int analysisId,
+    List<Map<String, dynamic>>? links, [
+    DatabaseExecutor? executor,
+  ]) async {
+    _check(Permission.labResultsUpdate);
+    // `_inTransaction` (not a fresh `db.transaction`): the base
+    // `createAnalysis`/`updateAnalysis` call this with their own `txn`, and
+    // sqflite has no nested transactions.
+    return _inTransaction(executor, (txn) async {
+      final before = await txn.query(
+        'lab_field_chemical_links',
+        columns: ['id'],
+        where: 'analysis_id = ?',
+        whereArgs: [analysisId],
+      );
+      final beforeIds = {for (final r in before) (r['id'] as num).toInt()};
+      await super.saveFieldChemicalLinks(analysisId, links, txn);
+      final after = await txn.query(
+        'lab_field_chemical_links',
+        columns: ['id'],
+        where: 'analysis_id = ?',
+        whereArgs: [analysisId],
+      );
+      final afterIds = {for (final r in after) (r['id'] as num).toInt()};
+      for (final id in beforeIds.difference(afterIds)) {
+        await _enqueueConfig(
+          txn,
+          entity: _labFieldLink,
+          table: 'lab_field_chemical_links',
+          localId: id,
+          operation: 'tombstone',
+          action: AuditAction.settingsUpdated,
+          details: {'localId': id, 'analysisId': analysisId},
+        );
+      }
+      for (final id in afterIds) {
+        await _enqueueConfig(
+          txn,
+          entity: _labFieldLink,
+          table: 'lab_field_chemical_links',
+          localId: id,
+          operation: 'upsert',
+          action: AuditAction.settingsUpdated,
+          details: {'localId': id, 'analysisId': analysisId},
+        );
+      }
+      // `registerUnit` inside the base save auto-creates `lab_units` rows
+      // (INSERT OR IGNORE) with no queue entry of their own.
+      await _syncUnitRows(txn);
     });
   }
 
@@ -1262,6 +1834,7 @@ class OfflineFirstLabRepository extends LabRepo
           },
         );
       }
+      await _syncUnitRows(txn);
       return row;
     });
   }
@@ -1275,11 +1848,13 @@ class OfflineFirstLabRepository extends LabRepo
     final db = await dbHelper.database;
     return db.transaction((txn) async {
       final result = await super.deleteGlobalConstant(constantId, txn);
-      await audit.log(
+      await _enqueueConfig(
         txn,
+        entity: _labConstant,
+        table: 'lab_constants',
+        localId: constantId,
+        operation: 'tombstone',
         action: AuditAction.settingsUpdated,
-        entityType: _labConstant.type,
-        entityId: 'lc_lab_constants_$constantId',
         details: {'localId': constantId, 'operation': 'delete'},
       );
       return result;
@@ -1338,6 +1913,22 @@ class OfflineFirstLabRepository extends LabRepo
         exec: txn,
       );
       await _enqueueResult(txn, result['test'] as Map<String, dynamic>?);
+      // Mirror the FEFO consumption lines the save just wrote (lot draws +
+      // ledger + lot/item queue rows). Without this they stay device-local.
+      final testId =
+          ((result['test'] as Map?)?['id'] as num?)?.toInt();
+      if (testId != null) {
+        final swept = await _sweepConsumptionLines(
+          txn,
+          testIds: [testId],
+          reason: 'Lab test',
+          createdBy: await _resolveUserId(txn, user),
+        );
+        await _enqueueLots(txn, swept.lots);
+        for (final inventoryId in swept.inventory) {
+          await _syncInventoryCache(txn, inventoryId);
+        }
+      }
       return result;
     });
   }
@@ -1377,6 +1968,18 @@ class OfflineFirstLabRepository extends LabRepo
         executor: txn,
       );
       await _enqueueResult(txn, result);
+      // Mirror any FEFO movement the edit produced (extra draws and/or
+      // return-to-source lines), like the create path above.
+      final swept = await _sweepConsumptionLines(
+        txn,
+        testIds: [testId],
+        reason: 'Lab test updated',
+        createdBy: await _resolveUserId(txn, user),
+      );
+      await _enqueueLots(txn, swept.lots);
+      for (final inventoryId in swept.inventory) {
+        await _syncInventoryCache(txn, inventoryId);
+      }
       return result;
     });
   }
@@ -1392,97 +1995,82 @@ class OfflineFirstLabRepository extends LabRepo
     }
     _check(Permission.labResultsUpdate);
     final db = await dbHelper.database;
-    await db.transaction((txn) async {
-      final rows = await txn.query(
-        'lab_sample_tests',
-        where: 'id = ?',
-        whereArgs: [testId],
-        limit: 1,
-      );
-      if (rows.isEmpty) throw NotFoundError(AppErrors.testNotFound);
-      final snapshot = Map<String, dynamic>.from(rows.first);
-      final remoteVersion = (snapshot['remote_version'] as num?)?.toInt() ?? 0;
-      final localVersion = (snapshot['version'] as num?)?.toInt() ?? 0;
-      final version = remoteVersion == 0
-          ? 1
-          : (localVersion > remoteVersion ? localVersion : remoteVersion) + 1;
-      final tombstone = Map<String, dynamic>.from(snapshot)
-        ..['version'] = version
-        ..['sync_state'] = 'queued'
-        ..['deleted_at'] = DateTime.now().toIso8601String();
-      final ctx = SyncPayloadContext(
-        organizationId: guard.organizationId,
-        uid: guard.uid,
-        deviceId: guard.deviceId,
-        version: version,
-        versionField: 'version',
-      );
-      await queue.enqueue(
-        txn,
-        entityType: _labResult.type,
-        entityId: _labResult.docId(snapshot),
-        localRef: testId,
-        operation: 'tombstone',
-        payload: buildRemotePayload(_labResult, tombstone, ctx, asCreate: true),
-        baseVersion: remoteVersion,
-      );
-      // Plan §5: deleting a result reverses its consumption via REVERSAL
-      // ledger rows. The original consumption rows are kept for history.
-      final logs = await txn.query(
-        'lab_consumption_log',
-        where: 'sample_test_id = ?',
-        whereArgs: [testId],
-      );
-      for (final l in logs) {
-        final applied =
-            ((l['applied_qty'] as num?)?.toDouble() ??
-                    ((l['qty_used'] as num?)?.toDouble() ?? 0.0))
-                .abs();
-        if (applied <= 0) continue;
-        await _recordInventoryTransaction(
-          txn,
-          inventoryId: (l['inventory_id'] as num).toInt(),
-          quantityDelta: applied,
-          transactionType: 'REVERSAL',
-          referenceType: 'sample_test',
-          referenceId: testId,
-          reason: 'Result deleted',
-          createdBy: user?['id'] as int?,
-        );
-        try {
-          final inv = await txn.query(
-            'lab_inventory',
-            columns: ['current_qty'],
-            where: 'id = ?',
-            whereArgs: [l['inventory_id']],
-            limit: 1,
-          );
-          if (inv.isNotEmpty) {
-            final cur = ((inv.first['current_qty'] as num?)?.toDouble() ?? 0);
-            await txn.update(
-              'lab_inventory',
-              {'current_qty': cur + applied},
-              where: 'id = ?',
-              whereArgs: [l['inventory_id']],
-            );
-          }
-        } on Object {
-          // Cache restore is best-effort; the ledger is the truth.
-        }
-      }
-      await super.deleteSampleTest(testId, executor: txn, user: user);
-      await audit.log(
-        txn,
-        action: AuditAction.labResultSaved,
-        entityType: _labResult.type,
-        entityId: _labResult.docId(snapshot),
-        details: {
-          'localId': testId,
-          'operation': 'delete',
-          'user': user?['id'],
-        },
-      );
-    });
+    await db.transaction((txn) => _deleteSampleTestIn(txn, testId, user));
+  }
+
+  /// The whole `deleteSampleTest` body on [txn]: tombstone queue entry,
+  /// consumption reversal (base helper) + fresh-line mirroring, lot and
+  /// inventory re-enqueue, audit. Shared so [deleteBatchSample] can delete a
+  /// sample's whole result set inside one transaction instead of one
+  /// full transaction per result (N tasks used to park the single
+  /// connection for the whole loop).
+  Future<void> _deleteSampleTestIn(
+    DatabaseExecutor txn,
+    int testId,
+    Map<String, dynamic>? user,
+  ) async {
+    final rows = await txn.query(
+      'lab_sample_tests',
+      where: 'id = ?',
+      whereArgs: [testId],
+      limit: 1,
+    );
+    if (rows.isEmpty) throw NotFoundError(AppErrors.testNotFound);
+    final snapshot = Map<String, dynamic>.from(rows.first);
+    final remoteVersion = (snapshot['remote_version'] as num?)?.toInt() ?? 0;
+    final localVersion = (snapshot['version'] as num?)?.toInt() ?? 0;
+    final version = remoteVersion == 0
+        ? 1
+        : (localVersion > remoteVersion ? localVersion : remoteVersion) + 1;
+    final tombstone = Map<String, dynamic>.from(snapshot)
+      ..['version'] = version
+      ..['sync_state'] = 'queued'
+      ..['deleted_at'] = DateTime.now().toIso8601String();
+    final ctx = SyncPayloadContext(
+      organizationId: guard.organizationId,
+      uid: guard.uid,
+      deviceId: guard.deviceId,
+      version: version,
+      versionField: 'version',
+    );
+    await queue.enqueue(
+      txn,
+      entityType: _labResult.type,
+      entityId: _labResult.docId(snapshot),
+      localRef: testId,
+      operation: 'tombstone',
+      payload: buildRemotePayload(_labResult, tombstone, ctx, asCreate: true),
+      baseVersion: remoteVersion,
+    );
+    // Plan §5: deleting a result reverses its consumption back into the
+    // source lots (base helper: lot credit + REVERSAL lines + SUM cache).
+    // The pool is restored exactly once there — an extra arithmetic
+    // restore here would double-count (historical bug), so this only
+    // mirrors the fresh lines: stamp + queue them, ledger them, and
+    // re-enqueue the touched lots + inventory rows.
+    await super.deleteSampleTest(testId, executor: txn, user: user);
+    final swept = await _sweepConsumptionLines(
+      txn,
+      testIds: [testId],
+      reason: 'Result deleted',
+      createdBy: user?['id'] as int?,
+      reversalsOnly: true,
+    );
+    await _enqueueLots(txn, swept.lots);
+    for (final inventoryId in swept.inventory) {
+      await _syncInventoryCache(txn, inventoryId);
+    }
+    await audit.log(
+      txn,
+      action: AuditAction.labResultSaved,
+      entityType: _labResult.type,
+      entityId: _labResult.docId(snapshot),
+      details: {
+        'localId': testId,
+        'operation': 'delete',
+        'user': user?['id'],
+      },
+    );
   }
 
   // ── Product batch samples (محضر التشغيلة rows) ──────────────────────
@@ -1633,14 +2221,17 @@ class OfflineFirstLabRepository extends LabRepo
       return super.deleteBatchSample(sampleId, executor);
     }
     _check(Permission.labResultsUpdate);
-    // Each result keeps its own tombstone + consumption reversal through
-    // the existing delete path (own transactions, no nesting).
+    // One transaction for the whole sample: every result keeps its own
+    // tombstone + consumption reversal through `_deleteSampleTestIn` (the
+    // per-result delete path), and the sample tombstone lands atomically with
+    // them. A loop of per-result transactions used to park the single
+    // connection N times per click and left row-deletion non-atomic.
     final testIds = await listBatchSampleTestIds(sampleId);
-    for (final id in testIds) {
-      await deleteSampleTest(id, user: user);
-    }
     final db = await dbHelper.database;
     await db.transaction((txn) async {
+      for (final id in testIds) {
+        await _deleteSampleTestIn(txn, id, user);
+      }
       await super.deleteBatchSample(sampleId, txn);
       await _enqueueConfig(
         txn,
@@ -1693,6 +2284,25 @@ class OfflineFirstLabRepository extends LabRepo
     } else {
       fresh = Map<String, dynamic>.from(current.first);
     }
+    // `productBatchSample` (and any future non-labConfig entity routed here)
+    // is identified cross-device by `remote_id` (see `remoteIdDocId`): stamp a
+    // UUID before the snapshot so the queued doc id is stable and the remote
+    // payload carries `remoteId`. Lab-config tables use `lc_<table>_<id>`
+    // doc ids and need no `remote_id`.
+    if (entity.collection != SyncCollection.labConfig &&
+        '${fresh['remote_id'] ?? ''}'.isEmpty) {
+      fresh['remote_id'] = sync_write.newRemoteId();
+      try {
+        await txn.update(
+          table,
+          {'remote_id': fresh['remote_id']},
+          where: 'id = ?',
+          whereArgs: [localId],
+        );
+      } on Object {
+        // Column absent on legacy files until the next open runs migrations.
+      }
+    }
     final localVersion = (fresh['version'] as num?)?.toInt() ?? 0;
     final remoteVersion = (fresh['remote_version'] as num?)?.toInt() ?? 0;
     final isFirstPush = remoteVersion == 0;
@@ -1708,11 +2318,19 @@ class OfflineFirstLabRepository extends LabRepo
     final snapshot = Map<String, dynamic>.from(fresh)
       ..['version'] = nextVersion
       ..['sync_state'] = 'queued'
-      ..['config_type'] = _configTypeOf(table)
-      ..['payload'] = Map<String, dynamic>.from(fresh)
       ..['updated_at'] = fresh['updated_at'] ?? DateTime.now().toIso8601String()
       ..['updated_by'] = fresh['updated_by'] ?? guard.uid
       ..['device_id'] = fresh['device_id'] ?? guard.deviceId;
+    // `config_type` / `payload` are labConfig-only envelope fields (the
+    // shared `labConfig` collection discriminator + nested data map, built
+    // for real by `buildRemotePayload`). `productBatchSample` owns its own
+    // collection with a flat schema — injecting these keys here leaks them
+    // into its remote payload (`configType`, `payload`) via the copy loop.
+    if (entity.collection == SyncCollection.labConfig) {
+      snapshot
+        ..['config_type'] = _configTypeOf(table)
+        ..['payload'] = Map<String, dynamic>.from(fresh);
+    }
     if (operation == 'tombstone') {
       snapshot['deleted_at'] = DateTime.now().toIso8601String();
       if (fresh['is_active'] != null) snapshot['is_active'] = 0;
@@ -1750,7 +2368,7 @@ class OfflineFirstLabRepository extends LabRepo
         'localId': localId,
         'version': nextVersion,
         'operation': operation,
-        'actor': guard.email,
+        'actor': guard.actorName,
       },
     );
   }
@@ -1790,18 +2408,31 @@ class OfflineFirstLabRepository extends LabRepo
     }
   }
 
+  /// Enqueues an analysis' child rows after a rewrite. The base
+  /// `updateAnalysis`/`createAnalysis` replace `lab_analysis_items` with a raw
+  /// DELETE + INSERTs, so rows that disappeared need tombstones (captured via
+  /// [beforeItemIds]/[beforeLinkIds] before the base write) and survivors get
+  /// upserts. [skipLinks] is set when the change already flowed through the
+  /// [saveFieldChemicalLinks] override (virtual dispatch inside the base
+  /// write), which enqueued the links itself — re-enqueueing would only bump
+  /// versions and queue duplicates.
   Future<void> _refreshAnalysisChildren(
     DatabaseExecutor txn,
-    int analysisId,
-  ) async {
+    int analysisId, {
+    Set<int> beforeItemIds = const {},
+    Set<int> beforeLinkIds = const {},
+    bool skipLinks = false,
+  }) async {
     final items = await txn.query(
       'lab_analysis_items',
       where: 'analysis_id = ?',
       whereArgs: [analysisId],
     );
+    final itemIds = <int>{};
     for (final r in items) {
       final id = (r['id'] as num?)?.toInt();
       if (id == null) continue;
+      itemIds.add(id);
       await _enqueueConfig(
         txn,
         entity: _labAnalysisItem,
@@ -1812,14 +2443,28 @@ class OfflineFirstLabRepository extends LabRepo
         details: {'analysisId': analysisId, 'inventoryId': r['inventory_id']},
       );
     }
+    for (final id in beforeItemIds.difference(itemIds)) {
+      await _enqueueConfig(
+        txn,
+        entity: _labAnalysisItem,
+        table: 'lab_analysis_items',
+        localId: id,
+        operation: 'tombstone',
+        action: AuditAction.settingsUpdated,
+        details: {'analysisId': analysisId, 'localId': id},
+      );
+    }
+    if (skipLinks) return;
     final links = await txn.query(
       'lab_field_chemical_links',
       where: 'analysis_id = ?',
       whereArgs: [analysisId],
     );
+    final linkIds = <int>{};
     for (final r in links) {
       final id = (r['id'] as num?)?.toInt();
       if (id == null) continue;
+      linkIds.add(id);
       await _enqueueConfig(
         txn,
         entity: _labFieldLink,
@@ -1828,6 +2473,17 @@ class OfflineFirstLabRepository extends LabRepo
         operation: 'upsert',
         action: AuditAction.settingsUpdated,
         details: {'analysisId': analysisId, 'dynamicField': r['dynamic_field']},
+      );
+    }
+    for (final id in beforeLinkIds.difference(linkIds)) {
+      await _enqueueConfig(
+        txn,
+        entity: _labFieldLink,
+        table: 'lab_field_chemical_links',
+        localId: id,
+        operation: 'tombstone',
+        action: AuditAction.settingsUpdated,
+        details: {'analysisId': analysisId, 'localId': id},
       );
     }
   }

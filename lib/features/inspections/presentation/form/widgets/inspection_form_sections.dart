@@ -330,6 +330,17 @@ class InspectionFormSections {
   final ValueChanged<int> onRemoveSample;
   final VoidCallback onRegenerateEntry;
 
+  /// Phone layout: every field takes the full width, stacked with generous
+  /// gaps and a numbered step marker per group, instead of the desktop's
+  /// side-by-side pairs (which squeeze below ~600dp).
+  final bool compact;
+
+  /// Inline validation errors keyed by field ('material', 'formula',
+  /// 'batch', 'supplier', 'sampleTaker'), computed by the save gate in the
+  /// screen so every form factor renders the same messages in place
+  /// instead of as toasts.
+  final Map<String, String> fieldErrors;
+
   const InspectionFormSections({
     this.isProduct = false,
     required this.date,
@@ -355,16 +366,23 @@ class InspectionFormSections {
     required this.onAddSample,
     required this.onRemoveSample,
     required this.onRegenerateEntry,
+    this.compact = false,
+    this.fieldErrors = const {},
   });
 
   bool get hasResults => physical.isNotEmpty || chemical.isNotEmpty;
 
   Widget basicCard(BuildContext context) {
     final state = context.watch<InspectionFormCubit>().state;
+    if (compact) return _basicCardCompact(state);
     return FormSectionCard(
       title: AppText.t('البيانات الأساسية', 'Basic data'),
       children: [
-        _materialPicker(state.materials, state.materialId),
+        _materialPicker(
+          state.materials,
+          state.materialId,
+          error: fieldErrors['material'],
+        ),
         const SizedBox(height: AppSpacing.md),
         Row(
           children: [
@@ -414,6 +432,7 @@ class InspectionFormSections {
                 child: AppField(
                   label: AppText.t('رقم الفورمولا', 'Formula no.'),
                   controller: formula,
+                  error: fieldErrors['formula'],
                 ),
               ),
               const SizedBox(width: AppSpacing.lg),
@@ -421,6 +440,7 @@ class InspectionFormSections {
                 child: AppField(
                   label: AppText.t('رقم التشغيلة', 'Batch no.'),
                   controller: batch,
+                  error: fieldErrors['batch'],
                 ),
               ),
             ] else ...[
@@ -429,6 +449,7 @@ class InspectionFormSections {
                   label: AppText.t('المورد', 'Supplier'),
                   controller: supplier,
                   options: state.supplierOptions,
+                  error: fieldErrors['supplier'],
                   hint: AppText.t(
                     'اكتب للبحث في موردي الخامة…',
                     'Type to search this material\u2019s suppliers…',
@@ -464,6 +485,7 @@ class InspectionFormSections {
                   label: AppText.t('آخذ العينة', 'Sample taker'),
                   controller: sampleTaker,
                   options: state.sampleTakerOptions,
+                  error: fieldErrors['sampleTaker'],
                   hint: AppText.t(
                     'اكتب للبحث في سجل الفنيين…',
                     'Type to search the technicians log…',
@@ -509,6 +531,197 @@ class InspectionFormSections {
             ],
           ),
       ],
+    );
+  }
+
+  /// Phone version of the basics card: one field per line with a numbered
+  /// step marker per group, so nothing ever squeezes side-by-side.
+  Widget _basicCardCompact(dynamic state) {
+    Widget step(int n, String label, Widget field) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 24.r,
+                height: 24.r,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppColors.primary.withValues(alpha: 0.12),
+                ),
+                child: Text(
+                  '$n',
+                  style: TextStyle(
+                    fontSize: 13.spMax,
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13.spMax,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          field,
+        ],
+      );
+    }
+
+    final expiryField = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        AppDateField(
+          label: AppText.t('تاريخ الانتهاء', 'Expiry (YYYY-MM-DD)'),
+          controller: expiry,
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          children: [
+            for (final m in const [(3, '3M'), (6, '6M'), (9, '9M')])
+              AppButton(
+                small: true,
+                style: AppButtonStyle.secondary,
+                label: m.$2,
+                onPressed: () => expiry.text = _addMonths(
+                  date.text.trim().isEmpty ? todayIso() : date.text.trim(),
+                  m.$1,
+                ),
+              ),
+          ],
+        ),
+      ],
+    );
+
+    final entryField = Row(
+      children: [
+        Expanded(
+          child: AppField(
+            label: AppText.t('رقم القيد', 'Entry code'),
+            controller: entryCode,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        IconButton(
+          tooltip: AppText.t('إعادة توليد', 'Regenerate'),
+          onPressed: onRegenerateEntry,
+          icon: Icon(Icons.refresh, size: 20.r),
+        ),
+      ],
+    );
+
+    var n = 0;
+    final groups = <Widget>[];
+    void add(String label, Widget field) {
+      if (groups.isNotEmpty) {
+        groups.add(const SizedBox(height: AppSpacing.md));
+      }
+      groups.add(step(++n, label, field));
+    }
+
+    add(
+      isProduct
+          ? AppText.t('المنتج', 'Product')
+          : AppText.t('الخامة', 'Material'),
+      _materialPicker(
+        state.materials,
+        state.materialId,
+        error: fieldErrors['material'],
+      ),
+    );
+    add(
+      AppText.t('التواريخ', 'Dates'),
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppDateField(
+            label: AppText.t('تاريخ الفحص', 'Date (YYYY-MM-DD)'),
+            controller: date,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          expiryField,
+        ],
+      ),
+    );
+    if (isProduct) {
+      add(
+        AppText.t('التشغيلة', 'Batch'),
+        AppField(
+          label: AppText.t('رقم الفورمولا', 'Formula no.'),
+          controller: formula,
+          error: fieldErrors['formula'],
+        ),
+      );
+      add(
+        AppText.t('رقم التشغيلة', 'Batch no.'),
+        AppField(
+          label: AppText.t('رقم التشغيلة', 'Batch no.'),
+          controller: batch,
+          error: fieldErrors['batch'],
+        ),
+      );
+    } else {
+      add(
+        AppText.t('المورد', 'Supplier'),
+        AppHistoryAutocomplete(
+          label: AppText.t('المورد', 'Supplier'),
+          controller: supplier,
+          options: state.supplierOptions,
+          error: fieldErrors['supplier'],
+          hint: AppText.t(
+            'اكتب للبحث في موردي الخامة…',
+            'Type to search this material\u2019s suppliers…',
+          ),
+        ),
+      );
+      add(
+        AppText.t('الشاحنة', 'Truck'),
+        AppField(
+          label: AppText.t('رقم الشاحنة', 'Truck no.'),
+          controller: truck,
+        ),
+      );
+    }
+    add(
+      AppText.t('الكمية', 'Quantity'),
+      AppQuantityField(
+        label: AppText.t('الكمية', 'Quantity'),
+        hint: AppText.t('بالطن', 'In tons'),
+        controller: qty,
+      ),
+    );
+    // Product reports are batch-traceability records: no header-level
+    // taker — samples carry their own taker, added inside the record.
+    if (!isProduct) {
+      add(
+        AppText.t('آخذ العينة', 'Sample taker'),
+        AppHistoryAutocomplete(
+          label: AppText.t('آخذ العينة', 'Sample taker'),
+          controller: sampleTaker,
+          options: state.sampleTakerOptions,
+          error: fieldErrors['sampleTaker'],
+          hint: AppText.t(
+            'اكتب للبحث في سجل الفنيين…',
+            'Type to search the technicians log…',
+          ),
+        ),
+      );
+    }
+    add(AppText.t('القيد', 'Record'), entryField);
+
+    return FormSectionCard(
+      title: AppText.t('البيانات الأساسية', 'Basic data'),
+      children: groups,
     );
   }
 
@@ -626,8 +839,9 @@ class InspectionFormSections {
 
   Widget _materialPicker(
     List<Map<String, dynamic>> materials,
-    int? selectedId,
-  ) {
+    int? selectedId, {
+    String? error,
+  }) {
     final selected = selectedId != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -693,6 +907,16 @@ class InspectionFormSections {
             ],
           ],
         ),
+        if (error != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            error,
+            style: TextStyle(
+              color: AppColors.danger,
+              fontSize: 12.spMax,
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -1152,16 +1376,6 @@ class InspectionFormSections {
   }
 
   Widget _sampleHeader(int index) {
-    if (sampleCount == 1) {
-      return Expanded(
-        flex: 3,
-        child: Text(
-          AppText.t('النتيجة', 'Result'),
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-        ),
-      );
-    }
     return Expanded(
       flex: 3,
       child: Row(

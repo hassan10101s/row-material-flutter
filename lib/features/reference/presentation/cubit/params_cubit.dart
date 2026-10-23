@@ -27,17 +27,17 @@ class ParamsCubit extends AppCubit<ParamsState> {
 
   ParamsCubit.chemical({required ReferenceRepository repo})
     : this(
-          repo: repo,
-          parameterType: ParameterType.chemical.value,
-          loadUnits: true,
-        );
+        repo: repo,
+        parameterType: ParameterType.chemical.value,
+        loadUnits: true,
+      );
 
   ParamsCubit.physical({required ReferenceRepository repo})
     : this(
-          repo: repo,
-          parameterType: ParameterType.physical.value,
-          loadUnits: true,
-        );
+        repo: repo,
+        parameterType: ParameterType.physical.value,
+        loadUnits: true,
+      );
 
   Future<void> load() async {
     final token = ++_token;
@@ -52,10 +52,7 @@ class ParamsCubit extends AppCubit<ParamsState> {
           limit: pageSize,
           offset: 0,
         ),
-        repo.countParameters(
-          query: state.query,
-          parameterType: parameterType,
-        ),
+        repo.countParameters(query: state.query, parameterType: parameterType),
       ]);
       final units = loadUnits
           ? await repo.listUnits()
@@ -77,7 +74,7 @@ class ParamsCubit extends AppCubit<ParamsState> {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 

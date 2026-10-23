@@ -48,11 +48,16 @@ class _AppErrorFeedbackState<C extends StateStreamable<S>, S>
 
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<C, S>(
-      builder: (context, state) {
-        _raise(widget.selector(state));
-        return widget.child;
-      },
+    // Perf: the error banner never renders state content, so watching the
+    // state with a builder rebuilt the ENTIRE wrapped subtree on every emit.
+    // A listener observes the same state without touching the tree — the
+    // child builds exactly once per parent rebuild. listenWhen skips states
+    // whose selected error did not change at all.
+    return BlocListener<C, S>(
+      listenWhen: (previous, current) =>
+          widget.selector(previous) != widget.selector(current),
+      listener: (context, state) => _raise(widget.selector(state)),
+      child: widget.child,
     );
   }
 }

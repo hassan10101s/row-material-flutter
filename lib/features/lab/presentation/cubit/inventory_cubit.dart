@@ -25,11 +25,7 @@ class InventoryCubit extends AppCubit<InventoryState> {
     );
     try {
       final settled = await Future.wait([
-        repo.listInventoryPaged(
-          query: state.query,
-          limit: pageSize,
-          offset: 0,
-        ),
+        repo.listInventoryPaged(query: state.query, limit: pageSize, offset: 0),
         repo.countInventory(query: state.query),
       ]);
       if (token != _token) return;
@@ -48,7 +44,7 @@ class InventoryCubit extends AppCubit<InventoryState> {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 

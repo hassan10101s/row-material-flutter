@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>تقرير عدم المطابقة - {{ scope }}</title>
+    <title>{% if is_en %}Non-Conformance Report - {% else %}تقرير عدم المطابقة - {% endif %}{{ scope }}</title>
     {% if base_url %}<base href="{{ base_url }}">{% endif %}
     <link rel="stylesheet" href="fonts/fonts.css">
     <style>
@@ -384,8 +384,9 @@
 
                     <div class="brand-center">
                         <div class="eyebrow">Non-Conformance Report</div>
-                        <h1 class="title">تقرير عدم المطابقة | Non-Conformance Report</h1>
+                        <h1 class="title">{% if is_en %}Non-Conformance Report{% else %}تقرير عدم المطابقة | Non-Conformance Report{% endif %}</h1>
                         <p class="subtitle">{{ department_label }}</p>
+                        {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
                         <p class="subtitle">{{ generated_at }} | {{ generated_by }}</p>
                     </div>
 
@@ -417,42 +418,42 @@
                     <div class="summary-card primary">
                         <span class="summary-label">Total</span>
                         <span class="summary-value">{{ kpis.total }}</span>
-                        <span class="summary-note">إجمالي الحالات</span>
+                        <span class="summary-note">{% if is_en %}Total Cases{% else %}إجمالي الحالات{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Open</span>
                         <span class="summary-value">{{ kpis.open }}</span>
-                        <span class="summary-note">حالات مفتوحة</span>
+                        <span class="summary-note">{% if is_en %}Open Cases{% else %}حالات مفتوحة{% endif %}</span>
                     </div>
                     <div class="summary-card {% if kpis.overdue > 0 %}danger{% endif %}">
                         <span class="summary-label">Overdue</span>
                         <span class="summary-value">{{ kpis.overdue }}</span>
-                        <span class="summary-note">حالات متأخرة</span>
+                        <span class="summary-note">{% if is_en %}Overdue Cases{% else %}حالات متأخرة{% endif %}</span>
                     </div>
                     <div class="summary-card {% if kpis.critical > 0 %}danger{% endif %}">
                         <span class="summary-label">Critical</span>
                         <span class="summary-value">{{ kpis.critical }}</span>
-                        <span class="summary-note">حالات حرجة</span>
+                        <span class="summary-note">{% if is_en %}Critical Cases{% else %}حالات حرجة{% endif %}</span>
                     </div>
                     <div class="summary-card success">
                         <span class="summary-label">Closed</span>
                         <span class="summary-value">{{ kpis.closed }}</span>
-                        <span class="summary-note">حالات مغلقة</span>
+                        <span class="summary-note">{% if is_en %}Closed Cases{% else %}حالات مغلقة{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">On-Time %</span>
                         <span class="summary-value">{{ kpis.on_time_closure_display }}</span>
-                        <span class="summary-note">إغلاق في الموعد</span>
+                        <span class="summary-note">{% if is_en %}Closed on Time{% else %}إغلاق في الموعد{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">MTTC</span>
                         <span class="summary-value">{{ kpis.mttc_display }}</span>
-                        <span class="summary-note">متوسط أيام الإغلاق</span>
+                        <span class="summary-note">{% if is_en %}Avg. Closing Days{% else %}متوسط أيام الإغلاق{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">MTTV</span>
                         <span class="summary-value">{{ kpis.mttv_display }}</span>
-                        <span class="summary-note">متوسط أيام التحقق</span>
+                        <span class="summary-note">{% if is_en %}Avg. Verification Days{% else %}متوسط أيام التحقق{% endif %}</span>
                     </div>
                 </div>
 
@@ -460,48 +461,48 @@
                     <div class="summary-card">
                         <span class="summary-label">Assigned</span>
                         <span class="summary-value">{{ kpis.assigned }}</span>
-                        <span class="summary-note">مسندة</span>
+                        <span class="summary-note">{% if is_en %}Assigned{% else %}مسندة{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">In Progress</span>
                         <span class="summary-value">{{ kpis.in_progress }}</span>
-                        <span class="summary-note">قيد المعالجة</span>
+                        <span class="summary-note">{% if is_en %}In Progress{% else %}قيد المعالجة{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Verified</span>
                         <span class="summary-value">{{ kpis.verified }}</span>
-                        <span class="summary-note">تم التحقق</span>
+                        <span class="summary-note">{% if is_en %}Verified{% else %}تم التحقق{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Major</span>
                         <span class="summary-value">{{ kpis.major }}</span>
-                        <span class="summary-note">حالات كبرى</span>
+                        <span class="summary-note">{% if is_en %}Major Cases{% else %}حالات كبرى{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Minor</span>
                         <span class="summary-value">{{ kpis.minor }}</span>
-                        <span class="summary-note">حالات بسيطة</span>
+                        <span class="summary-note">{% if is_en %}Minor Cases{% else %}حالات بسيطة{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">CAPA Linked</span>
                         <span class="summary-value">{{ kpis.capa_linked }}</span>
-                        <span class="summary-note">مرتبطة بإجراء</span>
+                        <span class="summary-note">{% if is_en %}CAPA Linked{% else %}مرتبطة بإجراء{% endif %}</span>
                     </div>
                     <div class="summary-card {% if kpis.capa_overdue > 0 %}danger{% endif %}">
                         <span class="summary-label">CAPA Overdue</span>
                         <span class="summary-value">{{ kpis.capa_overdue }}</span>
-                        <span class="summary-note">إجراء متأخر</span>
+                        <span class="summary-note">{% if is_en %}CAPA Overdue{% else %}إجراء متأخر{% endif %}</span>
                     </div>
                     <div class="summary-card">
                         <span class="summary-label">Rejected</span>
                         <span class="summary-value">{{ kpis.rejected }}</span>
-                        <span class="summary-note">حالات مرفوضة</span>
+                        <span class="summary-note">{% if is_en %}Rejected Cases{% else %}حالات مرفوضة{% endif %}</span>
                     </div>
                 </div>
 
                 {% if top_defects %}
                 <div class="section-head">
-                    <h2 class="section-title">أكثر العيوب تكراراً</h2>
+                    <h2 class="section-title">{% if is_en %}Most Recurring Defects{% else %}أكثر العيوب تكراراً{% endif %}</h2>
                     <div class="section-caption">Top Recurring Defects</div>
                 </div>
 
@@ -510,9 +511,9 @@
                         <table>
                             <thead>
                                 <tr>
-                                    <th style="width: 50%;">الرمز / التصنيف</th>
-                                    <th style="width: 25%;">العدد</th>
-                                    <th style="width: 25%;">حرجة</th>
+                                    <th style="width: 50%;">{% if is_en %}Code / Category{% else %}الرمز / التصنيف{% endif %}</th>
+                                    <th style="width: 25%;">{% if is_en %}Count{% else %}العدد{% endif %}</th>
+                                    <th style="width: 25%;">{% if is_en %}Critical{% else %}حرجة{% endif %}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -531,7 +532,7 @@
 
                 {% if aging %}
                 <div class="section-head">
-                    <h2 class="section-title">التوزيع العمري</h2>
+                    <h2 class="section-title">{% if is_en %}Aging Distribution{% else %}التوزيع العمري{% endif %}</h2>
                     <div class="section-caption">Aging Distribution</div>
                 </div>
 
@@ -540,9 +541,9 @@
                         <table>
                             <thead>
                                 <tr>
-                                    <th style="width: 40%;">الفئة</th>
-                                    <th style="width: 30%;">العدد</th>
-                                    <th style="width: 30%;">النسبة</th>
+                                    <th style="width: 40%;">{% if is_en %}Band{% else %}الفئة{% endif %}</th>
+                                    <th style="width: 30%;">{% if is_en %}Count{% else %}العدد{% endif %}</th>
+                                    <th style="width: 30%;">{% if is_en %}Share{% else %}النسبة{% endif %}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -560,7 +561,7 @@
                 {% endif %}
 
                 <div class="section-head">
-                    <h2 class="section-title">الحالات المطابقة ({{ total }})</h2>
+                    <h2 class="section-title">{% if is_en %}Matching Cases ({% else %}الحالات المطابقة ({% endif %}{{ total }})</h2>
                     <div class="section-caption">Matching Findings</div>
                 </div>
 
@@ -570,16 +571,16 @@
                         <table>
                             <thead>
                                 <tr>
-                                    <th style="width: 8%;">المرجع</th>
-                                    <th style="width: 22%;">الوصف</th>
-                                    <th style="width: 7%;">الخطورة</th>
-                                    <th style="width: 8%;">الحالة</th>
-                                    <th style="width: 8%;">التفتيش</th>
-                                    <th style="width: 9%;">التشغيلة</th>
-                                    <th style="width: 9%;">المسند</th>
-                                    <th style="width: 9%;">الاستحقاق</th>
-                                    <th style="width: 6%;">متأخرة</th>
-                                    <th style="width: 14%;">الإجراء</th>
+                                    <th style="width: 8%;">{% if is_en %}Ref{% else %}المرجع{% endif %}</th>
+                                    <th style="width: 22%;">{% if is_en %}Description{% else %}الوصف{% endif %}</th>
+                                    <th style="width: 7%;">{% if is_en %}Severity{% else %}الخطورة{% endif %}</th>
+                                    <th style="width: 8%;">{% if is_en %}Status{% else %}الحالة{% endif %}</th>
+                                    <th style="width: 8%;">{% if is_en %}Inspection{% else %}التفتيش{% endif %}</th>
+                                    <th style="width: 9%;">{% if is_en %}Batch{% else %}التشغيلة{% endif %}</th>
+                                    <th style="width: 9%;">{% if is_en %}Assignee{% else %}المسند{% endif %}</th>
+                                    <th style="width: 9%;">{% if is_en %}Due{% else %}الاستحقاق{% endif %}</th>
+                                    <th style="width: 6%;">{% if is_en %}Overdue{% else %}متأخرة{% endif %}</th>
+                                    <th style="width: 14%;">{% if is_en %}Action{% else %}الإجراء{% endif %}</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -619,14 +620,14 @@
                 </div>
                 {% else %}
                 <div class="empty-state">
-                    <h3>لا توجد حالات مطابقة لمعايير التصفية</h3>
-                    <p>لم يتم العثور على بيانات.</p>
+                    <h3>{% if is_en %}No cases match the filter criteria{% else %}لا توجد حالات مطابقة لمعايير التصفية{% endif %}</h3>
+                    <p>{% if is_en %}No data found.{% else %}لم يتم العثور على بيانات.{% endif %}</p>
                 </div>
                 {% endif %}
             </div>
 
             <div class="footer">
-                <div><strong>Material Lab</strong> | نظام ادارة المعمل الداخلي</div>
+                <div><strong>Material Lab</strong> | {% if is_en %}Internal lab management system{% else %}نظام ادارة المعمل الداخلي{% endif %}</div>
                 <div>Prepared Automatically by {{ department_label }}</div>
             </div>
         </div>

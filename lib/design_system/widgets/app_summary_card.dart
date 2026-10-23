@@ -39,7 +39,12 @@ class _AppSummaryCardState extends State<AppSummaryCard> {
   @override
   Widget build(BuildContext context) {
     final isInteractive = widget.onTap != null;
-    return MouseRegion(
+    // Screen readers announce "label: value" as one unit instead of
+    // traversing the number before the caption it belongs to.
+    return Semantics(
+      label: '${widget.label}: ${widget.value}',
+      button: isInteractive,
+      child: MouseRegion(
       onEnter: isInteractive ? (_) => _setHovered(true) : null,
       onExit: isInteractive ? (_) => _setHovered(false) : null,
       cursor: isInteractive ? SystemMouseCursors.click : MouseCursor.defer,
@@ -129,6 +134,7 @@ class _AppSummaryCardState extends State<AppSummaryCard> {
             ),
           ],
         ),
+      ),
       ),
     );
   }

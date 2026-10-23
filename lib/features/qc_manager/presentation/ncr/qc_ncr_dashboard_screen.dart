@@ -5,12 +5,18 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
+import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_summary_card.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../../di/service_locator.dart';
+import '../../../../app/auth_gate.dart';
+import '../../../../core/auth/permissions.dart';
 import '../../domain/ncr_kpis.dart';
 import '../cubit/qc_ncr_cubit.dart';
+import 'qc_ncr_create_screen.dart';
 
 /// NCR dashboard (plan V6_ENHANCED §22.6).
 ///
@@ -19,7 +25,12 @@ import '../cubit/qc_ncr_cubit.dart';
 /// Everything here is a pure function of [QcNcrState], so the cards and the
 /// table underneath them can never describe different populations.
 class QcNcrDashboardScreen extends StatelessWidget {
-  const QcNcrDashboardScreen({super.key, this.cubit, this.onOpenList});
+  const QcNcrDashboardScreen({
+    super.key,
+    this.cubit,
+    this.onOpenList,
+    this.embedded = false,
+  });
 
   /// Optional so the same widget works under a `BlocProvider` (the router,
   /// which then owns and closes the cubit) and standalone (tests and previews,
@@ -29,12 +40,45 @@ class QcNcrDashboardScreen extends StatelessWidget {
   /// Pushes the table view. Optional so the dashboard is usable standalone.
   final VoidCallback? onOpenList;
 
+  /// Embedded inside the QC hub tab row: the hub owns the chrome, so this
+  /// widget drops the [Scaffold]/app bar and the surrounding padding.
+  final bool embedded;
+
   @override
   Widget build(BuildContext context) {
     final cubit = this.cubit ?? context.read<QcNcrCubit>();
     return BlocBuilder<QcNcrCubit, QcNcrState>(
       bloc: cubit,
       builder: (context, state) {
+        final body = state.loading && state.kpis.total == 0
+            ? const AppSkeletonList(rows: 8)
+            : RefreshIndicator(
+                onRefresh: cubit.load,
+                child: ListView(
+                  padding: embedded
+                      ? const EdgeInsets.all(AppSpacing.md)
+                      : const EdgeInsets.all(AppSpacing.lg),
+                  children: [
+                    _FilterSummary(state: state, cubit: cubit),
+                    _CreateActionRow(cubit: cubit),
+                    const SizedBox(height: AppSpacing.md),
+                    _KpiRow(kpis: state.kpis),
+                    const SizedBox(height: AppSpacing.md),
+                    _AgingPanel(buckets: state.aging, total: state.total),
+                    const SizedBox(height: AppSpacing.md),
+                    _Panels(
+                      defects: state.topDefects,
+                      repeats: state.repeatRefs,
+                      onOpenList: onOpenList,
+                    ),
+                    if (state.error != null) ...[
+                      const SizedBox(height: AppSpacing.md),
+                      _ErrorNote(message: state.error!),
+                    ],
+                  ],
+                ),
+              );
+        if (embedded) return body;
         return Scaffold(
           appBar: AppTopAppBar(
             title: AppText.t('تقرير عدم المطابقة', 'Non-conformance report'),
@@ -46,33 +90,49 @@ class QcNcrDashboardScreen extends StatelessWidget {
               ),
             ],
           ),
-          body: state.loading && state.kpis.total == 0
-              ? const Center(child: CircularProgressIndicator())
-              : RefreshIndicator(
-                  onRefresh: cubit.load,
-                  child: ListView(
-                    padding: const EdgeInsets.all(AppSpacing.lg),
-                    children: [
-                      _FilterSummary(state: state, cubit: cubit),
-                      const SizedBox(height: AppSpacing.md),
-                      _KpiRow(kpis: state.kpis),
-                      const SizedBox(height: AppSpacing.md),
-                      _AgingPanel(buckets: state.aging, total: state.total),
-                      const SizedBox(height: AppSpacing.md),
-                      _Panels(
-                        defects: state.topDefects,
-                        repeats: state.repeatRefs,
-                        onOpenList: onOpenList,
-                      ),
-                      if (state.error != null) ...[
-                        const SizedBox(height: AppSpacing.md),
-                        _ErrorNote(message: state.error!),
-                      ],
-                    ],
-                  ),
-                ),
+          body: body,
         );
       },
+    );
+  }
+}
+
+/// The create button, tucked under the filter summary. Only whoever holds
+/// `qc.write` sees it — the repository re-checks the same permission inside
+/// its write transaction, and the reject surfaces as the message there.
+/// Desktop opens the unified window; phones push the form as a route with
+/// the system Back affordance.
+class _CreateActionRow extends StatelessWidget {
+  const _CreateActionRow({required this.cubit});
+
+  final QcNcrCubit cubit;
+
+  @override
+  Widget build(BuildContext context) {
+    bool canCreate;
+    try {
+      canCreate = getIt<AuthGate>().canWrite(Permission.qcWrite);
+    } on Object catch (_) {
+      // No live session yet (tests, previews): no button rather than a
+      // button that always fails.
+      canCreate = false;
+    }
+    if (!canCreate) return const SizedBox.shrink();
+    return Align(
+      alignment: AlignmentDirectional.centerEnd,
+      child: Padding(
+        padding: const EdgeInsets.only(top: AppSpacing.xs),
+        child: AppButton(
+          small: true,
+          label: AppText.t('إنشاء عدم مطابقة', 'New non-conformance'),
+          icon: const Icon(Icons.flag_outlined, size: 18),
+          onPressed: () => QcNcrCreateScreen.open(
+            context,
+            cubit,
+            assignees: cubit.state.options.assignees,
+          ),
+        ),
+      ),
     );
   }
 }

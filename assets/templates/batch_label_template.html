@@ -308,7 +308,7 @@
                                     <div class="info-value">{{ lbl.expiry_date or '-' }}</div>
                                 </div>
                             </div>
-                            <div class="label-footer">{{ department_label }}</div>
+                            <div class="label-footer">{{ department_label }}{% if form_no %} | {% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}{% endif %}</div>
                         </div>
                     </div>
                     <div class="label-qr-col">

@@ -147,12 +147,76 @@ void main() {
       "VALUES ('Remote Match', 'liquid', 'mL', 7, 1, '', 0, 'x', 'x', 'uuid-abc-123')",
     );
     final entity = SyncEntity.byType('inventoryItem')!;
+    // The data carries NO natural key (`name` is absent): only the
+    // `remote_id` fast path can resolve this document. With the natural key
+    // in place the test used to pass while the fast path itself queried the
+    // integer pk against a UUID and never matched anything.
     final found = await findLocalRef(
       fx.db, entity, 'uuid-abc-123',
-      {'remoteId': 'uuid-abc-123', 'name': 'Remote Match'},
+      {'remoteId': 'uuid-abc-123'},
       localDeviceId: 'device-B',
     );
     expect(found, isNotNull);
+    // The document id itself (as a tombstone carries it, without even a
+    // `remoteId` field) must also resolve through `remote_id`.
+    final byDocId = await findLocalRef(
+      fx.db, entity, 'uuid-abc-123',
+      const {},
+      localDeviceId: 'device-B',
+    );
+    expect(byDocId, isNotNull, reason: 'tombstone docs carry no payload fields');
+    // The document id alone matches even when the payload hints a name with
+    // no row: it must never null out a findable row.
+    final withForeignFields = await findLocalRef(
+      fx.db, entity, 'uuid-abc-123',
+      {'name': 'completely-different-name'},
+      localDeviceId: 'device-B',
+    );
+    expect(withForeignFields, isNotNull);
+  });
+
+  test('foreign localId cannot hijack an unrelated row', () async {
+    // Device-B row of pk id=1 that owns a DIFFERENT cross-device identity.
+    await fx.db.rawInsert(
+      "INSERT INTO lab_inventory (name, category, unit, current_qty, min_qty, "
+      "description, created_by, created_at, updated_at, remote_id, device_id) "
+      "VALUES ('Mine', 'liquid', 'mL', 2, 1, '', 0, 'x', 'x', 'uuid-mine', 'device-B')",
+    );
+    // A foreign (device-A) document whose origin-device localId happens to
+    // be 1 — the classic autoincrement collision.
+    final entity = SyncEntity.byType('inventoryItem')!;
+    final hijack = await findLocalRef(
+      fx.db, entity, 'uuid-foreign',
+      {'localId': 1, 'deviceId': 'device-A'},
+      localDeviceId: 'device-B',
+    );
+    expect(
+      hijack,
+      isNull,
+      reason: 'row 1 carries remote_id "uuid-mine": the foreign localId '
+          'must not match it (no natural key either → fresh insert expected)',
+    );
+    // A row WITHOUT a remote_id (legacy) keeps the legacy localId semantics.
+    await fx.db.rawInsert(
+      "INSERT INTO lab_inventory (name, category, unit, current_qty, min_qty, "
+      "description, created_by, created_at, updated_at) "
+      "VALUES ('Legacy', 'liquid', 'mL', 3, 1, '', 0, 'x', 'x')",
+    );
+    final legacyRow = (await fx.db.query(
+      'lab_inventory',
+      columns: ['id'],
+      where: 'name = ?',
+      whereArgs: ['Legacy'],
+    )).single;
+    final legacy = await findLocalRef(
+      fx.db, entity, 'legacy_lab_inventory_${legacyRow['id']}',
+      {
+        'localId': legacyRow['id'],
+        'deviceId': 'device-A',
+      },
+      localDeviceId: 'device-B',
+    );
+    expect(legacy, isNotNull, reason: 'legacy rows without identity still match locally');
   });
 }
 
@@ -188,7 +252,8 @@ abstract final class DatabaseHelperSyncedTablesForTest {
     'lab_analyses', 'lab_analysis_items', 'lab_field_chemical_links',
     'lab_constants', 'lab_products', 'lab_product_analyses', 'lab_units',
     'lab_material_analyses', 'reference_materials',
-    'lab_inventory', 'inventory_transactions', 'lab_consumption_log',
+    'lab_inventory', 'inventory_lots', 'inventory_transactions',
+    'lab_consumption_log',
     'lab_stock_adjustments', 'lab_worksheet', 'lab_equipment',
     'lab_equipment_events', 'product_batch_samples',
   ];

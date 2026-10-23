@@ -184,7 +184,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 
@@ -214,7 +214,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(saving: false, error: '$e'));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
   }
 
@@ -266,7 +266,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(saving: false, error: '$e'));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
     return null;
   }
@@ -280,7 +280,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(saving: false, error: '$e'));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
   }
 
@@ -303,7 +303,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
-      safeEmit(state.copyWith(saving: false, error: '$e'));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
   }
 

@@ -67,7 +67,7 @@ void main() {
   }
 
   Future<int> finding(
-    int inspectionId, {
+    int? inspectionId, {
     String severity = 'Major',
     String status = 'Open',
     String code = '',
@@ -482,6 +482,34 @@ void main() {
 
       expect(rows.length, 1);
       expect(rows.single.lotNo, 'KEEP');
+    });
+
+    test('a standalone finding (no inspection) is reportable', () async {
+      // The create-NCR screen allows saving without linking an inspection;
+      // those rows land with inspection_id NULL (a NULL child key satisfies
+      // the FK; 0 never would) and a NULL inspection side in the join. They
+      // must still appear in the table, the count and the KPIs - only
+      // findings under a *deleted* inspection are tombstoned.
+      final standalone = await finding(null, code: 'STANDALONE');
+      final tombstoned = await inspection(lot: 'GONE', deleted: true);
+      await finding(tombstoned);
+
+      final rows = await repo.list(const NcrFilters());
+      expect(rows.length, 1);
+      expect(rows.single.findingId, standalone);
+      expect(rows.single.code, 'STANDALONE');
+      // No inspection side exists, so the lot context is empty rather than
+      // null - same treatment as any other missing scalar.
+      expect(rows.single.lotNo, '');
+
+      final detail = await repo.detail(standalone);
+      expect(detail, isNotNull);
+      expect(detail!.findingId, standalone);
+
+      final count = await repo.count(const NcrFilters());
+      expect(count, 1);
+      final kpis = await repo.kpis(const NcrFilters());
+      expect(kpis.total, 1);
     });
 
     test(

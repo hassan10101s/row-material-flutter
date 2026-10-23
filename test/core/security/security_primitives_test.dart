@@ -18,12 +18,13 @@ import 'package:pointycastle/macs/hmac.dart';
 
 /// The security primitives that had **no** behavioural test at all.
 ///
-/// Both are load-bearing and both fail silently, which is exactly the
-/// combination that rots: `verify` returns `false` for a malformed stored
+/// Both are load-bearing and both fail closed, which is exactly the property
+/// worth pinning: `verify` returns `false` for a malformed or unsalted stored
 /// hash, `unsealText` returns `('', false)` rather than the ciphertext, and
-/// `LocalSecret.load` derives a fallback secret from whatever bytes it finds. A
-/// regression in any of those degrades into "the user is silently denied" or
-/// "a tampered value is accepted", with no crash and no log to notice it by.
+/// `LocalSecret.load` raises on a corrupt file instead of deriving a fallback
+/// secret from whatever bytes it finds. A regression in any of those degrades
+/// into "the user is silently denied" or "a tampered value is accepted", with
+/// no crash and no log to notice it by.
 ///
 /// Nothing here needs a device, a network, or the Firestore emulator.
 void main() {
@@ -177,14 +178,16 @@ void main() {
           reason: 'a digest computed over another salt must not verify');
     });
 
-    test('a bare SHA-256 hex digest still verifies, for pre-PBKDF2 rows',
+    test('a bare SHA-256 hex digest is rejected (unsalted legacy format)',
         () async {
+      // The pre-PBKDF2 row format was a bare, unsalted `sha256(password)`.
+      // Accepting it would make a leaked database crackable with a precomputed
+      // table, so the branch was removed: such a row must not authenticate.
       final sha = sha256.convert(utf8.encode('legacy-plain')).toString();
       expect(sha, hasLength(64));
-      expect(await hasher.verify('legacy-plain', sha), isTrue);
+      expect(await hasher.verify('legacy-plain', sha), isFalse);
       expect(await hasher.verify('other', sha), isFalse);
-      expect(await hasher.verify('legacy-plain', sha.toUpperCase()), isTrue,
-          reason: 'hex comparison is case-insensitive');
+      expect(await hasher.verify('legacy-plain', sha.toUpperCase()), isFalse);
     });
 
     test('a SHA-256 candidate of the wrong length is rejected', () async {
@@ -193,13 +196,14 @@ void main() {
           reason: 'non-hex of the right length must not slip through');
     });
 
-    test('the pre-PBKDF2 SHA-256 branch ignores the pepper', () async {
-      // Pinned deliberately, not endorsed: because that branch hashes the raw
-      // password, rotating the pepper cannot invalidate a stolen DB that still
-      // holds legacy digests.
+    test('a legacy unsalted SHA-256 digest is never accepted, with any pepper',
+        () async {
+      // The removed branch hashed the raw password and ignored the pepper, so a
+      // stolen database could be attacked pepper-free. It is gone: neither a
+      // peppered nor an unpeppered hasher may authenticate it.
       final sha = sha256.convert(utf8.encode('right')).toString();
-      expect(await hasher.verify('right', sha), isTrue);
-      expect(await PasswordHasher(pepper: 'other').verify('right', sha), isTrue);
+      expect(await hasher.verify('right', sha), isFalse);
+      expect(await PasswordHasher(pepper: 'other').verify('right', sha), isFalse);
     });
 
     test('a non-numeric round count is rejected without hashing', () async {
@@ -215,20 +219,12 @@ void main() {
       );
     });
 
-    test('a malformed salt hex throws instead of returning false', () async {
-      // PINNED DEFECT, not endorsed. `_hexToBytes` uses
-      // `int.parse(..., radix: 16)` with no guard, so a single corrupt stored
-      // hash takes the login path down with a FormatException instead of
-      // simply denying the login. The correct behaviour is `false`.
+    test('a malformed salt hex is rejected without throwing', () async {
+      // `verify` parses the salt out of a stored hash it does not control, so
+      // corruption must deny the login rather than raise a FormatException out
+      // of the login path.
       const corrupt = r'pbkdf2_sha256_v2$16$zzzz$0000000000000000000000000000000000000000000000000000000000000000';
-      Object? caught;
-      try {
-        await hasher.verify('x', corrupt);
-      } catch (error) {
-        caught = error;
-      }
-      expect(caught, isA<FormatException>(),
-          reason: 'PINNED DEFECT: verify must return false, not throw');
+      expect(await hasher.verify('x', corrupt), isFalse);
     });
   });
 
@@ -473,29 +469,31 @@ void main() {
       expect(await LocalSecret(tmp.path).readSecretText(), 'stored-text');
     });
 
-    test('a corrupt secret file yields a secret DERIVED from its bytes', () async {
-      // PINNED DEFECT, not endorsed. `load()` cannot parse the file, so it
-      // falls back to `sha256(fileBytes)`. That is deterministic and
-      // computable by anyone who can read the file, so a tampered or truncated
-      // secret file silently downgrades the local secret from random to
-      // guessable instead of regenerating it or reporting the corruption.
+    test('a corrupt secret file fails closed instead of re-keying', () async {
+      // A tampered/unreadable `.secret` must NOT be replaced by
+      // `sha256(fileBytes)` (attacker-computable) nor by a fresh random key
+      // (which would orphan every sealed value and invalidate every password
+      // hash). It is surfaced as an error so the app fails closed.
       final file = File('${tmp.path}${Platform.pathSeparator}.secret');
       await file.writeAsString('hunter2');
 
-      expect(await LocalSecret(tmp.path).load(), sha256Bytes(utf8.encode('hunter2')));
-      expect(await LocalSecret(tmp.path).load(), await LocalSecret(tmp.path).load(),
-          reason: 'at least it is stable across reloads');
+      await expectLater(
+        LocalSecret(tmp.path).load(),
+        throwsA(isA<LocalSecretException>()),
+      );
+      expect(await file.readAsString(), 'hunter2',
+          reason: 'the corrupt file is never overwritten or deleted');
     });
 
-    test('a too-short base64 secret falls through to a 32-byte digest', () async {
-      // Decodes cleanly but is under the 16-byte floor, so it must not be
-      // returned as-is.
+    test('a too-short base64 secret fails closed, not downgraded', () async {
+      // Decodes cleanly but is under the 16-byte floor: corrupt, not reusable.
       final file = File('${tmp.path}${Platform.pathSeparator}.secret');
       await file.writeAsString(b64UrlNoPad(List<int>.filled(8, 7)));
 
-      final secret = await LocalSecret(tmp.path).load();
-      expect(secret, hasLength(32));
-      expect(secret, isNot(List<int>.filled(8, 7)));
+      await expectLater(
+        LocalSecret(tmp.path).load(),
+        throwsA(isA<LocalSecretException>()),
+      );
     });
 
     test('a valid stored secret is used verbatim', () async {

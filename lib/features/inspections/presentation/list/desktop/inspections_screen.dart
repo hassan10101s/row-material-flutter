@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -45,8 +46,24 @@ const _allStatuses = [
 ];
 
 /// Desktop inspections ledger: the pre-split screen verbatim.
-class DesktopInspectionsScreen extends StatelessWidget {
+class DesktopInspectionsScreen extends StatefulWidget {
   const DesktopInspectionsScreen({super.key});
+
+  @override
+  State<DesktopInspectionsScreen> createState() =>
+      _DesktopInspectionsScreenState();
+}
+
+class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
+  /// Ctrl+F moves focus into the ledger search field (desktop keyboard UX).
+  final _searchFocus = FocusNode();
+
+  @override
+  void dispose() {
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
   Future<void> _newInspection(BuildContext context) async {
     final kind = context.read<InspectionsCubit>().kind;
     final isProduct = kind == 'product';
@@ -126,10 +143,15 @@ class DesktopInspectionsScreen extends StatelessWidget {
       ref: getIt<ReferenceRepository>(),
       isProduct: isProduct,
     );
+    final supplierOptions = await loadInspectionSupplierOptions(
+      getIt<InspectionRepository>(),
+    );
     if (!context.mounted) return;
     var dStatus = cubit.state.status;
+    var dReason = cubit.state.reason;
     var dFrom = cubit.state.dateFrom;
     var dTo = cubit.state.dateTo;
+    var dSupplier = cubit.state.supplier;
     int? dMaterial = cubit.state.materialId;
 
     await showAppWindow<void>(
@@ -169,6 +191,8 @@ class DesktopInspectionsScreen extends StatelessWidget {
                   child: InspectionFilterGrid(
                     isProduct: isProduct,
                     status: dStatus,
+                    reason: dReason,
+                    onReason: (v) => setDraft(() => dReason = v),
                     dateFrom: dFrom,
                     dateTo: dTo,
                     onStatus: (v) => setDraft(() => dStatus = v),
@@ -181,6 +205,9 @@ class DesktopInspectionsScreen extends StatelessWidget {
                     materialOptions: materialOptions,
                     selectedMaterialId: dMaterial,
                     onMaterial: (v) => setDraft(() => dMaterial = v),
+                    supplierOptions: supplierOptions,
+                    selectedSupplier: dSupplier,
+                    onSupplier: (v) => setDraft(() => dSupplier = v ?? ''),
                   ),
                 ),
               ),
@@ -207,8 +234,10 @@ class DesktopInspectionsScreen extends StatelessWidget {
                       small: true,
                       onPressed: () => setDraft(() {
                         dStatus = '';
+                        dReason = '';
                         dFrom = '';
                         dTo = '';
+                        dSupplier = '';
                         dMaterial = null;
                       }),
                     ),
@@ -227,8 +256,10 @@ class DesktopInspectionsScreen extends StatelessWidget {
                       onPressed: () {
                         cubit.applyFilters(
                           status: dStatus,
+                          reason: dReason,
                           dateFrom: dFrom,
                           dateTo: dTo,
+                          supplier: dSupplier,
                           materialId: dMaterial,
                           materialName: inspectionMaterialNameFor(
                             materialOptions,
@@ -319,16 +350,23 @@ class DesktopInspectionsScreen extends StatelessWidget {
     };
     return AppErrorFeedback<InspectionsCubit, InspectionsState>(
       selector: (s) => s.error,
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.page),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Title lives in the shell topbar on desktop; search and every
-            // action share one row so no vertical space is wasted.
-            AppFilterBar(
-              searchLabel: AppText.t('بحث', 'Search'),
-              onSearch: (v) => cubit.setQuery(v),
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.keyF, control: true): () {
+            _searchFocus.requestFocus();
+          },
+        },
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.page),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title lives in the shell topbar on desktop; search and every
+              // action share one row so no vertical space is wasted.
+              AppFilterBar(
+                searchLabel: AppText.t('بحث', 'Search'),
+                onSearch: (v) => cubit.setQuery(v),
+                searchFocusNode: _searchFocus,
               trailing: canCreate
                   ? AppButton(
                       icon: Icon(Icons.add, size: 18.r),
@@ -339,10 +377,9 @@ class DesktopInspectionsScreen extends StatelessWidget {
                     )
                   : null,
               filters: [
-                InspectionFilterButton(
-                  activeCount: inspectionActiveFilterCount(state),
-                  onPressed: () => _openFilterDialog(context),
-                ),
+                // زر «فلترة» أُزيل (2026-10-17): الفلترة تظل متاحة من
+                // قائمة «الحالة» + أيقونة الفترة (النطاق المخصص يفتح
+                // نافذة الفلاتر كاملة).
                 ConstrainedBox(
                   constraints: const BoxConstraints(
                     minWidth: 200,
@@ -361,6 +398,14 @@ class DesktopInspectionsScreen extends StatelessWidget {
                     ],
                     onChanged: (v) => cubit.setStatus(v ?? ''),
                   ),
+                ),
+                // Quick period access beside the follow-up action: اليوم /
+                // آخر ٧ / آخر ٣٠ / الكل without opening the filter dialog.
+                InspectionPeriodButton(
+                  dateFrom: state.dateFrom,
+                  dateTo: state.dateTo,
+                  onPreset: (from, to) => cubit.setDateRange(from, to),
+                  onCustom: () => _openFilterDialog(context),
                 ),
                 AppButton(
                   icon: Icon(Icons.description_outlined, size: 18.r),
@@ -509,7 +554,7 @@ class DesktopInspectionsScreen extends StatelessWidget {
                             ),
                           ),
                           IconButton(
-                            tooltip: AppText.t('ملصق', 'Label'),
+                            tooltip: AppText.t('QR', 'QR'),
                             icon: Icon(Icons.label_outline, size: 18.r),
                             onPressed: () => _exportOne(context, r, 'label'),
                             visualDensity: VisualDensity.compact,
@@ -530,6 +575,7 @@ class DesktopInspectionsScreen extends StatelessWidget {
               ),
             ],
           ],
+        ),
         ),
       ),
     );

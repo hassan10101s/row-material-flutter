@@ -94,7 +94,9 @@ class BackupManager implements BackupService {
   }
 
   Future<Set<String>> _tableNames(Database db) async {
-    final rows = await db.rawQuery("SELECT name FROM sqlite_master WHERE type = 'table'");
+    final rows = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    );
     return rows.map((r) => '${r['name']}').toSet();
   }
 
@@ -122,9 +124,12 @@ class BackupManager implements BackupService {
       }
 
       final tables = await _tableNames(conn);
-      final missingTables = backupRequiredTables.difference(tables).toList()..sort();
+      final missingTables = backupRequiredTables.difference(tables).toList()
+        ..sort();
       if (missingTables.isNotEmpty) {
-        throw ValidationError(AppErrors.backupMissingTables(missingTables.join(', ')));
+        throw ValidationError(
+          AppErrors.backupMissingTables(missingTables.join(', ')),
+        );
       }
 
       for (final entry in backupRequiredColumns.entries) {
@@ -132,7 +137,8 @@ class BackupManager implements BackupService {
         final missingCols = entry.value.difference(cols).toList()..sort();
         if (missingCols.isNotEmpty) {
           throw ValidationError(
-              AppErrors.backupSchemaTooOld(entry.key, missingCols.join(', ')));
+            AppErrors.backupSchemaTooOld(entry.key, missingCols.join(', ')),
+          );
         }
       }
     } on ValidationError {
@@ -147,7 +153,10 @@ class BackupManager implements BackupService {
   /// Copy the backup to a temp file and run the full current-schema migration
   /// against the copy. Returns the migrated file path.
   @override
-  Future<String> preflightMigrateBackup(String backupPath, Directory tempRoot) async {
+  Future<String> preflightMigrateBackup(
+    String backupPath,
+    Directory tempRoot,
+  ) async {
     final stamp = nowIso().replaceAll(':', '').replaceAll(' ', '_');
     final migrated = p.join(tempRoot.path, 'preflight_$stamp.db');
     await File(backupPath).copy(migrated);
@@ -182,14 +191,21 @@ class BackupManager implements BackupService {
         throw ValidationError(AppErrors.invalidParamsDb);
       }
       final materialCols = await _columnNames(conn, 'reference_materials');
-      final missingMaterials = materialsTableRequiredColumns.difference(materialCols).toList()..sort();
+      final missingMaterials =
+          materialsTableRequiredColumns.difference(materialCols).toList()
+            ..sort();
       if (missingMaterials.isNotEmpty) {
-        throw ValidationError(AppErrors.incompatibleMaterialsTable(missingMaterials.join(', ')));
+        throw ValidationError(
+          AppErrors.incompatibleMaterialsTable(missingMaterials.join(', ')),
+        );
       }
       final paramCols = await _columnNames(conn, 'parameters');
-      final missingParams = parametersTableRequiredColumns.difference(paramCols).toList()..sort();
+      final missingParams =
+          parametersTableRequiredColumns.difference(paramCols).toList()..sort();
       if (missingParams.isNotEmpty) {
-        throw ValidationError(AppErrors.incompatibleParamsTable(missingParams.join(', ')));
+        throw ValidationError(
+          AppErrors.incompatibleParamsTable(missingParams.join(', ')),
+        );
       }
     } finally {
       await conn?.close();
@@ -202,7 +218,9 @@ class BackupManager implements BackupService {
   /// controller.export_database_backup (VACUUM INTO achieves the same
   /// consistent snapshot as sqlite's online backup API).
   @override
-  Future<Map<String, dynamic>> exportDatabaseBackup({String? explicitPath}) async {
+  Future<Map<String, dynamic>> exportDatabaseBackup({
+    String? explicitPath,
+  }) async {
     final db = await dbHelper.database;
     final livePath = await dbHelper.databasePath;
 
@@ -212,7 +230,10 @@ class BackupManager implements BackupService {
       if (p.extension(backupPath).isEmpty) backupPath = '$backupPath.db';
     } else {
       final dir = await dbHelper.paths.backupsDir();
-      backupPath = p.join(dir.path, 'material_lab_backup_${fileTimestamp()}.db');
+      backupPath = p.join(
+        dir.path,
+        'material_lab_backup_${fileTimestamp()}.db',
+      );
     }
     if (await _sameFile(backupPath, livePath)) {
       throw ValidationError(AppErrors.backupPathMustDiffer);
@@ -224,13 +245,19 @@ class BackupManager implements BackupService {
     // Same-filesystem rename keeps MSIX/EXE/mobile parity (no extra plugin).
     final target = File(backupPath);
     await target.parent.create(recursive: true);
-    final tmpTarget = File('${target.path}.tmp-${DateTime.now().microsecondsSinceEpoch}');
+    final tmpTarget = File(
+      '${target.path}.tmp-${DateTime.now().microsecondsSinceEpoch}',
+    );
 
-    await DbTrace.run('backup.walCheckpoint',
-        () => db.rawQuery('PRAGMA wal_checkpoint(FULL)'));
+    await DbTrace.run(
+      'backup.walCheckpoint',
+      () => db.rawQuery('PRAGMA wal_checkpoint(FULL)'),
+    );
     try {
-      await DbTrace.run('backup.vacuumInto',
-          () => db.execute("VACUUM INTO '${_sqlQuote(tmpTarget.path)}'"));
+      await DbTrace.run(
+        'backup.vacuumInto',
+        () => db.execute("VACUUM INTO '${_sqlQuote(tmpTarget.path)}'"),
+      );
     } on Object {
       try {
         if (await tmpTarget.exists()) await tmpTarget.delete();
@@ -263,8 +290,11 @@ class BackupManager implements BackupService {
   /// Rename [src] over [dst] with retries for Windows file locks (OneDrive,
   /// antivirus, Explorer preview). Falls back to copy+delete when rename fails
   /// (e.g. cross-volume target).
-  static Future<void> _replaceWithRetry(File src, File dst,
-      {int attempts = 5}) async {
+  static Future<void> _replaceWithRetry(
+    File src,
+    File dst, {
+    int attempts = 5,
+  }) async {
     Object? lastError;
     for (var i = 0; i < attempts; i++) {
       try {
@@ -290,8 +320,11 @@ class BackupManager implements BackupService {
         await Future<void>.delayed(Duration(milliseconds: 150 * (i + 1)));
       }
     }
-    throw AppError(AppErrors.backupUnreadable(
-        'could not replace backup target (locked?): $lastError'));
+    throw AppError(
+      AppErrors.backupUnreadable(
+        'could not replace backup target (locked?): $lastError',
+      ),
+    );
   }
 
   /// Delete with retries for Windows locks. Returns true when gone.
@@ -324,34 +357,41 @@ class BackupManager implements BackupService {
         final existing = dir
             .listSync()
             .whereType<File>()
-            .where((f) =>
-                p.basename(f.path).startsWith('material_lab_backup_') &&
-                f.path.endsWith('.db'))
+            .where(
+              (f) =>
+                  p.basename(f.path).startsWith('material_lab_backup_') &&
+                  f.path.endsWith('.db'),
+            )
             .toList();
         if (existing.isNotEmpty) {
-          existing.sort((a, b) => b
-              .statSync()
-              .modified
-              .compareTo(a.statSync().modified));
+          existing.sort(
+            (a, b) => b.statSync().modified.compareTo(a.statSync().modified),
+          );
           final newest = existing.first.statSync().modified;
-          if (DateTime.now().difference(newest) <
-              const Duration(hours: 12)) {
+          if (DateTime.now().difference(newest) < const Duration(hours: 12)) {
             return;
           }
         }
       } catch (_) {
         // Listing must never block the backup itself.
       }
-      final backupPath = p.join(dir.path, 'material_lab_backup_${fileTimestamp()}.db');
+      final backupPath = p.join(
+        dir.path,
+        'material_lab_backup_${fileTimestamp()}.db',
+      );
 
       final db = await dbHelper.database;
       // Labelled because this runs on every organization bind, on the live
       // connection, while the UI is already reading: a full-database rewrite
       // holds the connection for as long as the file takes.
-      await DbTrace.run('autoBackup.walCheckpoint',
-          () => db.rawQuery('PRAGMA wal_checkpoint(FULL)'));
-      await DbTrace.run('autoBackup.vacuumInto',
-          () => db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'"));
+      await DbTrace.run(
+        'autoBackup.walCheckpoint',
+        () => db.rawQuery('PRAGMA wal_checkpoint(FULL)'),
+      );
+      await DbTrace.run(
+        'autoBackup.vacuumInto',
+        () => db.execute("VACUUM INTO '${_sqlQuote(backupPath)}'"),
+      );
 
       Database? checkDb;
       try {
@@ -365,14 +405,19 @@ class BackupManager implements BackupService {
         await checkDb?.close();
       }
 
-      final files = dir
-          .listSync()
-          .whereType<File>()
-          .where((f) =>
-              p.basename(f.path).startsWith('material_lab_backup_') &&
-              f.path.endsWith('.db'))
-          .toList()
-        ..sort((a, b) => a.statSync().modified.compareTo(b.statSync().modified));
+      final files =
+          dir
+              .listSync()
+              .whereType<File>()
+              .where(
+                (f) =>
+                    p.basename(f.path).startsWith('material_lab_backup_') &&
+                    f.path.endsWith('.db'),
+              )
+              .toList()
+            ..sort(
+              (a, b) => a.statSync().modified.compareTo(b.statSync().modified),
+            );
       while (files.length > _autoBackupRetention) {
         final oldest = files.removeAt(0);
         try {
@@ -405,8 +450,11 @@ class BackupManager implements BackupService {
       for (final side in [livePath, '$livePath-wal', '$livePath-shm']) {
         final ok = await _deleteWithRetry(File(side));
         if (!ok) {
-          throw AppError(AppErrors.backupRestoreFailed(
-              'live database is locked (OneDrive/antivirus?). Close Explorer preview and retry.'));
+          throw AppError(
+            AppErrors.backupRestoreFailed(
+              'live database is locked (OneDrive/antivirus?). Close Explorer preview and retry.',
+            ),
+          );
         }
       }
       await File(migrated).copy(livePath);
@@ -455,15 +503,16 @@ class BackupManager implements BackupService {
   }
 
   static const String usersImportDisabledMessage =
-      'استيراد المستخدمين معطّل في النسخة الثانية: الهوية أصبحت عبر Google/Firebase. '
-      'أضف الأعضاء من شاشة "الأعضاء" (Members) داخل التطبيق، وسيتم ربط كل بريد '
-      'بحسابه تلقائيًا عند أول تسجيل دخول.';
+      'استيراد المستخدمين غير متاح. أضف الأعضاء من شاشة "الأعضاء" داخل التطبيق، '
+      'وسيتم ربط كل بريد بحسابه تلقائيًا عند أول تسجيل دخول.';
 
   /// Copy inspections (and their status history) from a source database,
   /// creating missing reference materials. Returns the number of inspections
   /// copied.
   @override
-  Future<int> importInspectionsFromSource({required String sourceDbPath}) async {
+  Future<int> importInspectionsFromSource({
+    required String sourceDbPath,
+  }) async {
     final livePath = await dbHelper.databasePath;
     if (await _sameFile(sourceDbPath, livePath)) return 0;
 
@@ -475,26 +524,30 @@ class BackupManager implements BackupService {
       final tables = await _tableNames(source);
       if (!tables.contains('inspections')) return 0;
 
-      final sourceInspections =
-          await source.rawQuery('SELECT * FROM inspections ORDER BY id ASC');
+      final sourceInspections = await source.rawQuery(
+        'SELECT * FROM inspections ORDER BY id ASC',
+      );
       final sourceHistory = tables.contains('inspection_status_history')
           ? await source.rawQuery(
-              'SELECT * FROM inspection_status_history ORDER BY id ASC')
+              'SELECT * FROM inspection_status_history ORDER BY id ASC',
+            )
           : <Map<String, Object?>>[];
 
-      final existingCodes = (await db.rawQuery('SELECT entry_code FROM inspections'))
-          .map((r) => '${r['entry_code']}')
-          .toSet();
+      final existingCodes = (await db.rawQuery(
+        'SELECT entry_code FROM inspections',
+      )).map((r) => '${r['entry_code']}').toSet();
       // V2: `created_by` is assigned to the current member (the session user),
       // because legacy usernames no longer exist in the roster.
       final userRows = await db.rawQuery('SELECT id, email FROM users');
       final emailsToId = <String, int>{
         for (final r in userRows) '${r['email']}': int.parse('${r['id']}'),
       };
-      final materialRows =
-          await db.rawQuery('SELECT id, material_name FROM reference_materials');
+      final materialRows = await db.rawQuery(
+        'SELECT id, material_name FROM reference_materials',
+      );
       final materialNameToId = <String, int>{
-        for (final r in materialRows) '${r['material_name']}': int.parse('${r['id']}'),
+        for (final r in materialRows)
+          '${r['material_name']}': int.parse('${r['id']}'),
       };
       final timestamp = nowIso();
       final idMap = <int, int>{};
@@ -506,7 +559,8 @@ class BackupManager implements BackupService {
           final pendingMaterials = <String>{};
           for (final insp in sourceInspections) {
             final entryCode = '${insp['entry_code'] ?? ''}'.trim();
-            if (entryCode.isEmpty || existingCodes.contains(entryCode)) continue;
+            if (entryCode.isEmpty || existingCodes.contains(entryCode))
+              continue;
             final materialName = '${insp['material_name'] ?? 'Unknown'}'.trim();
             final materialCode = '${insp['material_code'] ?? ''}'.trim();
             final key = materialName.toLowerCase();
@@ -523,17 +577,13 @@ class BackupManager implements BackupService {
             // holder in stall reports.
             final batch = (txn as dynamic).batch() as dynamic;
             for (final m in newMaterials) {
-              batch.insert(
-                'reference_materials',
-                {
-                  'material_name': m[0],
-                  'material_code': m[1],
-                  'physical_reference_json': '{}',
-                  'chemical_reference_json': '{}',
-                  'imported_at': m[2],
-                },
-                conflictAlgorithm: ConflictAlgorithm.ignore,
-              );
+              batch.insert('reference_materials', {
+                'material_name': m[0],
+                'material_code': m[1],
+                'physical_reference_json': '{}',
+                'chemical_reference_json': '{}',
+                'imported_at': m[2],
+              }, conflictAlgorithm: ConflictAlgorithm.ignore);
             }
             await DbTrace.run(
               'import.materialsBatch(${newMaterials.length})',
@@ -542,17 +592,20 @@ class BackupManager implements BackupService {
             final qmarks = List.filled(newMaterials.length, '?').join(',');
             final names = [for (final m in newMaterials) m[0] as Object];
             final idRows = await txn.rawQuery(
-                'SELECT id, material_name FROM reference_materials WHERE material_name IN ($qmarks)',
-                names);
+              'SELECT id, material_name FROM reference_materials WHERE material_name IN ($qmarks)',
+              names,
+            );
             for (final r in idRows) {
-              materialNameToId['${r['material_name']}'] =
-                  int.parse('${r['id']}');
+              materialNameToId['${r['material_name']}'] = int.parse(
+                '${r['id']}',
+              );
             }
           }
 
           for (final insp in sourceInspections) {
             final entryCode = '${insp['entry_code'] ?? ''}'.trim();
-            if (entryCode.isEmpty || existingCodes.contains(entryCode)) continue;
+            if (entryCode.isEmpty || existingCodes.contains(entryCode))
+              continue;
             final materialName = '${insp['material_name'] ?? 'Unknown'}'.trim();
             final materialId = materialNameToId[materialName]!;
             final createdByName = '${insp['created_by_name'] ?? ''}'.trim();
@@ -571,10 +624,14 @@ class BackupManager implements BackupService {
               'quantity': '${insp['quantity'] ?? ''}',
               'sample_taken_by': '${insp['sample_taken_by'] ?? ''}',
               'specialist_name': '${insp['specialist_name'] ?? ''}',
-              'physical_results_json': '${insp['physical_results_json'] ?? '{}'}',
-              'chemical_results_json': '${insp['chemical_results_json'] ?? '{}'}',
-              'physical_reference_json': '${insp['physical_reference_json'] ?? '{}'}',
-              'chemical_reference_json': '${insp['chemical_reference_json'] ?? '{}'}',
+              'physical_results_json':
+                  '${insp['physical_results_json'] ?? '{}'}',
+              'chemical_results_json':
+                  '${insp['chemical_results_json'] ?? '{}'}',
+              'physical_reference_json':
+                  '${insp['physical_reference_json'] ?? '{}'}',
+              'chemical_reference_json':
+                  '${insp['chemical_reference_json'] ?? '{}'}',
               'decision_status': '${insp['decision_status'] ?? ''}',
               'decision_reason': '${insp['decision_reason'] ?? ''}',
               'follow_up_note': '${insp['follow_up_note'] ?? ''}',
@@ -645,17 +702,16 @@ class BackupManager implements BackupService {
       final tables = await _tableNames(source);
       final parameterRows = tables.contains('parameters')
           ? await source.rawQuery(
-              'SELECT parameter_name, unit, parameter_type, imported_at FROM parameters')
+              'SELECT parameter_name, unit, parameter_type, imported_at FROM parameters',
+            )
           : <Map<String, Object?>>[];
 
-      final existingMaterials =
-          (await db.rawQuery('SELECT material_name FROM reference_materials'))
-              .map((r) => '${r['material_name']}')
-              .toSet();
-      final existingParameters =
-          (await db.rawQuery('SELECT parameter_name FROM parameters'))
-              .map((r) => '${r['parameter_name']}')
-              .toSet();
+      final existingMaterials = (await db.rawQuery(
+        'SELECT material_name FROM reference_materials',
+      )).map((r) => '${r['material_name']}').toSet();
+      final existingParameters = (await db.rawQuery(
+        'SELECT parameter_name FROM parameters',
+      )).map((r) => '${r['parameter_name']}').toSet();
       final timestamp = nowIso();
 
       await db.transaction((txn) async {
@@ -711,7 +767,9 @@ class BackupManager implements BackupService {
         importedUnits = await importUnits();
       }
       final materialCount = materialRows.length;
-      final parameterCount = parameterRows.isNotEmpty ? parameterRows.length : importedUnits;
+      final parameterCount = parameterRows.isNotEmpty
+          ? parameterRows.length
+          : importedUnits;
       final createdMaterials = materialRows
           .where((r) => !existingMaterials.contains('${r['material_name']}'))
           .length;
@@ -724,10 +782,12 @@ class BackupManager implements BackupService {
         'materials_created': createdMaterials,
         'materials_updated': materialCount - createdMaterials,
         'parameters': parameterCount,
-        'parameters_created':
-            parameterRows.isNotEmpty ? createdParameters : importedUnits,
-        'parameters_updated':
-            parameterRows.isNotEmpty ? (parameterRows.length - createdParameters) : 0,
+        'parameters_created': parameterRows.isNotEmpty
+            ? createdParameters
+            : importedUnits,
+        'parameters_updated': parameterRows.isNotEmpty
+            ? (parameterRows.length - createdParameters)
+            : 0,
         'target_path': livePath,
         'message':
             'تم تحديث $materialCount خامة و $parameterCount وحدة/متطلب بدون تغيير الإعدادات أو المسارات المحلية.',

@@ -26,6 +26,7 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_field.dart';
+import '../../../../design_system/widgets/app_user_avatar.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../router/app_router.dart';
 import '../../../backup/domain/backup_service.dart';
@@ -44,11 +45,18 @@ import '../../domain/settings_repository.dart';
 
 /// Deep-linkable Settings sections, reachable as `/settings?tab=<key>`.
 enum SettingsTab {
+  account(
+    'account',
+    'الحساب',
+    'Account',
+    'الاسم وكلمة المرور',
+    'Name and password',
+  ),
   general('general', 'عام', 'General', 'الإعدادات العامة', 'General settings'),
   database(
     'database',
-    'قاعدة البيانات',
-    'Database',
+    'البيانات',
+    'Data',
     'نسخ واستعادة',
     'Backup and restore',
   ),
@@ -142,6 +150,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _body() => switch (_tab) {
+    SettingsTab.account => const _ProfilePanel(),
     SettingsTab.general => BlocProvider(
       create: (c) =>
           GeneralSettingsCubit(repo: getIt<SettingsRepository>())..load(),
@@ -195,6 +204,181 @@ class _SettingsTabs extends StatelessWidget {
               ),
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// Signed-in member's own profile: the Google photo as the avatar, the display
+/// name they choose for themselves, and a password-reset link.
+///
+/// This is the "يغيّر كلمة المرور والاسم" section. The name is the member's
+/// profile name (independent of the Google account name) and is written to
+/// `users/{uid}` so it follows them to every device; the password is changed by
+/// a Firebase reset link, which is provider-safe and needs no re-authentication.
+class _ProfilePanel extends StatefulWidget {
+  const _ProfilePanel();
+  @override
+  State<_ProfilePanel> createState() => _ProfilePanelState();
+}
+
+class _ProfilePanelState extends State<_ProfilePanel> {
+  final AuthGate _gate = getIt<AuthGate>();
+  late final TextEditingController _name = TextEditingController(
+    text: _gate.currentUser?.label ?? '',
+  );
+  bool _savingName = false;
+  bool _sendingReset = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveName() async {
+    final name = _name.text.trim();
+    if (name.isEmpty) {
+      AppFeedback.error(
+        context,
+        AppText.t('أدخل اسمًا صحيحًا.', 'Enter a valid name.'),
+      );
+      return;
+    }
+    setState(() => _savingName = true);
+    try {
+      await _gate.auth.updateDisplayName(name);
+      if (!mounted) return;
+      AppFeedback.success(context, AppText.t('تم حفظ الاسم', 'Name saved'));
+    } on AppError catch (e) {
+      if (mounted) AppFeedback.error(context, e.message);
+    } catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    } finally {
+      if (mounted) setState(() => _savingName = false);
+    }
+  }
+
+  Future<void> _sendReset() async {
+    final user = _gate.currentUser;
+    if (user == null) return;
+    setState(() => _sendingReset = true);
+    try {
+      await _gate.auth.sendPasswordResetEmail(user.email);
+      if (!mounted) return;
+      AppFeedback.success(
+        context,
+        AppText.t(
+          'أرسلنا رابط تغيير كلمة المرور إلى ${user.email}',
+          'We sent a password reset link to ${user.email}',
+        ),
+      );
+    } on AppError catch (e) {
+      if (mounted) AppFeedback.error(context, e.message);
+    } catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    } finally {
+      if (mounted) setState(() => _sendingReset = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = _gate.currentUser;
+    if (user == null) return const SizedBox.shrink();
+    final displayName = user.label.isEmpty ? user.email : user.label;
+    return _Panel(
+      children: [
+        _TwoColumn(
+          children: [
+            _SettingsCard(
+              title: AppText.t('الملف الشخصي', 'Profile'),
+              children: [
+                Row(
+                  children: [
+                    AppUserAvatar(
+                      name: displayName,
+                      photoUrl: user.photoUrl,
+                      radius: 26.r,
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            displayName,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14.spMax,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          Text(
+                            user.email,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12.spMax,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                AppField(
+                  label: AppText.t('الاسم الظاهر', 'Display name'),
+                  controller: _name,
+                ),
+                const SizedBox(height: AppSpacing.xs),
+                Text(
+                  AppText.t(
+                    'هذا الاسم يظهر في التطبيق وسجل التحاليل، ويمكن أن يختلف عن اسم حساب Google.',
+                    'This name is shown in the app and the test log; it can differ from your Google account name.',
+                  ),
+                  style: TextStyle(
+                    fontSize: 12.spMax,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  label: AppStrings.save,
+                  loading: _savingName,
+                  onPressed: _savingName ? null : _saveName,
+                ),
+              ],
+            ),
+            _SettingsCard(
+              title: AppText.t('كلمة المرور', 'Password'),
+              children: [
+                Text(
+                  AppText.t(
+                    'سنرسل رابطًا آمنًا إلى بريد حسابك لإعادة تعيين كلمة المرور. يعمل هذا مع حسابات Google وحسابات البريد.',
+                    'We will email a secure link to your account address to reset the password. This works for both Google and email accounts.',
+                  ),
+                  style: TextStyle(
+                    fontSize: 13.spMax,
+                    color: AppColors.textMuted,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  label: AppText.t(
+                    'إرسال رابط تغيير كلمة المرور',
+                    'Send password reset link',
+                  ),
+                  icon: Icon(Icons.key_outlined, size: 16.r),
+                  style: AppButtonStyle.secondary,
+                  loading: _sendingReset,
+                  onPressed: _sendingReset ? null : _sendReset,
+                ),
+              ],
+            ),
+          ],
+        ),
       ],
     );
   }
@@ -482,7 +666,7 @@ class _AppearanceSection extends StatelessWidget {
   }
 }
 
-class _ReportLogoSection extends StatelessWidget {
+class _ReportLogoSection extends StatefulWidget {
   final String path;
   final String dataUri;
   final VoidCallback onPick;
@@ -493,9 +677,48 @@ class _ReportLogoSection extends StatelessWidget {
     required this.onPick,
     required this.onRemove,
   });
+
+  @override
+  State<_ReportLogoSection> createState() => _ReportLogoSectionState();
+}
+
+class _ReportLogoSectionState extends State<_ReportLogoSection> {
+  Uint8List? _logoBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _decodeLogo();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReportLogoSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.dataUri != widget.dataUri) {
+      _decodeLogo();
+    }
+  }
+
+  /// Perf: decode once per dataUri change instead of on every parent rebuild.
+  /// Invalid payloads fall back to the placeholder via null bytes.
+  void _decodeLogo() {
+    final uri = widget.dataUri;
+    if (uri.isEmpty) {
+      _logoBytes = null;
+      return;
+    }
+    try {
+      final comma = uri.indexOf(',');
+      final raw = comma >= 0 ? uri.substring(comma + 1) : uri;
+      _logoBytes = base64Decode(raw);
+    } on Object catch (_) {
+      _logoBytes = null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final hasLogo = dataUri.isNotEmpty;
+    final hasLogo = widget.dataUri.isNotEmpty && _logoBytes != null;
     // The title lives on the wrapping card; this only lays out the preview.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -507,10 +730,13 @@ class _ReportLogoSection extends StatelessWidget {
               borderRadius: BorderRadius.circular(8.r),
               child: hasLogo
                   ? Image.memory(
-                      _logoBytes,
+                      _logoBytes!,
                       width: 96.r,
                       height: 48.r,
                       fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                      cacheWidth: 192,
+                      cacheHeight: 96,
                       errorBuilder: (_, _, _) => _placeholder(),
                     )
                   : _placeholder(),
@@ -521,7 +747,7 @@ class _ReportLogoSection extends StatelessWidget {
               children: [
                 Text(
                   hasLogo
-                      ? AppPaths.fileNameOf(path)
+                      ? AppPaths.fileNameOf(widget.path)
                       : AppText.t('لا يوجد شعار', 'No logo'),
                   style: TextStyle(
                     fontSize: 13.spMax,
@@ -534,7 +760,7 @@ class _ReportLogoSection extends StatelessWidget {
                     AppButton(
                       label: AppText.t('اختيار', 'Choose'),
                       icon: Icon(Icons.image_outlined, size: 16.r),
-                      onPressed: onPick,
+                      onPressed: widget.onPick,
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     if (hasLogo)
@@ -542,7 +768,7 @@ class _ReportLogoSection extends StatelessWidget {
                         label: AppText.t('إزالة', 'Remove'),
                         style: AppButtonStyle.secondary,
                         icon: Icon(Icons.close, size: 16.r),
-                        onPressed: onRemove,
+                        onPressed: widget.onRemove,
                       ),
                   ],
                 ),
@@ -561,8 +787,6 @@ class _ReportLogoSection extends StatelessWidget {
     alignment: Alignment.center,
     child: Icon(Icons.image_outlined, size: 20.r, color: AppColors.textMuted),
   );
-  Uint8List get _logoBytes =>
-      base64Decode(dataUri.substring(dataUri.indexOf(',') + 1));
 }
 
 class _ExportPathSection extends StatelessWidget {
@@ -709,9 +933,9 @@ class _DatabasePanel extends StatelessWidget {
       context,
       title: AppText.t('تأكيد الاستعادة', 'Confirm restore'),
       message: AppText.t(
-        'سيتم استبدال قاعدة البيانات الحالية بالنسخة الاحتياطية بعد عمل نسخة أمان تلقائية. '
+        'سيتم استبدال البيانات الحالية بالنسخة الاحتياطية بعد عمل نسخة أمان تلقائية. '
             'سيتم تسجيل الخروج بعد الاستعادة.',
-        'The current database will be replaced with the backup, after an automatic safety copy. '
+        'Your current data will be replaced with the backup, after an automatic safety copy. '
             'You will be logged out.',
       ),
       confirmLabel: AppText.t('استعادة', 'Restore'),
@@ -745,12 +969,15 @@ class _DatabasePanel extends StatelessWidget {
           _TwoColumn(
             children: [
               _SettingsCard(
-                title: AppText.t('قاعدة البيانات', 'Database'),
+                title: AppText.t(
+                  'البيانات والنسخ الاحتياطي',
+                  'Data and backup',
+                ),
                 children: [
                   Text(
                     AppText.t(
-                      'نسخة احتياطية واستعادة قاعدة البيانات. تشمل الاستعادة ترقية تلقائية لهيكل النسخة القديمة.',
-                      'Back up and restore the database. Restoring automatically upgrades an old backup format.',
+                      'نسخ احتياطي واستعادة البيانات. تشمل الاستعادة ترقية تلقائية للنسخ القديمة.',
+                      'Back up and restore your data. Restoring automatically upgrades old backups.',
                     ),
                     style: TextStyle(
                       fontSize: 13.spMax,

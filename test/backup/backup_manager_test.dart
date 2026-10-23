@@ -294,7 +294,12 @@ void main() {
     final result = await _backup.pullUsersFromSourceDb(sourceDbPath: src);
     expect(result['users_copied'], 0);
     expect(result['disabled'], isTrue);
-    expect('${result['message']}', contains('Google/Firebase'));
+    // The disabled message now points to the members screen instead of the
+    // legacy Google/Firebase copy flow.
+    expect(
+      '${result['message']}',
+      contains('استيراد المستخدمين غير متاح'),
+    );
 
     // The legacy row must not exist here; the only rows are the seeded member
     // and the reserved `id = 0` placeholder (plan §6.6, D2).

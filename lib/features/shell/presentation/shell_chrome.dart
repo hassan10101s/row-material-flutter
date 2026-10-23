@@ -24,6 +24,7 @@ import '../../../core/theme/theme_service.dart';
 import '../../../design_system/tokens/app_colors.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_support.dart';
+import '../../../design_system/widgets/app_user_avatar.dart';
 import '../../auth/domain/user.dart';
 import '../../notifications/presentation/notification_bell.dart';
 import '../../sync/presentation/sync_badge.dart';
@@ -339,6 +340,7 @@ class ShellIdentityCard extends StatelessWidget {
     required this.user,
     required this.onLogout,
     required this.onLogoutThisDevice,
+    required this.onOpenSettings,
   });
 
   final User user;
@@ -348,11 +350,96 @@ class ShellIdentityCard extends StatelessWidget {
   final VoidCallback onLogout;
   final VoidCallback onLogoutThisDevice;
 
+  /// Opens the Settings screen (its account section holds name + password).
+  final VoidCallback onOpenSettings;
+
+  /// Tapping the member row opens a small account sheet: the two sign-outs live
+  /// in there now (they used to be two icon buttons crowding the row), and the
+  /// gear button beside the name jumps straight to Settings.
+  Future<void> _openAccountSheet(BuildContext context) {
+    final label = user.label.isNotEmpty ? user.label : user.email;
+    return showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+              child: Row(
+                children: [
+                  AppUserAvatar(
+                    name: label,
+                    photoUrl: user.photoUrl,
+                    radius: 22,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          label,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15.spMax,
+                          ),
+                        ),
+                        Text(
+                          '${user.username} — ${AppRoles.label(user.role)}',
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 12.spMax,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: Text(AppText.t('الإعدادات', 'Settings')),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onOpenSettings();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.phone_iphone),
+              title: Text(
+                AppText.t('تسجيل الخروج من هذا الجهاز فقط', 'Sign out of this device only'),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onLogoutThisDevice();
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.logout, color: AppColors.danger),
+              title: Text(
+                AppText.t('تسجيل الخروج', 'Logout'),
+                style: TextStyle(color: AppColors.danger),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                onLogout();
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final initial = user.fullName.isEmpty
-        ? '?'
-        : user.fullName.substring(0, 1).toUpperCase();
+    final label = user.label.isNotEmpty ? user.label : user.fullName;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 12),
       child: Column(
@@ -427,82 +514,81 @@ class ShellIdentityCard extends StatelessWidget {
             ),
             child: LayoutBuilder(
               builder: (context, constraints) {
-                // The rail can be collapsed to roughly 90px. In that state
-                // the avatar is the useful identity affordance; forcing the
-                // name and two logout buttons into the same row causes a
-                // horizontal RenderFlex overflow. The slim 224dp sidebar
-                // leaves ~178dp here, so the cutoff sits just below that.
-                if (constraints.maxWidth < 168) {
-                  return Align(
-                    alignment: AlignmentDirectional.center,
-                    child: CircleAvatar(
-                      radius: 18.r,
-                      backgroundColor: AppColors.primary,
-                      child: Text(
-                        initial,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15.spMax,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
+                final narrow = constraints.maxWidth < 168;
+                // The whole row opens the account sheet (name, Settings and the
+                // two sign-outs); the gear is a shortcut straight to Settings.
+                // The rail can be collapsed to roughly 90px - in that state the
+                // avatar alone is the affordance, so the name and buttons drop.
+                return InkWell(
+                  onTap: () => _openAccountSheet(context),
+                  borderRadius: BorderRadius.circular(14.r),
+                  child: Padding(
+                    padding: const EdgeInsetsDirectional.only(
+                      start: 2,
+                      end: 2,
+                      top: 2,
+                      bottom: 2,
                     ),
-                  );
-                }
-                return Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 18.r,
-                      backgroundColor: AppColors.primary,
-                      child: Text(
-                        initial,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15.spMax,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            user.fullName,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13.spMax,
+                    child: narrow
+                        ? Align(
+                            alignment: AlignmentDirectional.center,
+                            child: AppUserAvatar(
+                              name: label,
+                              photoUrl: user.photoUrl,
+                              radius: 18.r,
                             ),
+                          )
+                        : Row(
+                            children: [
+                              AppUserAvatar(
+                                name: label,
+                                photoUrl: user.photoUrl,
+                                radius: 18.r,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      label,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 13.spMax,
+                                      ),
+                                    ),
+                                    Text(
+                                      '${user.username} — ${user.role}',
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(
+                                        color: AppColors.textMuted,
+                                        fontSize: 11.spMax,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: AppText.t(
+                                  'الإعدادات',
+                                  'Settings',
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: onOpenSettings,
+                                icon: Icon(
+                                  Icons.settings_outlined,
+                                  size: 18.r,
+                                ),
+                              ),
+                              Icon(
+                                Icons.keyboard_arrow_down,
+                                size: 18.r,
+                                color: AppColors.textMuted,
+                              ),
+                            ],
                           ),
-                          Text(
-                            '${user.username} — ${user.role}',
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 11.spMax,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: AppText.t(
-                        'تسجيل الخروج من هذا الجهاز فقط',
-                        'Sign out of this device only',
-                      ),
-                      visualDensity: VisualDensity.compact,
-                      onPressed: onLogoutThisDevice,
-                      icon: Icon(Icons.phone_iphone, size: 18.r),
-                    ),
-                    IconButton(
-                      tooltip: AppText.t('تسجيل الخروج', 'Logout'),
-                      visualDensity: VisualDensity.compact,
-                      onPressed: onLogout,
-                      icon: Icon(Icons.logout, size: 18.r),
-                    ),
-                  ],
+                  ),
                 );
               },
             ),

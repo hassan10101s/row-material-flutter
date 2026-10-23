@@ -3,9 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import '../../../core/audit/audit_hasher.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/utils/app_dates.dart';
-import '../domain/qc_audit.dart';
 import '../domain/qc_enums.dart';
-import '../domain/qc_goal.dart';
 import '../domain/qc_inspection.dart';
 import '../domain/qc_nc_capa.dart';
 import '../domain/qc_sop.dart';
@@ -70,7 +68,7 @@ Map<String, dynamic> qcUpdatable(
   return out;
 }
 
-/// Shared plumbing for the QC local repositories (plan V6_ENHANCED §24 P3).
+/// Shared plumbing for the QC local repositories (plan V6_ENHANCED Â§24 P3).
 ///
 /// ## Why the repositories are thin
 /// These classes own the SQL and nothing else: no session, no permission check,
@@ -1109,11 +1107,16 @@ class QcNcCapaRepo extends QcLocalRepo {
   }) async {
     Future<int> run(DatabaseExecutor txn) async {
       await qcEnsureUnit(txn, finding.qtyUnit);
-      final findingId = await txn.insert(
-        'qc_findings_nc',
-        qcInsertable(finding.toMap(withId: false), 'finding_id'),
-      );
-      await QcInspectionRepo.recompute(txn, finding.inspectionId);
+      final row = qcInsertable(finding.toMap(withId: false), 'finding_id');
+      // Standalone finding: the FK to qc_inspections is satisfied by a NULL
+      // child key only, never by 0 (no inspection row 0 exists).
+      if ((row['inspection_id'] as num?)?.toInt() == 0) {
+        row['inspection_id'] = null;
+      }
+      final findingId = await txn.insert('qc_findings_nc', row);
+      if (finding.inspectionId != 0) {
+        await QcInspectionRepo.recompute(txn, finding.inspectionId);
+      }
       return findingId;
     }
 
@@ -1126,13 +1129,20 @@ class QcNcCapaRepo extends QcLocalRepo {
   }) async {
     Future<void> run(DatabaseExecutor txn) async {
       await qcEnsureUnit(txn, finding.qtyUnit);
+      final row = qcUpdatable(finding.toMap(withId: false), 'finding_id');
+      // Standalone finding: keep the NULL, don't turn it back into 0.
+      if ((row['inspection_id'] as num?)?.toInt() == 0) {
+        row['inspection_id'] = null;
+      }
       await txn.update(
         'qc_findings_nc',
-        qcUpdatable(finding.toMap(withId: false), 'finding_id'),
+        row,
         where: 'finding_id = ?',
         whereArgs: [finding.findingId],
       );
-      await QcInspectionRepo.recompute(txn, finding.inspectionId);
+      if (finding.inspectionId != 0) {
+        await QcInspectionRepo.recompute(txn, finding.inspectionId);
+      }
     }
 
     if (exec != null) return run(exec);
@@ -1150,7 +1160,8 @@ class QcNcCapaRepo extends QcLocalRepo {
       limit: 1,
     );
     if (owner.isEmpty) return;
-    final inspectionId = (owner.first['inspection_id'] as num).toInt();
+    // Standalone findings bring no sheet to recompute.
+    final inspectionId = (owner.first['inspection_id'] as num?)?.toInt() ?? 0;
 
     Future<void> run(DatabaseExecutor txn) async {
       await txn.update(
@@ -1241,331 +1252,5 @@ class QcNcCapaRepo extends QcLocalRepo {
       orderBy: 'code ASC',
     );
     return qcDecode(rows, QcDefectCode.fromMap);
-  }
-}
-
-/// Goals, the people assigned to them and the actions they owe.
-class QcGoalRepo extends QcLocalRepo {
-  QcGoalRepo(super.dbHelper);
-
-  Future<List<QcGoal>> listGoals({
-    String status = '',
-    String dept = '',
-    String ownerId = '',
-    bool overdueOnly = false,
-    int limit = 100,
-    int offset = 0,
-    DatabaseExecutor? exec,
-  }) async {
-    final clauses = <String>[qcAliveFilter];
-    final values = <Object?>[];
-    if (status.isNotEmpty) {
-      clauses.add('status = ?');
-      values.add(status);
-    }
-    if (dept.isNotEmpty) {
-      clauses.add('dept = ?');
-      values.add(dept);
-    }
-    if (ownerId.isNotEmpty) {
-      clauses.add('owner_id = ?');
-      values.add(ownerId);
-    }
-    if (overdueOnly) {
-      clauses.add(
-        "status NOT IN ('Completed','Cancelled') AND due_date <> '' AND due_date < ?",
-      );
-      values.add(qcToday());
-    }
-    final rows = await use(exec, await db).query(
-      'qc_goals',
-      where: qcWhere(clauses),
-      whereArgs: qcArgs(values),
-      orderBy: 'due_date ASC, goal_id DESC',
-      limit: limit,
-      offset: offset,
-    );
-    return qcDecode(rows, QcGoal.fromMap);
-  }
-
-  Future<QcGoal?> getGoal(int goalId, {DatabaseExecutor? exec}) async {
-    final rows = await use(exec, await db).query(
-      'qc_goals',
-      where: qcAlive('goal_id = ?'),
-      whereArgs: [goalId],
-      limit: 1,
-    );
-    return rows.isEmpty
-        ? null
-        : QcGoal.fromMap(Map<String, dynamic>.from(rows.first));
-  }
-
-  Future<int> createGoal(QcGoal goal, {DatabaseExecutor? exec}) async {
-    final txn = use(exec, await db);
-    final code = goal.code.trim();
-    final clash = await txn.query(
-      'qc_goals',
-      where: qcAlive('code = ?'),
-      whereArgs: [code],
-      limit: 1,
-    );
-    if (clash.isNotEmpty) {
-      throw StateError('A QC goal with code "$code" already exists');
-    }
-    await qcEnsureUnit(txn, goal.targetUnit);
-    return txn.insert(
-      'qc_goals',
-      qcInsertable(goal.toMap(withId: false), 'goal_id'),
-    );
-  }
-
-  /// Saves a goal.
-  ///
-  /// `completed_by` / `completed_at` are writable here but only meaningful once
-  /// the goal reaches a closed status - `OfflineFirstQcGoalRepository` enforces
-  /// that pairing, because "Completed" without a finisher is exactly the state
-  /// this feature exists to prevent.
-  ///
-  /// Two things happen beyond the plain column write:
-  ///
-  /// * `version` is bumped by the statement itself (`version = version + 1`)
-  ///   rather than by a value the caller sent. Read-modify-write in Dart would
-  ///   let two devices that both read version 4 both write version 5, and the
-  ///   counter would stop meaning anything; letting SQLite do the arithmetic
-  ///   inside the same statement keeps it monotonic.
-  /// * A recorded completion is not reassignable. The first person to finish a
-  ///   goal owns that record - reopening is a state change with its own audit
-  ///   entry, but silently swapping the name would rewrite the one fact the
-  ///   whole feature exists to record.
-  Future<void> saveGoal(QcGoal goal, {DatabaseExecutor? exec}) async {
-    final id = goal.goalId;
-    if (id == null) {
-      throw StateError('Cannot save a QC goal with no id');
-    }
-    final txn = use(exec, await db);
-    await qcEnsureUnit(txn, goal.targetUnit);
-    final existing = await txn.query(
-      'qc_goals',
-      columns: ['completed_by', 'completed_by_name'],
-      where: 'goal_id = ?',
-      whereArgs: [id],
-      limit: 1,
-    );
-    if (existing.isEmpty) {
-      throw StateError('No QC goal with id $id');
-    }
-    final recordedFinisher = '${existing.first['completed_by'] ?? ''}';
-    if (recordedFinisher.isNotEmpty && goal.completedBy != recordedFinisher) {
-      throw StateError(
-        'QC goal $id was already completed by '
-        '${existing.first['completed_by_name'] ?? recordedFinisher}; '
-        'reopen it before recording a different finisher',
-      );
-    }
-    final values = qcUpdatable(goal.toMap(withId: false), 'goal_id')
-      // The bump is done by the statement, not by a number the caller sent.
-      ..remove('version');
-    final assignments = values.keys.map((key) => '$key = ?').join(', ');
-    await txn.rawUpdate(
-      'UPDATE qc_goals SET $assignments, version = version + 1 WHERE goal_id = ?',
-      [...values.values, id],
-    );
-  }
-
-  Future<void> deleteGoal(int goalId, {DatabaseExecutor? exec}) async {
-    await use(exec, await db).update(
-      'qc_goals',
-      {'deleted_at': nowIso()},
-      where: qcAlive('goal_id = ?'),
-      whereArgs: [goalId],
-    );
-  }
-
-  Future<List<QcGoalAssignment>> listAssignments(
-    int goalId, {
-    DatabaseExecutor? exec,
-  }) async {
-    final rows = await use(exec, await db).query(
-      'qc_goal_assignments',
-      where: qcAlive('goal_id = ?'),
-      whereArgs: [goalId],
-      orderBy: 'assigned_at ASC, assign_id ASC',
-    );
-    return qcDecode(rows, QcGoalAssignment.fromMap);
-  }
-
-  /// Assigns a person to a goal.
-  ///
-  /// The `UNIQUE(goal_id, assignee_id)` index is the real guard against double
-  /// counting - re-assigning is an *update*, not a second row, so progress
-  /// cannot count the same person twice.
-  Future<void> assignGoal(
-    QcGoalAssignment assignment, {
-    DatabaseExecutor? exec,
-  }) async {
-    final txn = use(exec, await db);
-    final existing = await txn.query(
-      'qc_goal_assignments',
-      where: 'goal_id = ? AND assignee_id = ?',
-      whereArgs: [assignment.goalId, assignment.assigneeId],
-      limit: 1,
-    );
-    if (existing.isNotEmpty) {
-      await txn.update(
-        'qc_goal_assignments',
-        qcUpdatable(assignment.toMap(withId: false), 'assign_id'),
-        where: 'assign_id = ?',
-        whereArgs: [existing.first['assign_id']],
-      );
-      return;
-    }
-    await txn.insert(
-      'qc_goal_assignments',
-      qcInsertable(assignment.toMap(withId: false), 'assign_id'),
-    );
-  }
-
-  Future<void> updateAssignment(
-    QcGoalAssignment assignment, {
-    DatabaseExecutor? exec,
-  }) async {
-    await use(exec, await db).update(
-      'qc_goal_assignments',
-      qcUpdatable(assignment.toMap(withId: false), 'assign_id'),
-      where: 'assign_id = ?',
-      whereArgs: [assignment.assignId],
-    );
-  }
-
-  /// Unassigns by tombstone rather than `DELETE`, like every other removal here:
-  /// the row is part of the goal's history and still has to replicate and audit.
-  Future<void> removeAssignment(int assignId, {DatabaseExecutor? exec}) async {
-    await use(exec, await db).update(
-      'qc_goal_assignments',
-      {'deleted_at': nowIso()},
-      where: qcAlive('assign_id = ?'),
-      whereArgs: [assignId],
-    );
-  }
-
-  Future<List<QcGoalAction>> listActions(
-    int goalId, {
-    DatabaseExecutor? exec,
-  }) async {
-    final rows = await use(exec, await db).query(
-      'qc_goal_actions',
-      where: qcAlive('goal_id = ?'),
-      whereArgs: [goalId],
-      orderBy: 'due_date ASC, action_id ASC',
-    );
-    return qcDecode(rows, QcGoalAction.fromMap);
-  }
-
-  Future<int> addAction(QcGoalAction action, {DatabaseExecutor? exec}) async {
-    return use(exec, await db).insert(
-      'qc_goal_actions',
-      qcInsertable(action.toMap(withId: false), 'action_id'),
-    );
-  }
-
-  Future<void> saveAction(QcGoalAction action, {DatabaseExecutor? exec}) async {
-    await use(exec, await db).update(
-      'qc_goal_actions',
-      qcUpdatable(action.toMap(withId: false), 'action_id'),
-      where: 'action_id = ?',
-      whereArgs: [action.actionId],
-    );
-  }
-
-  /// A measured target on a goal. `target` is a number rather than free text so
-  /// progress is a comparison, not a reading of a sentence.
-  Future<int> addKpi(QcGoalKpi kpi, {DatabaseExecutor? exec}) async {
-    final dbExec = use(exec, await db);
-    await qcEnsureUnit(dbExec, kpi.unit);
-    return dbExec.insert(
-      'qc_goal_kpis',
-      qcInsertable(kpi.toMap(withId: false), 'kpi_id'),
-    );
-  }
-
-  Future<void> saveKpi(QcGoalKpi kpi, {DatabaseExecutor? exec}) async {
-    final dbExec = use(exec, await db);
-    await qcEnsureUnit(dbExec, kpi.unit);
-    await dbExec.update(
-      'qc_goal_kpis',
-      qcUpdatable(kpi.toMap(withId: false), 'kpi_id'),
-      where: 'kpi_id = ?',
-      whereArgs: [kpi.kpiId],
-    );
-  }
-
-  Future<void> deleteKpi(int kpiId, {DatabaseExecutor? exec}) async {
-    await use(exec, await db).update(
-      'qc_goal_kpis',
-      {'deleted_at': nowIso()},
-      where: qcAlive('kpi_id = ?'),
-      whereArgs: [kpiId],
-    );
-  }
-
-  Future<List<QcGoalKpi>> listKpis(int goalId, {DatabaseExecutor? exec}) async {
-    final rows = await use(exec, await db).query(
-      'qc_goal_kpis',
-      where: qcAlive('goal_id = ?'),
-      whereArgs: [goalId],
-      orderBy: 'kpi_id ASC',
-    );
-    return qcDecode(rows, QcGoalKpi.fromMap);
-  }
-
-  /// Ties a goal to the SOP, NC, inspection or template it exists to serve.
-  Future<int> addLink(QcGoalLink link, {DatabaseExecutor? exec}) async {
-    return use(exec, await db).insert(
-      'qc_goal_links',
-      qcInsertable(link.toMap(withId: false), 'link_id'),
-    );
-  }
-
-  Future<void> deleteLink(int linkId, {DatabaseExecutor? exec}) async {
-    await use(exec, await db).update(
-      'qc_goal_links',
-      {'deleted_at': nowIso()},
-      where: qcAlive('link_id = ?'),
-      whereArgs: [linkId],
-    );
-  }
-
-  /// Goal plus every child row, for the detail screen.
-  ///
-  /// One executor for all six reads so the summary counters and the rows they
-  /// describe come from the same snapshot - a progress bar reading 3/5 next to a
-  /// list of 4 actions is worse than a slightly stale total.
-  Future<QcGoalBundle?> getGoalBundle(
-    int goalId, {
-    DatabaseExecutor? exec,
-  }) async {
-    final txn = use(exec, await db);
-    final goal = await getGoal(goalId, exec: txn);
-    if (goal == null) return null;
-
-    Future<List<T>> child<T>(
-      String table,
-      T Function(Map<String, dynamic>) from,
-    ) async => qcDecode(
-      await txn.query(
-        table,
-        where: qcAlive('goal_id = ?'),
-        whereArgs: [goalId],
-      ),
-      from,
-    );
-
-    return QcGoalBundle(
-      goal: goal,
-      assignments: await child('qc_goal_assignments', QcGoalAssignment.fromMap),
-      actions: await child('qc_goal_actions', QcGoalAction.fromMap),
-      kpis: await child('qc_goal_kpis', QcGoalKpi.fromMap),
-      links: await child('qc_goal_links', QcGoalLink.fromMap),
-    );
   }
 }

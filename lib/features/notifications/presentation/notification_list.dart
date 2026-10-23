@@ -6,6 +6,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_colors.dart';
+import '../../../design_system/tokens/app_opacity.dart';
 import '../domain/notification_item.dart';
 import 'notification_controller.dart';
 
@@ -94,27 +95,33 @@ class NotificationList extends StatelessWidget {
                             // Icon by kind: truck for raw material, factory for
                             // product batch, microscope-ish (biotech) for lab.
                             final IconData icon;
-                            if (item.type == NotificationType.labResult) {
+                            if (item.type == NotificationType.sync) {
+                              icon = Icons.sync_problem_outlined;
+                            } else if (item.type == NotificationType.labResult) {
                               icon = Icons.biotech_outlined;
                             } else if (item.isProductInspection) {
                               icon = Icons.factory_outlined;
                             } else {
                               icon = Icons.local_shipping_outlined;
                             }
-                            // Color by verdict: light red when rejected /
-                            // non-conforming, blue when accepted/matching,
-                            // neutral primary tint when pending.
+                            // Color by verdict: danger tint when rejected /
+                            // non-conforming, info tint when accepted/
+                            // matching, neutral primary tint when pending.
                             final Color avatarBg;
                             final Color avatarFg;
                             if (item.isRejected) {
-                              avatarBg = const Color(0xFFFDECEC);
-                              avatarFg = const Color(0xFFB91C1C);
+                              avatarBg = AppColors.danger.withValues(
+                                alpha: AppOpacity.subtle,
+                              );
+                              avatarFg = AppColors.danger;
                             } else if (item.isAccepted) {
-                              avatarBg = const Color(0xFFE8F1FD);
-                              avatarFg = const Color(0xFF1D4ED8);
+                              avatarBg = AppColors.info.withValues(
+                                alpha: AppOpacity.subtle,
+                              );
+                              avatarFg = AppColors.info;
                             } else {
                               avatarBg = AppColors.primary
-                                  .withValues(alpha: 0.12);
+                                  .withValues(alpha: AppOpacity.subtle);
                               avatarFg = AppColors.primary;
                             }
                             return ListTile(

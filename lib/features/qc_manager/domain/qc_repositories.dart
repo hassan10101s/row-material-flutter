@@ -1,11 +1,11 @@
 import 'qc_audit.dart';
-import 'qc_goal.dart';
+import 'qc_custom_table.dart';
 import 'qc_inspection.dart';
 import 'qc_nc_capa.dart';
 import 'qc_sop.dart';
 import 'qc_template.dart';
 
-/// Domain contracts for the QC Manager (plan V6_ENHANCED §24 P3).
+/// Domain contracts for the QC Manager (plan V6_ENHANCED Â§24 P3).
 ///
 /// The presentation layer talks to these and never to a `data/` implementation
 /// (`test/architecture/repository_boundary_test.dart` enforces that), which is
@@ -191,57 +191,7 @@ abstract interface class QcNcCapaRepository {
   Future<List<QcDefectCode>> listDefectCodes({String category = ''});
 }
 
-/// Goals, with the people assigned to them and the actions they owe.
-abstract interface class QcGoalRepository {
-  Future<List<QcGoal>> listGoals({
-    String status = '',
-    String dept = '',
-    String ownerId = '',
-    bool overdueOnly = false,
-    int limit = 100,
-    int offset = 0,
-  });
-
-  Future<QcGoal?> getGoal(int goalId);
-
-  Future<int> createGoal(QcGoal goal);
-
-  Future<void> saveGoal(QcGoal goal);
-
-  Future<void> deleteGoal(int goalId);
-
-  Future<List<QcGoalAssignment>> listAssignments(int goalId);
-
-  Future<void> assignGoal(QcGoalAssignment assignment);
-
-  Future<void> updateAssignment(QcGoalAssignment assignment);
-
-  Future<void> removeAssignment(int assignId);
-
-  Future<List<QcGoalAction>> listActions(int goalId);
-
-  Future<int> addAction(QcGoalAction action);
-
-  Future<void> saveAction(QcGoalAction action);
-
-  Future<int> addKpi(QcGoalKpi kpi);
-
-  Future<void> saveKpi(QcGoalKpi kpi);
-
-  Future<void> deleteKpi(int kpiId);
-
-  Future<List<QcGoalKpi>> listKpis(int goalId);
-
-  /// Ties a goal to the SOP, NC, inspection or template it exists to serve.
-  Future<int> addLink(QcGoalLink link);
-
-  Future<void> deleteLink(int linkId);
-
-  /// A goal plus everything hanging off it, for the goal detail screen.
-  Future<QcGoalBundle?> getGoalBundle(int goalId);
-}
-
-/// Read-only access to the tamper-evident trail (plan V6_ENHANCED §21, P4).
+/// Read-only access to the tamper-evident trail (plan V6_ENHANCED Â§21, P4).
 ///
 /// There is deliberately no `update`, no `delete` and no `save`. The chain is
 /// only meaningful if rows cannot be rewritten after the fact, so the trail is
@@ -276,4 +226,54 @@ abstract interface class QcAuditRepository {
   /// Re-derives every hash in `qc_audits` and reports where the chain first
   /// breaks. See `AuditHasher.verifyChain`.
   Future<QcChainVerification> verifyChain({int? limit});
+}
+
+/// User-authored tables (the QC settings feature, plan: custom sync family).
+///
+/// A user defines a register - any number of typed columns (number / text /
+/// date) - and records rows into it. Definitions and records are syncable
+/// entities with real cross-device identities, so every write path here goes
+/// through the sync write contract; the `OfflineFirst*` facade owns the
+/// transaction, the validation and the queue.
+///
+/// ## What the contract deliberately does not allow
+///  * **Destructive column deletes.** `deleteTable` is the only bulk delete;
+///    removing one column of a live table is expressed by *excluding it* from
+///    the field list of [saveTable] - the repository tombstones it and keeps
+///    the history of its values intact.
+///  * **Row reads without a table scope.** Rows of different tables never
+///    mix; [listRows] always pins one [tableId].
+abstract interface class QcCustomTablesRepository {
+  /// Every alive definition, in chip order (sort_order, creation).
+  Future<List<QcCustomTable>> listTables();
+
+  /// One definition plus its alive columns, or null when gone.
+  Future<({QcCustomTable table, List<QcCustomTableField> fields})?>
+  getTableBundle(int tableId);
+
+  /// Records of one table, newest first, keyset-paged over `row_id`.
+  Future<List<QcCustomTableRow>> listRows(
+    int tableId, {
+    int limit,
+    int afterRowId,
+  });
+
+  /// Creates the definition and its columns in one commit. Field labels
+  /// must be unique and non-empty; the returned id is local.
+  Future<int> createTable(QcCustomTable table, List<QcCustomTableField> fields);
+
+  /// Reconciles an edited definition: known [fields] are updated, absent
+  /// alive columns are tombstoned (their values survive), new ones are
+  /// appended with a fresh identity. A column whose type would change while
+  /// it already holds values is rejected rather than silently re-typed.
+  Future<void> saveTable(QcCustomTable table, List<QcCustomTableField> fields);
+
+  /// Soft-deletes the definition, its columns and its records.
+  Future<void> deleteTable(int tableId);
+
+  Future<int> addRow(QcCustomTableRow row);
+
+  Future<void> saveRow(QcCustomTableRow row);
+
+  Future<void> deleteRow(int rowId);
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../../../core/security/local_secret.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../lab/data/lab_repo.dart';
 import '../../settings/data/settings_repo.dart';
@@ -55,6 +56,7 @@ class ReportHtmlBuilder {
     final (dataUri: qrImageDataUri, warning: qrWarning) =
         generateQrDataUri('${context['qr_payload_text'] ?? ''}');
     context
+      ..['is_en'] = !AppText.arabic
       ..['qr_image_data_uri'] = qrImageDataUri
       ..['qr_warning'] = qrWarning
       ..['updated_at'] = inspection['updated_at'] ?? nowIso()

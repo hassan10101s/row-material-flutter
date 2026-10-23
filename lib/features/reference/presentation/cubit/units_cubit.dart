@@ -30,11 +30,7 @@ class UnitsCubit extends AppCubit<UnitsState> {
     );
     try {
       final settled = await Future.wait([
-        repo.listUnitsPaged(
-          query: state.query,
-          limit: pageSize,
-          offset: 0,
-        ),
+        repo.listUnitsPaged(query: state.query, limit: pageSize, offset: 0),
         repo.countUnits(query: state.query),
       ]);
       var usage = _usageCache ?? const <String, int>{};
@@ -61,7 +57,7 @@ class UnitsCubit extends AppCubit<UnitsState> {
       safeEmit(state.copyWith(loading: false, error: e.message));
     } catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: '$e'));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
 
