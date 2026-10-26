@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:material_lab/core/constants/app_strings.dart';
+import 'package:material_lab/l10n/generated/app_localizations.dart';
 import 'package:material_lab/features/dashboard/presentation/widgets/dashboard_sticky_nav_bar.dart';
 
 Widget _pump(double textScale, void Function(String) onGo) {
@@ -10,7 +11,9 @@ Widget _pump(double textScale, void Function(String) onGo) {
   return ScreenUtilInit(
     designSize: const Size(1280, 720),
     minTextAdapt: true,
-    builder: (_, __) => MaterialApp(
+    builder: (_, _) => MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(
         body: CustomScrollView(
           slivers: [
@@ -60,10 +63,10 @@ void main() {
       // ignore: avoid_print
       print('ts=$ts contentExtent=${delegate.contentExtent}');
       await tester.pumpWidget(_pump(ts, (String _) {}));
-      await tester.pumpAndSettle();
+      await tester.pump();
 
       final rows = find.descendant(
-        of: find.byType(DashboardStickyNavBar).first,
+        of: find.byType(SliverPersistentHeader).first,
         matching: find.bySubtype<SingleChildScrollView>(),
       );
       var i = 0;
@@ -73,6 +76,20 @@ void main() {
         print('  ts=$ts row$i h=$size');
         i++;
       }
+      expect(tester.takeException(), isNull);
+      expect(
+        tester
+            .getSize(
+              find
+                  .descendant(
+                    of: find.byType(SliverPersistentHeader),
+                    matching: find.byType(SizedBox),
+                  )
+                  .first,
+            )
+            .height,
+        delegate.contentExtent,
+      );
     }
   });
 }

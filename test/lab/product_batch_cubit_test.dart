@@ -121,6 +121,20 @@ void main() {
         reason: 'Off spec',
       );
       expect(repo.updates[1], 'FULL_REJECTION');
+      expect(c.state.saving, isFalse);
+    });
+
+    test('successful add, edit and delete release the saving state', () async {
+      final c = cubit();
+      addTearDown(c.close);
+      await c.addSample(name: 'Operational sample');
+      expect(c.state.saving, isFalse);
+      expect(c.state.samples, hasLength(1));
+      await c.updateSample(1, name: 'Updated');
+      expect(c.state.saving, isFalse);
+      await c.deleteSample(1);
+      expect(c.state.saving, isFalse);
+      expect(repo.deleted, [1]);
     });
   });
 }

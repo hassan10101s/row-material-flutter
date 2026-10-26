@@ -6,6 +6,8 @@ import '../tokens/app_colors.dart';
 import '../tokens/app_motion.dart';
 import '../tokens/app_opacity.dart';
 import '../tokens/app_spacing.dart';
+import '../tokens/app_text_theme.dart';
+import 'app_adaptive.dart';
 
 enum AppButtonStyle { primary, secondary, accent, danger, ghost, whatsapp, pdf }
 
@@ -92,7 +94,7 @@ class _AppButtonState extends State<AppButton> {
     );
     // A minimum height rather than a fixed one, so a user with a large OS text
     // scale does not clip the label.
-    final minHeight = widget.small ? 34.h : 42.h;
+    final minHeight = appControlHeight(context, compact: widget.small);
 
     final shape = RoundedRectangleBorder(borderRadius: radius);
 
@@ -110,7 +112,7 @@ class _AppButtonState extends State<AppButton> {
               minimumSize: WidgetStatePropertyAll(Size(0, minHeight)),
               shape: WidgetStatePropertyAll(shape),
               padding: WidgetStatePropertyAll(
-                EdgeInsets.symmetric(horizontal: (widget.expanded ? 16 : 14).w),
+                EdgeInsets.symmetric(horizontal: widget.expanded ? 16 : 14),
               ),
               overlayColor: WidgetStatePropertyAll(
                 AppColors.primary.withValues(alpha: AppOpacity.hover),
@@ -135,7 +137,7 @@ class _AppButtonState extends State<AppButton> {
               minimumSize: WidgetStatePropertyAll(Size(0, minHeight)),
               shape: WidgetStatePropertyAll(shape),
               padding: WidgetStatePropertyAll(
-                EdgeInsets.symmetric(horizontal: (widget.expanded ? 16 : 14).w),
+                EdgeInsets.symmetric(horizontal: widget.expanded ? 16 : 14),
               ),
               // The hover fill used to be a manual white alpha swap, which
               // disappears on light backgrounds. Overlay follows the palette.
@@ -147,7 +149,8 @@ class _AppButtonState extends State<AppButton> {
             child: content,
           );
 
-    final semanticLabel = widget.label ??
+    final semanticLabel =
+        widget.label ??
         (widget.icon is Icon ? (widget.icon! as Icon).semanticLabel : null);
 
     return Semantics(
@@ -161,9 +164,7 @@ class _AppButtonState extends State<AppButton> {
         // disposed State.
         onEnter: enabled ? (_) => setState(() => _hovered = true) : null,
         onExit: enabled ? (_) => setState(() => _hovered = false) : null,
-        cursor: enabled
-            ? SystemMouseCursors.click
-            : SystemMouseCursors.basic,
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
         child: AnimatedScale(
           scale: enabled && _hovered ? 1.02 : 1,
           duration: AppMotion.of(context, AppMotion.fast),
@@ -177,10 +178,11 @@ class _AppButtonState extends State<AppButton> {
   }
 
   TextStyle _labelStyle(Color foreground) => TextStyle(
-        color: foreground,
-        fontSize: widget.small ? 12.spMax : 14.spMax,
-        fontWeight: FontWeight.w600,
-      );
+    fontFamily: AppTextTheme.cairoFontFamily,
+    color: foreground,
+    fontSize: widget.small ? 12.spMax : 14.spMax,
+    fontWeight: FontWeight.w600,
+  );
 
   /// The label and icon stay in place while [AppButton.loading] is true.
   ///
@@ -201,8 +203,7 @@ class _AppButtonState extends State<AppButton> {
       children: [
         if (widget.loading) ...[
           spinner,
-          if (widget.icon != null || widget.label != null)
-            SizedBox(width: 8.w),
+          if (widget.icon != null || widget.label != null) SizedBox(width: 8.w),
         ] else if (widget.icon != null) ...[
           widget.icon!,
           SizedBox(width: 8.w),

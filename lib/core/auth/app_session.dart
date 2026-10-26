@@ -16,6 +16,7 @@ class AppSession {
     this.organizationId = '',
     this.memberId = '',
     this.role = AppRoles.viewer,
+    this.roles = const [],
     this.status = MemberStatus.invited,
     this.deviceId = '',
     this.readOnlyDevice = false,
@@ -35,6 +36,9 @@ class AppSession {
   final String organizationId;
   final String memberId;
   final String role;
+
+  /// Effective grants. Empty means a legacy profile that only has `role`.
+  final List<String> roles;
   final String status;
   final String deviceId;
 
@@ -93,8 +97,7 @@ class AppSession {
   /// Blocks creating a new company (plan §2): bound + invited/pending/active.
   /// Sign-out alone never clears this; only leaving does.
   bool get blocksNewCompany =>
-      organizationId.isNotEmpty &&
-      MemberStatus.blocksNewCompany(status);
+      organizationId.isNotEmpty && MemberStatus.blocksNewCompany(status);
 
   /// The only state allowed into the dashboard, the company database and the
   /// sync cycle (plan §5/§8/§12): an `active` member of a usable company.
@@ -107,12 +110,22 @@ class AppSession {
       !isOrgSuspended;
 
   /// Can this device write anything at all?
-  bool get canWrite => isActiveMember && !readOnlyDevice;
+  bool get canWrite =>
+      isActiveMember &&
+      !isOrgSuspended &&
+      !readOnlyDevice &&
+      !rolesAreReadOnly(effectiveRoles);
 
-  Set<Permission> get permissions => rolePermissions(role);
+  List<String> get effectiveRoles => roles.isEmpty
+      ? [role]
+      : AppRoles.normalizeRoles(roles, fallbackRole: role);
+
+  String get rolesKey => effectiveRoles.join('|');
+
+  Set<Permission> get permissions => rolesPermissions(effectiveRoles);
 
   bool can(Permission permission) =>
-      isActiveMember && permissions.contains(permission);
+      isActiveMember && !isOrgSuspended && permissions.contains(permission);
 
   /// Guard used before every write (plan §9.4). [online] comes from
   /// `ConnectivityService.isOnline`.
@@ -125,8 +138,12 @@ class AppSession {
   bool canDo(Permission permission, {bool online = true}) {
     if (readOnlyDevice) return false;
     if (!isActiveMember) return false;
+    if (isOrgSuspended) return false;
     if (!permissions.contains(permission)) return false;
-    if (permissionRequiresFreshSession(permission, role: role) &&
+    if (permissionRequiresFreshSession(
+          permission,
+          role: effectiveRoles.contains(AppRoles.admin) ? AppRoles.admin : role,
+        ) &&
         (!online || !isTokenFresh)) {
       return false;
     }
@@ -149,6 +166,7 @@ class AppSession {
     String? organizationId,
     String? memberId,
     String? role,
+    List<String>? roles,
     String? status,
     String? deviceId,
     bool? readOnlyDevice,
@@ -169,6 +187,7 @@ class AppSession {
     organizationId: organizationId ?? this.organizationId,
     memberId: memberId ?? this.memberId,
     role: role ?? this.role,
+    roles: roles ?? this.roles,
     status: status ?? this.status,
     deviceId: deviceId ?? this.deviceId,
     readOnlyDevice: readOnlyDevice ?? this.readOnlyDevice,
@@ -191,6 +210,7 @@ class AppSession {
     'organizationId': organizationId,
     'memberId': memberId,
     'role': role,
+    'roles': effectiveRoles,
     'status': status,
     'deviceId': deviceId,
     'readOnlyDevice': readOnlyDevice,
@@ -213,6 +233,10 @@ class AppSession {
   /// `not_allowed`.
   static AppSession fromJson(Map<String, dynamic> json) {
     final role = normalizeRole(json['role'] as String?);
+    final roles = AppRoles.normalizeRoles(
+      json.containsKey('roles') ? (json['roles'] ?? const []) : null,
+      fallbackRole: role,
+    );
     return AppSession(
       uid: '${json['uid'] ?? ''}',
       email: '${json['email'] ?? ''}',
@@ -221,9 +245,10 @@ class AppSession {
       organizationId: '${json['organizationId'] ?? ''}',
       memberId: '${json['memberId'] ?? ''}',
       role: role,
+      roles: roles,
       status: normalizeCachedStatus(json['status'] as String?),
       deviceId: '${json['deviceId'] ?? ''}',
-      readOnlyDevice: roleIsReadOnly(role),
+      readOnlyDevice: rolesAreReadOnly(roles) || json['readOnlyDevice'] == true,
       signedInAt: _parseDate(json['signedInAt']),
       idToken: json['idToken'] as String?,
       idTokenExpiresAt: _parseDate(json['idTokenExpiresAt']),
@@ -246,7 +271,7 @@ class AppSession {
   @override
   String toString() =>
       'AppSession(uid: $uid, org: $organizationId, role: $role, status: $status, '
-      'readOnly: $readOnlyDevice, offline: $offline)';
+      'roles: ${effectiveRoles.join(',')}, readOnly: $readOnlyDevice, offline: $offline)';
 }
 
 /// Empty session used before sign-in and by tests.

@@ -51,7 +51,11 @@ class NotificationItem {
   /// Format: `inspection:<refId>`, `lab:<refId>` or `sync:<refId>` (refId is
   /// unused for sync rows; the payload simply routes to the sync screen).
   String get payload =>
-      '${type == NotificationType.inspection ? 'inspection' : type == NotificationType.labResult ? 'lab' : 'sync'}:$refId';
+      '${type == NotificationType.inspection
+          ? 'inspection'
+          : type == NotificationType.labResult
+          ? 'lab'
+          : 'sync'}:$refId';
 
   /// Product batch analysis (vs raw-material inspection). Title prefix is
   /// written once by `NotificationService._inspectionTitle`, so it survives

@@ -546,4 +546,3 @@ abstract final class QcAuditEntity {
     approval,
   ];
 }
-

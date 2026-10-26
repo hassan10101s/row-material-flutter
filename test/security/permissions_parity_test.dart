@@ -23,6 +23,25 @@ void main() {
     ruleMatrix = _parseRuleMatrix(rules);
   });
 
+  test('every emitted audit action is accepted by the server contract', () {
+    final source = File('lib/core/sync/audit_logger.dart').readAsStringSync();
+    final actions = RegExp(
+      r"static const String \w+ = '([A-Z_]+)'",
+    ).allMatches(source).map((match) => match.group(1)!);
+    final start = rules.indexOf('function validAuditAction');
+    final block = rules.substring(
+      start,
+      rules.indexOf('function activeOwnedDevice', start),
+    );
+    for (final action in actions) {
+      expect(
+        block.contains("'$action'"),
+        isTrue,
+        reason: 'audit action $action would strand its outbox entry',
+      );
+    }
+  });
+
   test('the rules file declares all roles', () {
     expect(ruleMatrix.keys.toSet(), AppRoles.all.toSet());
   });
@@ -77,6 +96,9 @@ void main() {
       'labConfig',
       'devices',
       'auditLogs',
+      'pushTokens', 'syncReceipts', 'entries',
+      'parameters', 'materialBounds', 'organizationSettings',
+      'qcSops', 'qcSopRevisions', 'qcSopReads',
       // Comprehensive sync (plan §7).
       'inventoryItems',
       'inventoryTransactions',
@@ -92,6 +114,11 @@ void main() {
       'qcCustomTables',
       'qcCustomTableFields',
       'qcCustomTableRows',
+      'qcTemplates', 'qcSections', 'qcItems', 'qcInspections', 'qcResponses',
+      'qcTaskLogs', 'qcFindingsNc', 'qcCapa',
+      // Central command protocol (SYNC_ARCHITECTURE_PLAN §6): server-written
+      // only — every rule is `false` for client writes.
+      'commandReceipts', 'changeEvents', 'counters', 'notifyRequests',
     };
     expect(allowedCollections.difference(expected), isEmpty);
   });

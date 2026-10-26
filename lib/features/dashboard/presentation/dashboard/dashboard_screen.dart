@@ -36,6 +36,7 @@ import '../widgets/dashboard_to_top_button.dart';
 import '../../../../router/app_router.dart';
 import '../../../inspections/presentation/list/widgets/inspection_filters.dart'
     show inspectionDayIso;
+
 /// Dashboard (port of Web DashboardView + dashboard summary analytics).
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -117,12 +118,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
               controller: _scroll,
               physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
-                // Sticky toolbar first: months, filter and refresh stay
-                // pinned; the old top header is gone (title lives in the
-                // shell topbar), so no space is wasted above it.
+                // Keep period, filter and refresh controls at the top of the
+                // dashboard, but let them scroll away so the charts and cards
+                // can use the full phone viewport while browsing.
                 if (ready && state.error == null)
                   SliverPersistentHeader(
-                    pinned: true,
+                    pinned: false,
                     delegate: DashboardStickyNavBar(
                       onGo: _go,
                       topPadding: AppSpacing.page,
@@ -181,39 +182,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         AppSpacing.page,
                         0,
                       ),
-                      child: BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
-                        buildWhen: (p, c) => p != c,
-                        builder: (context, kpi) => AppStagger(
-                          interval: const Duration(milliseconds: 40),
-                          children: [
-                             // Bento layout band 1: tappable hero KPIs —
-                             // each tile deep-links the register with its
-                             // own filter seeds.
-                             DashboardKpiRow(
-                               todayInspections: kpi.todayInspections,
-                               todayApproved: kpi.todayApproved,
-                               todayRejected: kpi.todayRejected,
-                               totalCount: kpi.totalCount,
-                               onOpenTodayInspections: () =>
-                                   _openInspections(
-                                     dateFrom: inspectionDayIso(),
-                                     dateTo: inspectionDayIso(),
-                                   ),
-                               onOpenTodayApproved: () => _openInspections(
-                                     status: 'APPROVED',
-                                     dateFrom: inspectionDayIso(),
-                                     dateTo: inspectionDayIso(),
-                                   ),
-                               onOpenTodayRejected: () => _openInspections(
-                                 status: 'FULL_REJECTION',
-                                 dateFrom: inspectionDayIso(),
-                                 dateTo: inspectionDayIso(),
-                               ),
-                               onOpenTotal: () => _openInspections(),
-                             ),
-                          ],
-                        ),
-                      ),
+                      child:
+                          BlocBuilder<DashboardKpisCubit, DashboardKpisState>(
+                            buildWhen: (p, c) => p != c,
+                            builder: (context, kpi) => AppStagger(
+                              interval: const Duration(milliseconds: 40),
+                              children: [
+                                // Bento layout band 1: tappable hero KPIs —
+                                // each tile deep-links the register with its
+                                // own filter seeds.
+                                DashboardKpiRow(
+                                  todayInspections: kpi.todayInspections,
+                                  todayApproved: kpi.todayApproved,
+                                  todayRejected: kpi.todayRejected,
+                                  totalCount: kpi.totalCount,
+                                  onOpenTodayInspections: () =>
+                                      _openInspections(
+                                        dateFrom: inspectionDayIso(),
+                                        dateTo: inspectionDayIso(),
+                                      ),
+                                  onOpenTodayApproved: () => _openInspections(
+                                    status: 'APPROVED',
+                                    dateFrom: inspectionDayIso(),
+                                    dateTo: inspectionDayIso(),
+                                  ),
+                                  onOpenTodayRejected: () => _openInspections(
+                                    status: 'FULL_REJECTION',
+                                    dateFrom: inspectionDayIso(),
+                                    dateTo: inspectionDayIso(),
+                                  ),
+                                  onOpenTotal: () => _openInspections(),
+                                ),
+                              ],
+                            ),
+                          ),
                     ),
                   ),
                   SliverToBoxAdapter(
@@ -273,9 +275,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   key: _sectionKeys['suppliers'],
                                   child: SupplierScorecardSection(
                                     kpi: kpi,
-                                    onOpenSupplier: (s) => _openInspections(
-                                      supplier: s.name,
-                                    ),
+                                    onOpenSupplier: (s) =>
+                                        _openInspections(supplier: s.name),
                                   ),
                                 ),
                                 const SizedBox(height: AppSpacing.lg),

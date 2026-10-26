@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -25,7 +26,7 @@ class MobileMaterialEditor extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(materialEditorTitle(materialId == null))),
+      appBar: AppTopAppBar(title: materialEditorTitle(materialId == null)),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),

@@ -7,7 +7,7 @@ part of '../firebase_auth.dart';
 
 /// A user account.
 class User {
-  UserPlatform _delegate;
+  final UserPlatform _delegate;
 
   final FirebaseAuth _auth;
   MultiFactor? _multiFactor;

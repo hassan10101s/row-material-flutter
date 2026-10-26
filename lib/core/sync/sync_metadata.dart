@@ -24,7 +24,9 @@ class PullCursor {
 
   @override
   bool operator ==(Object other) =>
-      other is PullCursor && other.timestamp == timestamp && other.documentId == documentId;
+      other is PullCursor &&
+      other.timestamp == timestamp &&
+      other.documentId == documentId;
 
   @override
   int get hashCode => Object.hash(timestamp, documentId);
@@ -36,22 +38,34 @@ class PullCursor {
 /// `last_pull_at`, `last_push_at`, `last_error`, `heartbeat_seen_at`,
 /// `org_bound_at`.
 class SyncMetadata {
-  SyncMetadata(this.dbHelper) {
+  SyncMetadata(this.dbHelper, {DatabaseExecutor? executor})
+    : _bound = executor {
     // The memoized connection must not survive a restore or an organization
     // switch, otherwise cursors and markers would be written to the old file.
-    dbHelper.onDatabaseClosed(() => _resolved = null);
+    if (executor == null) dbHelper.onDatabaseClosed(() => _resolved = null);
   }
 
   final DatabaseHelper dbHelper;
 
   Database? _resolved;
+  final DatabaseExecutor? _bound;
+
+  /// A cycle must keep its physical file across awaits, never resolve a new
+  /// organization's connection when persisting an old page cursor.
+  SyncMetadata bind(DatabaseExecutor executor) =>
+      SyncMetadata(dbHelper, executor: executor);
 
   /// `DatabaseHelper.database` is a `Future`, so it has to be awaited; the
   /// result is memoized because the metadata is read/written per operation.
-  Future<DatabaseExecutor> get _db async => _resolved ??= await dbHelper.database;
+  Future<DatabaseExecutor> get _db async {
+    final bound = _bound;
+    if (bound != null) return bound;
+    return _resolved ??= await dbHelper.database;
+  }
 
   static String deviceIdKey = 'device_id';
   static String lastPullAtKey = 'last_pull_at';
+  static String pullIncompleteKey = 'pull_incomplete';
   static String lastPushAtKey = 'last_push_at';
   static String lastErrorKey = 'last_error';
   static String heartbeatSeenAtKey = 'heartbeat_seen_at';
@@ -78,9 +92,14 @@ class SyncMetadata {
   Future<String> get(String key) async {
     final db = await _db;
     final rows = await DbTrace.run(
-        'metadata.get($key)',
-        () => db.query('sync_metadata',
-            where: 'key = ?', whereArgs: [key], limit: 1));
+      'metadata.get($key)',
+      () => db.query(
+        'sync_metadata',
+        where: 'key = ?',
+        whereArgs: [key],
+        limit: 1,
+      ),
+    );
     if (rows.isEmpty) return '';
     return '${rows.first['value']}';
   }
@@ -97,29 +116,32 @@ class SyncMetadata {
     final placeholders = List.filled(keys.length, '?').join(',');
     final db = await _db;
     final rows = await DbTrace.run(
-        'metadata.readAll(${keys.length})',
-        () => db.rawQuery(
-              'SELECT key, value FROM sync_metadata WHERE key IN ($placeholders)',
-              keys,
-            ));
-    return {
-      for (final row in rows) '${row['key']}': '${row['value']}',
-    };
+      'metadata.readAll(${keys.length})',
+      () => db.rawQuery(
+        'SELECT key, value FROM sync_metadata WHERE key IN ($placeholders)',
+        keys,
+      ),
+    );
+    return {for (final row in rows) '${row['key']}': '${row['value']}'};
   }
 
   Future<void> set(String key, String value) async {
     final db = await _db;
-    await DbTrace.run('metadata.set($key)', () => db.insert(
-          'sync_metadata',
-          {'key': key, 'value': value},
-          conflictAlgorithm: ConflictAlgorithm.replace,
-        ));
+    await DbTrace.run(
+      'metadata.set($key)',
+      () => db.insert('sync_metadata', {
+        'key': key,
+        'value': value,
+      }, conflictAlgorithm: ConflictAlgorithm.replace),
+    );
   }
 
   Future<void> remove(String key) async {
     final db = await _db;
-    await DbTrace.run('metadata.remove($key)',
-        () => db.delete('sync_metadata', where: 'key = ?', whereArgs: [key]));
+    await DbTrace.run(
+      'metadata.remove($key)',
+      () => db.delete('sync_metadata', where: 'key = ?', whereArgs: [key]),
+    );
   }
 
   /// Generate (once) and persist the device UUID used for `device_registry`
@@ -169,11 +191,13 @@ class SyncMetadata {
 
   Future<DateTime?> lastPullAt() => _date(lastPullAtKey);
 
-  Future<void> markPull(DateTime at) => set(lastPullAtKey, at.toIso8601String());
+  Future<void> markPull(DateTime at) =>
+      set(lastPullAtKey, at.toIso8601String());
 
   Future<DateTime?> lastPushAt() => _date(lastPushAtKey);
 
-  Future<void> markPush(DateTime at) => set(lastPushAtKey, at.toIso8601String());
+  Future<void> markPush(DateTime at) =>
+      set(lastPushAtKey, at.toIso8601String());
 
   Future<void> markHeartbeatSeen(DateTime at) =>
       set(heartbeatSeenAtKey, at.toIso8601String());
@@ -194,7 +218,8 @@ class SyncMetadata {
   /// Master switch used by the Sync screen.
   Future<bool> isSyncEnabled() async => (await get(syncEnabledKey)) != '0';
 
-  Future<void> setSyncEnabled(bool value) => set(syncEnabledKey, value ? '1' : '0');
+  Future<void> setSyncEnabled(bool value) =>
+      set(syncEnabledKey, value ? '1' : '0');
 
   Future<DateTime?> _date(String key) async {
     final raw = await get(key);

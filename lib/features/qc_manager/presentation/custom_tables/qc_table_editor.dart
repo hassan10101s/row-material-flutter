@@ -14,6 +14,7 @@ import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
 import '../../domain/qc_custom_table.dart';
 import '../../domain/qc_repositories.dart';
+import '../../../../design_system/widgets/app_select_field.dart';
 
 /// One editable row of the editor's field list: what the form holds per
 /// column while open. Kept outside the widgets so [showQcTableEditor] can
@@ -244,13 +245,11 @@ class _QcTableFormState extends State<_QcTableForm> {
                   const SizedBox(width: AppSpacing.xs),
                   Expanded(
                     flex: 2,
-                    child: DropdownButtonFormField<String>(
+                    child: AppSelectField<String>(
                       initialValue: draft.colType,
                       isExpanded: true,
                       decoration: InputDecoration(
                         labelText: AppText.t('النوع', 'Type'),
-                        border: const OutlineInputBorder(),
-                        isDense: true,
                       ),
                       items: [
                         for (final t in QcCustomColType.all)

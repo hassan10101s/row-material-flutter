@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../tokens/app_colors.dart';
+import '../tokens/app_text_theme.dart';
 import 'app_paginated_table.dart' show appTextOf;
 
 /// Default records per page for every table in the app.
@@ -54,7 +55,11 @@ class AppPageSizeSelector extends StatelessWidget {
           value: value,
           isDense: true,
           underline: const SizedBox.shrink(),
-          style: TextStyle(color: AppColors.textStrong, fontSize: 12.spMax),
+          style: TextStyle(
+            fontFamily: AppTextTheme.cairoFontFamily,
+            color: AppColors.textStrong,
+            fontSize: 12.spMax,
+          ),
           items: [
             for (final o in items)
               DropdownMenuItem(value: o, child: Text('$o')),

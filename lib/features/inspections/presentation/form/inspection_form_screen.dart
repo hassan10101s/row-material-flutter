@@ -33,6 +33,7 @@ import '../cubit/inspection_form_cubit.dart';
 import '../cubit/inspection_form_state.dart';
 import 'mobile/inspection_form_wizard.dart';
 import 'widgets/inspection_form_sections.dart';
+import '../../../../design_system/widgets/app_text_field.dart';
 
 /// Parsed chemical reference range shown in the results grid.
 class _ChemCell {
@@ -255,21 +256,7 @@ String _chemPlaceholder(_ChemCell cell) {
 }
 
 InputDecoration _inputDec(bool out, {required String hint}) {
-  return InputDecoration(
-    isDense: true,
-    hintText: hint,
-    filled: true,
-    fillColor: out
-        ? AppColors.danger.withValues(alpha: 0.10)
-        : AppColors.surface,
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(AppRadii.sm),
-      borderSide: BorderSide(
-        color: out ? AppColors.danger : AppColors.border,
-        width: out ? 1.4 : 1,
-      ),
-    ),
-  );
+  return InputDecoration(hintText: hint);
 }
 
 String _addMonths(String iso, int months) {
@@ -581,9 +568,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       final values = _storedValues(stored[key]);
       target[key] = [
         for (var i = 0; i < _sampleCount; i++)
-          TextEditingController(
-            text: i < values.length ? values[i] : '',
-          ),
+          TextEditingController(text: i < values.length ? values[i] : ''),
       ];
     }
     _watch(target.values.expand((l) => l));
@@ -736,10 +721,21 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     );
     if (!mounted) return;
     if (ok) {
-      AppFeedback.success(
-        context,
-        AppText.t('تم حفظ الفحص', 'Inspection saved.'),
-      );
+      if (cubit.state.pendingApproval) {
+        AppFeedback.show(
+          context,
+          AppText.t(
+            'حُفظ طلب الفحص؛ سيظهر السجل بعد اعتماد السيرفر.',
+            'Inspection request saved; the record will appear after server approval.',
+          ),
+          type: AppFeedbackType.info,
+        );
+      } else {
+        AppFeedback.success(
+          context,
+          AppText.t('تم حفظ الفحص', 'Inspection saved.'),
+        );
+      }
       // Saved: clear the guard so this pop is not intercepted and re-confirmed.
       _dirty = false;
       final onSaved = widget.onSaved;
@@ -973,11 +969,11 @@ class _FormBody extends StatelessWidget {
               title: AppText.t('البيانات الأساسية', 'Basic data'),
               children: [
                 _materialPicker(
-              state.materials,
-              state.materialId,
-              isProduct,
-              error: fieldErrors['material'],
-            ),
+                  state.materials,
+                  state.materialId,
+                  isProduct,
+                  error: fieldErrors['material'],
+                ),
                 const SizedBox(height: AppSpacing.md),
                 Row(
                   children: [
@@ -1352,10 +1348,7 @@ class _FormBody extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           Text(
             error,
-            style: TextStyle(
-              color: AppColors.danger,
-              fontSize: 12.spMax,
-            ),
+            style: TextStyle(color: AppColors.danger, fontSize: 12.spMax),
           ),
         ],
       ],
@@ -1507,7 +1500,7 @@ class _FormBody extends StatelessWidget {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                child: TextField(
+                child: AppTextField(
                   controller: ctrl,
                   onSubmitted: (_) => normalize(),
                   decoration: _inputDec(out, hint: 'Result'),
@@ -1647,23 +1640,12 @@ class _FormBody extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: TextField(
+            child: AppTextField(
               controller: sampleNames[index],
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13.spMax, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
-                isDense: true,
                 hintText: AppText.t('اسم العينة', 'Sample name'),
-                filled: true,
-                fillColor: AppColors.surface,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm,
-                  vertical: AppSpacing.sm,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  borderSide: BorderSide(color: AppColors.border),
-                ),
               ),
             ),
           ),
@@ -1691,7 +1673,7 @@ class _FormBody extends StatelessWidget {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                child: TextField(
+                child: AppTextField(
                   controller: ctrl,
                   onChanged: (_) {},
                   keyboardType: const TextInputType.numberWithOptions(

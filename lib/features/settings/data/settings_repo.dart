@@ -5,6 +5,13 @@ import '../../../core/constants/report_form_keys.dart';
 import '../../../core/database/database_helper.dart';
 import '../../../core/security/local_secret.dart';
 import '../../../core/security/seal_codec.dart';
+import '../../../core/sync/entity_registry.dart';
+import '../../../core/sync/shared_settings.dart';
+import '../../../core/sync/sync_queue.dart';
+import '../../../core/sync/sync_write.dart';
+import '../../../core/utils/app_exceptions.dart';
+import '../../../core/constants/app_errors.dart';
+import '../../organizations/data/member_write_guard.dart';
 import '../domain/settings_repository.dart';
 
 /// Settings repository (organization scoped).
@@ -16,8 +23,16 @@ class SettingsRepo implements SettingsRepository {
   final DatabaseHelper dbHelper;
   final LocalSecret secret;
   final AppPaths? paths;
+  final SyncQueue? queue;
+  final WriteGuard? guard;
 
-  SettingsRepo({required this.dbHelper, required this.secret, this.paths});
+  SettingsRepo({
+    required this.dbHelper,
+    required this.secret,
+    this.paths,
+    this.queue,
+    this.guard,
+  });
 
   Future<Map<String, dynamic>> getSettings() async {
     final db = await dbHelper.database;
@@ -31,15 +46,69 @@ class SettingsRepo implements SettingsRepository {
 
   @override
   Future<void> updateSettings(Map<String, String> updates) async {
-    final db = await dbHelper.database;
-    final batch = db.batch();
-    for (final entry in updates.entries) {
-      batch.insert('settings', {
-        'key': entry.key,
-        'value': entry.value,
-      }, conflictAlgorithm: ConflictAlgorithm.replace);
+    final shared = updates.keys.any(sharedSettingKeys.contains);
+    if (shared && guard != null && !guard!.allows('reports.create')) {
+      throw AuthorizationError(AppErrors.notAuthorizedForOperation);
     }
-    await batch.commit(noResult: true);
+    final db = await dbHelper.database;
+    Future<void> persist(
+      DatabaseExecutor txn,
+      Map<String, String> values,
+    ) async {
+      for (final entry in values.entries) {
+        await txn.insert('settings', {
+          'key': entry.key,
+          'value': entry.value,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        if (!sharedSettingKeys.contains(entry.key)) continue;
+        await txn.rawInsert(
+          'INSERT INTO organization_settings(key, value) '
+          'VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+          [entry.key, entry.value],
+        );
+        final rows = await txn.query(
+          'organization_settings',
+          where: 'key = ?',
+          whereArgs: [entry.key],
+          limit: 1,
+        );
+        if (queue == null || guard == null) continue;
+        final row = Map<String, dynamic>.from(rows.single);
+        await enqueueLocalChange(
+          executor: txn,
+          entity: SyncEntity.byType('organizationSetting')!,
+          row: row,
+          operation: (row['remote_version'] as num? ?? 0) == 0
+              ? 'create'
+              : 'update',
+          queue: queue!,
+          organizationId: guard!.organizationId,
+          uid: guard!.uid,
+          deviceId: guard!.deviceId,
+        );
+      }
+    }
+
+    if (dbHelper.businessGateway == null) {
+      await db.transaction((txn) => persist(txn, updates));
+      return;
+    }
+    final deviceValues = <String, String>{
+      for (final entry in updates.entries)
+        if (!sharedSettingKeys.contains(entry.key)) entry.key: entry.value,
+    };
+    final organizationValues = <String, String>{
+      for (final entry in updates.entries)
+        if (sharedSettingKeys.contains(entry.key)) entry.key: entry.value,
+    };
+    if (deviceValues.isNotEmpty) {
+      await db.transaction((txn) => persist(txn, deviceValues));
+    }
+    if (organizationValues.isNotEmpty) {
+      await dbHelper.businessTransaction(
+        (txn) => persist(txn, organizationValues),
+      );
+    }
   }
 
   /// Ensure the standard settings rows exist (port of

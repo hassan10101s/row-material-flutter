@@ -101,7 +101,10 @@ class _RoutineListsScreenState extends State<RoutineListsScreen> {
               children: [
                 Expanded(
                   child: DebouncedSearchField(
-                    hint: AppText.t('بحث بالاسم أو القسم', 'Search name or dept...'),
+                    hint: AppText.t(
+                      'بحث بالاسم أو القسم',
+                      'Search name or dept...',
+                    ),
                     onChanged: (v) => setState(() => _query = v),
                   ),
                 ),
@@ -183,8 +186,7 @@ class _RoutineListsScreenState extends State<RoutineListsScreen> {
                     : (i) => _openSheet(context, lists[i].template.templateId!),
                 empty: AppEmptyState(
                   icon: Icons.checklist_outlined,
-                  title:
-                      state.lists.isEmpty
+                  title: state.lists.isEmpty
                       ? AppText.t(
                           'لا توجد قوائم بعد — أنشئ أول قائمة يومية',
                           'No lists yet — create the first daily list',
@@ -216,10 +218,7 @@ class _RoutineListsScreenState extends State<RoutineListsScreen> {
           if (v == 'delete') _deleteList(context, list);
         },
         itemBuilder: (context) => [
-          PopupMenuItem(
-            value: 'edit',
-            child: Text(AppText.t('تعديل', 'Edit')),
-          ),
+          PopupMenuItem(value: 'edit', child: Text(AppText.t('تعديل', 'Edit'))),
           PopupMenuItem(
             value: 'delete',
             child: Text(

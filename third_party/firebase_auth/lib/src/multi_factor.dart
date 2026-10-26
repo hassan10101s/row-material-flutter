@@ -8,7 +8,7 @@ part of '../firebase_auth.dart';
 /// This class acts as the main entry point for enrolling or un-enrolling
 /// second factors for a user, and provides access to their currently enrolled factors.
 class MultiFactor {
-  MultiFactorPlatform _delegate;
+  final MultiFactorPlatform _delegate;
 
   MultiFactor._(this._delegate);
 

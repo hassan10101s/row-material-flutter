@@ -37,7 +37,8 @@ abstract final class AuditAction {
 /// (outbox pattern) and enqueues the matching `sync_queue` row so the entry
 /// reaches `organizations/{orgId}/auditLogs` (append-only, plan §9.7).
 class AuditLogger {
-  AuditLogger({required this.queue, AppSession Function()? session}) : sessionReader = session;
+  AuditLogger({required this.queue, AppSession Function()? session})
+    : sessionReader = session;
 
   final SyncQueue queue;
 
@@ -57,7 +58,9 @@ class AuditLogger {
     deviceId = session.deviceId;
     organizationId = session.organizationId;
     uid = session.uid;
-    userName = session.displayName.isNotEmpty ? session.displayName : session.email;
+    userName = session.displayName.isNotEmpty
+        ? session.displayName
+        : session.email;
   }
 
   Future<int> log(
@@ -68,21 +71,28 @@ class AuditLogger {
     Map<String, dynamic>? details,
   }) async {
     final session = sessionReader?.call();
-    final org = organizationId.isNotEmpty ? organizationId : (session?.organizationId ?? '');
+    final org = organizationId.isNotEmpty
+        ? organizationId
+        : (session?.organizationId ?? '');
     final actor = uid.isNotEmpty ? uid : (session?.uid ?? '');
     final name = userName.isNotEmpty
         ? userName
         : (session == null
-            ? ''
-            : (session.displayName.isNotEmpty ? session.displayName : session.email));
+              ? ''
+              : (session.displayName.isNotEmpty
+                    ? session.displayName
+                    : session.email));
     final device = deviceId.isNotEmpty
         ? deviceId
-        : (session == null || session.deviceId.isEmpty ? 'unknown' : session.deviceId);
+        : (session == null || session.deviceId.isEmpty
+              ? 'unknown'
+              : session.deviceId);
     final occurredAt = nowIso();
     // Single sanitized encode reused for both columns: the old code encoded
     // twice and threw on DateTime/Timestamp details, aborting the business txn.
-    final detailsJson =
-        details == null ? null : SyncCodec.encode(_redact(details));
+    final detailsJson = details == null
+        ? null
+        : SyncCodec.encode(_redact(details));
     final id = await txn.insert('audit_logs', {
       'user_id': actor.isEmpty ? null : actor,
       'user_name': name.isEmpty ? null : name,
@@ -115,8 +125,16 @@ class AuditLogger {
     };
     assert(() {
       const allowed = <String>{
-        'userId', 'userName', 'organizationId', 'action', 'entityType', 'entityId',
-        'detailsJson', 'deviceId', 'occurredAt', 'version',
+        'userId',
+        'userName',
+        'organizationId',
+        'action',
+        'entityType',
+        'entityId',
+        'detailsJson',
+        'deviceId',
+        'occurredAt',
+        'version',
       };
       final extra = payload.keys.where((k) => !allowed.contains(k)).toList();
       if (extra.isNotEmpty) {
@@ -127,7 +145,11 @@ class AuditLogger {
     await queue.enqueue(
       txn,
       entityType: auditLogEntity.type,
-      entityId: auditLogEntity.docId({'device_id': device, 'occurred_at': occurredAt, 'id': id}),
+      entityId: auditLogEntity.docId({
+        'device_id': device,
+        'occurred_at': occurredAt,
+        'id': id,
+      }),
       localRef: id,
       operation: 'create',
       payload: payload,
@@ -186,9 +208,7 @@ class AuditLogger {
             if (item is Map<String, dynamic>)
               _redact(item)
             else if (item is Map)
-              _redact({
-                for (final e in item.entries) '${e.key}': e.value,
-              })
+              _redact({for (final e in item.entries) '${e.key}': e.value})
             else
               item,
         ];
@@ -204,7 +224,10 @@ class AuditLogger {
   ///
   /// `sync_state` is the canonical marker - `SyncQueue.markDone` writes it -
   /// the legacy `synced` column is never updated any more.
-  Future<void> prune({int maxRows = 20000, Duration retention = const Duration(days: 90)}) async {
+  Future<void> prune({
+    int maxRows = 20000,
+    Duration retention = const Duration(days: 90),
+  }) async {
     final db = await queue.dbHelper.database;
     await db.rawDelete(
       "DELETE FROM audit_logs WHERE sync_state = 'synced' AND occurred_at < ?",
@@ -299,9 +322,11 @@ class AuditLogger {
   Future<({List<String> entityTypes, List<String> actions})> facets() async {
     final db = await queue.dbHelper.database;
     final types = await db.rawQuery(
-        'SELECT DISTINCT entity_type AS v FROM audit_logs ORDER BY v');
+      'SELECT DISTINCT entity_type AS v FROM audit_logs ORDER BY v',
+    );
     final actions = await db.rawQuery(
-        'SELECT DISTINCT action AS v FROM audit_logs ORDER BY v');
+      'SELECT DISTINCT action AS v FROM audit_logs ORDER BY v',
+    );
     return (
       entityTypes: types.map((r) => '${r['v']}').toList(),
       actions: actions.map((r) => '${r['v']}').toList(),

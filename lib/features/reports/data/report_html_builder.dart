@@ -33,8 +33,9 @@ class ReportHtmlBuilder {
 
   static Future<String> _loadTemplate() async {
     if (_cachedTemplate != null) return _cachedTemplate!;
-    final template =
-        await rootBundle.loadString('assets/templates/report_template.html');
+    final template = await rootBundle.loadString(
+      'assets/templates/report_template.html',
+    );
     _cachedTemplate = template;
     return template;
   }
@@ -46,15 +47,18 @@ class ReportHtmlBuilder {
     String? baseUrl,
   }) async {
     final settings = await settingsRepo.getSettings();
-    final enriched = await labRepo.injectLabTests(inspection);
+    final enriched = inspection.containsKey('lab_tests')
+        ? inspection
+        : await labRepo.injectLabTests(inspection);
     final secretBytes = await secret.load();
     final context = buildInspectionContext(
       enriched,
       settings: settings,
       encryptionSecret: secretBytes,
     );
-    final (dataUri: qrImageDataUri, warning: qrWarning) =
-        generateQrDataUri('${context['qr_payload_text'] ?? ''}');
+    final (dataUri: qrImageDataUri, warning: qrWarning) = generateQrDataUri(
+      '${context['qr_payload_text'] ?? ''}',
+    );
     context
       ..['is_en'] = !AppText.arabic
       ..['qr_image_data_uri'] = qrImageDataUri

@@ -234,11 +234,11 @@ class LabRepo {
       for (final row in rows)
         {
           ...row,
-          'sample_names': namesByBatch[(row['id'] as num).toInt()] ??
-              jsonLoadsList(
-                '${row['sample_names_json'] ?? ''}',
-                const ['Result'],
-              ),
+          'sample_names':
+              namesByBatch[(row['id'] as num).toInt()] ??
+              jsonLoadsList('${row['sample_names_json'] ?? ''}', const [
+                'Result',
+              ]),
         },
     ];
   }
@@ -247,9 +247,9 @@ class LabRepo {
 
   Future<List<Map<String, dynamic>>> listInventory({String? category}) async {
     final params = <Object?>[];
-    var query = 'SELECT * FROM lab_inventory';
+    var query = 'SELECT * FROM lab_inventory WHERE deleted_at IS NULL';
     if (inventoryCategories.contains(category)) {
-      query += ' WHERE category = ?';
+      query += ' AND category = ?';
       params.add(category);
     }
     query += ' ORDER BY name ASC';
@@ -263,7 +263,7 @@ class LabRepo {
     int offset = 0,
   }) async {
     final q = query.trim();
-    final where = <String>[];
+    final where = <String>['i.deleted_at IS NULL'];
     final args = <Object?>[];
     if (inventoryCategories.contains(category)) {
       where.add('category = ?');
@@ -297,7 +297,7 @@ class LabRepo {
 
   Future<int> countInventory({String query = '', String? category}) async {
     final q = query.trim();
-    final where = <String>[];
+    final where = <String>['deleted_at IS NULL'];
     final args = <Object?>[];
     if (inventoryCategories.contains(category)) {
       where.add('category = ?');
@@ -341,8 +341,9 @@ class LabRepo {
     String expiryDate = '',
   }) async {
     final cleanName = name.trim();
-    if (cleanName.isEmpty)
+    if (cleanName.isEmpty) {
       throw ValidationError(AppErrors.materialNameRequired);
+    }
     if (!inventoryCategories.contains(category)) {
       throw ValidationError(AppErrors.materialTypeInvalid);
     }
@@ -405,21 +406,12 @@ class LabRepo {
               expiry_date, received_at, created_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?)
           ''',
-        [
-          id,
-          'PENDING',
-          finalQty,
-          finalQty,
-          cleanDay,
-          timestamp,
-          timestamp,
-        ],
+        [id, 'PENDING', finalQty, finalQty, cleanDay, timestamp, timestamp],
       );
-      await execute(
-        db,
-        'UPDATE inventory_lots SET lot_no = ? WHERE id = ?',
-        ['L-${lotId.toString().padLeft(4, '0')}', lotId],
-      );
+      await execute(db, 'UPDATE inventory_lots SET lot_no = ? WHERE id = ?', [
+        'L-${lotId.toString().padLeft(4, '0')}',
+        lotId,
+      ]);
     }
     return getInventoryItem(id, executor);
   }
@@ -438,8 +430,9 @@ class LabRepo {
 
     if (updates.containsKey('name')) {
       final newName = '${updates['name'] ?? ''}'.trim();
-      if (newName.isEmpty)
+      if (newName.isEmpty) {
         throw ValidationError(AppErrors.materialNameRequired);
+      }
       final dup = await fetchOne(
         executor,
         'SELECT id FROM lab_inventory WHERE name = ? AND id != ?',
@@ -655,11 +648,10 @@ class LabRepo {
       ],
     );
     final lotNo = 'L-${lotId.toString().padLeft(4, '0')}';
-    await execute(
-      db,
-      'UPDATE inventory_lots SET lot_no = ? WHERE id = ?',
-      [lotNo, lotId],
-    );
+    await execute(db, 'UPDATE inventory_lots SET lot_no = ? WHERE id = ?', [
+      lotNo,
+      lotId,
+    ]);
     await refreshInventoryCache(db, inventoryId);
     final rows = await fetchAll(
       db,
@@ -758,11 +750,7 @@ class LabRepo {
   }
 
   /// Credits [qty] back to one lot (reversals return to source).
-  Future<void> creditLot(
-    DatabaseExecutor txn,
-    int lotId,
-    double qty,
-  ) async {
+  Future<void> creditLot(DatabaseExecutor txn, int lotId, double qty) async {
     final clean = (safeFloat(qty) ?? 0.0);
     if (clean <= 1e-9) return;
     await txn.rawUpdate(
@@ -1027,6 +1015,7 @@ class LabRepo {
                (SELECT COUNT(*) FROM lab_equipment_events v
                 WHERE v.equipment_id = e.id) AS events_count
         FROM lab_equipment e
+        WHERE e.deleted_at IS NULL
         ORDER BY e.name COLLATE NOCASE ASC
         ''');
   }
@@ -1546,7 +1535,7 @@ class LabRepo {
     final wanted = <String, Map<String, String>>{};
     for (final m in materials) {
       for (final e in jsonLoads('${m['physical_reference_json']}').entries) {
-        final name = '${e.key}'.trim();
+        final name = e.key.trim();
         if (name.isEmpty) continue;
         wanted.putIfAbsent(
           name.toLowerCase(),
@@ -1554,7 +1543,7 @@ class LabRepo {
         );
       }
       for (final e in jsonLoads('${m['chemical_reference_json']}').entries) {
-        final name = '${e.key}'.trim();
+        final name = e.key.trim();
         if (name.isEmpty) continue;
         wanted.putIfAbsent(
           name.toLowerCase(),
@@ -2116,7 +2105,7 @@ class LabRepo {
       if (canonical.isNotEmpty) byName.putIfAbsent(canonical, () => row);
     }
     for (final entry in chemicalReference.entries) {
-      final key = '${entry.key}'.trim();
+      final key = entry.key.trim();
       if (key.isEmpty) continue;
       final analysis = byName[key.toLowerCase()];
       if (analysis == null) continue;
@@ -2161,8 +2150,9 @@ class LabRepo {
       }
     }
     if (updates.containsKey('name')) {
-      if (updates['name'] == '')
+      if (updates['name'] == '') {
         throw ValidationError(AppErrors.productNameRequired);
+      }
       final dup = await fetchOne(
         executor,
         'SELECT id FROM lab_products WHERE name = ? AND id != ?',
@@ -2823,8 +2813,9 @@ class LabRepo {
       throw ValidationError(AppErrors.constantPrecisionRange);
     }
     if (isExpression == 1) {
-      if (expression.isEmpty)
+      if (expression.isEmpty) {
         throw ValidationError(AppErrors.constantDerivedExprRequired);
+      }
       try {
         parseFormula(expression);
       } on ValidationError catch (exc) {
@@ -3710,8 +3701,9 @@ class LabRepo {
     final patch = <String, Object?>{};
     if (sampleName != null) {
       final clean = sampleName.trim();
-      if (clean.isEmpty)
+      if (clean.isEmpty) {
         throw ValidationError(AppErrors.sampleAndSourceRequired);
+      }
       patch['sample_name'] = clean.substring(0, clean.length.clamp(0, 50));
     }
     if (resultText != null) {
@@ -3869,7 +3861,7 @@ class LabRepo {
             LEFT JOIN users ut ON ut.id = t.tested_by OR ut.uid = t.tested_by
             LEFT JOIN users uc ON uc.id = t.created_by OR uc.uid = t.created_by
             LEFT JOIN inspections i ON i.entry_code = t.entry_code
-            WHERE 1 = 1
+            WHERE t.deleted_at IS NULL
         ''';
     final params = <Object?>[];
     if (sourceTypes.contains(sourceType)) {
@@ -3911,7 +3903,7 @@ class LabRepo {
       FROM lab_sample_tests t
       JOIN lab_analyses a ON a.id = t.analysis_id
       LEFT JOIN parameters p ON p.id = a.parameter_id
-      WHERE t.entry_code = ?
+      WHERE t.entry_code = ? AND t.deleted_at IS NULL
         AND (p.parameter_type = 'chemical' OR a.parameter_id IS NULL)
       ORDER BY t.tested_at DESC, t.id DESC
       ''',
@@ -4062,7 +4054,7 @@ class LabRepo {
       throw ValidationError(AppErrors.reportTypeInvalid);
     }
     final params = <Object?>[];
-    final where = <String>[];
+    final where = <String>['t.deleted_at IS NULL'];
     String periodLabel;
     if (reportType == 'daily') {
       if (dateStr == null || dateStr.trim().isEmpty) {
@@ -4390,16 +4382,12 @@ class LabRepo {
   /// `tested_at >= cutoffKey` equals the Dart-side date-prefix comparison
   /// that used to re-read the whole table.
   Future<List<Map<String, dynamic>>> _dashboardTests(String? cutoffKey) async {
-    final rows = await fetchAll(
-      null,
-      '''
+    final rows = await fetchAll(null, '''
       SELECT t.id, t.source_type, t.source_ref_id, t.analysis_id,
              t.result_text, t.tested_at
       FROM lab_sample_tests t
       ${cutoffKey == null ? '' : 'WHERE t.tested_at >= ?'}
-      ''',
-      cutoffKey == null ? const <Object?>[] : <Object?>[cutoffKey],
-    );
+      ''', cutoffKey == null ? const <Object?>[] : <Object?>[cutoffKey]);
     await buildRangesCache();
     return [
       for (final row in rows) enrichTestSync(Map<String, dynamic>.from(row)),
@@ -4524,10 +4512,10 @@ class LabRepo {
         null,
         '''
                 SELECT
-                    t.*, a.name AS analysis_name, a.unit AS analysis_unit
+                    t.*, a.name AS analysis_name, a.unit AS analysis_unit, a.reference AS analysis_reference
                 FROM lab_sample_tests t
                 JOIN lab_analyses a ON a.id = t.analysis_id
-                WHERE t.entry_code = ?
+                WHERE t.entry_code = ? AND t.deleted_at IS NULL
                 ORDER BY t.tested_at DESC, t.id DESC
                 ''',
         [entryCode],
@@ -4545,10 +4533,10 @@ class LabRepo {
     final params = <Object?>[materialName];
     var query = '''
             SELECT
-                t.*, a.name AS analysis_name, a.unit AS analysis_unit
+                t.*, a.name AS analysis_name, a.unit AS analysis_unit, a.reference AS analysis_reference
             FROM lab_sample_tests t
             JOIN lab_analyses a ON a.id = t.analysis_id
-            WHERE t.source_type = 'raw_material'
+            WHERE t.deleted_at IS NULL AND t.source_type = 'raw_material'
               AND t.source_name = ?
         ''';
     if (inspectionDate.isNotEmpty) {
@@ -4578,8 +4566,8 @@ class LabRepo {
     // Perf: one batched `WHERE id IN (...)` instead of a SELECT per item /
     // per dynamic link. Same NotFoundError semantics as the per-row path
     // (loadInventoryMap throws inventoryItemNotFound for missing ids).
-    final effectiveMap = inventoryMap ??
-        await _consumptionInventoryMap(analysis, dynamicValues);
+    final effectiveMap =
+        inventoryMap ?? await _consumptionInventoryMap(analysis, dynamicValues);
     final providedMap = inventoryMap != null;
     final consumed = <int, double>{};
     for (final item in analysis['items'] as List? ?? []) {
@@ -4703,8 +4691,9 @@ class LabRepo {
       final delta = (newMap[id] ?? 0.0) - (oldMap[id] ?? 0.0);
       if (delta.abs() >= 1e-9) deltas[id] = delta;
     }
-    if (deltas.isEmpty)
+    if (deltas.isEmpty) {
       return (<Map<String, dynamic>>[], <Map<String, dynamic>>[]);
+    }
     // Single batched read for all touched inventory rows.
     final loaded = await loadInventoryMap(txn, deltas.keys.toSet());
     if (inventoryMap != null) {
@@ -4725,7 +4714,12 @@ class LabRepo {
       // FEFO draw (consume) or return-to-source (edit reduced the need).
       // Warn-only expired policy: expired lots participate, flagged per take.
       final takes = isReversal
-          ? await returnLotsToSource(txn, sampleTestId, inventoryId, requestedQty)
+          ? await returnLotsToSource(
+              txn,
+              sampleTestId,
+              inventoryId,
+              requestedQty,
+            )
           : await drawLotsFefo(txn, inventoryId, requestedQty);
       final appliedQty = takes.fold<double>(
         0.0,
@@ -5074,10 +5068,7 @@ class LabRepo {
         );
         for (final t in testRows) {
           existingTestsByRow
-              .putIfAbsent(
-                (t['worksheet_row_id'] as num).toInt(),
-                () => [],
-              )
+              .putIfAbsent((t['worksheet_row_id'] as num).toInt(), () => [])
               .add(t);
         }
       }
@@ -5186,7 +5177,8 @@ class LabRepo {
           // The one existing test (row, analysis) pair, from the batched
           // prefetch; inserts under a fresh wsId can never match.
           Map<String, dynamic>? existingTest;
-          for (final candidate in existingTestsByRow[wsId] ?? const <Map<String, dynamic>>[]) {
+          for (final candidate
+              in existingTestsByRow[wsId] ?? const <Map<String, dynamic>>[]) {
             if ((candidate['analysis_id'] as num?)?.toInt() == analysisId) {
               existingTest = candidate;
               break;
@@ -5288,9 +5280,9 @@ class LabRepo {
     required int rowId,
     Map<String, dynamic>? user,
     String reason = '',
+    DatabaseExecutor? executor,
   }) async {
-    final db = await _db;
-    return db.transaction((txn) async {
+    Future<Map<String, dynamic>> perform(DatabaseExecutor txn) async {
       final row = await fetchOne(
         txn,
         'SELECT * FROM lab_worksheet WHERE id = ?',
@@ -5329,7 +5321,10 @@ class LabRepo {
         [cleanReason, userId, timestamp, userId, timestamp, rowId],
       );
       return {'voided': true, 'reversed_entries': reversedCount};
-    });
+    }
+
+    if (executor != null) return perform(executor);
+    return (await _db).transaction(perform);
   }
 
   // ── Formula serialization helpers ─────────────────────────────
@@ -5393,14 +5388,14 @@ class LabRepo {
       final batch = await fetchOne(
         exec,
         "SELECT id, remote_id FROM inspections "
-        "WHERE id = ? AND inspection_kind = 'product'",
+        "WHERE id = ? AND inspection_kind = 'product' AND deleted_at IS NULL",
         [batchId],
       );
       if (batch == null) throw NotFoundError(AppErrors.batchNotFound);
       final maxRow = await fetchOne(
         exec,
         'SELECT MAX(sample_no) AS m FROM product_batch_samples '
-        'WHERE batch_id = ? AND deleted_at IS NULL',
+        'WHERE batch_id = ?',
         [batchId],
       );
       final nextNo = (((maxRow?['m'] as num?)?.toInt() ?? 0)) + 1;

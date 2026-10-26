@@ -16,7 +16,9 @@ class ParamsCubit extends AppCubit<ParamsState> {
     required this.parameterType,
     required this.loadUnits,
     this.pageSize = kMobilePageSize,
-  }) : super(const ParamsState());
+  }) : super(const ParamsState()) {
+    refreshOnSync(load);
+  }
 
   final ReferenceRepository repo;
   final String parameterType;

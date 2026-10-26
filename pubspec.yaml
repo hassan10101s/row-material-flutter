@@ -85,6 +85,8 @@ dependencies:
   # swiped away, where Workmanager polls cannot run. Paired with
   # firebase_core ^4.15.0 (FlutterFire BoM 4.20.0 -> messaging 16.7.0).
   firebase_messaging: ^16.7.0
+  cloud_functions: ^6.5.1
+  http: any
 dependency_overrides:
   # FirebaseAuth's Android ID-token listener can run on a Firebase worker
   # thread; use the local copy that posts those events to Android's main thread.
@@ -96,7 +98,6 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^6.0.0
   mocktail: ^1.0.3
-  http: ^1.2.2
 
 flutter:
   uses-material-design: true
@@ -107,6 +108,7 @@ flutter:
     - assets/units.xlsx
     - assets/images/
     - assets/templates/
+    - assets/templates/fonts/
     # Directory, not the single file: `firebase.local.json` is git-ignored, so
     # declaring the file itself would break the build on a clean clone.
     - assets/firebase/

@@ -4,8 +4,6 @@ import 'dart:typed_data';
 
 import 'package:excel/excel.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
 
 import '../../../../core/app_paths.dart';
 import '../../../../core/constants/app_strings.dart';
@@ -68,29 +66,12 @@ class NcrExportResult {
 /// Writes the NCR report to PDF and Excel (plan V6_ENHANCED 22.7).
 class NcrExportService {
   NcrExportService({AppPaths? paths, HtmlPdfExporter? htmlPdf})
-      : _paths = paths ?? AppPaths(),
-        _htmlPdf = htmlPdf ?? HtmlPdfExporter();
+    : _paths = paths ?? AppPaths(),
+      _htmlPdf = htmlPdf ?? HtmlPdfExporter();
 
   final AppPaths _paths;
   final HtmlPdfExporter _htmlPdf;
 
-  static List<String> _pdfColumns() => [
-    AppText.t('المرجع', 'Ref'),
-    AppText.t('الوصف', 'Description'),
-    AppText.t('الخطورة', 'Severity'),
-    AppText.t('الحالة', 'Status'),
-    AppText.t('التفتيش', 'Inspection'),
-    AppText.t('المخزون / الدفعة', 'Lot/Batch'),
-    AppText.t('المسند', 'Assignee'),
-    AppText.t('الاستحقاق', 'Due'),
-    AppText.t('متأخرة', 'Overdue'),
-    AppText.t('الإجراء التصحيحي', 'CAPA'),
-  ];
-
-  /// Arabic labels are kept out of the exported values on purpose: an NCR code,
-  /// a severity and a status are the same tokens the database stores and the
-  /// audit log records. Translating them here would make an exported file
-  /// impossible to grep back against the database.
   static List<String> _excelHeaders() => [
     AppText.t('المرجع', 'Ref'),
     AppText.t('الوصف', 'Description'),
@@ -129,10 +110,7 @@ class NcrExportService {
     r.isOpen ? 'YES' : 'NO',
   ];
 
-  /// PDF through the shared HTML pipeline: the shipped
-  /// `ncr_report_template.html` (same tiny_jinja + headless-browser flow as
-  /// every other report), falling back to the hand-drawn renderer below when
-  /// no browser exists — which is always the case on phones.
+  /// Render the shared NCR HTML template on desktop and Android.
   Future<NcrExportResult> exportPdf(
     NcrExportBundle bundle, {
     Directory? directory,
@@ -141,14 +119,7 @@ class NcrExportService {
     ctx['is_en'] = !AppText.arabic;
     final template = await _readTemplate();
     final html = tinyJinjaRender(template, ctx);
-    Uint8List bytes;
-    try {
-      bytes = await _htmlPdf.exportPdf(html);
-    } on HtmlToPdfUnavailableException {
-      bytes = await _renderNativePdf(bundle);
-    } on HtmlToPdfException {
-      bytes = await _renderNativePdf(bundle);
-    }
+    final bytes = await _htmlPdf.exportPdf(html);
 
     final file = await _write(directory, (dir) async {
       final path = _uniquePath(dir, _stamp(bundle.generatedAt), 'pdf');
@@ -174,109 +145,7 @@ class NcrExportService {
     }
   }
 
-  /// Hand-drawn fallback mirroring the template's sections in order (scope,
-  /// KPI tiles, top defects, aging, findings table) for environments without
-  /// a headless browser.
-  Future<Uint8List> _renderNativePdf(NcrExportBundle bundle) async {
-    await _ensureFont();
-    final theme = _baseFont == null
-        ? null
-        : pw.ThemeData.withFont(base: _baseFont!, bold: _boldFont!);
-    final doc = pw.Document(
-      title: AppText.t('تقرير عدم المطابقة', 'Non-conformance report'),
-      author: bundle.generatedBy.isEmpty ? 'MaterialLab' : bundle.generatedBy,
-      theme: theme,
-    );
-
-    final dark = PdfColors.grey900;
-    final muted = PdfColors.grey700;
-
-    doc.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat.a4.landscape,
-        margin: const pw.EdgeInsets.all(24),
-        header: (context) => pw.Container(
-          padding: const pw.EdgeInsets.only(bottom: 6),
-          decoration: const pw.BoxDecoration(
-            border: pw.Border(bottom: pw.BorderSide(color: PdfColors.grey400)),
-          ),
-          child: pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Text(
-                AppText.t('تقرير عدم المطابقة', 'Non-conformance report'),
-                style: pw.TextStyle(
-                  fontSize: 14,
-                  fontWeight: pw.FontWeight.bold,
-                ),
-              ),
-              pw.Text(
-                '${AppText.t('صفحة', 'Page')} ${context.pageNumber}',
-                style: pw.TextStyle(fontSize: 9, color: muted),
-              ),
-            ],
-          ),
-        ),
-        footer: (context) => pw.Container(
-          padding: const pw.EdgeInsets.only(top: 6),
-          child: pw.Text(
-            _provenance(bundle),
-            style: pw.TextStyle(fontSize: 8, color: muted),
-          ),
-        ),
-        build: (context) => [
-          _pdfScope(bundle),
-          pw.SizedBox(height: 8),
-          _pdfKpis(bundle.kpis, dark),
-          pw.SizedBox(height: 12),
-          if (bundle.topDefects.isNotEmpty) ...[
-            _pdfSectionTitle(
-              AppText.t('أكثر عيوب تكراراً', 'Top recurring defects'),
-            ),
-            _pdfTopDefects(bundle.topDefects),
-            pw.SizedBox(height: 12),
-          ],
-          if (bundle.aging.isNotEmpty) ...[
-            _pdfSectionTitle(AppText.t('التوزيع العمري', 'Aging distribution')),
-            _pdfAging(bundle.aging),
-            pw.SizedBox(height: 12),
-          ],
-          _pdfSectionTitle(
-            '${AppText.t('الحالات المطابقة', 'Matching findings')} '
-            '(${bundle.rows.length})',
-          ),
-          _pdfTable(bundle.rows),
-        ],
-      ),
-    );
-
-    return doc.save();
-  }
-
-  /// Arabic-capable font for the native fallback: without it every Arabic
-  /// string in the fallback PDF renders as tofu boxes. Same asset + pattern
-  /// as the shared [PdfRenderer].
-  static pw.Font? _baseFont;
-  static pw.Font? _boldFont;
-
-  static Future<void> _ensureFont() async {
-    if (_baseFont != null) return;
-    try {
-      ByteData data;
-      try {
-        data = await rootBundle.load('assets/fonts/Cairo-Variable.ttf');
-      } catch (_) {
-        final bytes = await File('assets/fonts/Cairo-Variable.ttf')
-            .readAsBytes();
-        data = ByteData.sublistView(bytes);
-      }
-      _baseFont = pw.Font.ttf(data);
-      _boldFont = pw.Font.ttf(data);
-    } catch (_) {
-      // No Arabic font: the fallback still prints latin tokens correctly.
-    }
-  }
-
+  /// Export the same immutable report snapshot to Excel.
   Future<NcrExportResult> exportExcel(
     NcrExportBundle bundle, {
     Directory? directory,
@@ -292,7 +161,8 @@ class NcrExportService {
         for (final d in bundle.topDefects) [d.code, d.category, d.count],
       ],
       'aging': [
-        for (final b in bundle.aging) [b.label, b.count, _share(b, bundle.aging)],
+        for (final b in bundle.aging)
+          [b.label, b.count, _share(b, bundle.aging)],
       ],
       'agingHeaders': [
         AppText.t('الفئة', 'Band'),
@@ -330,7 +200,10 @@ class NcrExportService {
       [AppText.t('بسيطة', 'Minor'), k.minor],
       [AppText.t('متأخرة', 'Overdue'), k.overdue],
       [AppText.t('إغلاق في الموعد', 'Closed on time'), k.closedOnTime],
-      [AppText.t('نسبة الإغلاق في الموعد', 'On-time closure %'), k.onTimeClosurePct],
+      [
+        AppText.t('نسبة الإغلاق في الموعد', 'On-time closure %'),
+        k.onTimeClosurePct,
+      ],
       [AppText.t('متوسط أيام الإغلاق', 'MTTC (days)'), k.mttcDays],
       [AppText.t('متوسط أيام التحقق', 'MTTV (days)'), k.mttvDays],
       [AppText.t('مرتبطة بإجراء', 'CAPA linked'), k.capaLinked],
@@ -340,243 +213,6 @@ class NcrExportService {
       [AppText.t('المستخدم', 'Generated by'), bundle.generatedBy],
     ];
   }
-
-  pw.Widget _pdfScope(NcrExportBundle bundle) => pw.Container(
-    padding: const pw.EdgeInsets.all(8),
-    decoration: pw.BoxDecoration(
-      color: PdfColors.grey100,
-      borderRadius: pw.BorderRadius.circular(3),
-    ),
-    child: pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        pw.Text(
-          '${AppText.t('النطاق', 'Scope')}: ${bundle.filters.describe}',
-          style: const pw.TextStyle(fontSize: 9),
-        ),
-        if (bundle.formNo.trim().isNotEmpty)
-          pw.Text(
-            '${AppText.t('نموذج رقم', 'Form No')}: ${bundle.formNo.trim()}',
-            style: const pw.TextStyle(fontSize: 9),
-          ),
-      ],
-    ),
-  );
-
-  pw.Widget _pdfKpis(NcrKpis k, PdfColor dark) {
-    // Two rows of tiles, because a single row of eight would be unreadable at
-    // A4 width. A count that is not zero is drawn in its alarm colour; the
-    // same tile for "0 critical" stays neutral.
-    final red = PdfColors.red700;
-    final tiles = <({String label, String value, PdfColor color})>[
-      (label: AppText.t('الإجمالي', 'Total'), value: '${k.total}', color: dark),
-      (label: AppText.t('المفتوحة', 'Open'), value: '${k.open}', color: dark),
-      (
-        label: AppText.t('متأخرة', 'Overdue'),
-        value: '${k.overdue}',
-        color: k.overdue > 0 ? red : dark,
-      ),
-      (
-        label: AppText.t('حرجة', 'Critical'),
-        value: '${k.critical}',
-        color: k.critical > 0 ? red : dark,
-      ),
-      (
-        label: AppText.t('حرجة مفتوحة %', 'Critical open %'),
-        value: _pct(k.criticalOpenPct),
-        color: dark,
-      ),
-      (
-        label: AppText.t('في الموعد %', 'On-time %'),
-        value: _pct(k.onTimeClosurePct),
-        color: dark,
-      ),
-      (
-        label: AppText.t('متوسط الإغلاق', 'MTTC'),
-        value: _days(k.mttcDays),
-        color: dark,
-      ),
-      (
-        label: AppText.t('متوسط التحقق', 'MTTV'),
-        value: _days(k.mttvDays),
-        color: dark,
-      ),
-    ];
-
-    return pw.Table(
-      border: null,
-      children: [
-        for (var row = 0; row < 2; row++)
-          pw.TableRow(
-            children: [
-              for (var col = 0; col < 4; col++)
-                pw.Container(
-                  padding: const pw.EdgeInsets.symmetric(
-                    horizontal: 6,
-                    vertical: 5,
-                  ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text(
-                        tiles[row * 4 + col].label,
-                        style: const pw.TextStyle(
-                          fontSize: 8,
-                          color: PdfColors.grey700,
-                        ),
-                      ),
-                      pw.Text(
-                        tiles[row * 4 + col].value,
-                        style: pw.TextStyle(
-                          fontSize: 13,
-                          fontWeight: pw.FontWeight.bold,
-                          color: tiles[row * 4 + col].color,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-            ],
-          ),
-      ],
-    );
-  }
-
-  pw.Widget _pdfSectionTitle(String title) => pw.Padding(
-    padding: const pw.EdgeInsets.only(bottom: 4),
-    child: pw.Text(
-      title,
-      style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
-    ),
-  );
-
-  pw.Widget _pdfTable(List<NcrReportRow> rows) {
-    pw.Widget cell(String value, {bool danger = false}) => pw.Container(
-      padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-      decoration: const pw.BoxDecoration(
-        border: pw.Border(
-          bottom: pw.BorderSide(color: PdfColors.grey300, width: 0.5),
-        ),
-      ),
-      child: pw.Text(
-        value,
-        style: pw.TextStyle(
-          fontSize: 7,
-          color: danger ? PdfColors.red700 : PdfColors.black,
-        ),
-      ),
-    );
-
-    return pw.Table(
-      columnWidths: const {
-        0: pw.FixedColumnWidth(56),
-        1: pw.FlexColumnWidth(4),
-        2: pw.FixedColumnWidth(44),
-        3: pw.FixedColumnWidth(56),
-        4: pw.FixedColumnWidth(56),
-        5: pw.FixedColumnWidth(70),
-        6: pw.FixedColumnWidth(70),
-        7: pw.FixedColumnWidth(56),
-        8: pw.FixedColumnWidth(38),
-        9: pw.FixedColumnWidth(48),
-      },
-      children: [
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-          children: [
-            for (final h in _pdfColumns())
-              pw.Container(
-                padding: const pw.EdgeInsets.symmetric(
-                  horizontal: 4,
-                  vertical: 3,
-                ),
-                child: pw.Text(
-                  h,
-                  style: pw.TextStyle(
-                    fontSize: 7,
-                    fontWeight: pw.FontWeight.bold,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        for (final r in rows)
-          pw.TableRow(
-            children: [
-              cell(r.reference),
-              cell(r.description),
-              cell(r.severity, danger: r.severity == 'Critical'),
-              cell(r.status),
-              cell(r.inspectionRefId),
-              cell(r.lotNo.isNotEmpty ? r.lotNo : r.batchNo),
-              cell(r.assignedToName),
-              cell(r.dueDate, danger: r.isOverdue),
-              cell(
-                r.isOverdue ? AppText.t('نعم', 'YES') : 'NO',
-                danger: r.isOverdue,
-              ),
-              cell(r.capaStatus),
-            ],
-          ),
-      ],
-    );
-  }
-
-  pw.Widget _pdfTopDefects(List<NcrTopDefect> defects) => pw.Table(
-    border: null,
-    children: [
-      pw.TableRow(
-        children: [
-          _pdfHead(AppText.t('الرمز', 'Code')),
-          _pdfHead(AppText.t('التصنيف', 'Category')),
-          _pdfHead(AppText.t('العدد', 'Count')),
-        ],
-      ),
-      for (final d in defects)
-        pw.TableRow(
-          children: [
-            _pdfCell(d.code),
-            _pdfCell(d.category),
-            _pdfCell('${d.count}'),
-          ],
-        ),
-    ],
-  );
-
-  pw.Widget _pdfAging(List<NcrAgingBucket> buckets) => pw.Table(
-    border: null,
-    children: [
-      pw.TableRow(
-        children: [
-          _pdfHead(AppText.t('الفئة', 'Band')),
-          _pdfHead(AppText.t('العدد', 'Count')),
-          _pdfHead(AppText.t('النسبة', 'Share')),
-        ],
-      ),
-      for (final b in buckets)
-        pw.TableRow(
-          children: [
-            _pdfCell(b.label),
-            _pdfCell('${b.count}'),
-            _pdfCell(_pct(_share(b, buckets))),
-          ],
-        ),
-    ],
-  );
-
-  pw.Widget _pdfHead(String text) => pw.Container(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-    decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-    child: pw.Text(
-      text,
-      style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold),
-    ),
-  );
-
-  pw.Widget _pdfCell(String text) => pw.Container(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
-    child: pw.Text(text, style: const pw.TextStyle(fontSize: 7)),
-  );
 
   Future<String> _write(
     Directory? directory,
@@ -617,11 +253,6 @@ class NcrExportService {
     return candidate;
   }
 
-  String _provenance(NcrExportBundle bundle) =>
-      '${AppText.t('أُنشئ في', 'Generated')}: ${nowIsoAt(bundle.generatedAt)}'
-      ' · ${AppText.t('المستخدم', 'User')}: ${bundle.generatedBy.isEmpty ? '-' : bundle.generatedBy}'
-      ' · ${AppText.t('النطاق', 'Scope')}: ${bundle.filters.describe}';
-
   String _stamp(DateTime at) =>
       '${at.year.toString().padLeft(4, '0')}'
       '${at.month.toString().padLeft(2, '0')}'
@@ -641,13 +272,6 @@ class NcrExportService {
     final total = all.fold<int>(0, (sum, b) => sum + b.count);
     return total == 0 ? 0 : (bucket.count / total) * 100;
   }
-
-  /// Formats an already-computed percentage (0-100).
-  String _pct(double? value) =>
-      value == null ? '-' : '${value.toStringAsFixed(1)}%';
-
-  String _days(double? value) =>
-      value == null ? '-' : '${value.toStringAsFixed(1)} d';
 }
 
 /// Top-level so it can run in [Isolate.run] off the UI thread.
@@ -693,14 +317,22 @@ Uint8List encodeNcrWorkbook(Map<String, dynamic> payload) {
   final defects = excel['Top_Defects'];
   headerRow(defects, const ['Code', 'Category', 'Count']);
   for (final d in List<List>.from(payload['defects'] as List)) {
-    defects.appendRow([ncrExcelCell(d[0]), ncrExcelCell(d[1]), ncrExcelCell(d[2])]);
+    defects.appendRow([
+      ncrExcelCell(d[0]),
+      ncrExcelCell(d[1]),
+      ncrExcelCell(d[2]),
+    ]);
   }
 
   final aging = excel['Aging'];
   final agingHeaders = List<String>.from(payload['agingHeaders'] as List);
   headerRow(aging, agingHeaders);
   for (final b in List<List>.from(payload['aging'] as List)) {
-    aging.appendRow([ncrExcelCell(b[0]), ncrExcelCell(b[1]), ncrExcelCell(b[2])]);
+    aging.appendRow([
+      ncrExcelCell(b[0]),
+      ncrExcelCell(b[1]),
+      ncrExcelCell(b[2]),
+    ]);
   }
 
   final bytes = excel.save();
@@ -709,10 +341,10 @@ Uint8List encodeNcrWorkbook(Map<String, dynamic> payload) {
 }
 
 CellValue? ncrExcelCell(Object? value) => switch (value) {
-      null => null,
-      String s => TextCellValue(s),
-      int n => IntCellValue(n),
-      double n => DoubleCellValue(n),
-      bool b => TextCellValue(b ? 'YES' : 'NO'),
-      _ => TextCellValue('$value'),
-    };
+  null => null,
+  String s => TextCellValue(s),
+  int n => IntCellValue(n),
+  double n => DoubleCellValue(n),
+  bool b => TextCellValue(b ? 'YES' : 'NO'),
+  _ => TextCellValue('$value'),
+};

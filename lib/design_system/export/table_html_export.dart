@@ -30,15 +30,16 @@ class TableHtmlExport {
     final arabic = AppText.arabic;
     final esc = escape;
     final titleEsc = esc(title);
-    final sub = subtitle ?? esc(
-      AppText.t(
-        'عدد السجلات: ${rows.length} — بتاريخ ${DateTime.now().toString().substring(0, 16)}',
-        'Records: ${rows.length} — ${DateTime.now().toString().substring(0, 16)}',
-      ),
-    );
+    final sub =
+        subtitle ??
+        esc(
+          AppText.t(
+            'عدد السجلات: ${rows.length} — بتاريخ ${DateTime.now().toString().substring(0, 16)}',
+            'Records: ${rows.length} — ${DateTime.now().toString().substring(0, 16)}',
+          ),
+        );
     final printLabel = esc(AppText.t('طباعة', 'Print'));
-    final thead =
-        '<tr>${headers.map((h) => '<th>${esc(h)}</th>').join()}</tr>';
+    final thead = '<tr>${headers.map((h) => '<th>${esc(h)}</th>').join()}</tr>';
     final tbody = StringBuffer();
     for (var i = 0; i < rows.length; i++) {
       tbody.write('<tr><td>${i + 1}</td>');
@@ -95,7 +96,9 @@ class TableHtmlExport {
       } else {
         dir = await getIt<ExportRootService>().effectiveRoot();
       }
-      final file = File('${dir.path}/${filePrefix}_${stamp(DateTime.now())}.html');
+      final file = File(
+        '${dir.path}/${filePrefix}_${stamp(DateTime.now())}.html',
+      );
       await file.writeAsString(html);
       if (!context.mounted) return null;
       await AppFeedbackExport.actions(

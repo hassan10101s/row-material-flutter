@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
+import '../../../../core/commands/command_outbox.dart';
+import '../../../../core/commands/command_worker.dart';
+import '../../../../core/commands/central_sync_driver.dart';
 import '../../../../core/sync/conflict_resolver.dart';
-import '../../../../core/sync/backfill_service.dart';
 import '../../../../core/sync/sync_engine.dart';
 import '../../../../core/sync/sync_metadata.dart';
 import '../../../../core/sync/sync_queue.dart';
@@ -16,6 +19,7 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
 import '../../../../design_system/widgets/app_paginated_table.dart';
@@ -37,12 +41,16 @@ class SyncScreen extends StatefulWidget {
 class _SyncScreenState extends State<SyncScreen> {
   final _engine = getIt<SyncEngine>();
   final _queue = getIt<SyncQueue>();
+  final _commands = getIt<CommandOutbox>();
   final _conflicts = getIt<ConflictResolver>();
 
   StreamSubscription<SyncStatusSnapshot>? _subscription;
   SyncStatusSnapshot? _status;
   List<Map<String, Object?>> _rows = const [];
   List<Map<String, Object?>> _queueRows = const [];
+  List<CommandOutboxEntry> _commandRows = const [];
+  CommandOutboxCounts? _commandCounts;
+  int? _centralSequence;
   bool _busy = false;
 
   @override
@@ -84,6 +92,11 @@ class _SyncScreenState extends State<SyncScreen> {
   }
 
   Future<void> _refresh() async {
+    if (centralCommandPilotEnabled) {
+      await getIt<CentralSyncDriver>().syncNow();
+      await _refreshData();
+      return;
+    }
     final snapshot = await _engine.syncNow(reason: 'screen');
     if (mounted) setState(() => _status = snapshot);
     await _refreshData();
@@ -94,17 +107,38 @@ class _SyncScreenState extends State<SyncScreen> {
   /// and the old shape called [syncNow] a second time through here — two full
   /// walks (2× the pull plus 2× the audit maintenance) per button tap.
   Future<void> _refreshData() async {
-    final rows = await _queue.listConflicts(limit: 200);
-    final queueRows = await _queue.listQueue(limit: 200);
+    final results = await Future.wait<Object?>([
+      _queue.listConflicts(limit: 200),
+      _queue.listQueue(limit: 200),
+      _commands.list(limit: 200),
+      _commands.counts(),
+      if (centralCommandPilotEnabled)
+        getIt<CentralSyncDriver>().currentSequence(),
+    ]);
+    final rows = results[0] as List<Map<String, Object?>>;
+    final queueRows = results[1] as List<Map<String, Object?>>;
+    final commandRows = results[2] as List<CommandOutboxEntry>;
+    final commandCounts = results[3] as CommandOutboxCounts;
+    final centralSequence = centralCommandPilotEnabled
+        ? results[4] as int?
+        : null;
     if (mounted) {
       setState(() {
         _rows = rows;
         _queueRows = queueRows;
+        _commandRows = commandRows;
+        _commandCounts = commandCounts;
+        _centralSequence = centralSequence;
       });
     }
   }
 
   Future<void> _syncNow() => _guarded(() async {
+    if (centralCommandPilotEnabled) {
+      await getIt<CentralSyncDriver>().syncNow();
+      await _refreshData();
+      return;
+    }
     await _engine.syncNow(reason: 'manual');
     await _refreshData();
   });
@@ -112,6 +146,11 @@ class _SyncScreenState extends State<SyncScreen> {
   /// "تنزيل السجل": a pull-only cycle, for a device that just wants the
   /// server's history without pushing anything.
   Future<void> _downloadHistory() => _guarded(() async {
+    if (centralCommandPilotEnabled) {
+      await getIt<CentralSyncDriver>().syncNow();
+      await _refreshData();
+      return;
+    }
     await _engine.syncNow(reason: 'history', pullOnly: true);
     await _refreshData();
   });
@@ -123,6 +162,11 @@ class _SyncScreenState extends State<SyncScreen> {
   /// app data) will ever fetch them. Applied rows re-skip cheaply and queued
   /// local edits are untouched, unlike wiping app data.
   Future<void> _fullRepull() => _guarded(() async {
+    if (centralCommandPilotEnabled) {
+      await getIt<CentralSyncDriver>().syncNow(forceSnapshot: true);
+      await _refreshData();
+      return;
+    }
     await getIt<SyncMetadata>().clearCursors();
     await _engine.syncNow(reason: 'full-repull', pullOnly: true);
     await _refreshData();
@@ -130,24 +174,6 @@ class _SyncScreenState extends State<SyncScreen> {
       AppFeedback.success(
         context,
         AppText.t('تمت إعادة السحب الكامل', 'Full re-pull done'),
-      );
-    }
-  });
-
-  /// "رفع المتأخر": re-queue every local inspection row that never reached
-  /// the server (imports / restores / lost queue rows), then push in batches.
-  /// Temporary recovery tool for the current history backlog.
-  Future<void> _backfill() => _guarded(() async {
-    final report = await getIt<BackfillService>().enqueueUnsyncedSamples();
-    await _engine.syncNow(reason: 'backfill');
-    await _refreshData();
-    if (mounted) {
-      AppFeedback.success(
-        context,
-        AppText.t(
-          'تم تجهيز ${report.total} سجل للرفع (${report.tombstones} حذف)',
-          'Queued ${report.total} record(s) for upload (${report.tombstones} deletes)',
-        ),
       );
     }
   });
@@ -165,18 +191,62 @@ class _SyncScreenState extends State<SyncScreen> {
     await _refreshData();
   });
 
-  /// "تجاهل الكل": dismiss every unresolved conflict without picking a side.
-  /// Purely local (no sync cycle), so it also works offline — the stale rows
-  /// just stop blocking the badge until fresh writes re-queue themselves.
   Future<void> _dismissAll() => _guarded(() async {
-    await _queue.dismissAllConflicts();
+    final gate = getIt<AuthGate>();
+    if (!gate.online ||
+        !gate.session.canDo(Permission.orgUpdate, online: gate.online)) {
+      return;
+    }
+    final organizationId = gate.organizationId;
+    final actor = _SessionView(gate.session.uid, gate.session.deviceId);
+    final ids = _rows.map((row) => (row['id'] as num).toInt()).toList();
+    if (ids.isEmpty) return;
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('تنظيف التعارضات', 'Clean up conflicts'),
+      message: AppText.t(
+        'استبدال التعديلات المحلية المتعارضة الظاهرة (${ids.length}) بأحدث نسخة من السيرفر؟ سيُحفظ سجل التعارض، وتبقى الحالات التي يتعذر التحقق منها للمراجعة. لا تُحذف بيانات السيرفر.',
+        'Replace the ${ids.length} displayed conflicting local changes with current server copies? Conflict history is retained. Unverifiable cases remain for review. Server data is not deleted.',
+      ),
+      confirmLabel: AppText.t('اعتماد نسخة السيرفر', 'Use server copies'),
+      danger: true,
+    );
+    if (!confirmed || !mounted) return;
+    final failures = await _conflicts.cleanUpFromServer(
+      ids,
+      organizationId: organizationId,
+      session: actor,
+    );
     await _refreshData();
+    if (!mounted) return;
+    final message = AppText.t(
+      'تمت معالجة ${ids.length - failures.length} تعارض؛ متبقٍ للمراجعة ${failures.length}.',
+      'Processed ${ids.length - failures.length} conflicts; ${failures.length} remain for review.',
+    );
+    if (failures.isEmpty) {
+      AppFeedback.success(context, message);
+    } else {
+      AppFeedback.error(context, message);
+    }
   });
 
   @override
   Widget build(BuildContext context) {
     final gate = getIt<AuthGate>();
     final status = _status;
+    final pendingCount = centralCommandPilotEnabled
+        ? ((_commandCounts?.pending ?? 0) +
+              (_commandCounts?.awaitingProjection ?? 0))
+        : (status?.pending ?? 0);
+    final blockedCount = centralCommandPilotEnabled
+        ? ((_commandCounts?.rejected ?? 0) +
+              (_commandCounts?.needsReview ?? 0) +
+              (_commandCounts?.requiresAuth ?? 0))
+        : (status?.blocked ?? 0);
+    final conflictCount = centralCommandPilotEnabled
+        ? (_commandCounts?.needsReview ?? 0)
+        : (status?.conflicts ?? 0);
+    final centralReady = _centralSequence != null;
     return ListView(
       padding: widget.embedded
           ? EdgeInsets.zero
@@ -208,19 +278,21 @@ class _SyncScreenState extends State<SyncScreen> {
               icon: const Icon(Icons.sync, size: 18),
               onPressed: _busy || !gate.online ? null : _syncNow,
             ),
-            if ((status?.blocked ?? 0) > 0)
+            if (!centralCommandPilotEnabled && (status?.blocked ?? 0) > 0)
               AppButton(
                 label: AppText.t('إعادة المحاولة', 'Retry'),
                 small: true,
                 icon: const Icon(Icons.refresh, size: 18),
                 onPressed: _busy || !gate.online ? null : _retryAll,
               ),
-            if ((status?.conflicts ?? 0) > 0)
+            if (!centralCommandPilotEnabled &&
+                _rows.isNotEmpty &&
+                gate.session.canDo(Permission.orgUpdate, online: gate.online))
               AppButton(
-                label: AppText.t('تجاهل الكل', 'Dismiss all'),
+                label: AppText.t('تنظيف التعارضات', 'Clean up conflicts'),
                 small: true,
                 icon: const Icon(Icons.clear_all, size: 18),
-                onPressed: _busy ? null : _dismissAll,
+                onPressed: _busy || !gate.online ? null : _dismissAll,
               ),
             AppButton(
               label: AppText.t('تنزيل السجل', 'Download log'),
@@ -234,12 +306,13 @@ class _SyncScreenState extends State<SyncScreen> {
               icon: const Icon(Icons.refresh_outlined, size: 18),
               onPressed: _busy || !gate.online ? null : _fullRepull,
             ),
-            AppButton(
-              label: AppText.t('رفع المتأخر', 'Upload backlog'),
-              small: true,
-              icon: const Icon(Icons.cloud_upload_outlined, size: 18),
-              onPressed: _busy || !gate.online ? null : _backfill,
-            ),
+            if (centralCommandPilotEnabled)
+              AppButton(
+                label: AppText.t('تنظيف الطلبات المحسومة', 'Clean settled'),
+                small: true,
+                icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+                onPressed: _busy ? null : _archiveSettled,
+              ),
           ],
         ),
         const SizedBox(height: AppSpacing.md),
@@ -258,27 +331,37 @@ class _SyncScreenState extends State<SyncScreen> {
               children: [
                 _Tile(
                   label: AppText.t('الحالة', 'Status'),
-                  value: status?.badge ?? '—',
-                  color: _badgeColor(status),
+                  value: centralCommandPilotEnabled
+                      ? (centralReady
+                            ? AppText.t(
+                                'جاهز · $_centralSequence',
+                                'Ready · $_centralSequence',
+                              )
+                            : AppText.t(
+                                'جارٍ تحميل الأرشيف',
+                                'Loading archive',
+                              ))
+                      : status?.badge ?? '—',
+                  color: centralCommandPilotEnabled
+                      ? (centralReady ? AppColors.success : AppColors.warning)
+                      : _badgeColor(status),
                   width: tileWidth,
                 ),
                 _Tile(
                   label: AppText.t('في الانتظار', 'Pending'),
-                  value: '${status?.pending ?? 0}',
+                  value: '$pendingCount',
                   width: tileWidth,
                 ),
                 _Tile(
                   label: AppText.t('محجوب', 'Blocked'),
-                  value: '${status?.blocked ?? 0}',
-                  color: (status?.blocked ?? 0) > 0 ? AppColors.danger : null,
+                  value: '$blockedCount',
+                  color: blockedCount > 0 ? AppColors.danger : null,
                   width: tileWidth,
                 ),
                 _Tile(
                   label: AppText.t('تعارضات', 'Conflicts'),
-                  value: '${status?.conflicts ?? 0}',
-                  color: (status?.conflicts ?? 0) > 0
-                      ? AppColors.warning
-                      : null,
+                  value: '$conflictCount',
+                  color: conflictCount > 0 ? AppColors.warning : null,
                   width: tileWidth,
                 ),
               ],
@@ -311,6 +394,55 @@ class _SyncScreenState extends State<SyncScreen> {
             style: TextStyle(color: AppColors.warning, fontSize: 12.spMax),
           ),
         ],
+        const SizedBox(height: AppSpacing.lg),
+        Text(
+          AppText.t('طلبات الاعتماد المركزي', 'Central approval requests'),
+          style: TextStyle(fontSize: 15.spMax, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        if (_commandRows.isEmpty)
+          Text(AppText.t('لا توجد طلبات مركزية.', 'No central requests.'))
+        else
+          SizedBox(
+            height: 280.h,
+            child: AppPaginatedTable(
+              minTableWidth: 920,
+              columnFlex: const [1.2, 1.2, 0.8, 0.8, 1.5, 1.1],
+              headers: [
+                AppText.t('العملية', 'Operation'),
+                AppText.t('المعرّف', 'Operation ID'),
+                AppText.t('الحالة', 'State'),
+                AppText.t('المحاولات', 'Attempts'),
+                AppText.t('التفاصيل', 'Details'),
+                AppText.t('الإجراءات', 'Actions'),
+              ],
+              rows: [
+                for (final command in _commandRows)
+                  [
+                    Text(
+                      command.commandType,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      command.operationId,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(command.state.value),
+                    Text('${command.attempts}'),
+                    Text(
+                      command.lastError ??
+                          command.lastErrorCode ??
+                          AppText.t('—', '—'),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    _commandAction(command),
+                  ],
+              ],
+            ),
+          ),
         const SizedBox(height: AppSpacing.lg),
         Row(
           children: [
@@ -417,8 +549,8 @@ class _SyncScreenState extends State<SyncScreen> {
         if (_rows.isEmpty)
           Text(
             AppText.t(
-              'لا توجد تعارضات — كل البيانات متزامنة.',
-              'No conflicts — all data is synced.',
+              'لا توجد تعارضات بانتظار المراجعة.',
+              'No conflicts awaiting review.',
             ),
           )
         else
@@ -452,17 +584,39 @@ class _SyncScreenState extends State<SyncScreen> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        AppButton(
-                          label: AppText.t('إبقاء المحلي', 'Keep local'),
-                          small: true,
-                          style: AppButtonStyle.ghost,
-                          onPressed: () => _keepLocal(row),
+                        Tooltip(
+                          message: AppText.t('إبقاء المحلي', 'Keep local'),
+                          child: AppButton(
+                            icon: Icon(
+                              Icons.edit_note,
+                              semanticLabel: AppText.t(
+                                'إبقاء المحلي',
+                                'Keep local',
+                              ),
+                            ),
+                            small: true,
+                            style: AppButtonStyle.ghost,
+                            onPressed: _busy || !_canResolve
+                                ? null
+                                : () => _keepLocal(row),
+                          ),
                         ),
-                        AppButton(
-                          label: AppText.t('إبقاء الخادم', 'Keep server'),
-                          small: true,
-                          style: AppButtonStyle.ghost,
-                          onPressed: () => _keepRemote(row),
+                        Tooltip(
+                          message: AppText.t('إبقاء الخادم', 'Keep server'),
+                          child: AppButton(
+                            icon: Icon(
+                              Icons.cloud_download_outlined,
+                              semanticLabel: AppText.t(
+                                'إبقاء الخادم',
+                                'Keep server',
+                              ),
+                            ),
+                            small: true,
+                            style: AppButtonStyle.ghost,
+                            onPressed: _busy || !_canResolve
+                                ? null
+                                : () => _keepRemote(row),
+                          ),
                         ),
                       ],
                     ),
@@ -523,8 +677,201 @@ class _SyncScreenState extends State<SyncScreen> {
     if (status == null) return null;
     if (!status.online) return AppColors.textMuted;
     if (status.syncing) return AppColors.primary;
-    if (status.blocked > 0) return AppColors.danger;
+    if (status.blocked > 0 ||
+        status.failed > 0 ||
+        (status.lastError?.isNotEmpty ?? false)) {
+      return AppColors.danger;
+    }
+    if (status.pullIncomplete || !status.fullySynced) {
+      return AppColors.textMuted;
+    }
     return AppColors.success;
+  }
+
+  /// Per-row correction actions in the central requests table (production
+  /// acceptance 3): requeue after sign-in, archive-and-release after a final
+  /// rejection, and the conflict review for needs_review. Approved rows are
+  /// resolved by definition; cleanup handles them in bulk.
+  Widget _commandAction(CommandOutboxEntry command) {
+    final gate = getIt<AuthGate>();
+    switch (command.state) {
+      case OutboxState.authRequired:
+        return AppButton(
+          label: AppText.t('إعادة الإرسال', 'Requeue'),
+          small: true,
+          style: AppButtonStyle.ghost,
+          onPressed: _busy || !gate.online ? null : () => _retryAuthRequired(),
+        );
+      case OutboxState.rejected:
+        return AppButton(
+          label: AppText.t('أرشفة ورفع القفل', 'Archive'),
+          small: true,
+          style: AppButtonStyle.ghost,
+          onPressed: _busy ? null : () => _archiveRejected(command),
+        );
+      case OutboxState.needsReview:
+        return AppButton(
+          label: AppText.t('عرض التعارض', 'Review'),
+          small: true,
+          style: AppButtonStyle.ghost,
+          onPressed: _busy ? null : () => _showConflictReview(command),
+        );
+      case OutboxState.pending:
+      case OutboxState.inFlight:
+      case OutboxState.approved:
+      case OutboxState.archived:
+        return const SizedBox.shrink();
+    }
+  }
+
+  /// Reads the approved after-image of one entity for the conflict dialog.
+  Future<(int, String)?> _approvedCopyInfo(String entityType, String entityId) async {
+    if (entityType.isEmpty || entityId.isEmpty) return null;
+    final rows = await (await _commands.dbHelper.database).query(
+      'central_approved_records',
+      columns: ['version', 'payload'],
+      where: 'entity_type = ? AND entity_id = ?',
+      whereArgs: [entityType, entityId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final version = (rows.single['version'] as num).toInt();
+    String payloadText;
+    try {
+      final payload = jsonDecode('${rows.single['payload']}');
+      payloadText = const JsonEncoder.withIndent('  ').convert(payload);
+      if (payloadText.length > 1500) payloadText = '${payloadText.substring(0, 1500)}…';
+    } on Object {
+      payloadText = '—';
+    }
+    return (version, payloadText);
+  }
+
+  /// Central cleanup (production acceptance 3): archive resolved rows only.
+  Future<void> _archiveSettled() => _guarded(() async {
+    final count = await _commands.archiveSettled();
+    await _refreshData();
+    if (!mounted) return;
+    AppFeedback.success(
+      context,
+      AppText.t(
+        'أُرشفت $count طلبات محسومة؛ لم تمس الإيصالات ولا الطلبات المعلقة.',
+        'Archived $count resolved requests; receipts and pending rows untouched.',
+      ),
+    );
+  });
+
+  /// Requeue auth_required requests after a fresh sign-in — same account,
+  /// organization and device, same operationId + hash (outbox scope).
+  Future<void> _retryAuthRequired() => _guarded(() async {
+    final requeued = await _commands.retryRejected(onlyPendingable: true);
+    await getIt<CommandWorker>().runOnce();
+    await _refreshData();
+    if (mounted && requeued > 0) {
+      AppFeedback.success(
+        context,
+        AppText.t(
+          'أعيدت $requeued طلبات إلى الانتظار بنفس المعرف.',
+          '$requeued request(s) requeued under their original ids.',
+        ),
+      );
+    }
+  });
+
+  /// Final rejection: archive the request and release its record locks so a
+  /// corrected request can be authored (production acceptance 3).
+  Future<void> _archiveRejected(CommandOutboxEntry command) => _guarded(() async {
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('أرشفة الطلب المرفوض', 'Archive the rejected request'),
+      message: AppText.t(
+        'سيُأرشف الطلب مع سبب الرفض ويرفع قفل السجل، فتستطيع إنشاء طلب مصحح جديد بالنسخة الحالية. الإيصال يبقى محفوظًا.',
+        'The request is archived with its rejection reason and the record locks are released, so a corrected request can be authored at the current version. The receipt is kept.',
+      ),
+      confirmLabel: AppText.t('أرشفة ورفع القفل', 'Archive and release'),
+      danger: true,
+    );
+    if (!confirmed || !mounted) return;
+    final released = await _commands.releaseLockAndArchive(
+      command.operationId,
+      reason: AppText.t(
+        'أُرشف بقرار المستخدم بعد الرفض النهائي',
+        'Archived by user decision after a final rejection',
+      ),
+    );
+    await _refreshData();
+    if (!mounted) return;
+    if (released) {
+      AppFeedback.success(
+        context,
+        AppText.t('رُفع قفل السجل؛ أنشئ طلبًا جديدًا بعد اكتمال المزامنة.', 'Lock released; author a new request once sync completes.'),
+      );
+    } else {
+      AppFeedback.error(
+        context,
+        AppText.t('لا يمكن أرشفة طلب مصيره غير محسوم بعد.', 'A request whose fate is not settled cannot be archived yet.'),
+      );
+    }
+  });
+
+  /// Version conflict (needs_review): show the approved copy against the
+  /// parked request, then let the user discard their request (archive +
+  /// release the lock) and re-author from the current version. Never merges
+  /// silently (production acceptance 3).
+  Future<void> _showConflictReview(CommandOutboxEntry command) async {
+    final writes = command.payload['writes'];
+    final approvedInfo = writes is List && writes.isNotEmpty && writes.first is Map
+        ? await _approvedCopyInfo(
+            '${(writes.first as Map)['entityType']}',
+            '${(writes.first as Map)['entityId']}',
+          )
+        : null;
+    if (!mounted) return;
+    final discard = await showAppConfirm(
+      context,
+      title: AppText.t('تعارض إصدار السجل', 'Record version conflict'),
+      message: [
+        AppText.t(
+          'طلبي: الإصدار المتوقع ${command.expectedVersion}.',
+          'My request: expected version ${command.expectedVersion}.',
+        ),
+        if (approvedInfo != null)
+          AppText.t(
+            'النسخة المعتمدة على السيرفر: الإصدار ${approvedInfo.$1}.',
+            'Approved server copy: version ${approvedInfo.$1}.',
+          ),
+        if (approvedInfo != null) approvedInfo.$2,
+        AppText.t(
+          'السبب: ${command.lastError ?? command.lastErrorCode ?? '—'}',
+          'Reason: ${command.lastError ?? command.lastErrorCode ?? '—'}',
+        ),
+        AppText.t(
+          'لتعديل الطلب: تجاهل هذا الطلب (يُأرشف ويُرفع القفل)، وبعد اكتمال المزامنة أنشئ طلبًا جديدًا بالإصدار الحالي من الشاشة نفسها.',
+          'To proceed: discard this request (archived, locks released), then author a new request at the current version once sync completes.',
+        ),
+      ].join('\n'),
+      confirmLabel: AppText.t('تجاهل طلبي وأرشفة', 'Discard my request'),
+      cancelLabel: AppText.t('إبقاء الطلب للمراجعة', 'Keep for review'),
+      danger: true,
+    );
+    if (!discard || !mounted) return;
+    await _guarded(() async {
+      final released = await _commands.releaseLockAndArchive(
+        command.operationId,
+        reason: AppText.t(
+          'تجاهل المستخدم طلبه بعد تعارض الإصدار',
+          'User discarded the request after a version conflict',
+        ),
+      );
+      await _refreshData();
+      if (!mounted) return;
+      AppFeedback.success(
+        context,
+        released
+            ? AppText.t('رُفع القفل؛ أنشئ طلبًا جديدًا بالإصدار الحالي.', 'Lock released; author a new request at the current version.')
+            : AppText.t('الطلب لم يعد في حالة قرار.', 'The request is no longer awaiting a decision.'),
+      );
+    });
   }
 }
 

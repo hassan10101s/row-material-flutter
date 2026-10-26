@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Centered icon for the Android 12+ (API 31+) system splash. The outer
-     288dp square is transparent padding; the 192dp bitmap is the artwork the
-     OS draws (same layering as the morattab reference: transparent holder
-     plus centered launch_image). -->
+<!-- Centered icon for the Android 12+ (API 31+) system splash. The OS masks
+     the icon into a circle (~192dp diameter centered in this 288dp drawable),
+     so the full-bleed logo would have its rings/tails cropped. The logo is
+     therefore pre-inset into a 512px transparent square
+     (splash_logo_inset.png) sized so its bounding-box diagonal fits inside
+     that mask circle. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:width="288dp"
@@ -18,6 +20,6 @@
         android:gravity="center">
         <bitmap
             android:gravity="fill"
-            android:src="@drawable/launch_image" />
+            android:src="@drawable/splash_logo_inset" />
     </item>
 </layer-list>

@@ -85,7 +85,8 @@ class ReferenceRepo implements ReferenceRepository {
     final like = '%$q%';
     final rows = await db.query(
       'reference_materials',
-      where: 'material_name != ? AND (material_name LIKE ? OR material_code LIKE ?)',
+      where:
+          'material_name != ? AND (material_name LIKE ? OR material_code LIKE ?)',
       whereArgs: [DatabaseHelper.productSentinelMaterialName, like, like],
       orderBy: 'active DESC, material_name COLLATE NOCASE ASC',
       limit: limit,
@@ -120,7 +121,7 @@ class ReferenceRepo implements ReferenceRepository {
   }) async {
     final db = await _db;
     final q = query.trim();
-    final where = <String>[];
+    final where = <String>['deleted_at IS NULL'];
     final args = <Object?>[];
     if (parameterType != null && parameterType.isNotEmpty) {
       where.add('parameter_type = ?');
@@ -143,10 +144,13 @@ class ReferenceRepo implements ReferenceRepository {
   }
 
   @override
-  Future<int> countParameters({String query = '', String? parameterType}) async {
+  Future<int> countParameters({
+    String query = '',
+    String? parameterType,
+  }) async {
     final db = await _db;
     final q = query.trim();
-    final where = <String>[];
+    final where = <String>['deleted_at IS NULL'];
     final args = <Object?>[];
     if (parameterType != null && parameterType.isNotEmpty) {
       where.add('parameter_type = ?');
@@ -175,13 +179,14 @@ class ReferenceRepo implements ReferenceRepository {
     final rows = q.isEmpty
         ? await db.query(
             'lab_units',
+            where: 'deleted_at IS NULL',
             orderBy: 'symbol COLLATE NOCASE ASC',
             limit: limit,
             offset: offset,
           )
         : await db.query(
             'lab_units',
-            where: 'symbol LIKE ? OR name LIKE ?',
+            where: 'deleted_at IS NULL AND (symbol LIKE ? OR name LIKE ?)',
             whereArgs: ['%$q%', '%$q%'],
             orderBy: 'symbol COLLATE NOCASE ASC',
             limit: limit,
@@ -195,9 +200,11 @@ class ReferenceRepo implements ReferenceRepository {
     final db = await _db;
     final q = query.trim();
     final rows = q.isEmpty
-        ? await db.rawQuery('SELECT COUNT(*) AS c FROM lab_units')
+        ? await db.rawQuery(
+            'SELECT COUNT(*) AS c FROM lab_units WHERE deleted_at IS NULL',
+          )
         : await db.rawQuery(
-            'SELECT COUNT(*) AS c FROM lab_units WHERE symbol LIKE ? OR name LIKE ?',
+            'SELECT COUNT(*) AS c FROM lab_units WHERE deleted_at IS NULL AND (symbol LIKE ? OR name LIKE ?)',
             ['%$q%', '%$q%'],
           );
     return ((rows.first['c'] as num?)?.toInt() ?? 0);
@@ -641,11 +648,12 @@ class ReferenceRepo implements ReferenceRepository {
     final rows = parameterType == null
         ? await db.query(
             'parameters',
+            where: 'deleted_at IS NULL',
             orderBy: 'parameter_name COLLATE NOCASE ASC',
           )
         : await db.query(
             'parameters',
-            where: 'parameter_type = ?',
+            where: 'parameter_type = ? AND deleted_at IS NULL',
             whereArgs: [parameterType],
             orderBy: 'parameter_name COLLATE NOCASE ASC',
           );
@@ -672,12 +680,14 @@ class ReferenceRepo implements ReferenceRepository {
       limit: 1,
     );
     if (existing.isNotEmpty &&
+        existing.first['deleted_at'] == null &&
         '${existing.first['parameter_type'] ?? ''}' != parameterType) {
       throw ValidationError(AppErrors.parameterTypeInvalid);
     }
     await registerUnit(db, unit);
     final values = {
       'parameter_name': trimmed,
+      'deleted_at': null,
       'unit': unit.trim(),
       'parameter_type': parameterType,
       'imported_at': nowIso(),
@@ -733,6 +743,7 @@ class ReferenceRepo implements ReferenceRepository {
     final db = await _db;
     final rows = await db.query(
       'lab_units',
+      where: 'deleted_at IS NULL',
       orderBy: 'symbol COLLATE NOCASE ASC',
     );
     return [for (final r in rows) Map<String, dynamic>.from(r)];

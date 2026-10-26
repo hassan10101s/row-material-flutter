@@ -4,6 +4,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../design_system/widgets/app_adaptive.dart';
 import '../../../di/service_locator.dart';
 import '../domain/lab_local_repository.dart';
 import '../domain/lab_result_repository.dart';
@@ -140,9 +141,9 @@ class LabScreen extends StatelessWidget {
         AppText.t('فلديشن NIR', 'NIR Validation'),
         Icons.query_stats_outlined,
         (context) => BlocProvider(
-          create: (_) => NirValidationCubit(
-            repo: getIt<NirValidationRepository>(),
-          )..load(),
+          create: (_) =>
+              NirValidationCubit(repo: getIt<NirValidationRepository>())
+                ..load(),
           child: const NirValidationTab(),
         ),
       ),
@@ -194,7 +195,7 @@ class LabScreen extends StatelessWidget {
             ),
           ),
         SizedBox(
-          height: 46.h,
+          height: appUsesDesktopChrome(context) ? 46.h : 56,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
@@ -209,6 +210,14 @@ class LabScreen extends StatelessWidget {
                       label: Text(tabs[i].label),
                       avatar: Icon(tabs[i].icon, size: 18.r),
                       selected: tab == i,
+                      materialTapTargetSize: appUsesDesktopChrome(context)
+                          ? MaterialTapTargetSize.shrinkWrap
+                          : MaterialTapTargetSize.padded,
+                      labelStyle: TextStyle(
+                        fontWeight: tab == i
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                      ),
                       onSelected: (_) => cubit.setTab(i),
                     ),
                   ),
@@ -217,7 +226,20 @@ class LabScreen extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: Padding(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragEnd: appUsesDesktopChrome(context)
+                ? null
+                : (details) {
+                    final velocity = details.primaryVelocity ?? 0;
+                    if (velocity.abs() < 350) return;
+                    cubit.setTab(
+                      (tab + (velocity < 0 ? 1 : -1))
+                          .clamp(0, tabs.length - 1)
+                          .toInt(),
+                    );
+                  },
+            child: Padding(
             padding: const EdgeInsets.all(AppSpacing.page),
             // Soft fade between tabs; the IndexedStack underneath keeps
             // every visited tab's scroll position and running state.
@@ -248,6 +270,7 @@ class LabScreen extends StatelessWidget {
                   ],
                 ),
               ),
+            ),
             ),
           ),
         ),

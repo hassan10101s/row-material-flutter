@@ -57,8 +57,10 @@ Future<Map<String, dynamic>> enqueueLocalChange({
   String? uid,
   String? deviceId,
 }) async {
+  await stampSharedParents(executor, entity, row);
   ensureRemoteId(row, entity.localTable, pkColumn: entity.pkColumn);
-  final version = operation == 'create' && ((row['version'] as num?)?.toInt() ?? 0) <= 1
+  final version =
+      operation == 'create' && ((row['version'] as num?)?.toInt() ?? 0) <= 1
       ? 1
       : nextVersion(row);
   row['version'] = version;
@@ -126,7 +128,10 @@ Future<Map<String, dynamic>> enqueueLocalChange({
         action: auditAction,
         entityType: entity.type,
         entityId: entity.docId(row),
-        details: {'localId': row[entity.pkColumn], 'remoteId': row['remote_id']},
+        details: {
+          'localId': row[entity.pkColumn],
+          'remoteId': row['remote_id'],
+        },
       );
     } on Object {
       // Audit must never fail the business write.

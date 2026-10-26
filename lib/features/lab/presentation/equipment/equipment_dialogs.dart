@@ -8,6 +8,7 @@ import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_date_field.dart';
 import '../../../../../design_system/widgets/app_field.dart';
@@ -17,6 +18,7 @@ import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
 import '../../../settings/domain/settings_repository.dart';
 import '../../domain/lab_local_repository.dart';
+import '../../../../design_system/widgets/app_select_field.dart';
 
 /// Arabic/English label for an equipment event type.
 String equipmentEventLabel(String type) => switch (type) {
@@ -179,7 +181,11 @@ class _FormNoFormState extends State<_FormNoForm> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const AppSkeletonList(rows: 3, height: 120, padding: EdgeInsets.zero);
+      return const AppSkeletonList(
+        rows: 3,
+        height: 120,
+        padding: EdgeInsets.zero,
+      );
     }
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -199,7 +205,7 @@ class _FormNoFormState extends State<_FormNoForm> {
             'لكل نموذج رقم مستقل يُطبع في تقريره فقط.',
             'Each form keeps its own number, printed on that document only.',
           ),
-          style: TextStyle(color: Colors.grey, fontSize: 12.spMax),
+          style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
         ),
         const SizedBox(height: AppSpacing.lg),
         Row(
@@ -455,13 +461,13 @@ class _ReadOnlyCode extends StatelessWidget {
       children: [
         Text(
           AppText.t('الكود', 'Code'),
-          style: TextStyle(color: Colors.grey, fontSize: 13.spMax),
+          style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
         ),
         const SizedBox(width: AppSpacing.sm),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.grey.withValues(alpha: 0.12),
+            color: AppColors.surfaceSoft,
             borderRadius: BorderRadius.circular(8),
           ),
           child: Text(
@@ -473,7 +479,7 @@ class _ReadOnlyCode extends StatelessWidget {
         const SizedBox(width: AppSpacing.sm),
         Text(
           AppText.t('(تلقائي)', '(automatic)'),
-          style: TextStyle(color: Colors.grey, fontSize: 12.spMax),
+          style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
         ),
       ],
     );
@@ -551,17 +557,14 @@ class _EquipmentEventFormState extends State<_EquipmentEventForm> {
       children: [
         Text(
           AppText.t('نوع الحدث', 'Event type'),
-          style: TextStyle(color: Colors.grey, fontSize: 13.spMax),
+          style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
         ),
         const SizedBox(height: AppSpacing.xs),
-        DropdownButtonFormField<String>(
+        AppSelectField<String>(
           initialValue: _type,
           isExpanded: true,
           menuMaxHeight: 320,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-            isDense: true,
-          ),
+          decoration: const InputDecoration(),
           items: [
             for (final t in EquipmentEventType.values)
               DropdownMenuItem(value: t, child: Text(equipmentEventLabel(t))),

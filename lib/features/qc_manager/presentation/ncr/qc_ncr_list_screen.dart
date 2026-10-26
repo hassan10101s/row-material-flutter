@@ -16,6 +16,7 @@ import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../design_system/export/table_html_export.dart';
 import '../cubit/qc_ncr_cubit.dart';
 import 'widgets/ncr_list_parts.dart';
+import '../../../../design_system/widgets/app_text_field.dart';
 
 /// The NCR register: one card list on every form factor (unified mobile
 /// logic — no table/desktop split). Cards, filters, pills and the filter
@@ -287,7 +288,7 @@ class _NcrSearchFieldState extends State<_NcrSearchField> {
   @override
   Widget build(BuildContext context) {
     _syncFromState();
-    return TextField(
+    return AppTextField(
       controller: _controller,
       focusNode: _focus,
       onChanged: _onChanged,
@@ -298,7 +299,7 @@ class _NcrSearchFieldState extends State<_NcrSearchField> {
           'بحث في: المرجع / الوصف / المخزون / المفتش...',
           'Search: reference, description, lot, inspector...',
         ),
-        isDense: true,
+
         suffixIcon: _controller.text.isEmpty
             ? null
             : IconButton(

@@ -25,14 +25,13 @@ class CreateOrganizationState extends Equatable {
     String? inviteCode,
     bool? busy,
     String? error,
-  }) =>
-      CreateOrganizationState(
-        mode: mode ?? this.mode,
-        name: name ?? this.name,
-        inviteCode: inviteCode ?? this.inviteCode,
-        busy: busy ?? this.busy,
-        error: error,
-      );
+  }) => CreateOrganizationState(
+    mode: mode ?? this.mode,
+    name: name ?? this.name,
+    inviteCode: inviteCode ?? this.inviteCode,
+    busy: busy ?? this.busy,
+    error: error,
+  );
 
   @override
   List<Object?> get props => [mode, name, inviteCode, busy, error];

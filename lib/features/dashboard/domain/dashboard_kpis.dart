@@ -26,8 +26,15 @@ class VolumeKpis extends Equatable {
   double get vsWeekAvg => today - weekAvg;
 
   @override
-  List<Object?> get props =>
-      [today, todayApproved, todayRejected, total, pending, openFollowUps, weekAvg];
+  List<Object?> get props => [
+    today,
+    todayApproved,
+    todayRejected,
+    total,
+    pending,
+    openFollowUps,
+    weekAvg,
+  ];
 }
 
 class QualityKpis extends Equatable {
@@ -75,11 +82,26 @@ class QualityKpis extends Equatable {
 
   @override
   List<Object?> get props => [
-        total, approved, conditional, partial, rejected, acceptanceRate,
-        strictRate, conditionalShare, partialRate, fullRate, rejectionRate,
-        totalQty, rejectedQty, rejectedQtyRatio, avgRejectedPerPartial,
-        churnAvg, reopened, expiryRisk, expired,
-      ];
+    total,
+    approved,
+    conditional,
+    partial,
+    rejected,
+    acceptanceRate,
+    strictRate,
+    conditionalShare,
+    partialRate,
+    fullRate,
+    rejectionRate,
+    totalQty,
+    rejectedQty,
+    rejectedQtyRatio,
+    avgRejectedPerPartial,
+    churnAvg,
+    reopened,
+    expiryRisk,
+    expired,
+  ];
 }
 
 class LabKpis extends Equatable {
@@ -100,8 +122,14 @@ class LabKpis extends Equatable {
   final int lowStockCount;
 
   @override
-  List<Object?> get props =>
-      [totalTests, evaluated, inRange, outOfRange, passRate, lowStockCount];
+  List<Object?> get props => [
+    totalTests,
+    evaluated,
+    inRange,
+    outOfRange,
+    passRate,
+    lowStockCount,
+  ];
 }
 
 class QcCheckKpis extends Equatable {
@@ -133,9 +161,18 @@ class QcCheckKpis extends Equatable {
 
   @override
   List<Object?> get props => [
-        total, pass, conditional, fail, pending, avgScore, hasNc, ncRate,
-        critical, major, minor,
-      ];
+    total,
+    pass,
+    conditional,
+    fail,
+    pending,
+    avgScore,
+    hasNc,
+    ncRate,
+    critical,
+    major,
+    minor,
+  ];
 }
 
 class NcrKpisSummary extends Equatable {
@@ -179,10 +216,24 @@ class NcrKpisSummary extends Equatable {
 
   @override
   List<Object?> get props => [
-        total, open, overdue, overduePct, critical, major, minor, closed,
-        closedOnTime, onTimePct, mttcDays, mttvDays, capaLinked,
-        capaCoveragePct, capaOverdue, aging, topDefects,
-      ];
+    total,
+    open,
+    overdue,
+    overduePct,
+    critical,
+    major,
+    minor,
+    closed,
+    closedOnTime,
+    onTimePct,
+    mttcDays,
+    mttvDays,
+    capaLinked,
+    capaCoveragePct,
+    capaOverdue,
+    aging,
+    topDefects,
+  ];
 }
 
 class SopKpis extends Equatable {
@@ -214,18 +265,18 @@ class SopKpis extends Equatable {
 
   @override
   List<Object?> get props => [
-        sopTotal,
-        sopPublished,
-        sopExpired,
-        sopExpiring,
-        sopPending,
-        goalTotal,
-        goalActive,
-        goalOverdue,
-        goalCompleted,
-        goalAvgProgress,
-        goalOverdueActions,
-      ];
+    sopTotal,
+    sopPublished,
+    sopExpired,
+    sopExpiring,
+    sopPending,
+    goalTotal,
+    goalActive,
+    goalOverdue,
+    goalCompleted,
+    goalAvgProgress,
+    goalOverdueActions,
+  ];
 }
 
 class InventoryKpis extends Equatable {
@@ -294,9 +345,16 @@ class SupplierScore extends Equatable {
 
   @override
   List<Object?> get props => [
-        name, total, approved, conditional, rejected, approvalRate,
-        rejectedQtyRatio, tier, score,
-      ];
+    name,
+    total,
+    approved,
+    conditional,
+    rejected,
+    approvalRate,
+    rejectedQtyRatio,
+    tier,
+    score,
+  ];
 }
 
 /// Pareto entry: share of total rejections + running cumulative share.
@@ -364,8 +422,14 @@ class StabilityKpis extends Equatable {
   final int sampleN;
 
   @override
-  List<Object?> get props =>
-      [stdDev, range, minRate, maxRate, volatility, sampleN];
+  List<Object?> get props => [
+    stdDev,
+    range,
+    minRate,
+    maxRate,
+    volatility,
+    sampleN,
+  ];
 }
 
 /// Data-completeness audit for the filtered inspection set.
@@ -391,9 +455,13 @@ class DataQualityKpis extends Equatable {
 
   @override
   List<Object?> get props => [
-        total, missingSupplier, missingExpiry, pending, completenessPct,
-        pendingPct,
-      ];
+    total,
+    missingSupplier,
+    missingExpiry,
+    pending,
+    completenessPct,
+    pendingPct,
+  ];
 }
 
 /// One-shot aggregate for the whole dashboard.
@@ -432,8 +500,19 @@ class DashboardBundle extends Equatable {
 
   @override
   List<Object?> get props => [
-        volume, quality, lab, qc, ncr, sopGoals, inventory, trend,
-        supplierScores, materialPareto, supplierPareto, forecast,
-        stability, dataQuality,
-      ];
+    volume,
+    quality,
+    lab,
+    qc,
+    ncr,
+    sopGoals,
+    inventory,
+    trend,
+    supplierScores,
+    materialPareto,
+    supplierPareto,
+    forecast,
+    stability,
+    dataQuality,
+  ];
 }

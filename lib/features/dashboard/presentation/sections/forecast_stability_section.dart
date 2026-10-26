@@ -8,6 +8,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_summary_card.dart';
 import '../cubit/dashboard_kpis_state.dart';
 import '../widgets/dashboard_section_title.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class ForecastStabilitySection extends StatelessWidget {
   final DashboardKpisState kpi;
@@ -77,7 +78,9 @@ class ForecastStabilitySection extends StatelessWidget {
           },
         ),
         const SizedBox(height: AppSpacing.sm),
-        Card(
+        AppCard(
+          padding: EdgeInsets.zero,
+          enableHover: false,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Row(

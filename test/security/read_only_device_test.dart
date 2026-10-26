@@ -48,32 +48,34 @@ void main() {
       );
     });
 
-    test('the audit trail has no route of its own; audit.read gates content',
-        () {
-      // The trail lives only inside Settings (`/settings?tab=audit`): there
-      // is no standalone route to guard, so an unknown audit path falls
-      // through and `audit.read` is enforced by the settings-tab content
-      // (`AuditController.canRead`) instead.
-      expect(AppRouter.guardRoute('/audit', session()), isNull);
-      expect(
-        session().permissions.contains(Permission.auditRead),
-        isFalse,
-        reason: 'a viewer is not in the audit.read matrix',
-      );
+    test(
+      'the audit trail has no route of its own; audit.read gates content',
+      () {
+        // The trail lives only inside Settings (`/settings?tab=audit`): there
+        // is no standalone route to guard, so an unknown audit path falls
+        // through and `audit.read` is enforced by the settings-tab content
+        // (`AuditController.canRead`) instead.
+        expect(AppRouter.guardRoute('/audit', session()), isNull);
+        expect(
+          session().permissions.contains(Permission.auditRead),
+          isFalse,
+          reason: 'a viewer is not in the audit.read matrix',
+        );
 
-      final admin = session(role: AppRoles.admin);
-      expect(admin.permissions.contains(Permission.auditRead), isTrue);
+        final admin = session(role: AppRoles.admin);
+        expect(admin.permissions.contains(Permission.auditRead), isTrue);
 
-      final qualityManager = session(role: AppRoles.qualityManager);
-      expect(
-        qualityManager.permissions.contains(Permission.auditRead),
-        isTrue,
-        reason: 'the quality manager reviews the trail',
-      );
+        final qualityManager = session(role: AppRoles.qualityManager);
+        expect(
+          qualityManager.permissions.contains(Permission.auditRead),
+          isTrue,
+          reason: 'the quality manager reviews the trail',
+        );
 
-      final lab = session(role: AppRoles.lab);
-      expect(lab.permissions.contains(Permission.auditRead), isFalse);
-    });
+        final lab = session(role: AppRoles.lab);
+        expect(lab.permissions.contains(Permission.auditRead), isFalse);
+      },
+    );
 
     test('a viewer keeps the read-only screens', () {
       final s = session();

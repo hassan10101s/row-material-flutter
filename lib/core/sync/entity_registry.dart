@@ -45,6 +45,7 @@ class SyncEntity {
 
   /// Remote document id derived from a local row.
   final String Function(Map<String, dynamic> row) docId;
+
   /// Fields a client is allowed to change after creation — must match the
   /// Fields a client is allowed to change after creation — m must match the
   /// `hasOnly([...])` list in `firestore.rules` for this collection.
@@ -168,9 +169,51 @@ String userDocId(Map<String, dynamic> row) {
   return 'member_${row['id']}';
 }
 
-/// Scope of V1 (plan Â§6.3, D7): core data + lab configuration.
-/// Inventory / consumption / worksheet / settings stay device-local on purpose.
+/// Shared business records and configuration. Device preferences stay local.
 final List<SyncEntity> syncEntities = [
+  for (final spec in const [
+    (
+      'parameter',
+      SyncCollection.parameters,
+      'parameters',
+      'id',
+      'lab_results.update',
+    ),
+    (
+      'materialBound',
+      SyncCollection.materialBounds,
+      'material_parameter_bounds',
+      'id',
+      'lab_results.update',
+    ),
+    (
+      'organizationSetting',
+      SyncCollection.organizationSettings,
+      'organization_settings',
+      'id',
+      'reports.create',
+    ),
+    ('qcSop', SyncCollection.qcSops, 'qc_sops', 'sop_id', 'qc.write'),
+    (
+      'qcSopRevision',
+      SyncCollection.qcSopRevisions,
+      'qc_sop_revisions',
+      'rev_id',
+      'qc.write',
+    ),
+    ('qcSopRead', SyncCollection.qcSopReads, 'qc_sop_reads', 'id', 'qc.write'),
+  ])
+    SyncEntity(
+      type: spec.$1,
+      collection: spec.$2,
+      localTable: spec.$3,
+      pkColumn: spec.$4,
+      naturalKeyIdentity: true,
+      usesLocalIdAsRef: false,
+      docId: remoteIdDocId,
+      permission: spec.$5,
+      mutableFields: const {},
+    ),
   SyncEntity(
     type: 'sample',
     collection: SyncCollection.samples,
@@ -262,6 +305,7 @@ final List<SyncEntity> syncEntities = [
     mutableFields: {
       'batchId',
       'batchRemoteId',
+      'batchEntryCode',
       'sampleNo',
       'sampleName',
       'sampleTaker',
@@ -372,6 +416,25 @@ final List<SyncEntity> syncEntities = [
     },
   ),
   SyncEntity(
+    type: 'nutritionFormulation',
+    collection: SyncCollection.labConfig,
+    localTable: 'nutrition_formulations',
+    naturalKeyIdentity: true,
+    docId: (row) => 'nf_${row['remote_id'] ?? row['id']}',
+    accepts: (document) => document.id.startsWith('nf_'),
+    permission: 'formulations.update',
+    mutableFields: {
+      'payload',
+      'configType',
+      'localId',
+      'version',
+      'updatedAt',
+      'updatedBy',
+      'deviceId',
+      'deletedAt',
+    },
+  ),
+  SyncEntity(
     type: 'labProductAnalysis',
     collection: SyncCollection.labConfig,
     localTable: 'lab_product_analyses',
@@ -416,6 +479,7 @@ final List<SyncEntity> syncEntities = [
     permission: 'users.update',
     mutableFields: {
       'role',
+      'roles',
       'status',
       'displayName',
       'activatedAt',
@@ -1077,6 +1141,7 @@ Map<String, dynamic> buildRemotePayload(
       continue;
     }
     final camel = _toCamel(entry.key);
+    if (entity.type == 'member' && camel == 'rolesJson') continue;
     if (_internalColumns.contains(camel)) continue;
     // Derived artifacts are never synced, only the data they render from:
     // `report_html` (full HTML + embedded base64 logo/QR images) is rebuilt
@@ -1090,6 +1155,17 @@ Map<String, dynamic> buildRemotePayload(
     // where the sentinel is written for why an update must omit it entirely.
     if (camel == 'createdAt') continue;
     payload[camel] = entry.value;
+  }
+  if (entity.type == 'member') {
+    Object? roles;
+    try {
+      roles = jsonDecode('${row['roles_json'] ?? ''}');
+    } on FormatException {
+      roles = null;
+    }
+    payload['roles'] = roles is List && roles.isNotEmpty
+        ? roles
+        : [payload['role'] ?? 'viewer'];
   }
   final builder = entity.payloadBuilder;
   if (builder != null) {
@@ -1126,6 +1202,25 @@ Map<String, dynamic> buildRemotePayload(
       ? _uidForLocalUser(row['created_by'])
       : ctx.uid;
   payload['deletedAt'] = row['deleted_at'];
+  if (entity.collection == SyncCollection.labConfig && !asCreate) {
+    payload.remove('createdBy');
+  }
+  // These records can be maintained by another authorized member on the
+  // writing device. Preserve the server's immutable creator on partial updates.
+  if (const {
+    'parameter',
+    'materialBound',
+    'organizationSetting',
+    'qcSop',
+    'qcSopRevision',
+    'qcSopRead',
+  }.contains(entity.type)) {
+    if (!asCreate) {
+      payload.remove('createdBy');
+    } else if (row['created_by'] is String) {
+      payload['createdBy'] = row['created_by'];
+    }
+  }
   // `qc_templates` / `qc_inspections` carry a BUSINESS `version` column (a
   // checklist revision number, incremented on every save/duplicate). The
   // envelope `version` overwrites that key below, so the business value
@@ -1262,6 +1357,78 @@ class QcFkSpec {
 /// backfill names (`legacy_<parentTable>_<id>`) that `_backfillRemoteIds`
 /// wrote on the origin device's parents.
 const Map<String, List<QcFkSpec>> _qcChildFks = {
+  'lab_analysis_items': [
+    QcFkSpec(
+      refColumn: 'inventory_id',
+      stampColumn: 'inventory_remote_id',
+      parentTable: 'lab_inventory',
+      parentPk: 'id',
+      parentType: 'inventoryItem',
+    ),
+  ],
+  'lab_field_chemical_links': [
+    QcFkSpec(
+      refColumn: 'inventory_id',
+      stampColumn: 'inventory_remote_id',
+      parentTable: 'lab_inventory',
+      parentPk: 'id',
+      parentType: 'inventoryItem',
+      isRequired: false,
+    ),
+  ],
+  'lab_material_analyses': [
+    QcFkSpec(
+      refColumn: 'material_id',
+      stampColumn: 'material_remote_id',
+      parentTable: 'reference_materials',
+      parentPk: 'id',
+      parentType: 'referenceMaterial',
+    ),
+  ],
+  'lab_analyses': [
+    QcFkSpec(
+      refColumn: 'parameter_id',
+      stampColumn: 'parameter_remote_id',
+      parentTable: 'parameters',
+      parentPk: 'id',
+      parentType: 'parameter',
+      isRequired: false,
+    ),
+  ],
+  'qc_sop_revisions': [
+    QcFkSpec(
+      refColumn: 'sop_id',
+      stampColumn: 'sop_remote_id',
+      parentTable: 'qc_sops',
+      parentPk: 'sop_id',
+      parentType: 'qcSop',
+    ),
+  ],
+  'qc_sop_reads': [
+    QcFkSpec(
+      refColumn: 'sop_id',
+      stampColumn: 'sop_remote_id',
+      parentTable: 'qc_sops',
+      parentPk: 'sop_id',
+      parentType: 'qcSop',
+    ),
+  ],
+  'material_parameter_bounds': [
+    QcFkSpec(
+      refColumn: 'material_id',
+      stampColumn: 'material_remote_id',
+      parentTable: 'reference_materials',
+      parentPk: 'id',
+      parentType: 'referenceMaterial',
+    ),
+    QcFkSpec(
+      refColumn: 'parameter_id',
+      stampColumn: 'parameter_remote_id',
+      parentTable: 'parameters',
+      parentPk: 'id',
+      parentType: 'parameter',
+    ),
+  ],
   'qc_sections': [
     QcFkSpec(
       refColumn: 'template_id',
@@ -1389,6 +1556,77 @@ const Map<String, List<QcFkSpec>> _qcChildFks = {
   ],
 };
 
+/// Published parent contract for the central validator and schema parity check.
+List<QcFkSpec> sharedParentSpecs(SyncEntity entity) =>
+    List<QcFkSpec>.unmodifiable(_qcChildFks[entity.localTable] ?? const []);
+
+/// Stamp parent identities for both live writes and legacy backfill. Numeric
+/// foreign keys are meaningful only inside their originating SQLite file.
+Future<void> stampSharedParents(
+  DatabaseExecutor txn,
+  SyncEntity entity,
+  Map<String, dynamic> row,
+) async {
+  if (entity.localTable == 'product_batch_samples') {
+    final parents = await txn.query(
+      'inspections',
+      columns: const ['remote_id', 'entry_code'],
+      where: "id = ? AND inspection_kind = 'product'",
+      whereArgs: [row['batch_id']],
+      limit: 1,
+    );
+    if (parents.isEmpty) {
+      // An orphaned legacy row must not abort the entire backfill page.
+      // PushWorker keeps this individual row pending until its real product
+      // header is available; never fabricate a link to a raw inspection.
+      return;
+    }
+    final parent = parents.single;
+    row['batch_entry_code'] = '${parent['entry_code'] ?? ''}';
+    final remote = '${parent['remote_id'] ?? ''}';
+    // Legacy headers can still lack a remote id. Their entry code is the
+    // actual Firestore document key and remains stable across devices.
+    row['batch_remote_id'] = remote.isNotEmpty
+        ? remote
+        : row['batch_entry_code'];
+    if (row['id'] != null) {
+      await txn.update(
+        'product_batch_samples',
+        {
+          'batch_remote_id': row['batch_remote_id'],
+          'batch_entry_code': row['batch_entry_code'],
+        },
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+    }
+    return;
+  }
+  for (final fk in _qcChildFks[entity.localTable] ?? const <QcFkSpec>[]) {
+    final id = row[fk.refColumn];
+    if (id == null) continue;
+    final parents = await txn.query(
+      fk.parentTable,
+      columns: [fk.parentPk, 'remote_id'],
+      where: '${fk.parentPk} = ?',
+      whereArgs: [id],
+      limit: 1,
+    );
+    if (parents.isEmpty) continue;
+    var remote = '${parents.first['remote_id'] ?? ''}';
+    if (remote.isEmpty) {
+      remote = 'legacy_${fk.parentTable}_$id';
+      await txn.update(
+        fk.parentTable,
+        {'remote_id': remote},
+        where: '${fk.parentPk} = ?',
+        whereArgs: [id],
+      );
+    }
+    row[fk.stampColumn] = remote;
+  }
+}
+
 /// Remap the per-device parent keys of a QC child row, in place (plan P8).
 ///
 /// For every link: the parent's cross-device identity comes from the stamp
@@ -1473,6 +1711,7 @@ Future<void> resolveRemoteRowRefs(
   }
 
   for (final column in const ['created_by', 'changed_by']) {
+    if (entity.localTable == 'qc_sops' && column == 'created_by') continue;
     final value = resolved[column];
     if (value is String) resolved[column] = await mapUser(value);
   }
@@ -1510,7 +1749,8 @@ Future<void> resolveRemoteRowRefs(
     // identity (`equipment_remote_id`), which the writer stamps at create
     // time. Missing parent => transient: the equipment master lands in the
     // same cycle and the failed-docs retry at the end picks this up.
-    final parentRemote = '${doc['equipmentRemoteId'] ?? doc['equipment_remote_id'] ?? resolved['equipment_remote_id'] ?? ''}';
+    final parentRemote =
+        '${doc['equipmentRemoteId'] ?? doc['equipment_remote_id'] ?? resolved['equipment_remote_id'] ?? ''}';
     if (parentRemote.isEmpty) {
       throw StateError('transient: equipment event without parent identity');
     }
@@ -1659,6 +1899,31 @@ Future<void> resolveRemoteRowRefs(
   }
 
   if (entity.localTable == 'product_batch_samples') {
+    final entryCode =
+        '${doc['batchEntryCode'] ?? doc['batch_entry_code'] ?? ''}'.trim();
+    if (entryCode.isNotEmpty) {
+      final parents = await txn.query(
+        'inspections',
+        columns: const ['id', 'remote_id'],
+        where: "entry_code = ? AND inspection_kind = 'product'",
+        whereArgs: [entryCode],
+        limit: 1,
+      );
+      if (parents.isEmpty) {
+        throw MissingParentException(
+          'sample',
+          entryCode,
+          'product batch $entryCode not synced yet',
+        );
+      }
+      final parent = parents.single;
+      resolved['batch_id'] = (parent['id'] as num).toInt();
+      resolved['batch_entry_code'] = entryCode;
+      final remote =
+          '${doc['batchRemoteId'] ?? doc['batch_remote_id'] ?? parent['remote_id'] ?? ''}';
+      resolved['batch_remote_id'] = remote.isEmpty ? entryCode : remote;
+      return;
+    }
     // `batch_id` references the product `inspections` header row: a
     // per-device autoincrement id. The writer stamps `batch_remote_id` (=
     // the header's remote_id, `legacy_inspections_<id>` for legacy
@@ -1668,20 +1933,62 @@ Future<void> resolveRemoteRowRefs(
     var parentRemote =
         '${doc['batchRemoteId'] ?? doc['batch_remote_id'] ?? resolved['batch_remote_id'] ?? ''}';
     if (parentRemote.isEmpty) {
-      // Payloads pushed before the parent-identity stamp existed: salvage
-      // from this device's own healed row (matched by the doc's remote id),
-      // if the doc is in fact local to the device applying it.
+      // Payloads pushed before the parent-identity stamp existed: salvage,
+      // in order (same shape as the inventory-lot salvage above):
+      //  1. this device's own healed row (matched by the doc's remote id),
+      //     whose `batch_remote_id` the open-time guarantee
+      //     (`_healBatchSampleParentIds`) filled from the parent inspection;
+      //  2. the same row's `batch_id` → its parent inspection's `remote_id`,
+      //     when the open-time guarantee has not run yet in this transaction
+      //     or ran while the parent had no remote_id of its own;
+      //  3. the deterministic legacy backfill name of the parent inspection
+      //     (`legacy_inspections_<id>`) that `_backfillRemoteIds` wrote on
+      //     the origin device: on an unstamped payload `batchId` is the
+      //     origin device's per-device inspections pk, and that row's
+      //     remote id is exactly that name. Only used when such a parent
+      //     row actually exists, so a foreign doc can never bind a wrong
+      //     batch (a missing parent stays a transient refusal).
       final ownRemote = '${resolved['remote_id'] ?? ''}';
       if (ownRemote.isNotEmpty) {
         final mine = await txn.query(
           'product_batch_samples',
-          columns: const ['batch_remote_id'],
+          columns: const ['batch_id', 'batch_remote_id'],
           where: 'remote_id = ?',
           whereArgs: [ownRemote],
           limit: 1,
         );
         if (mine.isNotEmpty) {
           parentRemote = '${mine.first['batch_remote_id'] ?? ''}';
+          if (parentRemote.isEmpty) {
+            final ownBatch = (mine.first['batch_id'] as num?)?.toInt() ?? 0;
+            if (ownBatch > 0) {
+              final parent = await txn.query(
+                'inspections',
+                columns: const ['remote_id'],
+                where: 'id = ?',
+                whereArgs: [ownBatch],
+                limit: 1,
+              );
+              if (parent.isNotEmpty) {
+                parentRemote = '${parent.first['remote_id'] ?? ''}';
+              }
+            }
+          }
+        }
+      }
+      if (parentRemote.isEmpty) {
+        final legacyBatch = (resolved['batch_id'] as num?)?.toInt() ?? 0;
+        if (legacyBatch > 0) {
+          final parent = await txn.query(
+            'inspections',
+            columns: const ['id'],
+            where: 'remote_id = ?',
+            whereArgs: ['legacy_inspections_$legacyBatch'],
+            limit: 1,
+          );
+          if (parent.isNotEmpty) {
+            parentRemote = 'legacy_inspections_$legacyBatch';
+          }
         }
       }
     }
@@ -1693,14 +2000,12 @@ Future<void> resolveRemoteRowRefs(
     final parent = await txn.query(
       'inspections',
       columns: const ['id'],
-      where: 'remote_id = ?',
+      where: "remote_id = ? AND inspection_kind = 'product'",
       whereArgs: [parentRemote],
       limit: 1,
     );
     if (parent.isEmpty) {
-      throw StateError(
-        'transient: product batch $parentRemote not synced yet',
-      );
+      throw StateError('transient: product batch $parentRemote not synced yet');
     }
     resolved['batch_id'] = (parent.first['id'] as num).toInt();
     resolved['batch_remote_id'] = parentRemote;
@@ -1770,7 +2075,11 @@ Future<void> resolveRemoteRowRefs(
 /// push was parked as a conflict, or a parent skipped on a divergent
 /// identity) re-fails once per cycle forever.
 class MissingParentException implements Exception {
-  const MissingParentException(this.parentEntity, this.parentRemoteId, this.message);
+  const MissingParentException(
+    this.parentEntity,
+    this.parentRemoteId,
+    this.message,
+  );
 
   /// `SyncEntity.type` of the missing parent.
   final String parentEntity;
@@ -1783,6 +2092,43 @@ class MissingParentException implements Exception {
 
   @override
   String toString() => 'transient: $message';
+}
+
+/// Removes the stale local rows that still hold the business [key] of an
+/// `organization_settings` write, except the row identified by [keepLocalId].
+///
+/// `organization_settings.key` is UNIQUE across the whole table, while the
+/// remote identity (`remote_id`) of the matched row can diverge from the
+/// previously applied sibling that still holds this key (a setting created on
+/// both devices before the organization was bound, or a key that was edited
+/// remotely while a same-key sibling existed locally). The raw UPDATE then
+/// aborts with code 2067 on every cycle and the document never applies.
+/// Business semantics — one row per key, the remote copy is authoritative —
+/// make the repair trivial: the row that keeps the write is the one that owns
+/// the document's identity; the throwaway duplicate is deleted. The mirror
+/// triggers keep the local `settings` copy in step automatically.
+Future<void> dropStaleOrgSettingSiblings(
+  DatabaseExecutor txn, {
+  required Object? key,
+  Object? keepLocalId,
+}) async {
+  final namedKey = '$key';
+  if (namedKey.isEmpty || keepLocalId == null) return;
+  final siblings = await txn.query(
+    'organization_settings',
+    columns: const ['id'],
+    where: 'key = ?',
+    whereArgs: [namedKey],
+  );
+  for (final sibling in siblings) {
+    final siblingId = sibling['id'];
+    if (siblingId == null || siblingId == keepLocalId) continue;
+    await txn.delete(
+      'organization_settings',
+      where: 'id = ?',
+      whereArgs: [siblingId],
+    );
+  }
 }
 
 /// Local id of the material identified by [code] (then [name]).
@@ -1912,10 +2258,12 @@ Future<int?> findLocalRef(
     // coherence check below is the whole point of the pre-selection.
     var selectCols = <String>[entity.pkColumn];
     try {
-      final names = (await db.rawQuery('PRAGMA table_info(${entity.localTable})'))
-          .map((e) => '${e['name']}')
-          .toSet();
-      if (names.contains('remote_id')) selectCols = [entity.pkColumn, 'remote_id'];
+      final names = (await db.rawQuery(
+        'PRAGMA table_info(${entity.localTable})',
+      )).map((e) => '${e['name']}').toSet();
+      if (names.contains('remote_id')) {
+        selectCols = [entity.pkColumn, 'remote_id'];
+      }
     } on Object {
       // Legacy file: keep the plain pk select.
     }
@@ -1935,7 +2283,8 @@ Future<int?> findLocalRef(
       // Otherwise fall through to the natural key / fresh-insert paths —
       // never overwrite a row that holds a different remote_id.
       final rowRemote = '${candidate['remote_id'] ?? ''}';
-      final coherent = rowRemote.isEmpty ||
+      final coherent =
+          rowRemote.isEmpty ||
           rowRemote == entityId ||
           rowRemote == payloadRemoteId;
       if (!foreign || coherent) {
@@ -1962,6 +2311,17 @@ Future<int?> findLocalRef(
   Map<String, dynamic> data,
 ) {
   switch (entity.localTable) {
+    case 'parameters':
+      final name = data['parameterName'] ?? data['parameter_name'];
+      return name is String && name.isNotEmpty
+          ? ('parameter_name = ? COLLATE NOCASE', [name])
+          : null;
+    case 'organization_settings':
+      final key = data['key'];
+      return key is String && key.isNotEmpty ? ('key = ?', [key]) : null;
+    case 'qc_sops':
+      final code = data['code'];
+      return code is String && code.isNotEmpty ? ('code = ?', [code]) : null;
     case 'lab_inventory':
       final name = data['name'];
       if (name is! String || name.isEmpty) return null;
@@ -1977,14 +2337,14 @@ Future<int?> findLocalRef(
       // below must NOT use `equipment_id`: it is a per-device autoincrement
       // id, so the origin device's value points at an unrelated local row.
       // `equipment_remote_id` is the cross-device parent identity.
-      final parentRemote = data['equipmentRemoteId'] ??
-          data['equipment_remote_id'];
+      final parentRemote =
+          data['equipmentRemoteId'] ?? data['equipment_remote_id'];
       final eventDate = data['eventDate'] ?? data['event_date'];
       if (parentRemote is! String || parentRemote.isEmpty) return null;
       if (eventDate == null) return null;
       return (
         'equipment_remote_id = ? AND event_date = ?',
-        [parentRemote, eventDate]
+        [parentRemote, eventDate],
       );
     case 'lab_worksheet':
       final entryCode = data['entryCode'] ?? data['entry_code'];
@@ -2084,6 +2444,9 @@ Map<String, dynamic> remoteToLocalRow(
       continue;
     }
     row[camelToSnake(key)] = entry.value;
+  }
+  if (entity.type == 'member' && document['roles'] is List) {
+    row['roles_json'] = jsonEncode(document['roles']);
   }
   if (entity.collection == SyncCollection.labConfig) {
     // The nested `payload` is the business content of a lab-config document,

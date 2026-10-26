@@ -12,7 +12,9 @@ import 'reference_state.dart';
 /// `state.materials` still holds everything loaded so far.
 class ReferenceCubit extends AppCubit<ReferenceState> {
   ReferenceCubit({required this.repo, this.pageSize = kMobilePageSize})
-    : super(const ReferenceState());
+    : super(const ReferenceState()) {
+    refreshOnSync(load);
+  }
 
   final ReferenceRepository repo;
   final int pageSize;

@@ -14,6 +14,9 @@ import 'pull_worker.dart';
 import 'remote/remote_data_source.dart';
 import 'sync_metadata.dart';
 import 'sync_queue.dart';
+import 'sync_data_changes.dart';
+import 'sync_run_scope.dart';
+import 'sync_cycle_lease.dart';
 
 /// What the shell badge shows (plan §25).
 class SyncStatusSnapshot {
@@ -24,6 +27,7 @@ class SyncStatusSnapshot {
     required this.blocked,
     required this.conflicts,
     this.failed = 0,
+    this.pullIncomplete = false,
     this.lastPushAt,
     this.lastPullAt,
     this.lastError,
@@ -36,6 +40,7 @@ class SyncStatusSnapshot {
   final int blocked;
   final int conflicts;
   final int failed;
+  final bool pullIncomplete;
   final DateTime? lastPushAt;
   final DateTime? lastPullAt;
   final String? lastError;
@@ -48,6 +53,7 @@ class SyncStatusSnapshot {
   bool get fullySynced =>
       online &&
       !syncing &&
+      !pullIncomplete &&
       pending == 0 &&
       blocked == 0 &&
       conflicts == 0 &&
@@ -64,6 +70,7 @@ class SyncStatusSnapshot {
     if (blocked > 0) return 'Blocked $blocked';
     if (conflicts > 0) return 'Conflicts $conflicts';
     if (pending > 0) return 'Pending $pending';
+    if (pullIncomplete) return 'Downloading';
     if (fullySynced) return 'Synced';
     return 'Online';
   }
@@ -88,7 +95,8 @@ class RestoreReport {
   /// The restored file carried another device's id, which was replaced.
   final bool deviceIdReplaced;
 
-  bool get isClean => orphanedEntries == 0 && requeuedRows == 0 && !deviceIdReplaced;
+  bool get isClean =>
+      orphanedEntries == 0 && requeuedRows == 0 && !deviceIdReplaced;
 }
 
 /// Orchestrates the offline-first lifecycle (plan §9.3, §13):
@@ -108,6 +116,9 @@ class SyncEngine {
     required this.connectivity,
     this.auditPullWorker,
     this.trail,
+    this.allowPush,
+    this.allowPull,
+    this.allowAuditPull,
     this.timerInterval = const Duration(seconds: 60),
     this.dashboardInterval = const Duration(minutes: 5),
     this.heartbeatInterval = const Duration(seconds: 10),
@@ -115,10 +126,15 @@ class SyncEngine {
     this.fullPullFallback = const Duration(minutes: 15),
   });
 
+  final bool Function()? allowPush;
+  final bool Function()? allowPull;
+  final bool Function()? allowAuditPull;
   final PushWorker pushWorker;
   final PullWorker pullWorker;
   final SyncQueue queue;
   final SyncMetadata metadata;
+  SyncMetadata? _cycleMetadata;
+  SyncMetadata get _runMetadata => _cycleMetadata ?? metadata;
   final AuditLogger audit;
   final ConnectivityService connectivity;
 
@@ -140,11 +156,14 @@ class SyncEngine {
   ///
   /// Best-effort: a failure here must never abort the data cycle, so the error
   /// goes through the same reporting path as the rest of [syncNow].
-  Future<void> _recoverStalledRows() async {
+  Future<void> _recoverStalledRows(void Function() checkCurrent) async {
     try {
-      final recovered = await queue.recoverStalled();
+      await queue.recoverEnvelopeUpgrade(checkCurrent: checkCurrent);
+      final recovered = await queue.recoverStalled(checkCurrent: checkCurrent);
       if (recovered > 0) {
-        await _markErrorSafely('Recovered $recovered push(es) interrupted by an app exit.');
+        await _markErrorSafely(
+          'Recovered $recovered push(es) interrupted by an app exit.',
+        );
       }
     } on Object catch (e) {
       await _markErrorSafely('Push recovery failed: $e');
@@ -189,6 +208,12 @@ class SyncEngine {
   Timer? _dashboardTimer;
   Timer? _heartbeatTimer;
   Timer? _mutationTimer;
+  int _lifecycleGeneration = 0;
+  bool _lastPullComplete = false;
+  bool _heartbeatPolling = false;
+  bool _mutationNeedsPush = false;
+  bool _deferredMutation = false;
+  bool _deferredPush = false;
   bool _running = false;
   bool _inFlight = false;
   bool _disposed = false;
@@ -228,10 +253,13 @@ class SyncEngine {
   /// anything scheduled while offline or before [start].
   void scheduleSync({bool pullOnly = false}) {
     if (_disposed || !_running) return;
+    _mutationNeedsPush = _mutationNeedsPush || !pullOnly;
     _mutationTimer?.cancel();
     _mutationTimer = Timer(mutationDelay, () {
       if (_disposed || !_running) return;
-      unawaited(syncNow(reason: 'mutation', pullOnly: pullOnly));
+      final onlyPull = !_mutationNeedsPush;
+      _mutationNeedsPush = false;
+      unawaited(syncNow(reason: 'mutation', pullOnly: onlyPull));
     });
   }
 
@@ -253,8 +281,7 @@ class SyncEngine {
         return;
       }
       final last = _lastFullCycleAt;
-      if (last == null ||
-          DateTime.now().difference(last) >= fullPullFallback) {
+      if (last == null || DateTime.now().difference(last) >= fullPullFallback) {
         await syncNow(reason: 'timer');
         return;
       }
@@ -276,26 +303,38 @@ class SyncEngine {
   /// [heartbeatInterval]; a full pull walk happens only when the heartbeat
   /// advanced past what this device has seen — i.e. another device pushed.
   ///
-  /// Own pushes mark the heartbeat seen at write time (see the push worker),
-  /// so this never pulls on our own writes. The 60 s timer stays as the
-  /// fallback for a bump that was lost with its push.
+  /// A marker is acknowledged only after a complete successful pull. Failed
+  /// and partial walks leave it pending for the next heartbeat probe.
   Future<void> _pollHeartbeat() async {
-    if (_disposed || !_running || _inFlight) return;
+    if (_disposed || !_running || _inFlight || _heartbeatPolling) return;
     if (!connectivity.isOnline || !pushWorker.remote.isSignedIn) return;
     final organizationId = pushWorker.session.organizationId;
     if (organizationId.isEmpty) return;
+    final scope = SyncRunScope(pushWorker.source, queue.dbHelper);
+    _heartbeatPolling = true;
     try {
+      final db = await queue.dbHelper.database;
+      scope.check();
+      final probeMetadata = metadata.bind(db);
       final beat = await pushWorker.remote.readHeartbeat(organizationId);
       if (!beat.exists) return;
       final marker = _heartbeatMarker(beat);
       if (marker.isEmpty || marker.startsWith('#')) return;
-      final seen = await metadata.get(SyncMetadata.heartbeatSeenMarkerKey);
+      final seen = await probeMetadata.get(SyncMetadata.heartbeatSeenMarkerKey);
       if (seen == marker) return;
-      await metadata.set(SyncMetadata.heartbeatSeenMarkerKey, marker);
-      await metadata.markHeartbeatSeen(DateTime.now());
+      scope.check();
+      if (_disposed || !_running || _inFlight) return;
+      _lastPullComplete = false;
       await syncNow(reason: 'heartbeat', pullOnly: true);
+      scope.check();
+      if (_lastPullComplete && _running && !_disposed) {
+        await probeMetadata.set(SyncMetadata.heartbeatSeenMarkerKey, marker);
+        await probeMetadata.markHeartbeatSeen(DateTime.now());
+      }
     } on Object {
-      // Best-effort probe by design; failures are silent, the timer covers.
+      // An unconsumed marker remains visible for the next probe.
+    } finally {
+      _heartbeatPolling = false;
     }
   }
 
@@ -327,6 +366,16 @@ class SyncEngine {
   /// company database is unbound. The engine is single-flight safe to restart
   /// via [start] on the next active bind.
   void stop() {
+    _lifecycleGeneration++;
+    pushWorker.cancel();
+    pullWorker.cancel();
+    auditPullWorker?.cancel();
+    _lastFullCycleAt = null;
+    _lastSnapshot = null;
+    _lastProblems = null;
+    _mutationNeedsPush = false;
+    _deferredMutation = false;
+    _deferredPush = false;
     _running = false;
     _timer?.cancel();
     _timer = null;
@@ -342,32 +391,94 @@ class SyncEngine {
 
   /// Push first, then pull: local edits must reach the server before remote
   /// changes are compared against them.
-  Future<SyncStatusSnapshot> syncNow({String reason = 'manual', bool pullOnly = false}) async {
+  Future<SyncStatusSnapshot> syncNow({
+    String reason = 'manual',
+    bool pullOnly = false,
+  }) async {
     // A status read is a reporting concern, never a reason to fail a cycle. The
     // counters go through the memoized sync queue, so a database that is being
     // closed underneath us (an organization switch, a restore) makes
     // `_current()` throw `DatabaseException(error database_closed)`. That used
     // to escape here as an *unhandled* exception, because the `try` below only
     // wrapped the push/pull work - the badge killed the app on startup.
-    if (_disposed || _inFlight) return _safeCurrent();
+    if (_disposed) return _safeCurrent();
+    if (_inFlight) {
+      if (reason == 'mutation') {
+        _deferredMutation = true;
+        _deferredPush = _deferredPush || !pullOnly;
+      }
+      return _safeCurrent();
+    }
     if (!connectivity.isOnline) {
       await _emit();
       return _safeCurrent();
     }
+    final generation = _lifecycleGeneration;
+    final scope = SyncRunScope(pushWorker.source, queue.dbHelper);
+    SyncCycleLease? lease;
+    void checkRun() {
+      scope.check();
+      if (lease != null && !lease.held) throw const SyncRunCancelled();
+      if (generation != _lifecycleGeneration || _disposed) {
+        throw const SyncRunCancelled();
+      }
+    }
+
     _inFlight = true;
+    _lastPullComplete = false;
     await _emit();
     try {
-      await _recoverStalledRows();
-      if (!pullOnly) {
+      checkRun();
+      final db = await queue.dbHelper.database;
+      scope.check();
+      _cycleMetadata = metadata.bind(db);
+      final acquired = SyncCycleLease(db);
+      if (!await acquired.acquire()) throw const SyncRunCancelled();
+      lease = acquired;
+      pushWorker.cycleIsCurrent = () => acquired.held && scope.isCurrent;
+      pullWorker.cycleIsCurrent = () => acquired.held && scope.isCurrent;
+      auditPullWorker?.cycleIsCurrent = () => acquired.held && scope.isCurrent;
+      checkRun();
+      if (!pullOnly) await _recoverStalledRows(checkRun);
+      checkRun();
+      if (!pushWorker.remote.isSignedIn) {
+        await _runMetadata.set(SyncMetadata.pullIncompleteKey, '1');
+        await _runMetadata.markError(
+          'Authentication is required to verify synchronization.',
+        );
+        throw const SyncRunCancelled();
+      }
+      String? pushError;
+      if (!pullOnly && (allowPush?.call() ?? true)) {
         // One runOnce claims at most 400 rows: an 800-row desktop import left
         // half the queue pending while the badge already said "Synced".
         // Drain (bounded) so one manual "Sync now" actually finishes the push.
         for (var i = 0; i < 5; i++) {
           final pushReport = await pushWorker.runOnce();
+          checkRun();
+          pushError ??= pushReport.lastError;
           if (pushReport.pushed == 0) break;
         }
       }
-      final pullReport = await pullWorker.runOnce();
+      checkRun();
+      final pullEnabled = allowPull?.call() ?? true;
+      final pullReport = pullEnabled
+          ? await pullWorker.runOnce()
+          : PullReport.empty;
+      checkRun();
+      _lastPullComplete =
+          pullEnabled &&
+          pullReport.error == null &&
+          pullReport.failed == 0 &&
+          !pullReport.hasMore;
+      if (_lastPullComplete && pushError == null) {
+        await _runMetadata.markError(null);
+      } else if (pushError != null &&
+          pullReport.error == null &&
+          pullReport.failed == 0) {
+        await _runMetadata.markError(pushError);
+      }
+      if (pullReport.applied > 0) SyncDataChanges.notify();
       if (pullReport.applied > 0) {
         try {
           await onPullApplied?.call();
@@ -376,16 +487,36 @@ class SyncEngine {
         }
       }
       // The audit trail and its retention must never fail the data cycle.
-      await _auditMaintenance();
+      checkRun();
+      if (pullEnabled || (allowAuditPull?.call() ?? true)) {
+        await _auditMaintenance(pullAudit: allowAuditPull?.call() ?? true);
+      }
       // Same for the parity sweep: best-effort, never aborts the cycle.
-      await _parityMaintenance();
+      checkRun();
+      if (pullEnabled) await _parityMaintenance();
       // A completed walk counts as "full and recent" for the timer gate,
       // whatever reason started it (dashboard, heartbeat, manual…).
-      _lastFullCycleAt = DateTime.now();
+      checkRun();
+      if (_lastPullComplete) _lastFullCycleAt = DateTime.now();
+    } on SyncRunCancelled {
+      // The response belongs to an earlier session/file, not the new one.
     } on Object catch (e) {
       await _markErrorSafely('$e');
     } finally {
+      await lease?.release();
+      _cycleMetadata = null;
+      pushWorker.cycleIsCurrent = null;
+      pullWorker.cycleIsCurrent = null;
+      auditPullWorker?.cycleIsCurrent = null;
       _inFlight = false;
+      if (_deferredMutation &&
+          generation == _lifecycleGeneration &&
+          scope.isCurrent) {
+        final push = _deferredPush;
+        _deferredMutation = false;
+        _deferredPush = false;
+        scheduleSync(pullOnly: !push);
+      }
       await _emit();
     }
     // Problem bell (mobile-only): when conflicts/blocked/failed CHANGE, tell
@@ -412,7 +543,9 @@ class SyncEngine {
       // Stash before firing: a crash inside the consumer must not resurface
       // the same count on every cycle for the rest of the session.
       _lastProblems = total;
-      if (total > 0) hook(snapshot.conflicts, snapshot.blocked, snapshot.failed);
+      if (total > 0) {
+        hook(snapshot.conflicts, snapshot.blocked, snapshot.failed);
+      }
     } on Object {
       // Reporting concern only; the badge on the shell already shows it.
     }
@@ -436,7 +569,7 @@ class SyncEngine {
 
   Future<void> _markErrorSafely(String message) async {
     try {
-      await metadata.markError(message);
+      await _runMetadata.markError(message);
     } on Object {
       // The metadata write needs the same database that just failed; a failure
       // here must not replace the original error with a second one.
@@ -446,11 +579,13 @@ class SyncEngine {
   /// Pull the audit documents of the other devices, then apply the retention
   /// policy. Every failure here is swallowed on purpose: a member without
   /// `audit.read`, or a revoked device, must not turn the sync badge red.
-  Future<void> _auditMaintenance() async {
-    try {
-      await auditPullWorker?.runOnce();
-    } on Object catch (e) {
-      debugPrint('[sync] audit pull skipped: $e');
+  Future<void> _auditMaintenance({bool pullAudit = true}) async {
+    if (pullAudit) {
+      try {
+        await auditPullWorker?.runOnce();
+      } on Object catch (e) {
+        debugPrint('[sync] audit pull skipped: $e');
+      }
     }
     try {
       await trail?.runRetention();
@@ -481,28 +616,29 @@ class SyncEngine {
     try {
       final entities = pullWorker.entities;
       if (entities.isEmpty) return;
-      var pending = await metadata.get(SyncMetadata.parityPendingKey);
+      var pending = await _runMetadata.get(SyncMetadata.parityPendingKey);
       if (pending != '1') {
         if (!await _parityDue()) return;
-        await metadata.set(SyncMetadata.parityPendingKey, '1');
-        await metadata.set(SyncMetadata.parityIndexKey, '0');
+        await _runMetadata.set(SyncMetadata.parityPendingKey, '1');
+        await _runMetadata.set(SyncMetadata.parityIndexKey, '0');
       }
       final index =
-          int.tryParse(await metadata.get(SyncMetadata.parityIndexKey)) ?? 0;
+          int.tryParse(await _runMetadata.get(SyncMetadata.parityIndexKey)) ??
+          0;
       if (index >= entities.length) {
-        await metadata.set(SyncMetadata.parityPendingKey, '0');
-        await metadata.set(SyncMetadata.lastFullSyncAtKey, nowIso());
+        await _runMetadata.set(SyncMetadata.parityPendingKey, '0');
+        await _runMetadata.set(SyncMetadata.lastFullSyncAtKey, nowIso());
         return;
       }
       // While pulls are erroring, do not churn the cursor: re-walking from
       // the beginning while the same document keeps failing repeats the
       // failure against more documents. The sweep resumes once the error
       // clears (a successful pull removes `last_error`).
-      final lastError = await metadata.lastError();
+      final lastError = await _runMetadata.lastError();
       if (lastError.isNotEmpty) return;
       final entity = entities[index];
-      await metadata.remove(SyncMetadata.cursorKey(entity.type));
-      await metadata.set(SyncMetadata.parityIndexKey, '${index + 1}');
+      await _runMetadata.remove(SyncMetadata.cursorKey(entity.type));
+      await _runMetadata.set(SyncMetadata.parityIndexKey, '${index + 1}');
     } on Object catch (e) {
       debugPrint('[sync] parity sweep skipped: $e');
     }
@@ -511,10 +647,11 @@ class SyncEngine {
   /// True when a full re-verification is due: skipped-document pull errors
   /// are live, or the last completed sweep is missing/stale.
   Future<bool> _parityDue() async {
-    final lastError = await metadata.lastError();
+    final lastError = await _runMetadata.lastError();
     if (lastError.contains('Pull skipped')) return true;
-    final last =
-        DateTime.tryParse(await metadata.get(SyncMetadata.lastFullSyncAtKey));
+    final last = DateTime.tryParse(
+      await _runMetadata.get(SyncMetadata.lastFullSyncAtKey),
+    );
     if (last == null) return true;
     return DateTime.now().difference(last) > parityInterval;
   }
@@ -524,8 +661,8 @@ class SyncEngine {
   /// cycle through [SyncEngine._parityMaintenance].
   Future<void> markParityDue() async {
     try {
-      await metadata.set(SyncMetadata.parityPendingKey, '1');
-      await metadata.set(SyncMetadata.parityIndexKey, '0');
+      await _runMetadata.set(SyncMetadata.parityPendingKey, '1');
+      await _runMetadata.set(SyncMetadata.parityIndexKey, '0');
     } on Object {
       // Best-effort: the weekly trigger covers a failed write here.
     }
@@ -558,16 +695,23 @@ class SyncEngine {
     // A restore on another device carries that device's id.
     final currentDeviceId = pushWorker.session.deviceId;
     if (currentDeviceId.isNotEmpty) {
-      final stored = await metadata.get(SyncMetadata.deviceIdKey);
+      final stored = await _runMetadata.get(SyncMetadata.deviceIdKey);
       if (stored.isNotEmpty && stored != currentDeviceId) {
-        await metadata.set(SyncMetadata.deviceIdKey, currentDeviceId);
+        await _runMetadata.set(SyncMetadata.deviceIdKey, currentDeviceId);
         deviceIdReplaced = true;
       }
     }
 
     final rows = await db.query(
       'sync_queue',
-      columns: ['id', 'entity_type', 'entity_id', 'local_ref', 'base_version', 'status'],
+      columns: [
+        'id',
+        'entity_type',
+        'entity_id',
+        'local_ref',
+        'base_version',
+        'status',
+      ],
       where: "status IN ('pending','in_flight')",
     );
 
@@ -581,10 +725,7 @@ class SyncEngine {
       final localRef = (row['local_ref'] as num?)?.toInt();
       if (entity == null || localRef == null) continue;
       refsByTable
-          .putIfAbsent(
-            entity.localTable,
-            () => (entity: entity, refs: <int>{}),
-          )
+          .putIfAbsent(entity.localTable, () => (entity: entity, refs: <int>{}))
           .refs
           .add(localRef);
     }
@@ -663,8 +804,9 @@ class SyncEngine {
     final present = <int>{};
     final all = refs.toList(growable: false);
     for (var offset = 0; offset < all.length; offset += chunkSize) {
-      final end =
-          offset + chunkSize < all.length ? offset + chunkSize : all.length;
+      final end = offset + chunkSize < all.length
+          ? offset + chunkSize
+          : all.length;
       final chunk = all.sublist(offset, end);
       final found = await db.query(
         table,
@@ -702,22 +844,26 @@ class SyncEngine {
   Future<SyncStatusSnapshot> _current() {
     final flight = _currentFlight;
     if (flight != null) return flight;
-    final next = _readCurrent().then((snapshot) {
-      _lastSnapshot = snapshot;
-      return snapshot;
-    }).timeout(statusReadTimeout, onTimeout: _fallbackSnapshot);
+    final next = _readCurrent()
+        .then((snapshot) {
+          _lastSnapshot = snapshot;
+          return snapshot;
+        })
+        .timeout(statusReadTimeout, onTimeout: _fallbackSnapshot);
     _currentFlight = next;
     // Clearing is observed (not awaited): the derived future must not go
     // unhandled when the shared read itself fails — every awaiter already
     // receives the error through `next`.
-    unawaited(next.then<void>(
-      (_) {
-        if (identical(_currentFlight, next)) _currentFlight = null;
-      },
-      onError: (_) {
-        if (identical(_currentFlight, next)) _currentFlight = null;
-      },
-    ));
+    unawaited(
+      next.then<void>(
+        (_) {
+          if (identical(_currentFlight, next)) _currentFlight = null;
+        },
+        onError: (_) {
+          if (identical(_currentFlight, next)) _currentFlight = null;
+        },
+      ),
+    );
     return next;
   }
 
@@ -745,6 +891,7 @@ class SyncEngine {
       );
 
   Future<SyncStatusSnapshot> _readCurrent() async {
+    final generation = queue.dbHelper.connectionGeneration;
     // Parallel, not sequential: each of these is a message to the single FFI
     // isolate, and awaiting them one after another doubles the badge latency
     // whenever the connection is busy (bootstrap, dashboard load). Neither
@@ -755,8 +902,12 @@ class SyncEngine {
         SyncMetadata.lastPullAtKey,
         SyncMetadata.lastPushAtKey,
         SyncMetadata.lastErrorKey,
+        SyncMetadata.pullIncompleteKey,
       ]),
     ]);
+    if (generation != queue.dbHelper.connectionGeneration) {
+      throw const SyncRunCancelled();
+    }
     final badge = results[0] as SyncQueueCounts;
     final keys = results[1] as Map<String, String>;
     final lastError = keys[SyncMetadata.lastErrorKey] ?? '';
@@ -767,6 +918,7 @@ class SyncEngine {
       blocked: badge.blocked,
       conflicts: badge.conflicts,
       failed: badge.failed,
+      pullIncomplete: keys[SyncMetadata.pullIncompleteKey] == '1',
       lastPushAt: _asDate(keys[SyncMetadata.lastPushAtKey]),
       lastPullAt: _asDate(keys[SyncMetadata.lastPullAtKey]),
       lastError: lastError.isEmpty ? null : lastError,
@@ -776,7 +928,6 @@ class SyncEngine {
 
   static DateTime? _asDate(String? iso) =>
       (iso == null || iso.isEmpty) ? null : DateTime.tryParse(iso);
-
 
   Future<void> _emit() async {
     if (_disposed || _status.isClosed) return;
@@ -789,6 +940,7 @@ class SyncEngine {
   }
 
   Future<void> dispose() async {
+    stop();
     _disposed = true;
     _running = false;
     _timer?.cancel();
@@ -813,8 +965,20 @@ SyncEngine buildSyncEngine({
   required RemoteDataSource remote,
   PullWorker? auditPullWorker,
   AuditTrail? trail,
+  bool Function()? allowPush,
+  bool Function()? allowPull,
+  bool Function()? allowAuditPull,
+  Duration timerInterval = const Duration(seconds: 60),
+  Duration heartbeatInterval = const Duration(seconds: 10),
+  Duration mutationDelay = const Duration(seconds: 2),
 }) {
   final engine = SyncEngine(
+    allowPush: allowPush,
+    allowPull: allowPull,
+    allowAuditPull: allowAuditPull,
+    timerInterval: timerInterval,
+    heartbeatInterval: heartbeatInterval,
+    mutationDelay: mutationDelay,
     pushWorker: pushWorker,
     pullWorker: pullWorker,
     queue: queue,

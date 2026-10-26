@@ -13,8 +13,12 @@ Uint8List qrPngBytes(String payloadText, {int scale = 8, int border = 3}) {
   if (payloadText.isEmpty) {
     throw AppError(AppErrors.qrPayloadEmpty);
   }
-  final (png, _) =
-      _renderQrPng(payloadText, scale: scale, border: border, throwOnFailure: true);
+  final (png, _) = _renderQrPng(
+    payloadText,
+    scale: scale,
+    border: border,
+    throwOnFailure: true,
+  );
   return png!;
 }
 
@@ -26,11 +30,16 @@ Uint8List qrPngBytes(String payloadText, {int scale = 8, int border = 3}) {
     return (dataUri: '', warning: 'QR payload is empty.');
   }
   final (png, truncated) = _renderQrPng(
-      payloadText, scale: 8, border: 3, throwOnFailure: false);
+    payloadText,
+    scale: 8,
+    border: 3,
+    throwOnFailure: false,
+  );
   if (png == null) {
     return (
       dataUri: '',
-      warning: 'QR generation failed: Data exceeds QR code capacity (version > 40)',
+      warning:
+          'QR generation failed: Data exceeds QR code capacity (version > 40)',
     );
   }
   return (
@@ -42,8 +51,12 @@ Uint8List qrPngBytes(String payloadText, {int scale = 8, int border = 3}) {
 /// Render a PNG for the given text, retrying with a truncated payload when the
 /// full one exceeds QR capacity. Mirrors the attempts list in
 /// core/utils.py:548-597 (byte-level truncation at utf-8[:2380] + suffix).
-(Uint8List?, bool) _renderQrPng(String payloadText,
-    {required int scale, required int border, required bool throwOnFailure}) {
+(Uint8List?, bool) _renderQrPng(
+  String payloadText, {
+  required int scale,
+  required int border,
+  required bool throwOnFailure,
+}) {
   final full = _encodeQrPng(payloadText, scale: scale, border: border);
   if (full != null) return (full, false);
 
@@ -62,7 +75,11 @@ Uint8List qrPngBytes(String payloadText, {int scale = 8, int border = 3}) {
   return (null, false);
 }
 
-Uint8List? _encodeQrPng(String payloadText, {required int scale, required int border}) {
+Uint8List? _encodeQrPng(
+  String payloadText, {
+  required int scale,
+  required int border,
+}) {
   try {
     final code = QrCode.fromData(
       data: payloadText,
@@ -81,8 +98,14 @@ Uint8List? _encodeQrPng(String payloadText, {required int scale, required int bo
         if (image.isDark(row, col)) {
           final x1 = (border + col) * scale;
           final y1 = (border + row) * scale;
-          img.fillRect(out,
-              x1: x1, y1: y1, x2: x1 + scale, y2: y1 + scale, color: black);
+          img.fillRect(
+            out,
+            x1: x1,
+            y1: y1,
+            x2: x1 + scale,
+            y2: y1 + scale,
+            color: black,
+          );
         }
       }
     }

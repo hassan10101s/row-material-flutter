@@ -1,3 +1,4 @@
+import 'app_text_field.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -49,7 +50,9 @@ class _DebouncedSearchFieldState extends State<DebouncedSearchField> {
 
   TextEditingController get _effectiveController =>
       widget.controller ??
-      (_internalController ??= TextEditingController(text: widget.initialValue));
+      (_internalController ??= TextEditingController(
+        text: widget.initialValue,
+      ));
 
   @override
   void didUpdateWidget(covariant DebouncedSearchField oldWidget) {
@@ -65,6 +68,7 @@ class _DebouncedSearchFieldState extends State<DebouncedSearchField> {
 
   @override
   void dispose() {
+    _debounceTimer?.cancel();
     _effectiveController.removeListener(_syncHasText);
     _internalController?.dispose();
     super.dispose();
@@ -97,7 +101,7 @@ class _DebouncedSearchFieldState extends State<DebouncedSearchField> {
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
+    return AppTextField(
       controller: _effectiveController,
       focusNode: widget.focusNode,
       onChanged: _onTextChanged,
@@ -113,6 +117,7 @@ class _DebouncedSearchFieldState extends State<DebouncedSearchField> {
                 tooltip: MaterialLocalizations.of(context).searchFieldLabel,
                 visualDensity: VisualDensity.compact,
                 onPressed: () {
+                  _debounceTimer?.cancel();
                   _effectiveController.clear();
                   widget.onChanged('');
                 },

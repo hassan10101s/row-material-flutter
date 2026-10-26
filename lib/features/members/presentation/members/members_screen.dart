@@ -15,7 +15,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
-import '../../../../design_system/widgets/app_dropdown.dart';
+import '../../../../design_system/widgets/app_window.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
@@ -54,7 +54,7 @@ class _MembersScreenState extends State<MembersScreen> {
   List<Member> _members = const [];
   String? _error;
   bool _busy = false;
-  String _role = AppRoles.lab;
+  final Set<String> _roles = {AppRoles.lab};
   Timer? _searchDebounce;
   String _query = '';
 
@@ -152,8 +152,38 @@ class _MembersScreenState extends State<MembersScreen> {
   /// a second administrator, which is how ownership is shared: `ownerUid` is
   /// immutable in the rules, so a second `admin` is the supported form of
   /// co-ownership.
-  Future<void> _invite(String role) async {
+  void _toggleRole(Set<String> roles, String role) {
+    if (roles.contains(role)) {
+      if (roles.length > 1) roles.remove(role);
+      return;
+    }
+    if (role == AppRoles.admin ||
+        role == AppRoles.trialOwner ||
+        role == AppRoles.viewer) {
+      roles
+        ..clear()
+        ..add(role);
+      return;
+    }
+    roles.removeWhere(
+      (value) =>
+          value == AppRoles.admin ||
+          value == AppRoles.trialOwner ||
+          value == AppRoles.viewer,
+    );
+    roles.add(role);
+  }
+
+  Future<void> _invite(List<String> selectedRoles) async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
+    final roles = AppRoles.normalizeRoles(
+      selectedRoles,
+      fallbackRole: selectedRoles.isEmpty
+          ? AppRoles.viewer
+          : selectedRoles.first,
+    );
+    if (!AppRoles.isValidAssignment(roles)) return;
+    final role = roles.first;
     final email = _email.text.trim().toLowerCase();
     // Client-side duplicate hint before the remote round-trip.
     final duplicate = _members.any((m) => m.email.toLowerCase() == email);
@@ -184,10 +214,13 @@ class _MembersScreenState extends State<MembersScreen> {
       }
       return;
     }
-    await _run(() => _repo!.invite(email: email, role: role));
+    await _run(() => _repo!.invite(email: email, role: role, roles: roles));
     if (mounted) {
       _email.clear();
-      final message = role == AppRoles.admin
+      _roles
+        ..clear()
+        ..add(AppRoles.lab);
+      final message = roles.contains(AppRoles.admin)
           ? AppText.t(
               'تم إرسال دعوة مالك آخر — فعّلها ليتمكن من إدارة الشركة.',
               'Co-owner invite sent — activate it to grant company management.',
@@ -271,7 +304,9 @@ class _MembersScreenState extends State<MembersScreen> {
                 (m) =>
                     m.email.toLowerCase().contains(query) ||
                     m.label.toLowerCase().contains(query) ||
-                    AppRoles.label(m.role).toLowerCase().contains(query),
+                    AppRoles.labelMany(
+                      m.effectiveRoles,
+                    ).toLowerCase().contains(query),
               )
               .toList();
     final activeCount = _members.where((m) => m.isActive).length;
@@ -412,9 +447,9 @@ class _MembersScreenState extends State<MembersScreen> {
             child: Text(
               AppText.t(
                 'الدعوة والتعديل يتطلبان اتصالاً بالإنترنت وجلسة صالحة '
-                    '(الدور الحالي: ${AppRoles.label(gate.role)}).',
+                    '(الأدوار الحالية: ${AppRoles.labelMany(gate.session.effectiveRoles)}).',
                 'Inviting and editing require an internet connection and a valid session '
-                    '(current role: ${AppRoles.label(gate.role)}).',
+                    '(current roles: ${AppRoles.labelMany(gate.session.effectiveRoles)}).',
               ),
               style: TextStyle(color: AppColors.warning, fontSize: 12.spMax),
             ),
@@ -495,24 +530,32 @@ class _MembersScreenState extends State<MembersScreen> {
                   autovalidateMode: AutovalidateMode.onUserInteraction,
                   validator: validateInviteEmail,
                   onFieldSubmitted: (_) {
-                    if (canInvite && !_busy) _invite(_role);
+                    if (canInvite && !_busy) _invite(_roles.toList());
                   },
                 ),
               ),
               SizedBox(
-                width: 200.w,
-                child: AppDropdown<String>(
-                  key: const Key('inviteRole'),
-                  value: _role,
-                  labelText: AppText.t('الدور', 'Role'),
-                  items: [
-                    for (final role in AppRoles.all)
-                      AppDropdownItem(
-                        value: role,
-                        label: AppRoles.label(role),
-                      ),
-                  ],
-                  onChanged: (v) => setState(() => _role = v ?? AppRoles.lab),
+                width: 430.w,
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: AppText.t('الأدوار', 'Roles'),
+                    border: const OutlineInputBorder(),
+                  ),
+                  child: Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      for (final candidate in AppRoles.all.where(
+                        (role) => role != AppRoles.trialOwner,
+                      ))
+                        FilterChip(
+                          label: Text(AppRoles.label(candidate)),
+                          selected: _roles.contains(candidate),
+                          onSelected: (_) =>
+                              setState(() => _toggleRole(_roles, candidate)),
+                        ),
+                    ],
+                  ),
                 ),
               ),
               SizedBox(
@@ -522,7 +565,9 @@ class _MembersScreenState extends State<MembersScreen> {
                   label: AppText.t('إرسال دعوة', 'Send invite'),
                   small: true,
                   loading: _busy,
-                  onPressed: canInvite && !_busy ? () => _invite(_role) : null,
+                  onPressed: canInvite && !_busy
+                      ? () => _invite(_roles.toList())
+                      : null,
                 ),
               ),
               SizedBox(
@@ -534,7 +579,7 @@ class _MembersScreenState extends State<MembersScreen> {
                   icon: const Icon(Icons.workspace_premium_outlined, size: 18),
                   loading: _busy,
                   onPressed: canInvite && !_busy
-                      ? () => _invite(AppRoles.admin)
+                      ? () => _invite([AppRoles.admin])
                       : null,
                 ),
               ),
@@ -583,7 +628,10 @@ class _MembersScreenState extends State<MembersScreen> {
         padding: const EdgeInsets.all(AppSpacing.page),
         child: Text(
           query.isEmpty
-              ? AppText.t('لا يوجد أعضاء بعد — أضف أول دعوة.', 'No members yet — add the first invite.')
+              ? AppText.t(
+                  'لا يوجد أعضاء بعد — أضف أول دعوة.',
+                  'No members yet — add the first invite.',
+                )
               : AppText.t('لا نتائج مطابقة.', 'No matching members.'),
         ),
       );
@@ -625,6 +673,56 @@ class _MembersScreenState extends State<MembersScreen> {
 
   /// One roster row for the paginated table. No bulk selection here on
   /// purpose: activate/disable/remove are destructive per-member decisions.
+  Future<void> _editMemberRoles(Member member) async {
+    final roles = member.effectiveRoles
+        .where((role) => role != AppRoles.trialOwner)
+        .toSet();
+    final selected = await showDialog<List<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AppWindow(
+          title: AppText.t('أدوار الموظف', 'Employee roles'),
+          actions: [
+            AppButton(
+              style: AppButtonStyle.secondary,
+              onPressed: () => Navigator.pop(dialogContext),
+              label: AppText.t('إلغاء', 'Cancel'),
+            ),
+            AppButton(
+              onPressed: AppRoles.isValidAssignment(roles)
+                  ? () => Navigator.pop(dialogContext, roles.toList())
+                  : null,
+              label: AppText.t('حفظ الأدوار', 'Save roles'),
+            ),
+          ],
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final role in AppRoles.all.where(
+                (value) => value != AppRoles.trialOwner,
+              ))
+                CheckboxListTile(
+                  dense: true,
+                  value: roles.contains(role),
+                  title: Text(AppRoles.label(role)),
+                  onChanged: (_) =>
+                      setDialogState(() => _toggleRole(roles, role)),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (selected == null || selected.isEmpty || !mounted) return;
+    await _run(
+      () => _repo!.changeRole(
+        memberId: member.id,
+        role: selected.first,
+        roles: selected,
+      ),
+    );
+  }
+
   List<Widget> _memberRow(Member member, bool self) {
     final gate = _gate ?? getIt<AuthGate>();
     final canUpdate = gate.canWrite(Permission.usersUpdate) && gate.online;
@@ -643,7 +741,7 @@ class _MembersScreenState extends State<MembersScreen> {
       ),
       Text(member.email, maxLines: 1, overflow: TextOverflow.ellipsis),
       Text(
-        AppRoles.label(member.role),
+        AppRoles.labelMany(member.effectiveRoles),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
@@ -687,15 +785,9 @@ class _MembersScreenState extends State<MembersScreen> {
               icon: const Icon(Icons.send_outlined, size: 20),
             ),
           if (canUpdate && member.isActive && !self)
-            PopupMenuButton<String>(
+            IconButton(
               tooltip: AppText.t('تغيير الدور', 'Change role'),
-              onSelected: (role) => _run(
-                () => _repo!.changeRole(memberId: member.id, role: role),
-              ),
-              itemBuilder: (_) => [
-                for (final role in AppRoles.all)
-                  PopupMenuItem(value: role, child: Text(AppRoles.label(role))),
-              ],
+              onPressed: () => _editMemberRoles(member),
               icon: const Icon(Icons.manage_accounts_outlined, size: 20),
             ),
           if (canDisable && member.isActive && !self)
@@ -731,7 +823,12 @@ class _MembersScreenState extends State<MembersScreen> {
     ],
     rows: [
       for (final m in rows)
-        [m.label, m.email, AppRoles.label(m.role), _statusLabel(m.status)],
+        [
+          m.label,
+          m.email,
+          AppRoles.labelMany(m.effectiveRoles),
+          _statusLabel(m.status),
+        ],
     ],
   );
 

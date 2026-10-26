@@ -193,7 +193,7 @@ class _LeaveOrganizationSectionState extends State<LeaveOrganizationSection> {
           ),
           const SizedBox(height: AppSpacing.sm),
           Text(
-            '${AppText.t('الدور', 'Role')}: ${AppRoles.label(gate.role)}\n'
+            '${AppText.t('الأدوار', 'Roles')}: ${AppRoles.labelMany(gate.session.effectiveRoles)}\n'
             '${AppText.t('الحالة', 'Status')}: ${_statusLabel(gate.session.status)}',
             style: TextStyle(
               color: AppColors.textMuted,

@@ -11,7 +11,9 @@ import 'inventory_state.dart';
 /// dialogs; the tab reloads this cubit after a successful save.
 class InventoryCubit extends AppCubit<InventoryState> {
   InventoryCubit({required this.repo, this.pageSize = kMobilePageSize})
-    : super(const InventoryState());
+    : super(const InventoryState()) {
+    refreshOnSync(load);
+  }
 
   final LabLocalRepository repo;
   final int pageSize;

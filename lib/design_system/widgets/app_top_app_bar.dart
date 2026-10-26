@@ -29,10 +29,9 @@ class AppTopAppBar extends StatelessWidget implements PreferredSizeWidget {
         style: TextStyle(fontWeight: AppFontWeights.bold, fontSize: 18.spMax),
       ),
       centerTitle: true,
-      leading: leading ??
-          (ModalRoute.of(context)?.canPop ?? false
-              ? const BackButton()
-              : null),
+      leading:
+          leading ??
+          (ModalRoute.of(context)?.canPop ?? false ? const BackButton() : null),
       actions: actions,
       backgroundColor: AppColors.surface,
       foregroundColor: AppColors.textStrong,

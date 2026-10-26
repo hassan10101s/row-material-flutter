@@ -1,3 +1,4 @@
+import 'app_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -172,7 +173,7 @@ class _AppHistoryAutocompleteState extends State<AppHistoryAutocomplete> {
               fieldViewBuilder:
                   (context, textController, focusNode, onSubmitted) {
                     _attach(textController);
-                    return TextField(
+                    return AppTextField(
                       controller: textController,
                       focusNode: focusNode,
                       enabled: widget.enabled,
@@ -181,7 +182,6 @@ class _AppHistoryAutocompleteState extends State<AppHistoryAutocomplete> {
                       decoration: InputDecoration(
                         isDense: true,
                         hintText: widget.hint,
-                        border: const OutlineInputBorder(),
                         suffixIcon: widget.options.isEmpty
                             ? null
                             : Icon(

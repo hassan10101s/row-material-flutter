@@ -38,45 +38,50 @@ class AppChartLegend extends StatelessWidget {
       runSpacing: runSpacing,
       children: [
         for (final e in entries)
-          Row(mainAxisSize: MainAxisSize.min, children: [
-            _swatch(e),
-            const SizedBox(width: 6),
-            Text(
-              e.label,
-              style: TextStyle(
-                fontSize: 11,
-                color: AppColors.textMuted,
-                fontWeight: FontWeight.w500,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _swatch(e),
+              const SizedBox(width: 6),
+              Text(
+                e.label,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
-          ]),
+            ],
+          ),
       ],
     );
   }
 
   Widget _swatch(AppChartLegendEntry e) => Container(
-        width: 22,
-        height: 4,
-        decoration: BoxDecoration(
-          color: e.dashed ? Colors.transparent : e.color,
-          borderRadius: BorderRadius.circular(2),
-          border: e.dashed
-              ? Border(top: BorderSide(color: e.color, width: 2))
-              : null,
-        ),
-        child: e.dashed
-            ? Row(children: [
-                for (var i = 0; i < 4; i++)
-                  Expanded(
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 1),
-                      height: 3,
-                      color: e.color,
-                    ),
+    width: 22,
+    height: 4,
+    decoration: BoxDecoration(
+      color: e.dashed ? Colors.transparent : e.color,
+      borderRadius: BorderRadius.circular(2),
+      border: e.dashed
+          ? Border(top: BorderSide(color: e.color, width: 2))
+          : null,
+    ),
+    child: e.dashed
+        ? Row(
+            children: [
+              for (var i = 0; i < 4; i++)
+                Expanded(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 1),
+                    height: 3,
+                    color: e.color,
                   ),
-              ])
-            : null,
-      );
+                ),
+            ],
+          )
+        : null,
+  );
 }
 
 /// Canonical chart surface: a card shell with an optional title row, the
@@ -135,10 +140,7 @@ class AppChartCard extends StatelessWidget {
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(AppRadii.lg),
           ),
-          child: Padding(
-            padding: EdgeInsets.all(padding),
-            child: body,
-          ),
+          child: Padding(padding: EdgeInsets.all(padding), child: body),
         ),
       ),
     );

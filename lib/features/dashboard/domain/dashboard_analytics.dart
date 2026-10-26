@@ -82,19 +82,20 @@ List<SupplierScore> buildSupplierScores(List<Map<String, dynamic>> rows) {
   for (final e in bySup.entries) {
     final a = e.value;
     final rate = a.total == 0 ? 0.0 : round1(a.approved / a.total * 100);
-    final rejRatio =
-        a.qty <= 0 ? 0.0 : round1(a.rejQty / a.qty * 100);
-    out.add(SupplierScore(
-      name: e.key,
-      total: a.total,
-      approved: a.approved,
-      conditional: a.conditional,
-      rejected: a.rejected,
-      approvalRate: rate,
-      rejectedQtyRatio: rejRatio,
-      tier: tierFor(rate, a.total),
-      score: compositeScore(rate, a.total),
-    ));
+    final rejRatio = a.qty <= 0 ? 0.0 : round1(a.rejQty / a.qty * 100);
+    out.add(
+      SupplierScore(
+        name: e.key,
+        total: a.total,
+        approved: a.approved,
+        conditional: a.conditional,
+        rejected: a.rejected,
+        approvalRate: rate,
+        rejectedQtyRatio: rejRatio,
+        tier: tierFor(rate, a.total),
+        score: compositeScore(rate, a.total),
+      ),
+    );
   }
   // Rank: score desc, then volume desc — stable and explainable.
   out.sort((a, b) {
@@ -149,12 +150,14 @@ List<ParetoEntry> buildPareto(
   var cum = 0;
   for (final e in sorted.take(limit)) {
     cum += e.value;
-    out.add(ParetoEntry(
-      label: e.key,
-      count: e.value,
-      pct: round1(e.value / totalRej * 100),
-      cumulativePct: round1(cum / totalRej * 100),
-    ));
+    out.add(
+      ParetoEntry(
+        label: e.key,
+        count: e.value,
+        pct: round1(e.value / totalRej * 100),
+        cumulativePct: round1(cum / totalRej * 100),
+      ),
+    );
   }
   return out;
 }
@@ -247,8 +250,8 @@ StabilityKpis buildStability(List<double> rates, List<bool> hasData) {
   final volatility = sd1 <= 5
       ? 'low'
       : sd1 <= 12
-          ? 'medium'
-          : 'high';
+      ? 'medium'
+      : 'high';
   return StabilityKpis(
     stdDev: sd1,
     range: round1(mx - mn),
@@ -328,10 +331,12 @@ Map<String, dynamic> buildExecutiveSignals({
   if (topRiskSupplier == '—' && suppliers.isNotEmpty) {
     topRiskSupplier = suppliers.last.name;
   }
-  final topRiskMaterial =
-      materialPareto.isEmpty ? '—' : materialPareto.first.label;
-  final concentrationPct =
-      materialPareto.isEmpty ? 0.0 : materialPareto.first.cumulativePct;
+  final topRiskMaterial = materialPareto.isEmpty
+      ? '—'
+      : materialPareto.first.label;
+  final concentrationPct = materialPareto.isEmpty
+      ? 0.0
+      : materialPareto.first.cumulativePct;
   String confidence = 'low';
   if (totalInspections >= 30 && quality.completenessPct >= 80) {
     confidence = 'high';

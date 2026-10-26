@@ -1,3 +1,4 @@
+import '../../../../design_system/widgets/app_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -6,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../cubit/daily_tasks_cubit.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class DailyTasksCard extends StatelessWidget {
   const DailyTasksCard({super.key});
@@ -22,7 +24,9 @@ class DailyTasksCard extends StatelessWidget {
         final total = s.total;
         final done = s.done;
         final pct = total == 0 ? 0.0 : done / total;
-        return Card(
+        return AppCard(
+          padding: EdgeInsets.zero,
+          enableHover: false,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -72,10 +76,12 @@ class DailyTasksCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: TextButton.icon(
+                  child: AppButton(
                     onPressed: () => context.go('/quality-management'),
+                    label: AppText.t('عرض المهام', 'View tasks'),
                     icon: const Icon(Icons.arrow_forward, size: 16),
-                    label: Text(AppText.t('عرض المهام', 'View tasks')),
+                    style: AppButtonStyle.ghost,
+                    small: true,
                   ),
                 ),
               ],

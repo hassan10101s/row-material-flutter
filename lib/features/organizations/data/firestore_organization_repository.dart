@@ -268,7 +268,11 @@ class _Members implements MemberRepository {
   }
 
   @override
-  Future<void> invite({required String email, required String role}) async {
+  Future<void> invite({
+    required String email,
+    required String role,
+    List<String>? roles,
+  }) async {
     final normalized = email.trim().toLowerCase();
     if (normalized.length < 4 ||
         !normalized.contains('@') ||
@@ -278,7 +282,12 @@ class _Members implements MemberRepository {
         code: 'validation',
       );
     }
-    if (!AppRoles.isValid(role)) {
+    final assignedRoles = roles ?? [role];
+    if (!AppRoles.isValid(role) ||
+        role == AppRoles.trialOwner ||
+        assignedRoles.isEmpty ||
+        assignedRoles.first != role ||
+        !AppRoles.isValidAssignment(assignedRoles)) {
       throw OrganizationFailure(
         AppText.t('الدور غير صالح', 'Invalid role.'),
         code: 'validation',
@@ -302,6 +311,7 @@ class _Members implements MemberRepository {
         organizationId: _orgId,
         email: normalized,
         role: role,
+        roles: assignedRoles,
         invitedBy: _guard.uid,
       );
     } on RemoteAuthException catch (error) {
@@ -324,7 +334,7 @@ class _Members implements MemberRepository {
       action: 'MEMBER_INVITED',
       entityType: 'member',
       entityId: memberId,
-      details: {'email': normalized, 'role': role},
+      details: {'email': normalized, 'role': role, 'roles': assignedRoles},
     );
     await _owner.onRosterChanged?.call();
   }
@@ -366,6 +376,7 @@ class _Members implements MemberRepository {
       organizationId: _orgId,
       email: target.email,
       role: target.role,
+      roles: target.effectiveRoles,
       invitedBy: _guard.uid,
     );
     await _remote.writeAudit(
@@ -373,7 +384,11 @@ class _Members implements MemberRepository {
       action: 'MEMBER_INVITE_RESENT',
       entityType: 'member',
       entityId: memberIdOut,
-      details: {'email': target.email, 'role': target.role},
+      details: {
+        'email': target.email,
+        'role': target.role,
+        'roles': target.effectiveRoles,
+      },
     );
     await _owner.onRosterChanged?.call();
   }
@@ -382,8 +397,14 @@ class _Members implements MemberRepository {
   Future<void> changeRole({
     required String memberId,
     required String role,
+    List<String>? roles,
   }) async {
-    if (!AppRoles.isValid(role)) {
+    final assignedRoles = roles ?? [role];
+    if (!AppRoles.isValid(role) ||
+        role == AppRoles.trialOwner ||
+        assignedRoles.isEmpty ||
+        assignedRoles.first != role ||
+        !AppRoles.isValidAssignment(assignedRoles)) {
       throw OrganizationFailure(
         AppText.t('الدور غير صالح', 'Invalid role.'),
         code: 'validation',
@@ -404,7 +425,7 @@ class _Members implements MemberRepository {
       await _remote.updateMember(
         organizationId: _orgId,
         memberId: memberId,
-        data: {'role': role},
+        data: {'role': role, 'roles': assignedRoles},
       );
     } on Object catch (e) {
       throw _mapRemoteError(e);
@@ -414,7 +435,7 @@ class _Members implements MemberRepository {
       action: 'MEMBER_ROLE_CHANGED',
       entityType: 'member',
       entityId: memberId,
-      details: {'role': role},
+      details: {'role': role, 'roles': assignedRoles},
     );
     await _owner.onRosterChanged?.call();
   }
@@ -445,7 +466,7 @@ class _Members implements MemberRepository {
       await _remote.updateMember(
         organizationId: _orgId,
         memberId: memberId,
-        data: {'status': status, 'activatedAt': null},
+        data: {'status': status, if (status == 'active') 'activatedAt': null},
       );
     } on Object catch (e) {
       throw _mapRemoteError(e);

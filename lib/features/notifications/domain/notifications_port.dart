@@ -45,4 +45,7 @@ abstract class NotificationsPort {
 
   /// Detach a handler attached with [addPayloadListener].
   void removePayloadListener(void Function(String payload) callback);
+
+  /// Resolve remote identities in this organization's local database.
+  Future<String?> resolvePayload(String payload);
 }

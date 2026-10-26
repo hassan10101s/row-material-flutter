@@ -97,10 +97,7 @@ ReferenceRange _fromBounds(
 
 ReferenceRange _fromText(String text, String unit) {
   if (text.isEmpty) return ReferenceRange(display: '—', unit: unit);
-  final t = text
-      .replaceAll('–', '-')
-      .replaceAll('—', '-')
-      .replaceAll(',', '.');
+  final t = text.replaceAll('–', '-').replaceAll('—', '-').replaceAll(',', '.');
   final maxM = RegExp(
     r'(?:<=|≤|less\s+than|max)\s*(-?\d+(?:\.\d+)?)',
     caseSensitive: false,
@@ -122,7 +119,9 @@ ReferenceRange _fromText(String text, String unit) {
     final a = _numOf(range.group(1));
     final b = _numOf(range.group(2));
     if (a != null && b != null) {
-      if (a == b) return ReferenceRange(display: '= ${range.group(1)}', unit: unit);
+      if (a == b) {
+        return ReferenceRange(display: '= ${range.group(1)}', unit: unit);
+      }
       return ReferenceRange(
         display: '${range.group(1)} – ${range.group(2)}',
         unit: unit,

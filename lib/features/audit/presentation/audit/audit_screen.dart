@@ -1,5 +1,6 @@
+import '../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../design_system/widgets/app_select_field.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
@@ -90,8 +91,8 @@ class AppTopBarFallback extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AppBar(
-      title: Text(title),
+    return AppTopAppBar(
+      title: title,
       actions: [
         if (onRefresh != null)
           IconButton(
@@ -212,28 +213,16 @@ class _Dropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InputDecorator(
-      decoration: InputDecoration(
-        labelText: label,
-        isDense: true,
-        border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: value,
-          isDense: true,
-          isExpanded: true,
-          menuMaxHeight: 320,
-          hint: Text(allLabel, style: TextStyle(fontSize: 12.spMax)),
-          items: [
-            DropdownMenuItem<String>(value: null, child: Text(allLabel)),
-            for (final item in items)
-              DropdownMenuItem<String>(value: item, child: Text(item)),
-          ],
-          onChanged: onChanged,
-        ),
-      ),
+    return AppSelectField<String>(
+      initialValue: value,
+      decoration: InputDecoration(labelText: label),
+      hint: Text(allLabel),
+      items: [
+        DropdownMenuItem<String>(value: null, child: Text(allLabel)),
+        for (final item in items)
+          DropdownMenuItem<String>(value: item, child: Text(item)),
+      ],
+      onChanged: onChanged,
     );
   }
 }

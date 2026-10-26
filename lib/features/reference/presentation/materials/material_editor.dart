@@ -266,7 +266,8 @@ class MaterialEditorState extends State<MaterialEditor> {
           if (row != null && isReferenceRequired(refVal)) row.required = true;
         });
         // Merge required flag for physical bounds fields too.
-        final physAnalyses = matAnalyses['physical']?['fields'] as List? ?? const [];
+        final physAnalyses =
+            matAnalyses['physical']?['fields'] as List? ?? const [];
         for (final f in physAnalyses) {
           final fm = Map<String, dynamic>.from(f as Map);
           if (fm['is_required'] != 1 && fm['is_required'] != true) continue;
@@ -527,7 +528,11 @@ class MaterialEditorState extends State<MaterialEditor> {
       children: [
         Expanded(
           child: _loading
-              ? const AppSkeletonList(rows: 4, height: 320, padding: EdgeInsets.zero)
+              ? const AppSkeletonList(
+                  rows: 4,
+                  height: 320,
+                  padding: EdgeInsets.zero,
+                )
               : SingleChildScrollView(
                   padding: EdgeInsets.symmetric(
                     horizontal: _compact ? 0 : AppSpacing.lg,

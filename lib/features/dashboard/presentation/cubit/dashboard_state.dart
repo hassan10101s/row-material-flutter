@@ -36,27 +36,26 @@ class DashboardState extends Equatable {
     String? selectedMaterial,
     String? selectedSupplier,
     String? selectedStatus,
-  }) =>
-      DashboardState(
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        summary: summary ?? this.summary,
-        filterOptions: filterOptions ?? this.filterOptions,
-        period: period ?? this.period,
-        selectedMaterial: selectedMaterial ?? this.selectedMaterial,
-        selectedSupplier: selectedSupplier ?? this.selectedSupplier,
-        selectedStatus: selectedStatus ?? this.selectedStatus,
-      );
+  }) => DashboardState(
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    summary: summary ?? this.summary,
+    filterOptions: filterOptions ?? this.filterOptions,
+    period: period ?? this.period,
+    selectedMaterial: selectedMaterial ?? this.selectedMaterial,
+    selectedSupplier: selectedSupplier ?? this.selectedSupplier,
+    selectedStatus: selectedStatus ?? this.selectedStatus,
+  );
 
   @override
   List<Object?> get props => [
-        loading,
-        error,
-        summary,
-        filterOptions,
-        period,
-        selectedMaterial,
-        selectedSupplier,
-        selectedStatus,
-      ];
+    loading,
+    error,
+    summary,
+    filterOptions,
+    period,
+    selectedMaterial,
+    selectedSupplier,
+    selectedStatus,
+  ];
 }

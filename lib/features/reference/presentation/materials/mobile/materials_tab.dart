@@ -117,29 +117,33 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-              AppPageHeader(
+            // Header-only entrance, the same convention as the sibling
+            // reference tabs — the card list below never animates per card.
+            AppEntrance(
+              child: AppPageHeader(
                 title: AppText.t('خامات مرجعية', 'Reference Materials'),
-              subtitle: '$countLabel ${AppText.t('مادة', 'materials')}',
-              icon: Icons.science_outlined,
-              actions: [
-                IconButton(
-                  tooltip: AppText.t('تصدير جدول', 'Export table'),
-                  constraints: const BoxConstraints(
-                    minWidth: 48,
-                    minHeight: 48,
+                subtitle: '$countLabel ${AppText.t('مادة', 'materials')}',
+                icon: Icons.science_outlined,
+                actions: [
+                  IconButton(
+                    tooltip: AppText.t('تصدير جدول', 'Export table'),
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
+                    onPressed: rows.isEmpty
+                        ? null
+                        : () => TableHtmlExport.export(
+                            context,
+                            filePrefix: 'materials',
+                            title: DesktopMaterialsTab.exportTitle(),
+                            headers: DesktopMaterialsTab.exportHeaders(),
+                            rows: DesktopMaterialsTab.exportRows(rows),
+                          ),
+                    icon: const Icon(Icons.table_view_outlined),
                   ),
-                  onPressed: rows.isEmpty
-                      ? null
-                      : () => TableHtmlExport.export(
-                          context,
-                          filePrefix: 'materials',
-                          title: DesktopMaterialsTab.exportTitle(),
-                          headers: DesktopMaterialsTab.exportHeaders(),
-                          rows: DesktopMaterialsTab.exportRows(rows),
-                        ),
-                  icon: const Icon(Icons.table_view_outlined),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: AppSpacing.md),
             // Compact dense search (icon + clear + built-in debounce) instead
@@ -147,7 +151,10 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
             DebouncedSearchField(
               controller: _searchCtrl,
               focusNode: _searchFocus,
-              hint: AppText.t('بحث بالاسم أو الكود', 'Search by name or code...'),
+              hint: AppText.t(
+                'بحث بالاسم أو الكود',
+                'Search by name or code...',
+              ),
               onChanged: (query) {
                 if (mounted) {
                   context.read<ReferenceCubit>().setQuery(query.trim());
@@ -242,6 +249,8 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
     final id = (m['id'] as num).toInt();
     return AppCard(
       enableHover: false,
+      // Flat shadow tier: a page of stacked cards reads lighter.
+      flat: true,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
         children: [

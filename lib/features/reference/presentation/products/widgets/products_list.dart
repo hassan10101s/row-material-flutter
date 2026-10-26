@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../core/utils/app_format.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -98,10 +99,11 @@ class ProductsHeader extends StatelessWidget {
           const SizedBox(height: AppSpacing.sm),
           SizedBox(
             width: double.infinity,
-            child: FilledButton.icon(
+            child: AppButton(
               onPressed: onAdd,
+              label: AppText.t('منتج جديد', 'New Product'),
               icon: Icon(Icons.add, size: 20.r),
-              label: Text(AppText.t('منتج جديد', 'New Product')),
+              style: AppButtonStyle.primary,
             ),
           ),
         ],
@@ -476,6 +478,9 @@ class ProductCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppCard(
+      // Dense list card: flat shadow tier on mobile keeps long registers
+      // light; the desktop grid keeps the standard lift.
+      flat: FormFactor.current.isMobile,
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

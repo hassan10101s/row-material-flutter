@@ -7,6 +7,7 @@ import '../../design_system/tokens/app_opacity.dart';
 import '../../design_system/tokens/app_palette.dart';
 import '../../design_system/tokens/app_spacing.dart';
 import '../../design_system/tokens/app_text_theme.dart';
+import '../responsive/form_factor.dart';
 
 /// App themes (light + dark) built from the shared design tokens and the
 /// Cairo typeface.
@@ -20,6 +21,9 @@ class AppTheme {
   static ThemeData _build(Brightness brightness) {
     final palette = AppPalette.of(brightness);
     final scheme = _colorScheme(palette, brightness);
+    final controlHeight = FormFactor.current.isMobile
+        ? AppControlSizes.touch
+        : AppControlSizes.regular;
 
     return ThemeData(
       brightness: brightness,
@@ -41,7 +45,7 @@ class AppTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.md.r),
+          borderRadius: BorderRadius.circular(AppRadii.md),
           side: BorderSide(color: palette.borderMuted),
         ),
       ),
@@ -58,15 +62,16 @@ class AppTheme {
           fontWeight: AppFontWeights.bold,
         ),
       ),
-      inputDecorationTheme: _inputDecoration(palette),
-      filledButtonTheme: _filledButton(palette),
-      outlinedButtonTheme: _outlinedButton(palette),
-      textButtonTheme: _textButton(palette),
+      inputDecorationTheme: _inputDecoration(palette, controlHeight),
+      filledButtonTheme: _filledButton(palette, controlHeight),
+      outlinedButtonTheme: _outlinedButton(palette, controlHeight),
+      textButtonTheme: _textButton(palette, controlHeight),
       dialogTheme: DialogThemeData(
         backgroundColor: palette.surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadii.lg.r),
+          borderRadius: BorderRadius.circular(AppRadii.xl),
+          side: BorderSide(color: palette.borderMuted),
         ),
         titleTextStyle: TextStyle(
           color: palette.textStrong,
@@ -94,7 +99,6 @@ class AppTheme {
       // renders 24 DropdownButtons, 9 chips, 5 popup menus, 17 progress
       // indicators and 3 tooltips, so theming them here improves every screen
       // at once without touching a single feature file.
-
       tooltipTheme: TooltipThemeData(
         waitDuration: const Duration(milliseconds: 500),
         textStyle: TextStyle(
@@ -229,7 +233,7 @@ class AppTheme {
         showDragHandle: true,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(
-            top: Radius.circular(AppRadii.lg.r),
+            top: Radius.circular(AppRadii.lg),
           ),
         ),
       ),
@@ -283,10 +287,13 @@ class AppTheme {
   /// were set, so a bare `TextField` in an error state drew the framework's
   /// default Material 3 red instead of `AppColors.danger` — a different field
   /// style from the one `AppField` renders.
-  static InputDecorationTheme _inputDecoration(AppPalette palette) {
+  static InputDecorationTheme _inputDecoration(
+    AppPalette palette,
+    double controlHeight,
+  ) {
     OutlineInputBorder border(Color color, [double width = 1]) =>
         OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadii.sm.r),
+          borderRadius: BorderRadius.circular(AppRadii.sm),
           borderSide: BorderSide(color: color, width: width),
         );
 
@@ -294,7 +301,17 @@ class AppTheme {
       isDense: true,
       filled: true,
       fillColor: palette.surface,
-      contentPadding: EdgeInsets.symmetric(horizontal: 12.w, vertical: 10.h),
+      constraints: BoxConstraints(minHeight: controlHeight),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      prefixIconConstraints: BoxConstraints(
+        minWidth: controlHeight,
+        minHeight: controlHeight,
+      ),
+      suffixIconConstraints: BoxConstraints(
+        minWidth: controlHeight,
+        minHeight: controlHeight,
+      ),
+      border: border(palette.border),
       enabledBorder: border(palette.border),
       focusedBorder: border(palette.primary, 1.6),
       errorBorder: border(palette.danger),
@@ -325,53 +342,59 @@ class AppTheme {
     );
   }
 
-  static FilledButtonThemeData _filledButton(AppPalette palette) =>
-      FilledButtonThemeData(
-        style: FilledButton.styleFrom(
-          backgroundColor: palette.primary,
-          // Derived, not hardcoded: white on the dark palette's #38BDF8 is
-          // 2.14:1, which is unreadable.
-          foregroundColor: AppContrast.on(palette.primary),
-          disabledBackgroundColor:
-              palette.textStrong.withValues(alpha: AppOpacity.disabledSurface),
-          disabledForegroundColor:
-              palette.textStrong.withValues(alpha: AppOpacity.disabled),
-          minimumSize: Size(0, 42.h),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.md.r),
-          ),
-          textStyle: TextStyle(
-            fontFamily: AppTextTheme.cairoFontFamily,
-            fontSize: 14.spMax,
-            fontWeight: AppFontWeights.semiBold,
-          ),
-        ),
-      );
+  static FilledButtonThemeData _filledButton(
+    AppPalette palette,
+    double height,
+  ) => FilledButtonThemeData(
+    style: FilledButton.styleFrom(
+      backgroundColor: palette.primary,
+      // Derived, not hardcoded: white on the dark palette's #38BDF8 is
+      // 2.14:1, which is unreadable.
+      foregroundColor: AppContrast.on(palette.primary),
+      disabledBackgroundColor: palette.textStrong.withValues(
+        alpha: AppOpacity.disabledSurface,
+      ),
+      disabledForegroundColor: palette.textStrong.withValues(
+        alpha: AppOpacity.disabled,
+      ),
+      minimumSize: Size(0, height),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
+      textStyle: TextStyle(
+        fontFamily: AppTextTheme.cairoFontFamily,
+        fontSize: 14.spMax,
+        fontWeight: AppFontWeights.semiBold,
+      ),
+    ),
+  );
 
-  static OutlinedButtonThemeData _outlinedButton(AppPalette palette) =>
-      OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: palette.primary,
-          side: BorderSide(color: palette.primary),
-          minimumSize: Size(0, 42.h),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.md.r),
-          ),
-          textStyle: TextStyle(
-            fontFamily: AppTextTheme.cairoFontFamily,
-            fontSize: 14.spMax,
-            fontWeight: AppFontWeights.semiBold,
-          ),
-        ),
-      );
+  static OutlinedButtonThemeData _outlinedButton(
+    AppPalette palette,
+    double height,
+  ) => OutlinedButtonThemeData(
+    style: OutlinedButton.styleFrom(
+      foregroundColor: palette.primary,
+      side: BorderSide(color: palette.primary),
+      minimumSize: Size(0, height),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.md),
+      ),
+      textStyle: TextStyle(
+        fontFamily: AppTextTheme.cairoFontFamily,
+        fontSize: 14.spMax,
+        fontWeight: AppFontWeights.semiBold,
+      ),
+    ),
+  );
 
-  static TextButtonThemeData _textButton(AppPalette palette) =>
+  static TextButtonThemeData _textButton(AppPalette palette, double height) =>
       TextButtonThemeData(
         style: TextButton.styleFrom(
           foregroundColor: palette.primary,
-          minimumSize: Size(0, 42.h),
+          minimumSize: Size(0, height),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.md.r),
+            borderRadius: BorderRadius.circular(AppRadii.md),
           ),
           textStyle: TextStyle(
             fontFamily: AppTextTheme.cairoFontFamily,
@@ -387,7 +410,8 @@ class AppTheme {
   /// `TextTheme` entries, so they do not inherit the Cairo family from
   /// `ThemeData.fontFamily` — before the family was named here, all 7 tables
   /// rendered in the engine default font.
-  static DataTableThemeData _dataTable(AppPalette palette) => DataTableThemeData(
+  static DataTableThemeData _dataTable(AppPalette palette) =>
+      DataTableThemeData(
         headingTextStyle: TextStyle(
           color: palette.textMuted,
           fontFamily: AppTextTheme.cairoFontFamily,
@@ -402,5 +426,20 @@ class AppTheme {
           fontFeatures: const [FontFeature.tabularFigures()],
         ),
         headingRowColor: WidgetStatePropertyAll(palette.surfaceSoft),
+        headingRowHeight: AppControlSizes.tableHeading,
+        dataRowMinHeight: AppControlSizes.tableRow,
+        dataRowMaxHeight: AppControlSizes.tableRow,
+        horizontalMargin: AppSpacing.lg,
+        columnSpacing: AppSpacing.page,
+        dividerThickness: 1,
+        dataRowColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return palette.primary.withValues(alpha: AppOpacity.subtle);
+          }
+          if (states.contains(WidgetState.hovered)) {
+            return palette.primary.withValues(alpha: AppOpacity.hover);
+          }
+          return null;
+        }),
       );
 }

@@ -57,25 +57,40 @@ class AppColors {
   static const Color darkBorderMuted = Color(0xFF243147);
 
   // Active colors resolved by brightness
-  static Color get background => brightness == Brightness.dark ? darkBackground : lightBackground;
-  static Color get surface => brightness == Brightness.dark ? darkSurface : lightSurface;
-  static Color get surfaceSoft => brightness == Brightness.dark ? darkSurfaceSoft : lightSurfaceSoft;
-  static Color get surfaceDeep => brightness == Brightness.dark ? darkSurfaceDeep : lightSurfaceDeep;
-  static Color get primary => brightness == Brightness.dark ? darkPrimary : lightPrimary;
-  static Color get primaryDeep => brightness == Brightness.dark ? darkPrimaryDeep : lightPrimaryDeep;
-  static Color get accent => brightness == Brightness.dark ? darkAccent : lightAccent;
-  static Color get success => brightness == Brightness.dark ? darkSuccess : lightSuccess;
-  static Color get warning => brightness == Brightness.dark ? darkWarning : lightWarning;
-  static Color get partial => brightness == Brightness.dark ? darkPartial : lightPartial;
-  static Color get danger => brightness == Brightness.dark ? darkDanger : lightDanger;
+  static Color get background =>
+      brightness == Brightness.dark ? darkBackground : lightBackground;
+  static Color get surface =>
+      brightness == Brightness.dark ? darkSurface : lightSurface;
+  static Color get surfaceSoft =>
+      brightness == Brightness.dark ? darkSurfaceSoft : lightSurfaceSoft;
+  static Color get surfaceDeep =>
+      brightness == Brightness.dark ? darkSurfaceDeep : lightSurfaceDeep;
+  static Color get primary =>
+      brightness == Brightness.dark ? darkPrimary : lightPrimary;
+  static Color get primaryDeep =>
+      brightness == Brightness.dark ? darkPrimaryDeep : lightPrimaryDeep;
+  static Color get accent =>
+      brightness == Brightness.dark ? darkAccent : lightAccent;
+  static Color get success =>
+      brightness == Brightness.dark ? darkSuccess : lightSuccess;
+  static Color get warning =>
+      brightness == Brightness.dark ? darkWarning : lightWarning;
+  static Color get partial =>
+      brightness == Brightness.dark ? darkPartial : lightPartial;
+  static Color get danger =>
+      brightness == Brightness.dark ? darkDanger : lightDanger;
   static Color get info => brightness == Brightness.dark ? darkInfo : lightInfo;
   static Color get whatsapp =>
       brightness == Brightness.dark ? darkWhatsapp : lightWhatsapp;
   static Color get pdf => brightness == Brightness.dark ? darkPdf : lightPdf;
-  static Color get textStrong => brightness == Brightness.dark ? darkTextStrong : lightTextStrong;
-  static Color get textMuted => brightness == Brightness.dark ? darkTextMuted : lightTextMuted;
-  static Color get border => brightness == Brightness.dark ? darkBorder : lightBorder;
-  static Color get borderMuted => brightness == Brightness.dark ? darkBorderMuted : lightBorderMuted;
+  static Color get textStrong =>
+      brightness == Brightness.dark ? darkTextStrong : lightTextStrong;
+  static Color get textMuted =>
+      brightness == Brightness.dark ? darkTextMuted : lightTextMuted;
+  static Color get border =>
+      brightness == Brightness.dark ? darkBorder : lightBorder;
+  static Color get borderMuted =>
+      brightness == Brightness.dark ? darkBorderMuted : lightBorderMuted;
 }
 
 /// Status tone palette used by status pills and decision badges.

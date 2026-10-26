@@ -35,6 +35,7 @@ const int shellBottomBarSlots = 4;
 List<ShellNavEntry> shellNavEntries({
   required bool canSeeSettings,
   bool canReadQc = false,
+  bool canReadFormulations = false,
 }) {
   // Sync and Members are no longer top-level destinations: both live in
   // Settings now (`/settings?tab=sync`, `/settings?tab=members`).
@@ -47,6 +48,15 @@ List<ShellNavEntry> shellNavEntries({
     ),
     ShellNavEntry('/lab', AppStrings.lab, Icons.biotech_outlined),
   ];
+  if (canReadFormulations) {
+    entries.add(
+      ShellNavEntry(
+        '/formulations',
+        AppText.t('التركيبات', 'Formulations'),
+        Icons.restaurant_menu_outlined,
+      ),
+    );
+  }
   // QC management is one entry point for all QC Manager destinations.
   if (canReadQc) {
     entries.add(

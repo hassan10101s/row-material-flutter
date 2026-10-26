@@ -1,11 +1,8 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-
-import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../../../core/auth/app_session.dart';
+import '../../../core/auth/device_identity_store.dart';
 import '../../../core/auth/permissions.dart';
 import '../../../core/auth/session_store.dart';
 import '../../../core/auth/trial_policy.dart';
@@ -36,6 +33,7 @@ class OfflineFirstAuthRepository implements AuthRepository {
     required this.metadata,
     required this.bootstrap,
     this.devices,
+    this.identities,
     this.onOrganizationBound,
     this.onSignedOut,
   });
@@ -50,6 +48,7 @@ class OfflineFirstAuthRepository implements AuthRepository {
   /// Device registry - only needed for "sign out of this device only"
   /// (plan §14-P9.1); absent in tests that do not exercise it.
   final DeviceRegistry? devices;
+  final DeviceIdentityStore? identities;
 
   /// Hook invoked once the organization database is ready (start the sync
   /// engine, run the per-org seeds, ...). Wired in `app_bootstrap.dart`.
@@ -90,6 +89,10 @@ class OfflineFirstAuthRepository implements AuthRepository {
   Future<AuthState> restoreSession() async {
     if (bootstrap.isUnconfigured) return _set(AuthState.needsBootstrap);
     _deviceId = await metadata.ensureDeviceId(_generateDeviceId);
+    if (identities != null) {
+      _deviceId = await identities!.loadOrMigrate(_deviceId);
+      await metadata.set(SyncMetadata.deviceIdKey, _deviceId);
+    }
 
     if (connectivity.isOnline && remote.isConfigured) {
       final user = await remote.currentUser();
@@ -155,7 +158,7 @@ class OfflineFirstAuthRepository implements AuthRepository {
         code: 'cancelled',
       );
     }
-    await resolveProfile(user: user);
+    await resolveProfile(user: user, freshSignIn: true);
   }
 
   @override
@@ -183,7 +186,7 @@ class OfflineFirstAuthRepository implements AuthRepository {
           ),
         );
       }
-      await resolveProfile(user: user);
+      await resolveProfile(user: user, freshSignIn: true);
     } on RemoteAuthException catch (e) {
       throw AuthFailure(_emailMessage(e.code, e.message), code: e.code);
     }
@@ -220,7 +223,10 @@ class OfflineFirstAuthRepository implements AuthRepository {
   // ── Profile resolution ──────────────────────────────────────────────────
 
   @override
-  Future<AuthState> resolveProfile({RemoteUser? user}) async {
+  Future<AuthState> resolveProfile({
+    RemoteUser? user,
+    bool freshSignIn = false,
+  }) async {
     final account = user ?? await remote.currentUser();
     if (account == null) {
       _session = kEmptySession;
@@ -284,7 +290,8 @@ class OfflineFirstAuthRepository implements AuthRepository {
       return _set(AuthState.noProfile);
     }
 
-    final readOnly = roleIsReadOnly(normalizeRole(profile.role));
+    final roles = profile.effectiveRoles;
+    var readOnly = rolesAreReadOnly(roles);
     // Organization-level gate: a suspended company (trial finished, waiting
     // for manual activation) never opens the dashboard, even though the member
     // row itself is still `active`. A trial whose 30-day window has passed is
@@ -317,6 +324,26 @@ class OfflineFirstAuthRepository implements AuthRepository {
         debugPrint('[auth] org gate skipped: $e');
       }
     }
+    if (normalizeMemberStatus(profile.status) == MemberStatus.active &&
+        orgStatus != OrgStatus.suspended &&
+        devices != null &&
+        profile.organizationId.isNotEmpty &&
+        _deviceId.isNotEmpty &&
+        await devices!.requiresNewEnrollment(
+          organizationId: profile.organizationId,
+          uid: profile.uid,
+          deviceId: _deviceId,
+        )) {
+      if (freshSignIn && identities != null) {
+        // New authenticated enrollment, never revoked -> active on the old
+        // server document. Its audit trail and revocation remain unchanged.
+        _deviceId = await identities!.rotate();
+      } else {
+        await signOut();
+        return AuthState.signedOut;
+      }
+    }
+    readOnly = readOnly || (devices?.lastDeviceReadOnly ?? false);
     _session = AppSession(
       uid: profile.uid,
       email: profile.email,
@@ -327,6 +354,7 @@ class OfflineFirstAuthRepository implements AuthRepository {
       organizationId: profile.organizationId,
       memberId: profile.memberId,
       role: normalizeRole(profile.role),
+      roles: roles,
       status: normalizeMemberStatus(profile.status),
       deviceId: _deviceId,
       readOnlyDevice: readOnly,
@@ -523,6 +551,13 @@ class OfflineFirstAuthRepository implements AuthRepository {
     if (organizationId.isEmpty) return;
     final alreadyBound = dbHelper.boundOrgId == organizationId;
     await dbHelper.bindOrg(organizationId);
+    if (identities != null && _deviceId.isNotEmpty) {
+      if (await metadata.get(SyncMetadata.deviceIdKey) != _deviceId) {
+        await metadata.remove(DeviceRegistry.lastRegisteredAtKey);
+        await metadata.remove('device_registered_org');
+      }
+      await metadata.set(SyncMetadata.deviceIdKey, _deviceId);
+    }
     if (alreadyBound) return;
     final callback = onOrganizationBound;
     if (callback != null) await callback(organizationId);
@@ -543,15 +578,9 @@ class OfflineFirstAuthRepository implements AuthRepository {
     return next;
   }
 
-  /// Stable per-machine id: `device_<os>_<hash of the user profile dir>`.
-  /// Deliberately *not* a hardware id (plan P1.4) — no `device_info_plus`.
+  /// Random installation identity; existing ids migrate without changing.
   static String _generateDeviceId() {
-    final seed = '${Platform.operatingSystem}:${Platform.localHostname}';
-    final digest = sha256
-        .convert(utf8.encode(seed))
-        .toString()
-        .substring(0, 16);
-    return 'device_${Platform.operatingSystem}_$digest';
+    return DeviceIdentityStore.newId();
   }
 
   void _emit() {

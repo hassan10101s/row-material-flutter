@@ -33,10 +33,7 @@ typedef MemberWriteGuard = WriteGuard;
 /// sign-in, a sign-out, an organization switch or a connectivity change is
 /// picked up without re-registering anything.
 class SessionWriteGuard implements WriteGuard {
-  const SessionWriteGuard({
-    required this.source,
-    required this.isOnline,
-  });
+  const SessionWriteGuard({required this.source, required this.isOnline});
 
   final SessionSource source;
   final bool Function() isOnline;

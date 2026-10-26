@@ -105,7 +105,9 @@ class AppDonutChart extends StatelessWidget {
                     PieChartSectionData(
                       value: s.value,
                       color: s.color,
-                      title: showSectionTitles ? s.value.toInt().toString() : '',
+                      title: showSectionTitles
+                          ? s.value.toInt().toString()
+                          : '',
                       titleStyle: TextStyle(
                         color: AppContrast.on(s.color),
                         fontWeight: FontWeight.bold,
@@ -123,9 +125,8 @@ class AppDonutChart extends StatelessWidget {
 }
 
 /// Value formatter: integers without decimals, otherwise 1-dp.
-String formatChartValue(double v) => v == v.roundToDouble()
-    ? v.toInt().toString()
-    : v.toStringAsFixed(1);
+String formatChartValue(double v) =>
+    v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
 
 /// Bottom-axis label: first word of the point label, muted compact style.
 Widget appChartBottomLabel(
@@ -219,7 +220,8 @@ class AppCountBarChart extends StatelessWidget {
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
-                getTitlesWidget: (v, _) => appChartBottomLabel(v, points, axisStyle),
+                getTitlesWidget: (v, _) =>
+                    appChartBottomLabel(v, points, axisStyle),
               ),
             ),
           ),
@@ -314,20 +316,18 @@ class AppPercentLineChart extends StatelessWidget {
                 showTitles: true,
                 reservedSize: 40,
                 interval: yInterval,
-                getTitlesWidget: (v, _) => Text(
-                  '${v.toInt()}%',
-                  style: axisStyle,
-                ),
+                getTitlesWidget: (v, _) =>
+                    Text('${v.toInt()}%', style: axisStyle),
               ),
             ),
             bottomTitles: AxisTitles(
               sideTitles: SideTitles(
                 showTitles: true,
                 getTitlesWidget: (v, _) => appChartBottomLabel(
-                    v, points, TextStyle(
-                      fontSize: 10,
-                      color: AppColors.textMuted,
-                    )),
+                  v,
+                  points,
+                  TextStyle(fontSize: 10, color: AppColors.textMuted),
+                ),
               ),
             ),
           ),
@@ -338,4 +338,3 @@ class AppPercentLineChart extends StatelessWidget {
     );
   }
 }
-

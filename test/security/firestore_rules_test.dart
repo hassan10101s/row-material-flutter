@@ -6,6 +6,8 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:material_lab/core/sync/remote_write_policy.dart';
+import 'package:material_lab/core/sync/sync_codec.dart';
 
 /// End-to-end check of `firestore.rules` against the Firestore + Auth
 /// Emulators (plan §14-P4.2, scenarios a..i):
@@ -46,7 +48,28 @@ void main() {
   // ── low level helpers ──────────────────────────────────────────────────
 
   Map<String, dynamic> fieldValue(dynamic value) {
+    if (value == SyncCodec.serverTimestampPlaceholder) {
+      value = DateTime.now().toUtc();
+    }
+    if (value is DateTime) {
+      return {'timestampValue': value.toUtc().toIso8601String()};
+    }
     if (value == null) return <String, dynamic>{'nullValue': null};
+    if (value is Map) {
+      return {
+        'mapValue': {
+          'fields': {
+            for (final entry in value.entries)
+              '${entry.key}': fieldValue(entry.value),
+          },
+        },
+      };
+    }
+    if (value is List) {
+      return {
+        'arrayValue': {'values': value.map(fieldValue).toList()},
+      };
+    }
     if (value is bool) return <String, dynamic>{'booleanValue': value};
     if (value is int) return <String, dynamic>{'integerValue': '$value'};
     if (value is double) return <String, dynamic>{'doubleValue': value};
@@ -171,6 +194,30 @@ void main() {
     headers: <String, String>{'Authorization': 'Bearer $token'},
   );
 
+  Future<http.Response> userCommit(
+    Map<String, Map<String, dynamic>> documents,
+  ) => http.post(
+    Uri.parse(
+      'http://$firestoreHost/v1/projects/$_project/databases/(default)/documents:commit',
+    ),
+    headers: {
+      'Authorization': 'Bearer $token',
+      'Content-Type': 'application/json',
+    },
+    body: jsonEncode({
+      'writes': [
+        for (final entry in documents.entries)
+          {
+            'update': {
+              'name':
+                  'projects/$_project/databases/(default)/documents/${entry.key}',
+              'fields': fields(entry.value),
+            },
+          },
+      ],
+    }),
+  );
+
   void expectDenied(String what, http.Response response) {
     expect(
       response.statusCode,
@@ -209,15 +256,23 @@ void main() {
     String org = _org,
     String role = 'admin',
     String status = 'active',
-  }) => seed('users/$uid', <String, dynamic>{
-    'email': email,
-    'organizationId': org,
-    'role': role,
-    'status': status,
-    'memberId': 'member_$uid',
-    'version': 1,
-    'updatedBy': uid,
-  });
+  }) async {
+    await seed('users/$uid', <String, dynamic>{
+      'email': email,
+      'organizationId': org,
+      'role': role,
+      'status': status,
+      'memberId': 'member_$uid',
+      'version': 1,
+      'updatedBy': uid,
+    });
+    await seed('organizations/$org/devices/dev_$uid', {
+      'uid': uid,
+      'status': 'active',
+      'readOnly': role == 'viewer',
+      'version': 1,
+    });
+  }
 
   /// A complete sync envelope, as the push worker writes it.
   Map<String, dynamic> envelope({
@@ -232,7 +287,7 @@ void main() {
     'version': version,
     'updatedBy': updatedBy ?? uid,
     'createdBy': uid,
-    'deviceId': 'dev_test',
+    'deviceId': 'dev_$uid',
     'createdAt': '2026-01-01T00:00:00Z',
     'updatedAt': '2026-01-02T00:00:00Z',
     'deletedAt': null,
@@ -322,6 +377,387 @@ void main() {
 
       // A synced sample the readers can see.
       await seed('organizations/$_org/samples/s1', envelope(uid: adminUid));
+    });
+
+    test(
+      'central cutover blocks legacy clinical writes while keeping reads',
+      () async {
+        await signInAs('admin@lab.test');
+        await seed('organizations/$_org', {
+          'commandProtocol': {'enabled': true},
+        });
+        try {
+          expectDenied(
+            'legacy create during central cutover',
+            await userPatch(
+              'organizations/$_org/samples/forbidden-legacy',
+              envelope(uid: adminUid),
+            ),
+          );
+          expectDenied(
+            'legacy update during central cutover',
+            await userPatch(
+              'organizations/$_org/samples/s1',
+              envelope(uid: adminUid, version: 2),
+            ),
+          );
+          expectAllowed(
+            'read remains available',
+            await userGet('organizations/$_org/samples/s1'),
+          );
+        } finally {
+          final response = await http.patch(
+            Uri.parse(
+              'http://$firestoreHost/$_dbPath/organizations/$_org?updateMask.fieldPaths=commandProtocol',
+            ),
+            headers: {
+              'Authorization': 'Bearer owner',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'fields': {}}),
+          );
+          expect(response.statusCode, 200);
+        }
+      },
+      skip: skip,
+    );
+
+    test(
+      'pilot feed never exposes unsupported entity types to members',
+      () async {
+        await seed('organizations/$_org/changeEvents/pilot-sample', {
+          'entityType': 'sample',
+        });
+        await seed('organizations/$_org/changeEvents/future-qc', {
+          'entityType': 'qcInspection',
+        });
+        await signInAs('lab@lab.test');
+        expectAllowed(
+          'permitted sample event',
+          await userGet('organizations/$_org/changeEvents/pilot-sample'),
+        );
+        expectDenied(
+          'unsupported quality event',
+          await userGet('organizations/$_org/changeEvents/future-qc'),
+        );
+        expectDenied(
+          'client receipt forgery',
+          await userPatch('organizations/$_org/commandReceipts/forged', {
+            'uid': labUid,
+          }),
+        );
+      },
+      skip: skip,
+    );
+
+    test(
+      'transport preserves identity and restores missing acknowledged rows',
+      () async {
+        await signInAs('admin@lab.test');
+        final original = envelope(uid: adminUid);
+        final path = 'organizations/$_org/samples/transport';
+        expectAllowed('create original', await userPatch(path, original));
+        final incoming = {
+          ...original,
+          'localId': '900',
+          'createdBy': 'other',
+          'materialName': 'Changed',
+        };
+        final plan = RemoteWritePolicy.plan(
+          organizationId: _org,
+          data: incoming,
+          baseVersion: 1,
+          current: original,
+        );
+        expect(plan.refusal, isNull);
+        expectAllowed(
+          'preserve original identity',
+          await userPatch(path, {...original, ...plan.payload}),
+        );
+        final restored = RemoteWritePolicy.plan(
+          organizationId: _org,
+          data: incoming..remove('createdAt'),
+          baseVersion: 9,
+        );
+        expect(restored.version, 1);
+        expectAllowed(
+          'recreate missing v1',
+          await userPatch(
+            'organizations/$_org/samples/transport-restored',
+            restored.payload,
+          ),
+        );
+      },
+      skip: skip,
+    );
+
+    test(
+      'server never resurrects a tombstone through a normal update',
+      () async {
+        await signInAs('admin@lab.test');
+        final path = 'organizations/$_org/samples/no-resurrection';
+        final original = envelope(uid: adminUid);
+        expectAllowed('create', await userPatch(path, original));
+        expectAllowed(
+          'tombstone',
+          await userPatch(path, {
+            ...original,
+            'version': 2,
+            'deletedAt': '2026-10-24T00:00:00Z',
+          }),
+        );
+        expectDenied(
+          'resurrect',
+          await userPatch(path, {...original, 'version': 3}),
+        );
+      },
+      skip: skip,
+    );
+
+    test('server denies read-only revoked and foreign devices', () async {
+      await signInAs('admin@lab.test');
+      final device = 'organizations/$_org/devices/dev_$adminUid';
+      try {
+        for (final state in [
+          {'uid': adminUid, 'status': 'active', 'readOnly': true},
+          {'uid': adminUid, 'status': 'revoked', 'readOnly': false},
+          {'uid': labUid, 'status': 'active', 'readOnly': false},
+        ]) {
+          await seed(device, state);
+          expectDenied(
+            'restricted device write',
+            await userPatch(
+              'organizations/$_org/samples/restricted-device',
+              envelope(uid: adminUid),
+            ),
+          );
+        }
+      } finally {
+        await seed(device, {
+          'uid': adminUid,
+          'status': 'active',
+          'readOnly': false,
+        });
+      }
+    }, skip: skip);
+
+    test(
+      'a member cannot remove its own device read-only restriction',
+      () async {
+        await signInAs('lab@lab.test');
+        final path = 'organizations/$_org/devices/dev_$labUid';
+        final device = {
+          'uid': labUid,
+          'status': 'active',
+          'version': 1,
+          'readOnly': true,
+        };
+        await seed(path, device);
+        try {
+          expectDenied(
+            'self enable writes',
+            await userPatch(path, {...device, 'readOnly': false}),
+          );
+        } finally {
+          await seed(path, {...device, 'readOnly': false});
+        }
+      },
+      skip: skip,
+    );
+
+    test(
+      'append receipts are private immutable and contain no business fields',
+      () async {
+        await signInAs('lab@lab.test');
+        final path =
+            'organizations/$_org/syncReceipts/$labUid/entries/${'a' * 64}';
+        expect((await userGet(path)).statusCode, 404);
+        final receipt = {
+          'fingerprint': 'b' * 64,
+          'deviceId': 'dev_$labUid',
+          'collectionId': 'auditLogs',
+          'documentId': 'audit-transport',
+          'version': 1,
+          'createdAt': DateTime.now().toUtc(),
+        };
+        expectAllowed('create own receipt', await userPatch(path, receipt));
+        expectAllowed('read own receipt', await userGet(path));
+        expectDenied('mutate receipt', await userPatch(path, receipt));
+        expectDenied(
+          'business values in receipt',
+          await userPatch(
+            'organizations/$_org/syncReceipts/$labUid/entries/${'c' * 64}',
+            {...receipt, 'chemicalResultsJson': '{}'},
+          ),
+        );
+        await signInAs('admin@lab.test');
+        expectDenied('read another member receipt', await userGet(path));
+        await signInAs('other@lab.test');
+        expectDenied('cross organization receipt', await userGet(path));
+      },
+      skip: skip,
+    );
+
+    test(
+      'lab atomically commits an audit and its receipt without audit read access',
+      () async {
+        await signInAs('lab@lab.test');
+        final auditPath = 'organizations/$_org/auditLogs/receipt-atomic-audit';
+        final receiptPath =
+            'organizations/$_org/syncReceipts/$labUid/entries/${'d' * 64}';
+        expectDenied('lab audit read', await userGet(auditPath));
+        final response = await http.post(
+          Uri.parse('http://$firestoreHost/$_dbPath:commit'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode({
+            'writes': [
+              {
+                'update': {
+                  'name':
+                      'projects/$_project/databases/(default)/documents/$auditPath',
+                  'fields': fields({
+                    'organizationId': _org,
+                    'userId': labUid,
+                    'userName': 'Lab',
+                    'deviceId': 'dev_$labUid',
+                    'action': 'CUSTOM_ROW_RECORDED',
+                    'entityType': 'qcCustomRow',
+                    'entityId': 'row',
+                    'detailsJson': '{}',
+                    'occurredAt': '2026-10-24',
+                    'version': 1,
+                  }),
+                },
+              },
+              {
+                'update': {
+                  'name':
+                      'projects/$_project/databases/(default)/documents/$receiptPath',
+                  'fields': fields({
+                    'fingerprint': 'e' * 64,
+                    'deviceId': 'dev_$labUid',
+                    'collectionId': 'auditLogs',
+                    'documentId': 'receipt-atomic-audit',
+                    'version': 1,
+                    'createdAt': DateTime.now().toUtc(),
+                  }),
+                },
+              },
+            ],
+          }),
+        );
+        expectAllowed('atomic append plus receipt', response);
+        expectAllowed('retry reads receipt', await userGet(receiptPath));
+        expectDenied('audit remains private', await userGet(auditPath));
+      },
+      skip: skip,
+    );
+
+    test(
+      'shared program records obey organization, viewer and writer permissions',
+      () async {
+        for (final collection in [
+          'parameters',
+          'materialBounds',
+          'organizationSettings',
+          'qcSops',
+          'qcSopRevisions',
+          'qcSopReads',
+        ]) {
+          final data = <String, dynamic>{
+            ...envelope(uid: adminUid),
+            if (collection == 'organizationSettings') ...{
+              'key': 'department_label',
+              'value': 'QA',
+            },
+            if (collection == 'qcSops') 'status': 'Draft',
+          };
+          final path = 'organizations/$_org/$collection/shared-test';
+          await signInAs('admin@lab.test');
+          expectAllowed(
+            'writer creates $collection',
+            await userPatch(path, data),
+          );
+          await signInAs('viewer@lab.test');
+          expectAllowed('viewer reads $collection', await userGet(path));
+          expectDenied(
+            'viewer cannot change $collection',
+            await userPatch(path, {
+              ...data,
+              'version': 2,
+              'updatedBy': viewerUid,
+            }),
+          );
+          await signInAs('other@lab.test');
+          expectDenied(
+            'other organization cannot read $collection',
+            await userGet(path),
+          );
+        }
+        await signInAs('admin@lab.test');
+        expectDenied(
+          'local file paths cannot become organization settings',
+          await userPatch(
+            'organizations/$_org/organizationSettings/local-path',
+            {
+              ...envelope(uid: adminUid),
+              'key': 'export_root_path',
+              'value': 'C:/private',
+            },
+          ),
+        );
+      },
+    );
+
+    test('private push tokens bind only to an active owned device', () async {
+      const device = 'viewer-push-phone';
+      await seed('organizations/$_org/devices/$device', {
+        'uid': viewerUid,
+        'status': 'active',
+        'version': 1,
+      });
+      final tokenPath = 'organizations/$_org/pushTokens/test-viewer-token';
+      final data = <String, dynamic>{
+        'uid': viewerUid,
+        'deviceId': device,
+        'token': 'synthetic-test-token',
+        'platform': 'android',
+        'updatedAt': '2026-10-24T00:00:00Z',
+      };
+      await signInAs('viewer@lab.test');
+      expectAllowed(
+        'read-only viewer registers own delivery token',
+        await userPatch(tokenPath, data),
+      );
+      expectDenied(
+        'tokens are never readable in the client',
+        await userGet(tokenPath),
+      );
+      expectDenied(
+        'another device cannot be impersonated',
+        await userPatch('organizations/$_org/pushTokens/forged-device', {
+          ...data,
+          'deviceId': 'unregistered',
+        }),
+      );
+      expectDenied(
+        'another organization cannot receive this token',
+        await userPatch('organizations/$_otherOrg/pushTokens/cross-org', data),
+      );
+      await signInAs('lab@lab.test');
+      expectDenied(
+        'another member cannot take over a token',
+        await userPatch(tokenPath, {...data, 'uid': labUid}),
+      );
+      await seed('organizations/$_org/devices/$device', {'status': 'revoked'});
+      await signInAs('viewer@lab.test');
+      expectDenied(
+        'revoked device cannot refresh its token',
+        await userPatch(tokenPath, data),
+      );
     });
 
     test('(a) a user without a profile document reads nothing', () async {
@@ -587,55 +1023,66 @@ void main() {
         ),
       );
 
-      // The admin activates (member + profile + activation audit in one batch
-      // each); now the member may read and write.
+      // Both authorization copies must change atomically.
       await signInAs('admin@lab.test');
-      expectAllowed(
-        'admin activates the member',
+      final activeMember = <String, dynamic>{
+        ...memberPayload(
+          'member_newcomer',
+          uid: newUid,
+          email: newEmail,
+          status: 'active',
+          version: 3,
+          updatedBy: adminUid,
+          updatedAt: '2026-01-03T00:00:00Z',
+        ),
+        'activatedAt': '2026-01-03T00:00:00Z',
+        'activatedBy': adminUid,
+      };
+      final activeProfile = <String, dynamic>{
+        ...userPayload(
+          newUid,
+          newEmail,
+          role: 'lab',
+          status: 'active',
+          version: 2,
+          updatedBy: adminUid,
+          memberId: 'member_newcomer',
+          inviteKey: 'inv1',
+          createdAt: '2026-01-02T00:00:00Z',
+          updatedAt: '2026-01-03T00:00:00Z',
+        ),
+        'activatedAt': '2026-01-03T00:00:00Z',
+        'activatedBy': adminUid,
+      };
+      expectDenied(
+        'activation cannot leave the profile stale',
         await userPatch(
           'organizations/$_org/members/member_newcomer',
-          <String, dynamic>{
-            ...memberPayload(
-              'member_newcomer',
-              uid: newUid,
-              email: newEmail,
-              status: 'active',
-              version: 3,
-              updatedBy: adminUid,
-              updatedAt: '2026-01-03T00:00:00Z',
-            ),
-            'activatedAt': '2026-01-03T00:00:00Z',
-            'activatedBy': adminUid,
-          },
+          activeMember,
         ),
       );
       expectAllowed(
-        'admin activates the profile',
-        await userPatch(
-          'users/$newUid',
-          <String, dynamic>{
-            ...userPayload(
-              newUid,
-              newEmail,
-              role: 'lab',
-              status: 'active',
-              version: 2,
-              updatedBy: adminUid,
-              memberId: 'member_newcomer',
-              inviteKey: 'inv1',
-              createdAt: '2026-01-02T00:00:00Z',
-              updatedAt: '2026-01-03T00:00:00Z',
-            ),
-            'activatedAt': '2026-01-03T00:00:00Z',
-            'activatedBy': adminUid,
-          },
-        ),
+        'admin activates both copies together',
+        await userCommit({
+          'organizations/$_org/members/member_newcomer': activeMember,
+          'users/$newUid': activeProfile,
+        }),
       );
 
       await signInAs(newEmail);
       expectAllowed(
         'activated member reads',
         await userList('organizations/$_org/samples'),
+      );
+      expectAllowed(
+        'activated member enrolls its device',
+        await userPatch('organizations/$_org/devices/dev_$newUid', {
+          'uid': newUid,
+          'role': 'lab',
+          'readOnly': false,
+          'status': 'active',
+          'version': 1,
+        }),
       );
       expectAllowed(
         'activated member writes',
@@ -645,6 +1092,135 @@ void main() {
         ),
       );
     });
+
+    test(
+      'multi-role grants and role changes cannot bypass the profile mirror',
+      () async {
+        final uid = await createAuthUser('multirole@lab.test');
+        final memberId = 'member_$uid';
+        final profile = userPayload(uid, 'multirole@lab.test', role: 'lab');
+        final member = memberPayload(
+          memberId,
+          uid: uid,
+          email: 'multirole@lab.test',
+          role: 'lab',
+          status: 'active',
+        );
+        await seed('users/$uid', {
+          ...profile,
+          'roles': ['lab', 'nutritionist'],
+        });
+        await seed('organizations/$_org/members/$memberId', {
+          ...member,
+          'roles': ['lab', 'nutritionist'],
+        });
+        await seed('organizations/$_org/devices/dev_$uid', {
+          'uid': uid,
+          'status': 'active',
+          'readOnly': false,
+          'role': 'lab',
+          'version': 1,
+        });
+        await signInAs('multirole@lab.test');
+        expectAllowed(
+          'primary role creates sample',
+          await userPatch(
+            'organizations/$_org/samples/multi-sample',
+            envelope(uid: uid),
+          ),
+        );
+        expectAllowed(
+          'secondary role creates formulation',
+          await userPatch('organizations/$_org/labConfig/nf_multi-formula', {
+            ...envelope(uid: uid),
+            'configType': 'nutrition_formulation',
+          }),
+        );
+        expectDenied(
+          'cannot add own manager role',
+          await userPatch('users/$uid', {
+            ...profile,
+            'roles': ['lab', 'quality_manager', 'nutritionist'],
+            'version': 2,
+          }),
+        );
+        await signInAs('admin@lab.test');
+        final revisedProfile = {
+          ...profile,
+          'roles': ['lab'],
+          'version': 2,
+          'updatedBy': adminUid,
+        };
+        final revisedMember = {
+          ...member,
+          'roles': ['lab'],
+          'version': 2,
+          'updatedBy': adminUid,
+        };
+        expectDenied(
+          'one-sided role change',
+          await userPatch('users/$uid', revisedProfile),
+        );
+        expectAllowed(
+          'atomic role change',
+          await userCommit({
+            'users/$uid': revisedProfile,
+            'organizations/$_org/members/$memberId': revisedMember,
+          }),
+        );
+        await signInAs('multirole@lab.test');
+        expectDenied(
+          'removed secondary role stops writes',
+          await userPatch('organizations/$_org/labConfig/nf_multi-removed', {
+            ...envelope(uid: uid),
+            'configType': 'nutrition_formulation',
+          }),
+        );
+        for (final roles in [
+          <String>[],
+          ['lab', 'viewer'],
+          ['lab', 'unknown'],
+          ['lab', 'lab'],
+        ]) {
+          await seed('users/$uid', {'roles': roles});
+          expectDenied(
+            'malformed roles fail closed',
+            await userPatch(
+              'organizations/$_org/samples/multi-invalid',
+              envelope(uid: uid),
+            ),
+          );
+        }
+        await seed('users/$uid', {
+          'roles': ['lab'],
+        });
+        await signInAs('admin@lab.test');
+        final disabledProfile =
+            <String, dynamic>{
+                ...revisedProfile,
+                'status': 'disabled',
+                'version': 3,
+              }
+              ..remove('organizationId')
+              ..remove('memberId');
+        expectAllowed(
+          'manager disables both copies and releases the binding',
+          await userCommit({
+            'users/$uid': disabledProfile,
+            'organizations/$_org/members/$memberId': {
+              ...revisedMember,
+              'status': 'disabled',
+              'version': 3,
+            },
+          }),
+        );
+        await signInAs('multirole@lab.test');
+        expectDenied(
+          'disabled employee cannot read the company',
+          await userGet('organizations/$_org/samples/multi-sample'),
+        );
+      },
+    );
 
     test('the audit log is append-only and closed to non-auditors', () async {
       await signInAs('admin@lab.test');
@@ -658,7 +1234,7 @@ void main() {
           'entityType': 'sample',
           'entityId': 's1',
           'detailsJson': null,
-          'deviceId': 'dev_test',
+          'deviceId': 'dev_$adminUid',
           'occurredAt': '2026-01-01T00:00:00Z',
           'version': 1,
         }),
@@ -922,72 +1498,74 @@ void main() {
         );
       });
 
-      test('an unbound account creates a trial company as trial_owner',
-          () async {
-        const email = 'founder@trial.test';
-        final uid = await createAuthUser(email);
-        await signInAs(email);
-        expectAllowed(
-          'unbound account creates a trial organization',
-          await userPatch('organizations/org_trial_new', <String, dynamic>{
-            'name': 'Trial Co',
-            'ownerUid': uid,
-            'status': 'trial',
-            'schemaVersion': 2,
-            'version': 1,
-            'trialStartedAt': '2026-01-01T00:00:00Z',
-            'trialEndsAt': '2026-01-31T00:00:00Z',
-            'trialConsumed': false,
-            'manuallyActivated': false,
-          }),
-        );
-        expectAllowed(
-          'founder claims the trial_owner profile',
-          await userPatch('users/$uid', <String, dynamic>{
-            ...userPayload(
-              uid,
-              email,
-              org: 'org_trial_new',
-              role: 'trial_owner',
-              status: 'active',
-              memberId: 'member_trial',
-              createdAt: '2026-01-02T00:00:00Z',
-              updatedAt: '2026-01-02T00:00:00Z',
+      test(
+        'an unbound account creates a trial company as trial_owner',
+        () async {
+          const email = 'founder@trial.test';
+          final uid = await createAuthUser(email);
+          await signInAs(email);
+          expectAllowed(
+            'unbound account creates a trial organization',
+            await userPatch('organizations/org_trial_new', <String, dynamic>{
+              'name': 'Trial Co',
+              'ownerUid': uid,
+              'status': 'trial',
+              'schemaVersion': 2,
+              'version': 1,
+              'trialStartedAt': '2026-01-01T00:00:00Z',
+              'trialEndsAt': '2026-01-31T00:00:00Z',
+              'trialConsumed': false,
+              'manuallyActivated': false,
+            }),
+          );
+          expectAllowed(
+            'founder claims the trial_owner profile',
+            await userPatch('users/$uid', <String, dynamic>{
+              ...userPayload(
+                uid,
+                email,
+                org: 'org_trial_new',
+                role: 'trial_owner',
+                status: 'active',
+                memberId: 'member_trial',
+                createdAt: '2026-01-02T00:00:00Z',
+                updatedAt: '2026-01-02T00:00:00Z',
+              ),
+              'memberId': 'member_trial',
+            }),
+          );
+          expectAllowed(
+            'founder writes the trial_owner member document',
+            await userPatch(
+              'organizations/org_trial_new/members/member_trial',
+              memberPayload(
+                'member_trial',
+                uid: uid,
+                email: email,
+                role: 'trial_owner',
+                status: 'active',
+                version: 1,
+                updatedBy: uid,
+              ),
             ),
-            'memberId': 'member_trial',
-          }),
-        );
-        expectAllowed(
-          'founder writes the trial_owner member document',
-          await userPatch(
-            'organizations/org_trial_new/members/member_trial',
-            memberPayload(
-              'member_trial',
-              uid: uid,
-              email: email,
-              role: 'trial_owner',
-              status: 'active',
-              version: 1,
-              updatedBy: uid,
-            ),
-          ),
-        );
-        // Bound now: a second company is refused.
-        expectDenied(
-          'trial owner creates a second organization',
-          await userPatch('organizations/org_trial_second', <String, dynamic>{
-            'name': 'Second Co',
-            'ownerUid': uid,
-            'status': 'trial',
-            'schemaVersion': 2,
-            'version': 1,
-            'trialStartedAt': '2026-01-01T00:00:00Z',
-            'trialEndsAt': '2026-01-31T00:00:00Z',
-            'trialConsumed': false,
-            'manuallyActivated': false,
-          }),
-        );
-      });
+          );
+          // Bound now: a second company is refused.
+          expectDenied(
+            'trial owner creates a second organization',
+            await userPatch('organizations/org_trial_second', <String, dynamic>{
+              'name': 'Second Co',
+              'ownerUid': uid,
+              'status': 'trial',
+              'schemaVersion': 2,
+              'version': 1,
+              'trialStartedAt': '2026-01-01T00:00:00Z',
+              'trialEndsAt': '2026-01-31T00:00:00Z',
+              'trialConsumed': false,
+              'manuallyActivated': false,
+            }),
+          );
+        },
+      );
 
       test('org creation without trial fields is rejected', () async {
         const email = 'nodates@trial.test';
@@ -1005,25 +1583,31 @@ void main() {
         );
       });
 
-      test('org creation with status active is rejected (trial only)', () async {
-        const email = 'activebypass@trial.test';
-        final uid = await createAuthUser(email);
-        await signInAs(email);
-        expectDenied(
-          'organization created directly as active',
-          await userPatch('organizations/org_trial_activebypass', <String, dynamic>{
-            'name': 'Bypass Co',
-            'ownerUid': uid,
-            'status': 'active',
-            'schemaVersion': 2,
-            'version': 1,
-            'trialStartedAt': '2026-01-01T00:00:00Z',
-            'trialEndsAt': '2026-01-31T00:00:00Z',
-            'trialConsumed': false,
-            'manuallyActivated': false,
-          }),
-        );
-      });
+      test(
+        'org creation with status active is rejected (trial only)',
+        () async {
+          const email = 'activebypass@trial.test';
+          final uid = await createAuthUser(email);
+          await signInAs(email);
+          expectDenied(
+            'organization created directly as active',
+            await userPatch(
+              'organizations/org_trial_activebypass',
+              <String, dynamic>{
+                'name': 'Bypass Co',
+                'ownerUid': uid,
+                'status': 'active',
+                'schemaVersion': 2,
+                'version': 1,
+                'trialStartedAt': '2026-01-01T00:00:00Z',
+                'trialEndsAt': '2026-01-31T00:00:00Z',
+                'trialConsumed': false,
+                'manuallyActivated': false,
+              },
+            ),
+          );
+        },
+      );
     });
 
     /// Trial lifecycle pinning: no client may change `status`,

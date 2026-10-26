@@ -48,15 +48,9 @@ class _LabReportsTabState extends State<LabReportsTab> {
           ),
         ),
         IconButton(
-          tooltip: AppText.t(
-            'رقم فورم هذا التقرير',
-            'This report form number',
-          ),
-          onPressed: () => showQaFormNoDialog(
-            context,
-            key: formNoKey,
-            title: dialogTitle,
-          ),
+          tooltip: AppText.t('رقم فورم هذا التقرير', 'This report form number'),
+          onPressed: () =>
+              showQaFormNoDialog(context, key: formNoKey, title: dialogTitle),
           icon: const Icon(Icons.settings_outlined),
         ),
       ],

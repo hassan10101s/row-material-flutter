@@ -83,7 +83,7 @@ class InspectionRepo {
     void check(Map<String, dynamic> refs, Map<String, dynamic> results) {
       for (final entry in refs.entries) {
         if (!isReferenceRequired(entry.value)) continue;
-        final name = '${entry.key}'.trim();
+        final name = entry.key.trim();
         if (name.isEmpty) continue;
         final raw = results[name];
         final values = raw is List
@@ -184,8 +184,9 @@ class InspectionRepo {
       );
     }
     final materialId = int.tryParse('${payload['material_id'] ?? 0}') ?? 0;
-    if (materialId == 0)
+    if (materialId == 0) {
       throw ValidationError(AppErrors.materialSelectionRequired);
+    }
     final material = await referenceRepo.getMaterial(
       materialId,
       inspectionDate: '${payload['inspection_date'] ?? todayIso()}',

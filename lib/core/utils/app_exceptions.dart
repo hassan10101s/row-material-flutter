@@ -8,6 +8,10 @@ abstract interface class UserFacingError {
   String get userMessage;
 }
 
+/// A durably saved request that still needs a server decision. Presentation
+/// should describe its pending state instead of presenting it as a failed save.
+abstract interface class PendingOperation implements UserFacingError {}
+
 class AppError implements Exception, UserFacingError {
   final String message;
   const AppError(this.message);

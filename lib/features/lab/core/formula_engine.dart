@@ -146,8 +146,18 @@ double convertQuantityOrThrow(double qty, String fromUnit, String toUnit) {
 }
 
 const List<String> _arabicMonths = [
-  'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-  'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر',
+  'يناير',
+  'فبراير',
+  'مارس',
+  'أبريل',
+  'مايو',
+  'يونيو',
+  'يوليو',
+  'أغسطس',
+  'سبتمبر',
+  'أكتوبر',
+  'نوفمبر',
+  'ديسمبر',
 ];
 
 String monthLabel(String key) {
@@ -159,32 +169,93 @@ String monthLabel(String key) {
 // ── Constant presets ─────────────────────────────────────────────────────
 
 const List<Map<String, dynamic>> constantPresetsList = [
-  {'symbol': 'F_PROT', 'name': 'Kjeldahl protein factor', 'value': 6.25,
-   'unit': '', 'unit_dim': '', 'description': 'General protein conversion factor (N x 6.25).'},
-  {'symbol': 'F_WHEAT', 'name': 'Kjeldahl wheat protein factor', 'value': 5.70,
-   'unit': '', 'unit_dim': '', 'description': 'Wheat protein conversion factor (N x 5.70).'},
-  {'symbol': 'F_DAIRY', 'name': 'Kjeldahl dairy protein factor', 'value': 6.38,
-   'unit': '', 'unit_dim': '', 'description': 'Dairy protein conversion factor (N x 6.38).'},
-  {'symbol': 'K_LIPID', 'name': 'Total lipid factor', 'value': 1.4007,
-   'unit': '', 'unit_dim': '', 'description': 'Factor used in some lipid/acidimetric methods.'},
-  {'symbol': 'D_WATER', 'name': 'Density of water', 'value': 1.0,
-   'unit': 'g', 'unit_dim': 'mass', 'description': 'Density of water in g/mL (1 g per mL).'},
-  {'symbol': 'MV_DIL', 'name': 'Dilution factor (recipe)', 'value': 1.0,
-   'unit': '', 'unit_dim': '', 'description': 'Recipe dilution factor to apply.'},
-  {'symbol': 'C_NACL', 'name': 'Molar mass NaCl', 'value': 58.44,
-   'unit': 'g', 'unit_dim': 'mass', 'description': 'Molar mass of sodium chloride (g/mol).'},
-  {'symbol': 'C_NAOH', 'name': 'Molar mass NaOH', 'value': 40.0,
-   'unit': 'g', 'unit_dim': 'mass', 'description': 'Molar mass of sodium hydroxide (g/mol).'},
-  {'symbol': 'C_HCL', 'name': 'Molar mass HCl', 'value': 36.46,
-   'unit': 'g', 'unit_dim': 'mass', 'description': 'Molar mass of hydrogen chloride (g/mol).'},
-  {'symbol': 'M_N', 'name': 'Molar mass of nitrogen', 'value': 14.007,
-   'unit': 'g', 'unit_dim': 'mass', 'description': 'Atomic mass of nitrogen (g/mol).'},
+  {
+    'symbol': 'F_PROT',
+    'name': 'Kjeldahl protein factor',
+    'value': 6.25,
+    'unit': '',
+    'unit_dim': '',
+    'description': 'General protein conversion factor (N x 6.25).',
+  },
+  {
+    'symbol': 'F_WHEAT',
+    'name': 'Kjeldahl wheat protein factor',
+    'value': 5.70,
+    'unit': '',
+    'unit_dim': '',
+    'description': 'Wheat protein conversion factor (N x 5.70).',
+  },
+  {
+    'symbol': 'F_DAIRY',
+    'name': 'Kjeldahl dairy protein factor',
+    'value': 6.38,
+    'unit': '',
+    'unit_dim': '',
+    'description': 'Dairy protein conversion factor (N x 6.38).',
+  },
+  {
+    'symbol': 'K_LIPID',
+    'name': 'Total lipid factor',
+    'value': 1.4007,
+    'unit': '',
+    'unit_dim': '',
+    'description': 'Factor used in some lipid/acidimetric methods.',
+  },
+  {
+    'symbol': 'D_WATER',
+    'name': 'Density of water',
+    'value': 1.0,
+    'unit': 'g',
+    'unit_dim': 'mass',
+    'description': 'Density of water in g/mL (1 g per mL).',
+  },
+  {
+    'symbol': 'MV_DIL',
+    'name': 'Dilution factor (recipe)',
+    'value': 1.0,
+    'unit': '',
+    'unit_dim': '',
+    'description': 'Recipe dilution factor to apply.',
+  },
+  {
+    'symbol': 'C_NACL',
+    'name': 'Molar mass NaCl',
+    'value': 58.44,
+    'unit': 'g',
+    'unit_dim': 'mass',
+    'description': 'Molar mass of sodium chloride (g/mol).',
+  },
+  {
+    'symbol': 'C_NAOH',
+    'name': 'Molar mass NaOH',
+    'value': 40.0,
+    'unit': 'g',
+    'unit_dim': 'mass',
+    'description': 'Molar mass of sodium hydroxide (g/mol).',
+  },
+  {
+    'symbol': 'C_HCL',
+    'name': 'Molar mass HCl',
+    'value': 36.46,
+    'unit': 'g',
+    'unit_dim': 'mass',
+    'description': 'Molar mass of hydrogen chloride (g/mol).',
+  },
+  {
+    'symbol': 'M_N',
+    'name': 'Molar mass of nitrogen',
+    'value': 14.007,
+    'unit': 'g',
+    'unit_dim': 'mass',
+    'description': 'Atomic mass of nitrogen (g/mol).',
+  },
 ];
 
 /// Default analyses seeded on first lab setup.
 const List<Map<String, dynamic>> defaultAnalyses = [
   {
-    'name': 'Protein', 'unit': '%',
+    'name': 'Protein',
+    'unit': '%',
     'description': 'Kjeldahl total protein',
     'dynamic_fields': ['Sample Name', 'Notes'],
     'items': [
@@ -194,19 +265,27 @@ const List<Map<String, dynamic>> defaultAnalyses = [
     ],
   },
   {
-    'name': 'Fat', 'unit': '%', 'description': 'Soxhlet ether extract',
+    'name': 'Fat',
+    'unit': '%',
+    'description': 'Soxhlet ether extract',
     'dynamic_fields': ['Sample Name', 'Notes'],
     'items': [
       {'name': 'Petroleum Ether', 'qty': 200, 'unit': 'mL'},
     ],
   },
   {
-    'name': 'Moisture', 'unit': '%', 'description': 'Oven dry method',
-    'dynamic_fields': ['Sample Name', 'Notes'], 'items': [],
+    'name': 'Moisture',
+    'unit': '%',
+    'description': 'Oven dry method',
+    'dynamic_fields': ['Sample Name', 'Notes'],
+    'items': [],
   },
   {
-    'name': 'Ash', 'unit': '%', 'description': 'Muffle furnace',
-    'dynamic_fields': ['Sample Name', 'Notes'], 'items': [],
+    'name': 'Ash',
+    'unit': '%',
+    'description': 'Muffle furnace',
+    'dynamic_fields': ['Sample Name', 'Notes'],
+    'items': [],
   },
 ];
 
@@ -267,11 +346,18 @@ Map<String, dynamic> resolveConstants(
   double convertDim(Map<String, dynamic> desc, double baseValue) {
     final u = '${desc['unit'] ?? ''}'.trim().toLowerCase();
     final dim = unitDimOf(u);
-    if (targetDim.isNotEmpty && dim.isNotEmpty && dim != 'count' && targetDim != dim) {
-      throw ValidationError(AppErrors.formulaUnitDimMismatch(
-          desc['symbol'] ?? '', u, targetDim));
+    if (targetDim.isNotEmpty &&
+        dim.isNotEmpty &&
+        dim != 'count' &&
+        targetDim != dim) {
+      throw ValidationError(
+        AppErrors.formulaUnitDimMismatch(desc['symbol'] ?? '', u, targetDim),
+      );
     }
-    if (targetDim.isNotEmpty && targetDim != 'count' && dim.isNotEmpty && dim != 'count') {
+    if (targetDim.isNotEmpty &&
+        targetDim != 'count' &&
+        dim.isNotEmpty &&
+        dim != 'count') {
       return unitBaseValue(baseValue, u);
     }
     return baseValue;
@@ -282,7 +368,8 @@ Map<String, dynamic> resolveConstants(
   final derived = <String, List<Object?>>{};
   for (final symbol in descs.keys) {
     final desc = descs[symbol]!;
-    final isExpr = (desc['is_expression'] as Object?) == 1 ||
+    final isExpr =
+        (desc['is_expression'] as Object?) == 1 ||
         desc['is_expression'] is bool && desc['is_expression'] == true;
     if (!isExpr) continue;
     final expr = '${desc['expression'] ?? ''}'.trim();
@@ -314,7 +401,9 @@ Map<String, dynamic> resolveConstants(
         final vals = <String, Object?>{};
         var allResolved = true;
         for (final u in treeVars) {
-          if (!resolved.containsKey(u) && u.toLowerCase() != 'true' && u.toLowerCase() != 'false') {
+          if (!resolved.containsKey(u) &&
+              u.toLowerCase() != 'true' &&
+              u.toLowerCase() != 'false') {
             allResolved = false;
             break;
           }
@@ -325,7 +414,9 @@ Map<String, dynamic> resolveConstants(
         try {
           result = FormulaEvaluator.eval(tree, values: vals);
         } on ValidationError catch (exc) {
-          throw ValidationError(AppErrors.formulaEvalError(symbol, exc.message));
+          throw ValidationError(
+            AppErrors.formulaEvalError(symbol, exc.message),
+          );
         }
         value = convertDim(desc, _toNum(result));
       } else {
@@ -354,14 +445,19 @@ Map<String, dynamic> resolveConstants(
     }
     if (!progressed) {
       final unresolved = pending.toList()..sort();
-      throw ValidationError(AppErrors.formulaResolveFailed(unresolved.join(', ')));
+      throw ValidationError(
+        AppErrors.formulaResolveFailed(unresolved.join(', ')),
+      );
     }
   }
 
   if (exprVars != null) {
     final missing = [
       for (final v in exprVars)
-        if (!resolved.containsKey(v) && v.toLowerCase() != 'true' && v.toLowerCase() != 'false') v
+        if (!resolved.containsKey(v) &&
+            v.toLowerCase() != 'true' &&
+            v.toLowerCase() != 'false')
+          v,
     ];
     if (missing.isNotEmpty) {
       throw ValidationError(AppErrors.formulaMissingValues(missing.join(', ')));
@@ -381,26 +477,36 @@ double _roundTo(double value, int digits) {
   return (value * f).roundToDouble() / f;
 }
 
-double evaluateFormula(String expression,
-    {Map<String, dynamic>? values,
-    Map<String, dynamic>? constants,
-    String targetUnit = ''}) {
+double evaluateFormula(
+  String expression, {
+  Map<String, dynamic>? values,
+  Map<String, dynamic>? constants,
+  String targetUnit = '',
+}) {
   final expr = expression.trim();
   if (expr.isEmpty) throw ValidationError(AppErrors.formulaEmpty);
-  final resolved =
-      resolveConstants(constants ?? const {}, targetUnit: targetUnit);
+  final resolved = resolveConstants(
+    constants ?? const {},
+    targetUnit: targetUnit,
+  );
   final tree = FormulaParser.parse(expr);
   final safeValues = <String, Object?>{};
   (values ?? {}).forEach((k, v) {
     if (resolved.containsKey(k)) return;
     safeValues[k] = v;
   });
-  final r = FormulaEvaluator.eval(tree, values: safeValues, constants: resolved);
+  final r = FormulaEvaluator.eval(
+    tree,
+    values: safeValues,
+    constants: resolved,
+  );
   return _toNum(r);
 }
 
 Map<String, dynamic> constantPreviewValue(
-    Map<String, dynamic> desc, Map<String, dynamic>? allConstants) {
+  Map<String, dynamic> desc,
+  Map<String, dynamic>? allConstants,
+) {
   final symbol = '${desc['symbol'] ?? ''}'.trim();
   try {
     final merged = Map<String, dynamic>.from(allConstants ?? const {});
@@ -530,8 +636,7 @@ class FormulaParser {
     if (_pos + word.length <= _src.length &&
         _src.substring(_pos, _pos + word.length) == word) {
       final next = _pos + word.length;
-      if (next < _src.length &&
-          _isIdentCode(_src.codeUnitAt(next))) {
+      if (next < _src.length && _isIdentCode(_src.codeUnitAt(next))) {
         return false;
       }
       return true;
@@ -747,8 +852,15 @@ class FormulaParser {
   }
 
   static final Map<String, String> _funcMap = {
-    'abs': 'abs', 'round': 'round', 'min': 'min', 'max': 'max',
-    'sqrt': 'sqrt', 'pow': 'pow', 'log': 'log', 'log10': 'log10', 'exp': 'exp',
+    'abs': 'abs',
+    'round': 'round',
+    'min': 'min',
+    'max': 'max',
+    'sqrt': 'sqrt',
+    'pow': 'pow',
+    'log': 'log',
+    'log10': 'log10',
+    'exp': 'exp',
   };
 
   static void _validate(Expr node) {
@@ -787,9 +899,11 @@ class FormulaParser {
 }
 
 class FormulaEvaluator {
-  static Object eval(Expr node,
-      {Map<String, Object?>? values,
-      Map<String, Object?>? constants}) {
+  static Object eval(
+    Expr node, {
+    Map<String, Object?>? values,
+    Map<String, Object?>? constants,
+  }) {
     switch (node) {
       case NumExpr n:
         return n.value;
@@ -835,9 +949,13 @@ class FormulaEvaluator {
         final v = _toNum(eval(u.operand, values: values, constants: constants));
         return u.op == '-' ? -v : v;
       case CompareExpr c:
-        final valuesList = <double>[_toNum(eval(c.left, values: values, constants: constants))];
+        final valuesList = <double>[
+          _toNum(eval(c.left, values: values, constants: constants)),
+        ];
         for (final comp in c.comparators) {
-          valuesList.add(_toNum(eval(comp, values: values, constants: constants)));
+          valuesList.add(
+            _toNum(eval(comp, values: values, constants: constants)),
+          );
         }
         var outcome = true;
         for (var i = 0; i < c.ops.length; i++) {
@@ -862,20 +980,28 @@ class FormulaEvaluator {
         if (bo.op == 'and') {
           var result = true;
           for (final operand in bo.operands) {
-            result = result && _toNum(eval(operand, values: values, constants: constants)) != 0;
+            result =
+                result &&
+                _toNum(eval(operand, values: values, constants: constants)) !=
+                    0;
           }
           return result ? 1.0 : 0.0;
         }
         var result = false;
         for (final operand in bo.operands) {
-          result = result || _toNum(eval(operand, values: values, constants: constants)) != 0;
+          result =
+              result ||
+              _toNum(eval(operand, values: values, constants: constants)) != 0;
         }
         return result ? 1.0 : 0.0;
       case NotExpr n:
         final v = _toNum(eval(n.operand, values: values, constants: constants));
         return v == 0 ? 1.0 : 0.0;
       case CallExpr c:
-        final args = [for (final a in c.args) _toNum(eval(a, values: values, constants: constants))];
+        final args = [
+          for (final a in c.args)
+            _toNum(eval(a, values: values, constants: constants)),
+        ];
         final result = _callFunction(c.name, args);
         if (result.isInfinite || result.isNaN) {
           throw ValidationError(AppErrors.formulaInvalidArguments(c.name));
@@ -900,7 +1026,9 @@ class FormulaEvaluator {
       case 'pow':
         return math.pow(args[0], args[1]).toDouble();
       case 'log':
-        return args.length == 1 ? math.log(args.first) : math.log(args.first) / math.log(args[1]);
+        return args.length == 1
+            ? math.log(args.first)
+            : math.log(args.first) / math.log(args[1]);
       case 'log10':
         return math.log(args.first) / math.ln10;
       case 'exp':
@@ -1020,8 +1148,9 @@ bool isOutOfRange(String? actualValue, num? minimum, num? maximum) {
 /// parse_numeric_range port from core/utils.py.
 Map<String, dynamic> parseNumericRange(Object? value) {
   final raw = referenceValueText(value);
-  final direct =
-      RegExp(r'^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*$').firstMatch(raw);
+  final direct = RegExp(
+    r'^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*$',
+  ).firstMatch(raw);
   if (direct != null) {
     final minText = direct.group(1)!;
     final maxText = direct.group(2)!;
@@ -1084,7 +1213,14 @@ String inferChemicalUnit(Object? parameterData, [String? parameterName]) {
   }
   final normalized = name.trim().toLowerCase();
   const ppmTokens = [
-    'afla', 'aflat', 'aflatoxin', 'okra', 'ochra', 'ochratoxin', 'افلا', 'اكرا',
+    'afla',
+    'aflat',
+    'aflatoxin',
+    'okra',
+    'ochra',
+    'ochratoxin',
+    'افلا',
+    'اكرا',
   ];
   for (final token in ppmTokens) {
     if (normalized.contains(token)) return 'ppm';
@@ -1101,20 +1237,20 @@ bool isPhysicalOutOfRange(String? actualValue, Object? requirement) {
   if (reqStr == 'negative') return valStr != 'negative';
 
   final rangeSep = reqStr.replaceAll(RegExp(r'\s*:\s*'), '-');
-  final rangeMatch =
-      RegExp(r'^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*$').firstMatch(rangeSep);
+  final rangeMatch = RegExp(
+    r'^\s*(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)\s*$',
+  ).firstMatch(rangeSep);
   if (rangeMatch != null) {
     final minLimit = double.tryParse(rangeMatch.group(1)!);
     final maxLimit = double.tryParse(rangeMatch.group(2)!);
     final current = double.tryParse(valStr);
-    if (minLimit != null &&
-        maxLimit != null &&
-        current != null) {
+    if (minLimit != null && maxLimit != null && current != null) {
       return current < minLimit || current > maxLimit;
     }
   }
 
-  final isAbnormal = valStr.contains('abnormal') ||
+  final isAbnormal =
+      valStr.contains('abnormal') ||
       valStr.contains('غير طبيعي') ||
       valStr.contains('غير مطابق') ||
       RegExp(r'\bno\b').hasMatch(valStr) ||
@@ -1125,7 +1261,8 @@ bool isPhysicalOutOfRange(String? actualValue, Object? requirement) {
       valStr.contains('سيء');
   if (isAbnormal) return true;
 
-  final isNormal = valStr.contains('normal') ||
+  final isNormal =
+      valStr.contains('normal') ||
       valStr.contains('طبيعي') ||
       valStr.contains('مطابق') ||
       valStr.contains('ok') ||

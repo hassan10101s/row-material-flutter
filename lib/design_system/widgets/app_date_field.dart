@@ -36,6 +36,7 @@ class AppDateField extends StatelessWidget {
     final minimum = DateUtils.dateOnly(firstDate ?? DateTime(1900));
     final maximum = DateUtils.dateOnly(lastDate ?? DateTime(2100));
     return TextFormField(
+      style: Theme.of(context).textTheme.bodyMedium,
       controller: controller,
       enabled: enabled,
       keyboardType: TextInputType.datetime,
@@ -46,7 +47,6 @@ class AppDateField extends StatelessWidget {
         hintText: 'YYYY-MM-DD',
         errorText: errorText,
         isDense: isDense,
-        border: const OutlineInputBorder(),
         suffixIcon: IconButton(
           tooltip: AppText.t('اختيار التاريخ', 'Choose date'),
           onPressed: enabled
@@ -68,9 +68,9 @@ class AppDateField extends StatelessWidget {
                     lastDate: maximum,
                   );
                   if (picked == null) return;
-                  final value = DateUtils.dateOnly(picked)
-                      .toIso8601String()
-                      .substring(0, 10);
+                  final value = DateUtils.dateOnly(
+                    picked,
+                  ).toIso8601String().substring(0, 10);
                   controller.value = TextEditingValue(
                     text: value,
                     selection: TextSelection.collapsed(offset: value.length),

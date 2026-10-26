@@ -23,7 +23,10 @@ abstract interface class ReportRepository {
   // ── Inspection documents ───────────────────────────────────────
 
   /// Full inspection report for one sample.
-  Future<ReportDoc> inspectionReport(int inspectionId);
+  Future<ReportDoc> inspectionReport(
+    int inspectionId, {
+    bool includeAnalysisDetails = false,
+  });
 
   /// The small label/PDF sticker for one sample.
   Future<ReportDoc> sampleLabelPdf(int inspectionId);
@@ -79,11 +82,7 @@ abstract interface class ReportRepository {
   // ── Disk output ────────────────────────────────────────────────
 
   /// Writes [doc] into the export directory tree and returns the written file.
-  Future<File> saveReport(
-    ReportDoc doc, {
-    DateTime? date,
-    bool asLabel,
-  });
+  Future<File> saveReport(ReportDoc doc, {DateTime? date, bool asLabel});
 }
 
 /// A rendered report, ready to be written to disk.
@@ -91,11 +90,7 @@ abstract interface class ReportRepository {
 /// Deliberately inert: the filename and the bytes, nothing about the template
 /// engine or the PDF library that produced them.
 class ReportDoc {
-  const ReportDoc({
-    required this.filename,
-    required this.bytes,
-    this.title,
-  });
+  const ReportDoc({required this.filename, required this.bytes, this.title});
 
   /// Suggested file name (sanitized, already ends with `.pdf`).
   final String filename;

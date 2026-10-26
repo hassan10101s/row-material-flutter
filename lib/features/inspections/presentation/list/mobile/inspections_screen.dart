@@ -309,161 +309,193 @@ class MobileInspectionsScreen extends StatelessWidget {
               SliverPadding(
                 padding: const EdgeInsets.all(AppSpacing.pageMobile),
                 sliver: SliverToBoxAdapter(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      AppPageHeader(
-                        title: isProduct
-                            ? AppText.t('فحص المنتجات', 'Product inspections')
-                            : AppStrings.inspections,
-                        subtitle:
-                            '${state.total} ${AppText.t('فحص', 'inspections')}',
-                        icon: isProduct
-                            ? Icons.factory_outlined
-                            : Icons.inventory_2_outlined,
-                      ),
-                const SizedBox(height: AppSpacing.md),
-                // ── Compact filter row (mobile only) ───────────────────
-                // One ~48dp row: the search takes the width, everything else
-                // is an icon button. The old bar stacked a full-width search
-                // + a full-width status dropdown + three buttons, which ate
-                // half the screen before the first card. Status now lives
-                // only in the filter sheet (same source of truth, no loss).
-                Row(
-                  children: [
-                    Expanded(
-                      child: DebouncedSearchField(
-                        hint: isProduct
-                            ? AppText.t(
-                                'بحث في المنتجات...',
-                                'Search products...',
-                              )
-                            : AppText.t(
-                                'بحث في الخامات...',
-                                'Search materials...',
-                              ),
-                        initialValue: state.query,
-                        onChanged: (v) => cubit.setQuery(v),
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    // Quick period access (الفترة) beside the filter sheet —
-                    // اليوم / آخر ٧ / آخر ٣٠ / الكل, and نطاق مخصص opens
-                    // the filter sheet where the date pickers live.
-                    InspectionPeriodButton(
-                      dateFrom: state.dateFrom,
-                      dateTo: state.dateTo,
-                      onPreset: (from, to) => cubit.setDateRange(from, to),
-                      onCustom: () => _openFilterSheet(context),
-                    ),
-                    Badge(
-                      isLabelVisible: activeFilterCount > 0,
-                      label: Text('$activeFilterCount'),
-                      child: IconButton.filledTonal(
-                        tooltip: AppText.t('الفلاتر', 'Filters'),
-                        onPressed: () => _openFilterSheet(context),
-                        icon: Icon(Icons.filter_alt_outlined, size: 20.r),
-                      ),
-                    ),
-                    if (!kIsWeb &&
-                        defaultTargetPlatform == TargetPlatform.android) ...[
-                      const SizedBox(width: AppSpacing.xs),
-                      IconButton.outlined(
-                        tooltip: AppText.t('مسح رمز', 'Scan QR'),
-                        onPressed: () => Navigator.of(context).push(
-                          AppPageRoute(builder: (_) => const QrScanScreen()),
-                        ),
-                        icon: Icon(Icons.qr_code_scanner_outlined, size: 20.r),
-                      ),
-                    ],
-                    const SizedBox(width: AppSpacing.xs),
-                    PopupMenuButton<String>(
-                      tooltip: AppText.t('المزيد', 'More'),
-                      icon: const Icon(Icons.more_vert),
-                      onSelected: (v) {
-                        switch (v) {
-                          case 'followUp':
-                            if (!state.exporting) _exportFollowUp(context);
-                          case 'selectAll':
-                            cubit.setPageSelection(pageIds, !allPageSelected);
-                        }
-                      },
-                      itemBuilder: (context) => [
-                        PopupMenuItem(
-                          value: 'followUp',
-                          enabled: !state.exporting,
-                          child: Row(
-                            children: [
-                              Icon(Icons.description_outlined, size: 18.r),
-                              const SizedBox(width: AppSpacing.sm),
-                              Text(AppText.t('تقرير متابعة', 'Follow-up')),
-                            ],
-                          ),
-                        ),
-                        if (state.visible.isNotEmpty)
-                          PopupMenuItem(
-                            value: 'selectAll',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  allPageSelected
-                                      ? Icons.deselect_outlined
-                                      : Icons.select_all_outlined,
-                                  size: 18.r,
-                                ),
-                                const SizedBox(width: AppSpacing.sm),
-                                Text(
-                                  allPageSelected
-                                      ? AppText.t(
-                                          'إلغاء التحديد',
-                                          'Clear selection',
-                                        )
-                                      : AppText.t('تحديد الكل', 'Select all'),
-                                ),
-                              ],
-                            ),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-                InspectionFilterChips(
-                  chips: inspectionFilterChips(state, isProduct: isProduct),
-                  onClearChip: (key) => cubit.clearChip(key),
-                  onClearAll: () => cubit.clearFilters(),
-                ),
-                      const SizedBox(height: AppSpacing.md),
-                      if (state.loading && state.visible.isNotEmpty)
-                        const AppRefreshBar(),
-                      if (state.loading && state.visible.isEmpty) ...[
-                        const AppSkeletonList(rows: 6, lines: 2, height: 120),
-                      ] else if (state.visible.isEmpty) ...[
-                        AppEmptyState(
+                  // Header-only entrance, same convention as the lab/reference
+                  // tabs: per-card entrances would keep timers and saveLayers
+                  // alive while the card list scrolls.
+                  child: AppEntrance(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppPageHeader(
+                          title: isProduct
+                              ? AppText.t('فحص المنتجات', 'Product inspections')
+                              : AppStrings.inspections,
+                          subtitle:
+                              '${state.total} ${AppText.t('فحص', 'inspections')}',
                           icon: isProduct
                               ? Icons.factory_outlined
                               : Icons.inventory_2_outlined,
-                          title: isProduct
-                              ? AppText.t(
-                                  'لا توجد فحوصات منتجات',
-                                  'No product inspections',
-                                )
-                              : AppText.t('لا توجد فحوصات', 'No inspections'),
-                          subtitle: AppText.t(
-                            'ابدأ بفحص جديد أو عدّل معايير البحث.',
-                            'Start a new inspection or adjust the search.',
-                          ),
-                        ),
-                      ] else if (selectedCount > 0) ...[
-                        SelectionActionBar(
-                          selectedCount: selectedCount,
-                          onExportReports: () => exportSelectedReports(context),
-                          onExportLabels: () => exportSelectedLabels(context),
-                          onExportTable: () => exportSelectedTable(context),
-                          onClear: cubit.clearSelection,
                         ),
                         const SizedBox(height: AppSpacing.md),
+                        // ── Compact filter row (mobile only) ───────────────────
+                        // One ~48dp row: the search takes the width, everything else
+                        // is an icon button. The old bar stacked a full-width search
+                        // + a full-width status dropdown + three buttons, which ate
+                        // half the screen before the first card. Status now lives
+                        // only in the filter sheet (same source of truth, no loss).
+                        Row(
+                          children: [
+                            Expanded(
+                              child: DebouncedSearchField(
+                                hint: isProduct
+                                    ? AppText.t(
+                                        'بحث في المنتجات...',
+                                        'Search products...',
+                                      )
+                                    : AppText.t(
+                                        'بحث في الخامات...',
+                                        'Search materials...',
+                                      ),
+                                initialValue: state.query,
+                                onChanged: (v) => cubit.setQuery(v),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                            // Quick period access (الفترة) beside the filter sheet —
+                            // اليوم / آخر ٧ / آخر ٣٠ / الكل, and نطاق مخصص opens
+                            // the filter sheet where the date pickers live.
+                            InspectionPeriodButton(
+                              dateFrom: state.dateFrom,
+                              dateTo: state.dateTo,
+                              onPreset: (from, to) =>
+                                  cubit.setDateRange(from, to),
+                              onCustom: () => _openFilterSheet(context),
+                            ),
+                            Badge(
+                              isLabelVisible: activeFilterCount > 0,
+                              label: Text('$activeFilterCount'),
+                              child: IconButton.filledTonal(
+                                tooltip: AppText.t('الفلاتر', 'Filters'),
+                                onPressed: () => _openFilterSheet(context),
+                                icon: Icon(
+                                  Icons.filter_alt_outlined,
+                                  size: 20.r,
+                                ),
+                              ),
+                            ),
+                            if (!kIsWeb &&
+                                defaultTargetPlatform ==
+                                    TargetPlatform.android) ...[
+                              const SizedBox(width: AppSpacing.xs),
+                              IconButton.outlined(
+                                tooltip: AppText.t('مسح رمز', 'Scan QR'),
+                                onPressed: () => Navigator.of(context).push(
+                                  AppPageRoute(
+                                    builder: (_) => const QrScanScreen(),
+                                  ),
+                                ),
+                                icon: Icon(
+                                  Icons.qr_code_scanner_outlined,
+                                  size: 20.r,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(width: AppSpacing.xs),
+                            PopupMenuButton<String>(
+                              tooltip: AppText.t('المزيد', 'More'),
+                              icon: const Icon(Icons.more_vert),
+                              onSelected: (v) {
+                                switch (v) {
+                                  case 'followUp':
+                                    if (!state.exporting) {
+                                      _exportFollowUp(context);
+                                    }
+                                  case 'selectAll':
+                                    cubit.setPageSelection(
+                                      pageIds,
+                                      !allPageSelected,
+                                    );
+                                }
+                              },
+                              itemBuilder: (context) => [
+                                PopupMenuItem(
+                                  value: 'followUp',
+                                  enabled: !state.exporting,
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.description_outlined,
+                                        size: 18.r,
+                                      ),
+                                      const SizedBox(width: AppSpacing.sm),
+                                      Text(
+                                        AppText.t('تقرير متابعة', 'Follow-up'),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (state.visible.isNotEmpty)
+                                  PopupMenuItem(
+                                    value: 'selectAll',
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          allPageSelected
+                                              ? Icons.deselect_outlined
+                                              : Icons.select_all_outlined,
+                                          size: 18.r,
+                                        ),
+                                        const SizedBox(width: AppSpacing.sm),
+                                        Text(
+                                          allPageSelected
+                                              ? AppText.t(
+                                                  'إلغاء التحديد',
+                                                  'Clear selection',
+                                                )
+                                              : AppText.t(
+                                                  'تحديد الكل',
+                                                  'Select all',
+                                                ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        InspectionFilterChips(
+                          chips: inspectionFilterChips(
+                            state,
+                            isProduct: isProduct,
+                          ),
+                          onClearChip: (key) => cubit.clearChip(key),
+                          onClearAll: () => cubit.clearFilters(),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        if (state.loading && state.visible.isNotEmpty)
+                          const AppRefreshBar(),
+                        if (state.loading && state.visible.isEmpty) ...[
+                          const AppSkeletonList(rows: 6, lines: 2, height: 120),
+                        ] else if (state.visible.isEmpty) ...[
+                          AppEmptyState(
+                            icon: isProduct
+                                ? Icons.factory_outlined
+                                : Icons.inventory_2_outlined,
+                            title: isProduct
+                                ? AppText.t(
+                                    'لا توجد فحوصات منتجات',
+                                    'No product inspections',
+                                  )
+                                : AppText.t('لا توجد فحوصات', 'No inspections'),
+                            subtitle: AppText.t(
+                              'ابدأ بفحص جديد أو عدّل معايير البحث.',
+                              'Start a new inspection or adjust the search.',
+                            ),
+                          ),
+                        ] else if (selectedCount > 0) ...[
+                          SelectionActionBar(
+                            selectedCount: selectedCount,
+                            onExportReports: () =>
+                                exportSelectedReports(context),
+                            onExportLabels: () => exportSelectedLabels(context),
+                            onExportTable: () => exportSelectedTable(context),
+                            onClear: cubit.clearSelection,
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -617,6 +649,8 @@ class _InspectionCard extends StatelessWidget {
       onTap: onTap,
       // Touch-only device: skip the hover tracking machinery per row.
       enableHover: false,
+      // Flat shadow tier: a page of stacked cards reads lighter.
+      flat: true,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

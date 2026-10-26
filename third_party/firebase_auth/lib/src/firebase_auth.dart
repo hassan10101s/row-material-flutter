@@ -8,7 +8,7 @@ part of '../firebase_auth.dart';
 /// The entry point of the Firebase Authentication SDK.
 class FirebaseAuth extends FirebasePlugin implements FirebaseService {
   // Cached instances of [FirebaseAuth].
-  static Map<String, FirebaseAuth> _firebaseAuthInstances = {};
+  static final Map<String, FirebaseAuth> _firebaseAuthInstances = {};
 
   // Cached and lazily loaded instance of [FirebaseAuthPlatform] to avoid
   // creating a [MethodChannelFirebaseAuth] when not needed or creating an

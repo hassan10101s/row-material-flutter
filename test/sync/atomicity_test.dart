@@ -17,12 +17,14 @@ import 'sync_test_fixture.dart';
 /// thing back, and §9.4 has to block a forbidden write before any row exists.
 class _FakeGuard implements WriteGuard {
   _FakeGuard({this.online = true, Set<Permission>? allowed})
-      : _allowed = allowed ?? {
-          Permission.samplesCreate,
-          Permission.samplesUpdate,
-          Permission.qcApprove,
-          Permission.qcReject,
-        };
+    : _allowed =
+          allowed ??
+          {
+            Permission.samplesCreate,
+            Permission.samplesUpdate,
+            Permission.qcApprove,
+            Permission.qcReject,
+          };
 
   final Set<Permission> _allowed;
 
@@ -63,8 +65,7 @@ class _FailingQueue extends SyncQueue {
     required String operation,
     required Map<String, dynamic> payload,
     int baseVersion = 0,
-  }) async =>
-      throw StateError('enqueue failed on purpose');
+  }) async => throw StateError('enqueue failed on purpose');
 }
 
 /// An audit logger whose `log` always fails.
@@ -78,8 +79,7 @@ class _FailingAudit extends AuditLogger {
     required String entityType,
     required String entityId,
     Map<String, dynamic>? details,
-  }) async =>
-      throw StateError('audit failed on purpose');
+  }) async => throw StateError('audit failed on purpose');
 }
 
 void main() {
@@ -94,43 +94,51 @@ void main() {
     WriteGuard? writeGuard,
     SyncQueue? syncQueue,
     AuditLogger? auditLogger,
-  }) =>
-      OfflineFirstInspectionRepository(
-        dbHelper: fixture.helper,
-        referenceRepo: referenceRepo,
-        guard: writeGuard ?? guard,
-        queue: syncQueue ?? queue,
-        audit: auditLogger ?? audit,
-      );
+  }) => OfflineFirstInspectionRepository(
+    dbHelper: fixture.helper,
+    referenceRepo: referenceRepo,
+    guard: writeGuard ?? guard,
+    queue: syncQueue ?? queue,
+    audit: auditLogger ?? audit,
+  );
 
   Map<String, dynamic> samplePayload({String entryCode = 'S-1'}) => {
-        'entry_code': entryCode,
-        'material_id': 1,
-        'inspection_date': '2026-09-01',
-        'supplier': 'Cement Supplier Co',
-        'sample_taken_by': 'Mohamed Ali',
-        'quantity': '10',
-        'sample_names': ['S1'],
-        'physical_results': {
-          'color': 'good',
-        },
-        'decision_status': 'APPROVED',
-      };
+    'entry_code': entryCode,
+    'material_id': 1,
+    'inspection_date': '2026-09-01',
+    'supplier': 'Cement Supplier Co',
+    'sample_taken_by': 'Mohamed Ali',
+    'quantity': '10',
+    'sample_names': ['S1'],
+    'physical_results': {'color': 'good'},
+    'decision_status': 'APPROVED',
+  };
 
-  Future<int> countOf(String table, {String? where, List<Object?>? args}) async {
+  Future<int> countOf(
+    String table, {
+    String? where,
+    List<Object?>? args,
+  }) async {
     final rows = await fixture.db.rawQuery(
-        'SELECT COUNT(*) AS c FROM $table${where == null ? '' : ' WHERE $where'}',
-        args ?? const []);
+      'SELECT COUNT(*) AS c FROM $table${where == null ? '' : ' WHERE $where'}',
+      args ?? const [],
+    );
     return (rows.first['c'] as num?)?.toInt() ?? 0;
   }
 
   Future<int> inspections() => countOf('inspections');
 
   Future<int> queueRows([String? entityType]) => countOf(
-      'sync_queue', where: entityType == null ? null : 'entity_type = ?', args: entityType == null ? null : [entityType]);
+    'sync_queue',
+    where: entityType == null ? null : 'entity_type = ?',
+    args: entityType == null ? null : [entityType],
+  );
 
   Future<int> auditRows([String? action]) => countOf(
-      'audit_logs', where: action == null ? null : 'action = ?', args: action == null ? null : [action]);
+    'audit_logs',
+    where: action == null ? null : 'action = ?',
+    args: action == null ? null : [action],
+  );
 
   setUp(() async {
     fixture = await openSyncFixture();
@@ -155,10 +163,18 @@ void main() {
 
       expect(await inspections(), 1);
       expect(await queueRows('sample'), 1);
-      expect(await queueRows('auditLog'), 1, reason: 'the audit entry replicates too');
+      expect(
+        await queueRows('auditLog'),
+        1,
+        reason: 'the audit entry replicates too',
+      );
       expect(await auditRows(AuditAction.sampleCreated), 1);
 
-      final entry = (await fixture.db.query('sync_queue', where: 'entity_type = ?', whereArgs: ['sample'])).single;
+      final entry = (await fixture.db.query(
+        'sync_queue',
+        where: 'entity_type = ?',
+        whereArgs: ['sample'],
+      )).single;
       expect(entry['entity_id'], created['entry_code']);
       expect(entry['local_ref'], created['id']);
       expect(entry['operation'], 'create');
@@ -166,10 +182,28 @@ void main() {
       expect(entry['base_version'], 0);
       expect('${entry['payload']}', contains('"localId":${created['id']}'));
 
-      final local = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [created['id']])).single;
+      final local = (await fixture.db.query(
+        'inspections',
+        where: 'id = ?',
+        whereArgs: [created['id']],
+      )).single;
       expect(local['version'], 1, reason: 'a first push is version 1');
       expect(local['sync_state'], 'queued');
-      expect(local['decision_version'], 1, reason: 'the business counter is untouched');
+      expect(
+        local['remote_id'],
+        isNotEmpty,
+        reason: 'a newly saved inspection has an identity before any reopen',
+      );
+      expect(created['remote_id'], local['remote_id']);
+      expect(
+        '${entry['payload']}',
+        contains('"remoteId":"${local['remote_id']}"'),
+      );
+      expect(
+        local['decision_version'],
+        1,
+        reason: 'the business counter is untouched',
+      );
     });
 
     test('a failing enqueue rolls the whole create back', () async {
@@ -198,114 +232,208 @@ void main() {
       expect(await auditRows(), 0);
     });
 
-    test('update bumps the version, collapses the queue and keeps the count', () async {
-      final repo = buildRepo();
-      final created = await repo.create(samplePayload(), user);
-      final id = created['id'] as int;
+    test(
+      'update bumps the version, collapses the queue and keeps the count',
+      () async {
+        final repo = buildRepo();
+        final created = await repo.create(samplePayload(), user);
+        final id = created['id'] as int;
 
-      await repo.update(id, {'supplier': 'Another Supplier'}, user);
+        await repo.update(id, {'supplier': 'Another Supplier'}, user);
 
-      expect(await inspections(), 1);
-      expect(await queueRows('sample'), 1, reason: 'the pending create is refreshed, not duplicated');
-      final entry = (await fixture.db.query('sync_queue', where: 'entity_type = ?', whereArgs: ['sample'])).single;
-      expect(entry['operation'], 'create', reason: 'create wins over update while it has never synced');
-      expect(entry['base_version'], 0);
-      final local = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
-      expect(local['version'], 1, reason: 'still the first not-yet-acked version');
-      expect(local['supplier'], 'Another Supplier');
-    });
+        expect(await inspections(), 1);
+        expect(
+          await queueRows('sample'),
+          1,
+          reason: 'the pending create is refreshed, not duplicated',
+        );
+        final entry = (await fixture.db.query(
+          'sync_queue',
+          where: 'entity_type = ?',
+          whereArgs: ['sample'],
+        )).single;
+        expect(
+          entry['operation'],
+          'create',
+          reason: 'create wins over update while it has never synced',
+        );
+        expect(entry['base_version'], 0);
+        final local = (await fixture.db.query(
+          'inspections',
+          where: 'id = ?',
+          whereArgs: [id],
+        )).single;
+        expect(
+          local['version'],
+          1,
+          reason: 'still the first not-yet-acked version',
+        );
+        expect(local['supplier'], 'Another Supplier');
+      },
+    );
 
-    test('update after a synced version bumps version and baseVersion', () async {
-      final repo = buildRepo();
-      final created = await repo.create(samplePayload(), user);
-      final id = created['id'] as int;
-      await fixture.db.update('inspections',
+    test(
+      'update after a synced version bumps version and baseVersion',
+      () async {
+        final repo = buildRepo();
+        final created = await repo.create(samplePayload(), user);
+        final id = created['id'] as int;
+        await fixture.db.update(
+          'inspections',
           {'remote_version': 1, 'version': 1, 'sync_state': 'synced'},
-          where: 'id = ?', whereArgs: [id]);
-      await fixture.db.delete('sync_queue');
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+        await fixture.db.delete('sync_queue');
 
-      await repo.update(id, {'supplier': 'Third Supplier'}, user);
+        await repo.update(id, {'supplier': 'Third Supplier'}, user);
 
-      final entry = (await fixture.db.query('sync_queue', where: 'entity_type = ?', whereArgs: ['sample'])).single;
-      expect(entry['operation'], 'update');
-      expect(entry['base_version'], 1);
-      final local = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
-      expect(local['version'], 2);
-      expect(local['remote_version'], 1);
-      expect(local['sync_state'], 'queued');
-    });
+        final entry = (await fixture.db.query(
+          'sync_queue',
+          where: 'entity_type = ?',
+          whereArgs: ['sample'],
+        )).single;
+        expect(entry['operation'], 'update');
+        expect(entry['base_version'], 1);
+        final local = (await fixture.db.query(
+          'inspections',
+          where: 'id = ?',
+          whereArgs: [id],
+        )).single;
+        expect(local['version'], 2);
+        expect(local['remote_version'], 1);
+        expect(local['sync_state'], 'queued');
+      },
+    );
 
-    test('a decision writes the sample, the qc history and both queue rows together', () async {
-      final repo = buildRepo();
-      final created = await repo.create(samplePayload(), user);
-      final id = created['id'] as int;
+    test(
+      'a decision writes the sample, the qc history and both queue rows together',
+      () async {
+        final repo = buildRepo();
+        final created = await repo.create(samplePayload(), user);
+        final id = created['id'] as int;
 
-      await repo.updateStatus(id, {
-        'decision_status': 'PARTIAL_REJECTION',
-        'decision_reason': 'Moisture above the limit',
-        'rejected_quantity': '2',
-      }, user);
+        await repo.updateStatus(id, {
+          'decision_status': 'PARTIAL_REJECTION',
+          'decision_reason': 'Moisture above the limit',
+          'rejected_quantity': '2',
+        }, user);
 
-      expect(await queueRows('sample'), 1);
-      expect(await queueRows('qualityCheck'), 1);
-      expect(await auditRows(AuditAction.qcRejected), 1);
-      final qc = (await fixture.db.query('sync_queue', where: 'entity_type = ?', whereArgs: ['qualityCheck'])).single;
-      expect('${qc['entity_id']}', startsWith('qc_${id}_'));
-      final local = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
-      expect(local['decision_status'], 'PARTIAL_REJECTION');
-      expect(local['decision_version'], 2, reason: 'the business decision counter advances');
-      expect(local['version'], 1, reason: 'the sync version is separate');
-      final history = await fixture.db.query('inspection_status_history',
-          where: 'inspection_id = ?', whereArgs: [id]);
-      expect(history, hasLength(1));
-      expect(history.single['version'], 2);
-    });
+        expect(await queueRows('sample'), 1);
+        expect(await queueRows('qualityCheck'), 1);
+        expect(await auditRows(AuditAction.qcRejected), 1);
+        final qc = (await fixture.db.query(
+          'sync_queue',
+          where: 'entity_type = ?',
+          whereArgs: ['qualityCheck'],
+        )).single;
+        expect('${qc['entity_id']}', startsWith('qc_${id}_'));
+        final local = (await fixture.db.query(
+          'inspections',
+          where: 'id = ?',
+          whereArgs: [id],
+        )).single;
+        expect(local['decision_status'], 'PARTIAL_REJECTION');
+        expect(
+          local['decision_version'],
+          2,
+          reason: 'the business decision counter advances',
+        );
+        expect(local['version'], 1, reason: 'the sync version is separate');
+        final history = await fixture.db.query(
+          'inspection_status_history',
+          where: 'inspection_id = ?',
+          whereArgs: [id],
+        );
+        expect(history, hasLength(1));
+        expect(history.single['version'], 2);
+      },
+    );
 
-    test('a failing qc enqueue rolls the decision and its history back', () async {
-      final created = await buildRepo().create(samplePayload(), user);
-      final id = created['id'] as int;
-      await fixture.db.delete('audit_logs');
-      await fixture.db.delete('sync_queue');
+    test(
+      'a failing qc enqueue rolls the decision and its history back',
+      () async {
+        final created = await buildRepo().create(samplePayload(), user);
+        final id = created['id'] as int;
+        await fixture.db.delete('audit_logs');
+        await fixture.db.delete('sync_queue');
 
-      // The sample enqueue succeeds, the qualityCheck one throws: neither the
-      // decision nor its append-only history row may survive.
-      final flaky = _FlakyOnQualityCheck(fixture.helper);
-      await expectLater(
-        buildRepo(syncQueue: flaky).updateStatus(id, {
-          'decision_status': 'FULL_REJECTION',
-          'decision_reason': 'Failed the whole lot',
-        }, user),
-        throwsA(isA<StateError>()),
-      );
+        // The sample enqueue succeeds, the qualityCheck one throws: neither the
+        // decision nor its append-only history row may survive.
+        final flaky = _FlakyOnQualityCheck(fixture.helper);
+        await expectLater(
+          buildRepo(syncQueue: flaky).updateStatus(id, {
+            'decision_status': 'FULL_REJECTION',
+            'decision_reason': 'Failed the whole lot',
+          }, user),
+          throwsA(isA<StateError>()),
+        );
 
-      expect(flaky.calls, 2, reason: 'the sample queue was written before the qc one failed');
-      final local =
-          (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
-      expect(local['decision_status'], 'APPROVED', reason: 'the original decision is untouched');
-      expect(local['decision_version'], 1);
-      expect(await fixture.db.query('inspection_status_history',
-          where: 'inspection_id = ?', whereArgs: [id]), isEmpty);
-      expect(await queueRows(), 0);
-      expect(await auditRows(), 0);
-    });
+        expect(
+          flaky.calls,
+          2,
+          reason: 'the sample queue was written before the qc one failed',
+        );
+        final local = (await fixture.db.query(
+          'inspections',
+          where: 'id = ?',
+          whereArgs: [id],
+        )).single;
+        expect(
+          local['decision_status'],
+          'APPROVED',
+          reason: 'the original decision is untouched',
+        );
+        expect(local['decision_version'], 1);
+        expect(
+          await fixture.db.query(
+            'inspection_status_history',
+            where: 'inspection_id = ?',
+            whereArgs: [id],
+          ),
+          isEmpty,
+        );
+        expect(await queueRows(), 0);
+        expect(await auditRows(), 0);
+      },
+    );
 
-    test('delete tombstones the row, hides it from the lists and queues it', () async {
-      final repo = buildRepo();
-      final created = await repo.create(samplePayload(), user);
-      final id = created['id'] as int;
-      await fixture.db.delete('sync_queue');
+    test(
+      'delete tombstones the row, hides it from the lists and queues it',
+      () async {
+        final repo = buildRepo();
+        final created = await repo.create(samplePayload(), user);
+        final id = created['id'] as int;
+        await fixture.db.delete('sync_queue');
 
-      await repo.delete(id);
+        await repo.delete(id);
 
-      expect(await inspections(), 1, reason: 'the row survives so the deletion can replicate');
-      final local = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
-      expect(local['deleted_at'], isNotNull);
-      expect(await repo.list(), isEmpty, reason: 'a tombstone leaves the working set');
-      expect(await repo.count(), 0);
-      final entry = (await fixture.db.query('sync_queue', where: 'entity_type = ?', whereArgs: ['sample'])).single;
-      expect(entry['operation'], 'tombstone');
-      expect(await auditRows(AuditAction.sampleDeleted), 1);
-    });
+        expect(
+          await inspections(),
+          1,
+          reason: 'the row survives so the deletion can replicate',
+        );
+        final local = (await fixture.db.query(
+          'inspections',
+          where: 'id = ?',
+          whereArgs: [id],
+        )).single;
+        expect(local['deleted_at'], isNotNull);
+        expect(
+          await repo.list(),
+          isEmpty,
+          reason: 'a tombstone leaves the working set',
+        );
+        expect(await repo.count(), 0);
+        final entry = (await fixture.db.query(
+          'sync_queue',
+          where: 'entity_type = ?',
+          whereArgs: ['sample'],
+        )).single;
+        expect(entry['operation'], 'tombstone');
+        expect(await auditRows(AuditAction.sampleDeleted), 1);
+      },
+    );
 
     test('a failing enqueue rolls the tombstone back', () async {
       final repo = buildRepo();
@@ -317,23 +445,36 @@ void main() {
         buildRepo(syncQueue: failing).delete(id),
         throwsA(isA<StateError>()),
       );
-      final local = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
-      expect(local['deleted_at'], isNull, reason: 'the tombstone is rolled back with the queue');
+      final local = (await fixture.db.query(
+        'inspections',
+        where: 'id = ?',
+        whereArgs: [id],
+      )).single;
+      expect(
+        local['deleted_at'],
+        isNull,
+        reason: 'the tombstone is rolled back with the queue',
+      );
     });
   });
 
   group('§9.4 local guards', () {
-    test('a role without the permission is refused before anything is written', () async {
-      final repo = buildRepo(writeGuard: _FakeGuard(allowed: {Permission.samplesRead}));
+    test(
+      'a role without the permission is refused before anything is written',
+      () async {
+        final repo = buildRepo(
+          writeGuard: _FakeGuard(allowed: {Permission.samplesRead}),
+        );
 
-      await expectLater(
-        repo.create(samplePayload(), user),
-        throwsA(isA<AuthorizationError>()),
-      );
-      expect(await inspections(), 0);
-      expect(await queueRows(), 0);
-      expect(await auditRows(), 0);
-    });
+        await expectLater(
+          repo.create(samplePayload(), user),
+          throwsA(isA<AuthorizationError>()),
+        );
+        expect(await inspections(), 0);
+        expect(await queueRows(), 0);
+        expect(await auditRows(), 0);
+      },
+    );
 
     test('a privileged decision needs connectivity', () async {
       final repo = buildRepo(writeGuard: _FakeGuard(online: false));
@@ -346,13 +487,23 @@ void main() {
         }, user),
         throwsA(isA<AuthorizationError>()),
       );
-      final local = (await fixture.db.query('inspections',
-          where: 'id = ?', whereArgs: [created['id']])).single;
-      expect(local['decision_status'], 'APPROVED', reason: 'the decision never ran');
+      final local = (await fixture.db.query(
+        'inspections',
+        where: 'id = ?',
+        whereArgs: [created['id']],
+      )).single;
+      expect(
+        local['decision_status'],
+        'APPROVED',
+        reason: 'the decision never ran',
+      );
       expect(local['decision_version'], 1);
       expect(await queueRows('qualityCheck'), 0);
-      expect(await fixture.db.query('inspection_status_history'),
-          isEmpty, reason: 'no history row for a refused decision');
+      expect(
+        await fixture.db.query('inspection_status_history'),
+        isEmpty,
+        reason: 'no history row for a refused decision',
+      );
     });
 
     test('a read-only device cannot write at all', () async {
@@ -383,7 +534,9 @@ class _FlakyOnQualityCheck extends SyncQueue {
     int baseVersion = 0,
   }) async {
     calls++;
-    if (entityType == 'qualityCheck') throw StateError('qc enqueue failed on purpose');
+    if (entityType == 'qualityCheck') {
+      throw StateError('qc enqueue failed on purpose');
+    }
     return super.enqueue(
       txn,
       entityType: entityType,

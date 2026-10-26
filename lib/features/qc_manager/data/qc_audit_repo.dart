@@ -122,18 +122,15 @@ class QcAuditRepo implements QcAuditRepository {
       throw ValidationError(
         AppText.t(
           'نوع كيان التدقيق غير معروف "$entityType". '
-          'الأنواع المعروفة: ${QcAuditEntity.all.join(', ')}',
+              'الأنواع المعروفة: ${QcAuditEntity.all.join(', ')}',
           'Unknown QC audit entity type "$entityType". '
-          'Known types: ${QcAuditEntity.all.join(', ')}',
+              'Known types: ${QcAuditEntity.all.join(', ')}',
         ),
       );
     }
     if (action.trim().isEmpty) {
       throw ValidationError(
-        AppText.t(
-          'إجراء التدقيق مطلوب',
-          'An audit action is required',
-        ),
+        AppText.t('إجراء التدقيق مطلوب', 'An audit action is required'),
       );
     }
 

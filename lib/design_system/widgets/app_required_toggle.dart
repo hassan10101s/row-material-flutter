@@ -64,10 +64,8 @@ class AppRequiredToggle extends StatelessWidget {
                   AppText.t('مطلوب', 'Required'),
                   style: TextStyle(
                     fontSize: 12.spMax,
-                    fontWeight:
-                        value ? FontWeight.w700 : FontWeight.w400,
-                    color:
-                        value ? AppColors.primary : AppColors.textMuted,
+                    fontWeight: value ? FontWeight.w700 : FontWeight.w400,
+                    color: value ? AppColors.primary : AppColors.textMuted,
                   ),
                 ),
               ],
@@ -89,9 +87,7 @@ class RequiredBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.primary.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppColors.primary.withValues(alpha: 0.4),
-        ),
+        border: Border.all(color: AppColors.primary.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

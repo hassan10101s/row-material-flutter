@@ -52,7 +52,9 @@ const Object _unset = Object();
 /// uncheck while the period is current. Past sheets are read-only.
 class RoutineSheetCubit extends AppCubit<RoutineSheetState> {
   RoutineSheetCubit({required this.repo, required this.inspectionId})
-    : super(const RoutineSheetState());
+    : super(const RoutineSheetState()) {
+    refreshOnSync(load);
+  }
 
   final RoutineListsRepository repo;
   final int inspectionId;

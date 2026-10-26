@@ -9,8 +9,10 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 /// adds a real reachability probe (`InternetAddress.lookup`) before reporting
 /// "online" (plan §14-P1.4).
 class ConnectivityService {
-  ConnectivityService({Connectivity? connectivity, this.probeTimeout = const Duration(seconds: 3)})
-      : _connectivity = connectivity ?? Connectivity();
+  ConnectivityService({
+    Connectivity? connectivity,
+    this.probeTimeout = const Duration(seconds: 3),
+  }) : _connectivity = connectivity ?? Connectivity();
 
   final Connectivity _connectivity;
   final Duration probeTimeout;
@@ -32,14 +34,17 @@ class ConnectivityService {
     _subscription = _connectivity.onConnectivityChanged.listen((results) async {
       await _evaluate(results);
     });
-    _connectivity.checkConnectivity().then((results) => _evaluate(results)).catchError((_) {
-      _publish(false);
-    });
+    _connectivity
+        .checkConnectivity()
+        .then((results) => _evaluate(results))
+        .catchError((_) {
+          _publish(false);
+        });
   }
 
   Future<void> _evaluate(List<ConnectivityResult> results) async {
-    final interfaceUp = results.isNotEmpty &&
-        results.any((r) => r != ConnectivityResult.none);
+    final interfaceUp =
+        results.isNotEmpty && results.any((r) => r != ConnectivityResult.none);
     if (!interfaceUp) {
       _publish(false);
       return;
@@ -54,8 +59,9 @@ class ConnectivityService {
     if (_probeInFlight) return _online;
     _probeInFlight = true;
     try {
-      final result = await InternetAddress.lookup('firebaseinstallations.googleapis.com')
-          .timeout(probeTimeout);
+      final result = await InternetAddress.lookup(
+        'firebaseinstallations.googleapis.com',
+      ).timeout(probeTimeout);
       return result.isNotEmpty && result.first.rawAddress.isNotEmpty;
     } on Object {
       return false;

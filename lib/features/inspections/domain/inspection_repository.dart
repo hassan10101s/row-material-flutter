@@ -169,7 +169,5 @@ abstract interface class InspectionRepository {
 
   /// Distinct sample-taker names (the technicians log), most recent first.
   /// Same row shape and de-duplication as [listSupplierHistory].
-  Future<List<Map<String, dynamic>>> listSampleTakerHistory({
-    int limit = 30,
-  });
+  Future<List<Map<String, dynamic>>> listSampleTakerHistory({int limit = 30});
 }

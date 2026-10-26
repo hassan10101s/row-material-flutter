@@ -15,7 +15,9 @@ class TestHistoryCubit extends AppCubit<TestHistoryState> {
     required this.results,
     required this.local,
     required this.config,
-  }) : super(const TestHistoryState());
+  }) : super(const TestHistoryState()) {
+    refreshOnSync(load);
+  }
 
   final LabResultRepository results;
   final LabLocalRepository local;

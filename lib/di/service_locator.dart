@@ -6,12 +6,26 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:get_it/get_it.dart';
 
+import '../core/commands/command_outbox.dart';
+import '../core/commands/central_authoring_gateway.dart';
+import '../core/commands/central_projection.dart';
+import '../core/commands/central_sync_driver.dart';
+import '../core/commands/central_sync_transport.dart';
+import '../core/commands/command_contract.dart';
+import '../core/commands/command_service.dart';
+import '../core/commands/command_transport.dart';
+import '../core/commands/command_worker.dart';
+import '../core/commands/drafts_store.dart';
+import '../core/commands/local_read_model.dart';
+import '../core/commands/sync_checkpoint.dart';
 import '../app/auth_gate.dart';
 import '../app/auto_backup_task.dart';
 import '../core/app_paths.dart';
+import '../core/auth/device_identity_store.dart';
 import '../core/auth/session_source.dart';
 import '../core/auth/session_store.dart';
 import '../core/database/database_helper.dart';
+import '../core/utils/app_exceptions.dart';
 import '../core/firebase/firebase_bootstrap.dart';
 import '../core/locale/locale_service.dart';
 import '../core/network/connectivity_service.dart';
@@ -23,6 +37,8 @@ import '../core/security/local_secret.dart';
 import '../core/security/password_hash.dart';
 import '../core/services/seed_service.dart';
 import '../core/sync/audit_logger.dart';
+import '../core/auth/permissions.dart';
+import '../core/sync/remote/firestore_push_registration.dart';
 import '../core/sync/audit_trail.dart';
 import '../core/sync/backfill_service.dart';
 import '../core/sync/conflict_resolver.dart';
@@ -54,6 +70,8 @@ import '../features/inspections/data/inspection_repo.dart';
 import '../features/inspections/data/offline_first_inspection_repository.dart';
 import '../features/inspections/domain/inspection_repository.dart';
 import '../features/lab/data/lab_repo.dart';
+import '../features/formulations/domain/formulation_repository.dart';
+import '../features/formulations/data/sqlite_formulation_repository.dart';
 import '../features/lab/data/nir_validation_repo.dart';
 import '../features/lab/data/offline_first_lab_repository.dart';
 import '../features/lab/domain/lab_local_repository.dart';
@@ -98,6 +116,10 @@ import '../features/settings/domain/export_root_service.dart';
 /// degraded), then the per-organization database, then the repositories, and
 /// finally the sync engine which is started only after an organization is bound.
 final GetIt getIt = GetIt.instance;
+
+const centralCommandPilotEnabled = bool.fromEnvironment(
+  'ENABLE_CENTRAL_COMMAND_PILOT',
+);
 
 /// Manual constructors because the repos need the runtime DB path resolved
 /// from AppPaths (path_provider is only callable after runApp).
@@ -156,6 +178,7 @@ Future<void> initServiceLocator() async {
     metadata: metadata,
     bootstrap: bootstrap,
     devices: devices,
+    identities: DeviceIdentityStore(),
   );
   gate = AuthGate(authRepository, connectivity: connectivity);
 
@@ -215,6 +238,8 @@ Future<void> initServiceLocator() async {
         dbHelper: dbHelper,
         secret: secret,
         paths: getIt<AppPaths>(),
+        queue: queue,
+        guard: getIt<WriteGuard>(),
       ),
     )
     ..registerLazySingleton<SettingsRepository>(
@@ -267,6 +292,14 @@ Future<void> initServiceLocator() async {
     )
     ..registerLazySingleton<LabLocalRepository>(
       () => getIt<LabRepo>() as LabLocalRepository,
+    )
+    ..registerLazySingleton<FormulationRepository>(
+      () => SqliteFormulationRepository(
+        dbHelper: dbHelper,
+        guard: getIt<WriteGuard>(),
+        queue: queue,
+        audit: audit,
+      ),
     )
     ..registerLazySingleton<ProductBatchRepository>(
       () => getIt<LabRepo>() as ProductBatchRepository,
@@ -330,6 +363,7 @@ Future<void> initServiceLocator() async {
         dbHelper: dbHelper,
         secret: secret,
         htmlBuilder: getIt<ReportHtmlBuilder>(),
+        guard: getIt<WriteGuard>(),
       ),
     )
     ..registerLazySingleton<ReportRepository>(
@@ -451,6 +485,10 @@ Future<void> initServiceLocator() async {
         ),
         templates: QcTemplateRepo(getIt<QcRepositories>().dbHelper),
         inspections: QcInspectionRepo(getIt<QcRepositories>().dbHelper),
+        // Routine checklist writes must enter the same outbox path as the
+        // other QC repositories. Omitting this kept this one feature local.
+        queue: queue,
+        syncAudit: audit,
       ),
     )
     ..registerFactory<RoutineListsCubit>(
@@ -477,7 +515,11 @@ Future<void> initServiceLocator() async {
     )
     // ── Sync engine ───────────────────────────────────────────────────────
     ..registerLazySingleton<ConflictResolver>(
-      () => ConflictResolver(queue: queue, remote: remote),
+      () => ConflictResolver(
+        queue: queue,
+        remote: remote,
+        source: getIt<SessionSource>(),
+      ),
     )
     // Temporary backfill uploader: re-queues local rows that never reached
     // the server so the next syncNow pushes them in batches.
@@ -487,6 +529,91 @@ Future<void> initServiceLocator() async {
         queue: queue,
         guard: getIt<WriteGuard>(),
       ),
+    )
+    // ── Central command protocol (plan SYNC_ARCHITECTURE_PLAN_2026-10-25) ─
+    // New stores: drafts / command outbox / checkpoint. Registered next to the
+    // legacy stack for staged tests. Pilot sends require explicit opt-in and a server gate.
+    ..registerSingleton<DraftsStore>(
+      DraftsStore(dbHelper)
+        ..scopeProvider = () {
+          final session = sessionSource.session;
+          return session.isSignedIn
+              ? CommandScope(
+                  session.organizationId,
+                  session.uid,
+                  session.deviceId,
+                )
+              : null;
+        },
+    )
+    ..registerSingleton<SyncCheckpoints>(SyncCheckpoints(dbHelper))
+    ..registerSingleton<CommandOutbox>(
+      CommandOutbox(dbHelper)
+        ..deviceProvider = () {
+          return sessionSource.session.deviceId;
+        }
+        ..scopeProvider = () {
+          final session = sessionSource.session;
+          return session.isSignedIn
+              ? CommandScope(
+                  session.organizationId,
+                  session.uid,
+                  session.deviceId,
+                )
+              : null;
+        },
+    )
+    ..registerSingleton<CommandTransport>(
+      bootstrap.isReady
+          ? CloudFunctionsCommandTransport(
+              useRest: Platform.isWindows,
+              projectId: bootstrap.config.projectId,
+              auth: firebaseAuth,
+            )
+          : const UnconfiguredCommandTransport(),
+    )
+    ..registerSingleton<CommandWorker>(
+      CommandWorker(
+          outbox: getIt<CommandOutbox>(),
+          transport: getIt<CommandTransport>(),
+        )
+        ..onError = (error) {
+          debugPrint('[commands] $error');
+        }
+        ..canSend = () =>
+            centralCommandPilotEnabled &&
+            sessionSource.session.isSignedIn &&
+            sessionSource.session.canWrite &&
+            connectivity.isOnline,
+    )
+    ..registerSingleton<CentralProjection>(
+      CentralProjection(databaseHelper: dbHelper, source: sessionSource),
+    )
+    ..registerSingleton<CentralSyncTransport>(
+      CentralSyncTransport(
+        useRest: Platform.isWindows,
+        projectId: bootstrap.isReady ? bootstrap.config.projectId : null,
+        auth: firebaseAuth,
+      ),
+    )
+    ..registerSingleton<CentralSyncDriver>(
+      CentralSyncDriver(
+        databaseHelper: dbHelper,
+        source: sessionSource,
+        projection: getIt<CentralProjection>(),
+        transport: getIt<CentralSyncTransport>(),
+        outbox: getIt<CommandOutbox>(),
+        metadata: metadata,
+        onError: (error) => debugPrint('[central-sync] $error'),
+      ),
+    )
+    ..registerSingleton<CommandService>(
+      CommandService(
+        dbHelper: dbHelper,
+        drafts: getIt<DraftsStore>(),
+        outbox: getIt<CommandOutbox>(),
+        readModel: LocalReadModelState(dbHelper),
+      )..onDrainRequested = _drainCommands,
     )
     ..registerLazySingleton<SyncEngine>(() {
       final pushWorker = PushWorker(
@@ -517,6 +644,9 @@ Future<void> initServiceLocator() async {
         maxPagesPerCycle: 2,
       );
       return buildSyncEngine(
+        allowPush: () => !centralCommandPilotEnabled,
+        allowPull: () => !centralCommandPilotEnabled,
+        allowAuditPull: () => true,
         pushWorker: pushWorker,
         pullWorker: pullWorker,
         auditPullWorker: auditPullWorker,
@@ -533,7 +663,15 @@ Future<void> initServiceLocator() async {
     // Built over the same dbHelper/metadata the sync engine uses, so the
     // watermarks live in the per-organization database (plan D3).
     ..registerLazySingleton<NotificationService>(
-      () => NotificationService(dbHelper: dbHelper, metadata: metadata),
+      () => NotificationService(
+        dbHelper: dbHelper,
+        metadata: metadata,
+        canReadNotification: (kind) => getIt<SessionSource>().session.can(
+          kind == 'inspection'
+              ? Permission.samplesRead
+              : Permission.labResultsRead,
+        ),
+      ),
     )
     // The presentation-facing contract over the same instance.
     ..registerLazySingleton<NotificationsPort>(
@@ -545,12 +683,94 @@ Future<void> initServiceLocator() async {
     // Killed-app push (FCM topics `org_<orgId>`). Lazy so desktop builds
     // never touch firebase_messaging; initialized in startNotifications().
     ..registerLazySingleton<FcmPushService>(
-      () => FcmPushService(notifications: getIt<NotificationService>()),
+      () => FcmPushService(
+        notifications: getIt<NotificationService>(),
+        source: getIt<SessionSource>(),
+        registration: FirestorePushRegistration(),
+      ),
     );
+
+  // Central authoring is deliberately installed only when the explicit build
+  // flag is present. Once installed every repository transaction enters the
+  // savepoint/write-set gateway; legacy push is disabled above. Keeping this
+  // as one assignment prevents a screen from silently choosing a second write
+  // path.
+  if (centralCommandPilotEnabled) {
+    final gateway = CentralAuthoringGateway(
+      databaseHelper: dbHelper,
+      source: sessionSource,
+      outbox: getIt<CommandOutbox>(),
+      complete: (entry) async {
+        if (!connectivity.isOnline) return false;
+        final deadline = DateTime.now().add(const Duration(seconds: 12));
+        while (DateTime.now().isBefore(deadline)) {
+          await getIt<CommandWorker>().runOnce();
+          final settled = await getIt<CommandOutbox>().getByOperationId(
+            entry.operationId,
+          );
+          if (settled == null) return false;
+          switch (settled.state.value) {
+            case 'approved':
+              final sequence = settled.result?.changeSequence;
+              if (sequence == null) return false;
+              try {
+                return await getIt<CentralSyncDriver>().syncNow(
+                      throughSequence: sequence,
+                    ) >=
+                    sequence;
+              } on Object {
+                // The server receipt is durable; keep the UI in pending state
+                // until its approved event is safely applied to the read model.
+                return false;
+              }
+            case 'rejected':
+            case 'needs_review':
+              throw ValidationError(
+                settled.lastError ??
+                    'رفض السيرفر طلب الاعتماد؛ راجع شاشة المزامنة.',
+              );
+            case 'auth_required':
+              throw AuthorizationError(
+                settled.lastError ??
+                    'انتهت الجلسة؛ سجّل الدخول ثم أعد المحاولة.',
+              );
+            default:
+              await Future<void>.delayed(const Duration(milliseconds: 250));
+          }
+        }
+        return false;
+      },
+    );
+    dbHelper.businessGateway = gateway;
+    getIt.registerSingleton<CentralAuthoringGateway>(gateway);
+  }
 
   debugPrint(
     '[bootstrap] service locator ready (firebase: ${bootstrap.status.name})',
   );
+}
+
+/// Debounced drain of the command outbox. `onEnqueued` can burst (a form save
+/// loop); one pending microtask per window covers them all.
+Timer? _commandDrainTimer;
+
+void _drainCommands() {
+  if (!centralCommandPilotEnabled) return;
+  _commandDrainTimer?.cancel();
+  _commandDrainTimer = Timer(const Duration(milliseconds: 400), () {
+    try {
+      if (getIt.isRegistered<CommandWorker>()) {
+        unawaited(
+          getIt<CommandWorker>().runOnce().catchError((Object error) {
+            debugPrint('[commands] drain failed: $error');
+            return SweepReport.empty;
+          }),
+        );
+      }
+    } on Object catch (e) {
+      debugPrint('[commands] drain skipped: $e');
+    }
+  });
 }
 
 /// Wires the "organization bound" side effects (defaults → seeds → lab defaults
@@ -596,40 +816,46 @@ Future<void> registerOrganizationBinder(AuthRepository auth) async {
         debugPrint('[bootstrap] device registration skipped: $e');
       }
       getIt<SyncEngine>().start();
-      // Self-heal (two-way sync): every local row that is not `synced`
-      // re-joins the outbox, for ALL synced entity types — not only the
-      // samples the Sync-screen button covered. A queue entry lost to a
-      // crash, an offline import, or a write made before sync wiring can no
-      // longer strand a record on this device. Runs after the engine start
-      // so the debounced push carries the re-queued rows; never fails the
-      // bind.
-      unawaited(() async {
+      // The command worker re-sends staged drafts on connection/open; a
+      // staged row whose transport dropped keeps its operationId (§5).
+      if (centralCommandPilotEnabled) {
+        getIt<CommandWorker>().start();
+        // A fresh sign-in for the same account/organization/device (the
+        // outbox scope guarantees the match) re-queues `auth_required`
+        // requests under their original operationId + hash, with the draft
+        // state updated in the same transaction (production acceptance 3).
         try {
-          final report = await getIt<BackfillService>().enqueueUnsyncedAll();
-          if (report.total > 0) {
-            debugPrint('[bootstrap] backfill re-queued $report');
-            getIt<SyncEngine>().scheduleSync();
-          }
+          final requeued = await getIt<CommandOutbox>().retryRejected(
+            onlyPendingable: true,
+          );
+          if (requeued > 0) _drainCommands();
         } on Object catch (e) {
-          debugPrint('[bootstrap] backfill skipped: $e');
+          debugPrint('[commands] auth requeue skipped: $e');
         }
-      }());
+        getIt<CentralSyncDriver>().start();
+      }
+      // Only durable, explicitly staged writes may be uploaded. Historical
+      // local rows without an outbox entry are not adopted by this session.
       // Mobile-only bell: same hooks as app startup (engine start above does
       // not run them on an org switch). Best effort, never fails the bind.
       if ((Platform.isAndroid || Platform.isIOS) && !isHeadlessBackground) {
         try {
           final controller = getIt<NotificationController>();
+          controller.resetForSession();
+          if (centralCommandPilotEnabled) {
+            getIt<CentralSyncDriver>().onApplied = () =>
+                controller.refresh(showOs: true);
+          }
           // Pulled rows (other devices) -> bell + OS notification. Own saves
           // stay silent via the onEnqueued hook below (they watermark first).
-          getIt<SyncEngine>().onPullApplied =
-              () => controller.refresh(showOs: true);
+          getIt<SyncEngine>().onPullApplied = () =>
+              controller.refresh(showOs: true);
           // Own saves -> bell within seconds. Chains the engine's debounced
           // push (buildSyncEngine sets onEnqueued to scheduleSync); without
           // this, saves after an org switch would only surface on next pull.
           final queue = getIt<SyncQueue>();
-          final prev = queue.onEnqueued;
           queue.onEnqueued = () {
-            prev?.call();
+            getIt<SyncEngine>().scheduleSync();
             unawaited(controller.refresh());
           };
           // Sync problems -> bell: when the engine's conflict/blocked/failed
@@ -639,12 +865,11 @@ Future<void> registerOrganizationBinder(AuthRepository auth) async {
           getIt<SyncEngine>().onProblemsChanged = (conflicts, blocked, failed) {
             unawaited(() async {
               try {
-                await getIt<NotificationService>()
-                    .notifySyncProblems(
-                      conflicts: conflicts,
-                      blocked: blocked,
-                      failed: failed,
-                    );
+                await getIt<NotificationService>().notifySyncProblems(
+                  conflicts: conflicts,
+                  blocked: blocked,
+                  failed: failed,
+                );
                 await controller.refresh();
               } on Object catch (e) {
                 debugPrint('[bootstrap] sync problem notify skipped: $e');
@@ -676,12 +901,27 @@ Future<void> registerOrganizationBinder(AuthRepository auth) async {
       debugPrint('[bootstrap] organization $organizationId bound');
     };
     auth.onSignedOut = () async {
+      _commandDrainTimer?.cancel();
+      _commandDrainTimer = null;
       try {
         getIt<SyncEngine>().stop();
       } on Object catch (e) {
         debugPrint('[bootstrap] sync engine stop skipped: $e');
       }
+      try {
+        getIt<CommandWorker>().stop();
+      } on Object catch (e) {
+        debugPrint('[bootstrap] command worker stop skipped: $e');
+      }
+      if (getIt.isRegistered<CentralSyncDriver>()) {
+        getIt<CentralSyncDriver>()
+          ..stop()
+          // An in-flight download must not keep applying pages into the
+          // database after the session (and its org binding) is gone.
+          ..cancelActive();
+      }
       if (Platform.isAndroid || Platform.isIOS) {
+        getIt<NotificationController>().resetForSession();
         try {
           await const AndroidNotifPollScheduler().cancel();
         } on Object {

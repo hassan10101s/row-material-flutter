@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_card.dart';
@@ -105,6 +106,9 @@ class InventoryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppCard(
+      // Dense list card: the flat shadow tier on mobile keeps long registers
+      // light; the desktop grid keeps the standard lift.
+      flat: FormFactor.current.isMobile,
       padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

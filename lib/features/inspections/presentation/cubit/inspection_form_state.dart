@@ -24,6 +24,7 @@ class InspectionFormState extends Equatable {
   final bool loading;
   final bool saving;
   final String? error;
+  final bool pendingApproval;
   final String decision;
 
   const InspectionFormState({
@@ -39,6 +40,7 @@ class InspectionFormState extends Equatable {
     this.loading = true,
     this.saving = false,
     this.error,
+    this.pendingApproval = false,
     this.decision = 'APPROVED',
   });
 
@@ -55,38 +57,40 @@ class InspectionFormState extends Equatable {
     bool? loading,
     bool? saving,
     String? error,
+    bool? pendingApproval,
     String? decision,
-  }) =>
-      InspectionFormState(
-        materials: materials ?? this.materials,
-        materialId: materialId ?? this.materialId,
-        materialCode: materialCode ?? this.materialCode,
-        entryCode: entryCode ?? this.entryCode,
-        physicalReference: physicalReference ?? this.physicalReference,
-        chemicalReference: chemicalReference ?? this.chemicalReference,
-        refRevision: refRevision ?? this.refRevision,
-        supplierOptions: supplierOptions ?? this.supplierOptions,
-        sampleTakerOptions: sampleTakerOptions ?? this.sampleTakerOptions,
-        loading: loading ?? this.loading,
-        saving: saving ?? this.saving,
-        error: error ?? this.error,
-        decision: decision ?? this.decision,
-      );
+  }) => InspectionFormState(
+    materials: materials ?? this.materials,
+    materialId: materialId ?? this.materialId,
+    materialCode: materialCode ?? this.materialCode,
+    entryCode: entryCode ?? this.entryCode,
+    physicalReference: physicalReference ?? this.physicalReference,
+    chemicalReference: chemicalReference ?? this.chemicalReference,
+    refRevision: refRevision ?? this.refRevision,
+    supplierOptions: supplierOptions ?? this.supplierOptions,
+    sampleTakerOptions: sampleTakerOptions ?? this.sampleTakerOptions,
+    loading: loading ?? this.loading,
+    saving: saving ?? this.saving,
+    error: error ?? this.error,
+    pendingApproval: pendingApproval ?? this.pendingApproval,
+    decision: decision ?? this.decision,
+  );
 
   @override
   List<Object?> get props => [
-        materials,
-        materialId,
-        materialCode,
-        entryCode,
-        physicalReference,
-        chemicalReference,
-        refRevision,
-        supplierOptions,
-        sampleTakerOptions,
-        loading,
-        saving,
-        error,
-        decision,
-      ];
+    materials,
+    materialId,
+    materialCode,
+    entryCode,
+    physicalReference,
+    chemicalReference,
+    refRevision,
+    supplierOptions,
+    sampleTakerOptions,
+    loading,
+    saving,
+    error,
+    pendingApproval,
+    decision,
+  ];
 }

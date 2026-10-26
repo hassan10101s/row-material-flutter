@@ -18,12 +18,16 @@ class LayoutSpec {
   /// Desktop: the 1280x720 authoring grid every existing `.w`/`.h`/`.spMax`
   /// call site was tuned against. Unchanged, so the desktop build must not
   /// move by a single pixel.
-  static const LayoutSpec desktop = LayoutSpec._(formFactor: AppFormFactor.desktop);
+  static const LayoutSpec desktop = LayoutSpec._(
+    formFactor: AppFormFactor.desktop,
+  );
 
   /// Mobile: a 400x860 authoring grid. At that ratio `.w` behaves as a
   /// fraction of a 400dp reference, `.r` lands near 1.0 so authored corner
   /// radii survive, and `.spMax` floors text at its authored size.
-  static const LayoutSpec mobile = LayoutSpec._(formFactor: AppFormFactor.mobile);
+  static const LayoutSpec mobile = LayoutSpec._(
+    formFactor: AppFormFactor.mobile,
+  );
 
   static LayoutSpec of(AppFormFactor formFactor) =>
       formFactor == AppFormFactor.mobile ? mobile : desktop;

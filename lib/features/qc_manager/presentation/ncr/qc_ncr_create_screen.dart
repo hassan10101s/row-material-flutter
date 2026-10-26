@@ -22,6 +22,7 @@ import '../../domain/qc_enums.dart';
 import '../../domain/qc_inspection.dart';
 import '../../domain/qc_nc_capa.dart';
 import '../../domain/qc_repositories.dart';
+import '../../../../design_system/widgets/app_select_field.dart';
 
 /// Raised standalone: the code uses 0 as "no inspection context" and the
 /// write path turns that into a NULL `inspection_id` (a NULL child key is
@@ -38,11 +39,7 @@ const _standaloneInspectionId = 0;
 /// which carries the §A9.4 write guard and the audit trail; this layer only
 /// validates what the user actually typed.
 class QcNcrCreateScreen extends StatefulWidget {
-  const QcNcrCreateScreen({
-    super.key,
-    this.assignees = const [],
-    this.finding,
-  });
+  const QcNcrCreateScreen({super.key, this.assignees = const [], this.finding});
 
   /// The assignee roster the dashboard already fetched (`id`/`name` pairs).
   /// Passing it in keeps the form from re-querying a members list it does
@@ -141,6 +138,7 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
   /// keeps whatever inspection the finding was raised against, even when
   /// that inspection is older than the newest-50 picker window.
   bool _inspectionChanged = false;
+
   /// True once the user touched the defect pick - until then an edit keeps
   /// the finding's stored code even when the code list cannot offer it.
   bool _defectChanged = false;
@@ -327,8 +325,11 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
           )
         : QcFindingNc(
             findingId: base.findingId,
-            inspectionId: _inspection?.inspectionId ??
-                (_inspectionChanged ? _standaloneInspectionId : base.inspectionId),
+            inspectionId:
+                _inspection?.inspectionId ??
+                (_inspectionChanged
+                    ? _standaloneInspectionId
+                    : base.inspectionId),
             itemId: base.itemId,
             respId: base.respId,
             code: _defect?.code ?? (_defectChanged ? '' : base.code),
@@ -340,7 +341,8 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
             dueDate: dueDate,
             assignedTo: assignee?.id ?? '',
             assignedToName: assignee?.name ?? '',
-            assignedAt: (assignee?.id ?? '') != base.assignedTo && assignee != null
+            assignedAt:
+                (assignee?.id ?? '') != base.assignedTo && assignee != null
                 ? nowIso()
                 : base.assignedAt,
             rootCause: base.rootCause,
@@ -376,8 +378,14 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
       AppFeedback.success(
         context,
         base == null
-            ? AppText.t('تم إنشاء حالة عدم المطابقة.', 'Non-conformance created.')
-            : AppText.t('تم تحديث حالة عدم المطابقة.', 'Non-conformance updated.'),
+            ? AppText.t(
+                'تم إنشاء حالة عدم المطابقة.',
+                'Non-conformance created.',
+              )
+            : AppText.t(
+                'تم تحديث حالة عدم المطابقة.',
+                'Non-conformance updated.',
+              ),
       );
       Navigator.of(context).pop(true);
     } on AppError catch (e) {
@@ -456,11 +464,10 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
                         for (final i in _inspections)
                           (item: i, label: _inspectionLabel(i)),
                       ],
-                      onChanged: (v) =>
-                          setState(() {
-                            _inspection = v;
-                            _inspectionChanged = true;
-                          }),
+                      onChanged: (v) => setState(() {
+                        _inspection = v;
+                        _inspectionChanged = true;
+                      }),
                       clearable: true,
                     ),
                   ),
@@ -636,7 +643,9 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
                   label: _editing
                       ? AppText.t('حفظ', 'Save')
                       : AppText.t('إنشاء', 'Create'),
-                  icon: _editing ? Icon(Icons.save_outlined, size: 18.r) : Icon(Icons.flag, size: 18.r),
+                  icon: _editing
+                      ? Icon(Icons.save_outlined, size: 18.r)
+                      : Icon(Icons.flag, size: 18.r),
                   loading: _saving,
                   onPressed: _saving ? null : _save,
                 ),
@@ -756,28 +765,10 @@ class _DropdownTile<T extends Object?> extends StatelessWidget {
           style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
         ),
         const SizedBox(height: AppSpacing.xs),
-        DropdownButtonFormField<T>(
+        AppSelectField<T>(
           initialValue: value,
           isExpanded: true,
-          decoration: InputDecoration(
-            isDense: true,
-            enabled: enabled,
-            hintText: hint,
-            contentPadding: EdgeInsets.symmetric(
-              horizontal: 12.w,
-              vertical: 10.h,
-            ),
-            filled: true,
-            fillColor: AppColors.surface,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-              borderSide: BorderSide(color: AppColors.border),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(AppRadii.sm),
-              borderSide: BorderSide(color: AppColors.primary, width: 1.6),
-            ),
-          ),
+          decoration: InputDecoration(enabled: enabled, hintText: hint),
           items: [
             for (final entry in items)
               DropdownMenuItem<T>(value: entry.item, child: Text(entry.label)),

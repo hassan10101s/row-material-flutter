@@ -94,6 +94,10 @@ class AppFeedback {
   static void errorFrom(BuildContext context, Object error, {String? summary}) {
     final detail = describeError(error);
     debugPrint('AppFeedback error: $detail');
+    if (error is PendingOperation) {
+      show(context, error.userMessage, type: AppFeedbackType.info);
+      return;
+    }
     final userText = summary ?? _userText(error);
     show(context, userText, isError: true);
   }

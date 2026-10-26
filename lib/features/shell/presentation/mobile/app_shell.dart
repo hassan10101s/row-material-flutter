@@ -7,6 +7,7 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../core/locale/locale_service.dart';
 import '../../../../core/theme/theme_service.dart';
 import '../../../../design_system/tokens/app_colors.dart';
+import '../../../../design_system/tokens/app_motion.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_window.dart';
@@ -14,6 +15,7 @@ import '../../../auth/domain/user.dart';
 import '../../../sync/presentation/sync_status_controller.dart';
 import '../shell_chrome.dart';
 import '../shell_nav.dart';
+import '../chrome_reveal.dart';
 
 /// Phone shell: a topbar, the routed page, a bottom bar and a drawer.
 ///
@@ -71,6 +73,15 @@ class _MobileAppShellState extends State<MobileAppShell> {
 
   bool _drawerOpen = false;
 
+  /// Scroll-driven chrome visibility: scrolling down folds the top bar and
+  /// the bottom bar off their screen edges and hands the whole panel back to
+  /// the page; scrolling up, or a drag past the top edge, brings them back.
+  ///
+  /// While the drawer is open the chrome is forced visible so it slides back
+  /// rather than animating under the drawer scrim, and while the keyboard is
+  /// up the bottom bar stays folded so typing keeps the maximum body area.
+  final ChromeVisibilityController _chrome = ChromeVisibilityController();
+
   /// The bottom bar's slots: the unconditional destinations, then "More".
   ///
   /// The count is fixed at [shellBottomBarSlots] + 1 rather than "whatever this
@@ -87,7 +98,23 @@ class _MobileAppShellState extends State<MobileAppShell> {
   /// `onSelect` used to: dismiss the chrome, then move.
   void _navigate(String path) {
     if (_drawerOpen) _scaffoldKey.currentState?.closeDrawer();
+    // A fresh page starts its scroll at the top, so it opens with the chrome.
+    _chrome.reveal();
     widget.onNavigate(path);
+  }
+
+  /// Drawer destinations acknowledge the tap with a selection tick — the
+  /// bottom bar does the same in [_selectSlot]. The desktop sidebar share of
+  /// [ShellNavItem] stays feedback-free.
+  void _selectFromDrawer(String path) {
+    HapticFeedback.selectionClick();
+    _navigate(path);
+  }
+
+  @override
+  void dispose() {
+    _chrome.dispose();
+    super.dispose();
   }
 
   void _selectSlot(int index) {
@@ -148,17 +175,13 @@ class _MobileAppShellState extends State<MobileAppShell> {
                     child: Icon(
                       icons[path],
                       size: 19,
-                      color: selected
-                          ? AppColors.primary
-                          : AppColors.textMuted,
+                      color: selected ? AppColors.primary : AppColors.textMuted,
                     ),
                   ),
                   title: Text(
                     labels[path] ?? path,
                     style: TextStyle(
-                      fontWeight: selected
-                          ? FontWeight.w700
-                          : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
                     ),
                   ),
                   trailing: selected
@@ -175,7 +198,10 @@ class _MobileAppShellState extends State<MobileAppShell> {
         ],
       ),
     );
-    if (chosen != null && mounted) _navigate(chosen);
+    if (chosen != null && mounted) {
+      HapticFeedback.selectionClick();
+      _navigate(chosen);
+    }
   }
 
   @override
@@ -190,6 +216,12 @@ class _MobileAppShellState extends State<MobileAppShell> {
     final selected = section >= 0 && section < shellBottomBarSlots
         ? section
         : slots.length - 1;
+
+    // With the keyboard up the body is already squeezed from below; folding
+    // the nav bar out of the way keeps as much of the form as possible in
+    // view. The top bar folds with it - typing fields deserve the whole top.
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final revealDuration = AppMotion.of(context, AppMotion.normal);
 
     return PopScope(
       // While the drawer is up, back closes it instead of leaving the page.
@@ -211,12 +243,13 @@ class _MobileAppShellState extends State<MobileAppShell> {
         onDrawerChanged: (opened) {
           if (opened == _drawerOpen) return;
           setState(() => _drawerOpen = opened);
+          _chrome.forced = opened;
         },
         drawer: _ShellDrawer(
           user: widget.user,
           entries: widget.entries,
           currentPath: currentPath,
-          onSelect: _navigate,
+          onSelect: _selectFromDrawer,
           onLogout: widget.onLogout,
           onLogoutThisDevice: widget.onLogoutThisDevice,
           onOpenPdfFolder: widget.onOpenPdfFolder,
@@ -224,25 +257,46 @@ class _MobileAppShellState extends State<MobileAppShell> {
         ),
         body: Column(
           children: [
+            // The SafeArea stays *outside* the reveal: the status-bar band
+            // keeps its inset whether the bar below it is folded or not, so
+            // hidden chrome never pushes page content under the status icons.
             SafeArea(
               top: true,
               bottom: false,
               left: false,
               right: false,
-              child: ShellTopBar(
-              user: widget.user,
-              locale: widget.locale,
-              theme: widget.theme,
-              syncStatus: widget.syncStatus,
-              title: _currentDestinationLabel(currentPath),
-              onOpenSync: () => widget.onNavigate('/settings?tab=sync'),
-              onMenu: () => _scaffoldKey.currentState?.openDrawer(),
-              // The identity card states the role, so the chip would only
-              // duplicate it and cost bar width the phone does not have.
-              showRoleChip: false,
+              child: ListenableBuilder(
+                listenable: _chrome,
+                builder: (context, _) => ChromeReveal(
+                  visible: _chrome.visible && !keyboardOpen,
+                  edge: ChromeRevealEdge.top,
+                  duration: revealDuration,
+                  child: ShellTopBar(
+                    user: widget.user,
+                    locale: widget.locale,
+                    theme: widget.theme,
+                    syncStatus: widget.syncStatus,
+                    title: _currentDestinationLabel(currentPath),
+                    onOpenSync: () => widget.onNavigate('/settings?tab=sync'),
+                    onMenu: () => _scaffoldKey.currentState?.openDrawer(),
+                    // The identity card states the role, so the chip would only
+                    // duplicate it and cost bar width the phone does not have.
+                    showRoleChip: false,
+                    compact: true,
+                  ),
+                ),
               ),
             ),
-            Expanded(child: widget.child),
+            // One listener observes every scrollable in the page (vertical
+            // notifications bubble up through this bottleneck) and drives the
+            // chrome - no screen has to cooperate, and horizontal scrollers
+            // inside cards are filtered out by the controller.
+            Expanded(
+              child: NotificationListener<ScrollNotification>(
+                onNotification: _chrome.handleScrollNotification,
+                child: widget.child,
+              ),
+            ),
           ],
         ),
         // Floating rounded bar: same slots, labels and gestures as before
@@ -251,90 +305,107 @@ class _MobileAppShellState extends State<MobileAppShell> {
         // sync-attention dot while anything is pending/blocked, so unsynced
         // work is visible without opening the drawer.
         //
-        // The SafeArea keeps the bar clear of the system gesture bar (which
-        // would otherwise swallow its bottom edge on edge-to-edge phones);
-        // the compact single-line label style keeps long Arabic labels from
+        // The bottom SafeArea stays *outside* the reveal so the gesture-bar
+        // band keeps its inset whether the bar is folded or not; the outer
+        // margins ride inside the reveal instead of the SafeArea `minimum`,
+        // so folding the bar disappears the whole card - gutter and all -
+        // and the page body grows by its full height.
+        //
+        // The compact single-line label style keeps long Arabic labels from
         // wrapping onto a clipped second line in the narrow slots.
+        //
+        // The NavigationBar stays built while folded: only its box collapses,
+        // so state, keys and sibling finders survive the hidden state.
         bottomNavigationBar: ListenableBuilder(
-          listenable: widget.syncStatus,
+          listenable: Listenable.merge([widget.syncStatus, _chrome]),
           builder: (context, _) {
-            final attention = widget.syncStatus.status.pending +
+            final attention =
+                widget.syncStatus.status.pending +
                 widget.syncStatus.status.blocked;
             return SafeArea(
               top: false,
               left: false,
               right: false,
-              minimum: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                0,
-                AppSpacing.md,
-                AppSpacing.sm,
-              ),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(22),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.10),
-                      blurRadius: 16,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(22),
+              child: ChromeReveal(
+                visible: _chrome.visible && !keyboardOpen,
+                edge: ChromeRevealEdge.bottom,
+                duration: revealDuration,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    0,
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                  ),
                   child: DecoratedBox(
                     decoration: BoxDecoration(
-                      color: AppColors.surface,
-                      border: Border.all(color: AppColors.borderMuted),
                       borderRadius: BorderRadius.circular(22),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.10),
+                          blurRadius: 16,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
-                    child: NavigationBarTheme(
-                      data: NavigationBarThemeData(
-                        labelTextStyle: WidgetStatePropertyAll(
-                          TextStyle(
-                            fontSize: 11.spMax,
-                            fontWeight: FontWeight.w600,
-                            height: 1.1,
-                            overflow: TextOverflow.ellipsis,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(22),
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          border: Border.all(color: AppColors.borderMuted),
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                        child: NavigationBarTheme(
+                          data: NavigationBarThemeData(
+                            labelTextStyle: WidgetStatePropertyAll(
+                              TextStyle(
+                                fontSize: 11.spMax,
+                                fontWeight: FontWeight.w600,
+                                height: 1.1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                          child: NavigationBar(
+                            height: 70,
+                            elevation: 0,
+                            backgroundColor: Colors.transparent,
+                            indicatorColor: AppColors.primary.withValues(
+                              alpha: 0.14,
+                            ),
+                            labelBehavior:
+                                NavigationDestinationLabelBehavior.alwaysShow,
+                            selectedIndex: selected,
+                            onDestinationSelected: _selectSlot,
+                            destinations: [
+                              for (final slot in slots)
+                                NavigationDestination(
+                                  // `NavigationDestination` has no `onLongPress`, so the long
+                                  // press is a gesture recognizer on the icon - the deepest
+                                  // recognizer on the pointer's hit path, and therefore the one
+                                  // that wins the arena over the destination's own `InkResponse`
+                                  // tap and the bar's tooltip. Verified: a long press fires the
+                                  // handler and does *not* also select the destination.
+                                  icon: slot.isMore
+                                      ? (attention > 0
+                                            ? Badge(
+                                                smallSize: 9,
+                                                backgroundColor:
+                                                    AppColors.danger,
+                                                child: Icon(slot.icon),
+                                              )
+                                            : Icon(slot.icon))
+                                      : GestureDetector(
+                                          behavior: HitTestBehavior.translucent,
+                                          onLongPress: () => _showJumpList(),
+                                          child: Icon(slot.icon),
+                                        ),
+                                  label: slot.label,
+                                ),
+                            ],
                           ),
                         ),
-                      ),
-                      child: NavigationBar(
-                        height: 70,
-                        elevation: 0,
-                        backgroundColor: Colors.transparent,
-                        indicatorColor:
-                            AppColors.primary.withValues(alpha: 0.14),
-                        labelBehavior:
-                            NavigationDestinationLabelBehavior.alwaysShow,
-                      selectedIndex: selected,
-                      onDestinationSelected: _selectSlot,
-                      destinations: [
-                        for (final slot in slots)
-                          NavigationDestination(
-                            // `NavigationDestination` has no `onLongPress`, so the long
-                            // press is a gesture recognizer on the icon - the deepest
-                            // recognizer on the pointer's hit path, and therefore the one
-                            // that wins the arena over the destination's own `InkResponse`
-                            // tap and the bar's tooltip. Verified: a long press fires the
-                            // handler and does *not* also select the destination.
-                            icon: slot.isMore
-                                ? (attention > 0
-                                      ? Badge(
-                                          smallSize: 9,
-                                          backgroundColor: AppColors.danger,
-                                          child: Icon(slot.icon),
-                                        )
-                                      : Icon(slot.icon))
-                                : GestureDetector(
-                                    behavior: HitTestBehavior.translucent,
-                                    onLongPress: () => _showJumpList(),
-                                    child: Icon(slot.icon),
-                                  ),
-                            label: slot.label,
-                          ),
-                        ],
                       ),
                     ),
                   ),
@@ -395,11 +466,27 @@ class _ShellDrawer extends StatelessWidget {
                     onOpenSettings: () => onSelect('/settings'),
                   ),
                   const Divider(height: 1),
+                  // Small section label so the destination list does not
+                  // read as an undivided extension of the identity card.
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(22, 10, 22, 2),
+                    child: Text(
+                      AppText.t('الوجهات', 'Destinations'),
+                      style: TextStyle(
+                        fontSize: 11.spMax,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textMuted,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ),
                   for (final e in entries)
                     ShellNavItem(
                       label: e.label,
                       icon: e.icon,
-                      active: e.path == currentPath,
+                      active:
+                          entries.indexOf(e) ==
+                          shellSectionIndex(entries, currentPath),
                       onTap: () => onSelect(e.path),
                     ),
                 ],

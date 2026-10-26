@@ -29,7 +29,12 @@ class AuditPage {
   final List<String> entityTypes;
   final List<String> actions;
 
-  static const AuditPage empty = AuditPage(entries: [], total: 0, offset: 0, hasMore: false);
+  static const AuditPage empty = AuditPage(
+    entries: [],
+    total: 0,
+    offset: 0,
+    hasMore: false,
+  );
 }
 
 /// The read side of the audit trail, as the UI needs it.
@@ -128,7 +133,9 @@ class AuditTrail implements AuditTrailReader {
   Future<bool> runRetention({bool force = false}) async {
     if (!force) {
       final last = DateTime.tryParse(await metadata.get(lastPrunedAtKey));
-      if (last != null && DateTime.now().difference(last) < interval) return false;
+      if (last != null && DateTime.now().difference(last) < interval) {
+        return false;
+      }
     }
     await audit.prune(maxRows: maxRows, retention: retention);
     await metadata.set(lastPrunedAtKey, DateTime.now().toIso8601String());

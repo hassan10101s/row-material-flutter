@@ -5,6 +5,7 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class TopBreakdownSection extends StatelessWidget {
   final Map<String, dynamic> summary;
@@ -32,7 +33,9 @@ class TopBreakdownSection extends StatelessWidget {
             // Top Materials Card
             SizedBox(
               width: cardWidth,
-              child: Card(
+              child: AppCard(
+                padding: EdgeInsets.zero,
+                enableHover: false,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -86,7 +89,9 @@ class TopBreakdownSection extends StatelessWidget {
             // Top Suppliers Card
             SizedBox(
               width: cardWidth,
-              child: Card(
+              child: AppCard(
+                padding: EdgeInsets.zero,
+                enableHover: false,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
@@ -154,7 +159,8 @@ class TopItemProgress extends StatefulWidget {
   final String rate;
   final double value;
   final Color color;
-  const TopItemProgress({super.key, 
+  const TopItemProgress({
+    super.key,
     required this.label,
     required this.count,
     required this.rate,

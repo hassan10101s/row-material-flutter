@@ -71,9 +71,7 @@ class _TableSelectionBarState extends State<TableSelectionBar> {
       decoration: BoxDecoration(
         color: AppColors.warning.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(
-          color: AppColors.warning.withValues(alpha: 0.25),
-        ),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.25)),
       ),
       child: Wrap(
         spacing: AppSpacing.md,
@@ -213,9 +211,7 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
       decoration: BoxDecoration(
         color: AppColors.warning.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(AppRadii.md),
-        border: Border.all(
-          color: AppColors.warning.withValues(alpha: 0.25),
-        ),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.25)),
       ),
       child: Wrap(
         spacing: AppSpacing.md,
@@ -245,9 +241,7 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
                 ? AppText.t('جاري التصدير...', 'Exporting...')
                 : '${AppText.t('تصدير تقرير', 'Export report')} ($n)',
             loading: _busyReports,
-            onPressed: _busy
-                ? null
-                : () => _run(widget.onExportReports, true),
+            onPressed: _busy ? null : () => _run(widget.onExportReports, true),
           ),
           AppButton(
             small: true,
@@ -257,9 +251,7 @@ class _SelectionActionBarState extends State<SelectionActionBar> {
                 ? AppText.t('جاري التصدير...', 'Exporting...')
                 : '${AppText.t('تصدير QR', 'Export QR')} ($n)',
             loading: _busyLabels,
-            onPressed: _busy
-                ? null
-                : () => _run(widget.onExportLabels, false),
+            onPressed: _busy ? null : () => _run(widget.onExportLabels, false),
           ),
           if (widget.onExportTable != null)
             AppButton(

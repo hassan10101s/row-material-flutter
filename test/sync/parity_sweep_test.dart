@@ -12,6 +12,7 @@ import 'package:material_lab/core/sync/device_registry.dart';
 import 'package:material_lab/core/sync/pull_worker.dart';
 import 'package:material_lab/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
+import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_engine.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
@@ -44,12 +45,12 @@ class _Device {
   late final _MockConnectivity connectivity = _MockConnectivity();
 
   PullWorker puller(InMemoryDataSource remote) => PullWorker(
-        queue: queue,
-        metadata: metadata,
-        remote: remote,
-        conflicts: ConflictResolver(queue: queue, remote: remote),
-        source: SessionSource.empty(() => session),
-      );
+    queue: queue,
+    metadata: metadata,
+    remote: remote,
+    conflicts: ConflictResolver(queue: queue, remote: remote),
+    source: SessionSource.empty(() => session),
+  );
 
   SyncEngine engine(InMemoryDataSource remote) {
     when(() => connectivity.isOnline).thenReturn(online);
@@ -89,22 +90,20 @@ void main() {
   late InMemoryDataSource remote;
 
   AppSession sessionFor(String deviceId) => AppSession(
-        uid: 'uid_$deviceId',
-        email: '$deviceId@material-lab.test',
-        organizationId: 'org_test',
-        memberId: 'member_$deviceId',
-        role: AppRoles.admin,
-        status: 'active',
-        deviceId: deviceId,
-      );
+    uid: 'uid_$deviceId',
+    email: '$deviceId@material-lab.test',
+    organizationId: 'org_test',
+    memberId: 'member_$deviceId',
+    role: AppRoles.admin,
+    status: 'active',
+    deviceId: deviceId,
+  );
 
   setUp(() async {
     final a = await openSyncFixture();
     await a.seedOrganization();
     laptop = _Device(a, sessionFor('dev_AAAAAA'));
-    remote = InMemoryDataSource(
-      rolesByUid: const {'uid_dev_AAAAAA': 'admin'},
-    );
+    remote = InMemoryDataSource(rolesByUid: const {'uid_dev_AAAAAA': 'admin'});
   });
 
   tearDown(() async {
@@ -116,64 +115,72 @@ void main() {
   Future<void> poisonAllCursors() async {
     final entities = laptop.puller(remote).entities;
     for (final entity in entities) {
-      await laptop.metadata
-          .setCursor(entity.type, const PullCursor('2999-01-01T00:00:00Z', 'zz'));
+      await laptop.metadata.setCursor(
+        entity.type,
+        const PullCursor('2999-01-01T00:00:00Z', 'zz'),
+      );
     }
     return;
   }
 
-  test('sweep re-walks one entity per cycle, then stamps last_full_sync_at',
-      () async {
-    final entities = laptop.puller(remote).entities;
-    expect(entities.length, greaterThan(1));
-    await poisonAllCursors();
+  test(
+    'sweep re-walks one entity per cycle, then stamps last_full_sync_at',
+    () async {
+      final entities = laptop.puller(remote).entities;
+      expect(entities.length, greaterThan(1));
+      await poisonAllCursors();
 
-    final engine = laptop.engine(remote);
-    addTearDown(engine.dispose);
-    await engine.markParityDue();
+      final engine = laptop.engine(remote);
+      addTearDown(engine.dispose);
+      await engine.markParityDue();
 
-    // Each cycle clears exactly one cursor while the sweep is pending:
-    // the sweep's index counter must advance by exactly one per cycle.
-    for (var i = 0; i < entities.length; i++) {
-      await engine.syncNow(pullOnly: true, reason: 'parity-test');
-      final index = int.parse(
-        (await laptop.metadata.readAll([SyncMetadata.parityIndexKey]))[
-                SyncMetadata.parityIndexKey] ??
-            '0',
-      );
-      expect(index, i + 1, reason: 'one entity swept per cycle (cycle $i)');
-      if (i < entities.length - 1) {
+      // Each cycle clears exactly one cursor while the sweep is pending:
+      // the sweep's index counter must advance by exactly one per cycle.
+      for (var i = 0; i < entities.length; i++) {
+        await engine.syncNow(pullOnly: true, reason: 'parity-test');
+        final index = int.parse(
+          (await laptop.metadata.readAll([
+                SyncMetadata.parityIndexKey,
+              ]))[SyncMetadata.parityIndexKey] ??
+              '0',
+        );
+        expect(index, i + 1, reason: 'one entity swept per cycle (cycle $i)');
+        if (i < entities.length - 1) {
+          expect(
+            (await laptop.metadata.readAll([
+              SyncMetadata.parityPendingKey,
+            ]))[SyncMetadata.parityPendingKey],
+            '1',
+          );
+        }
+      }
+
+      // One extra cycle: completion is recognized at the START of the parity
+      // pass following the last cleared entity.
+      await engine.syncNow(pullOnly: true, reason: 'parity-finalize');
+      final done = await laptop.metadata.readAll([
+        SyncMetadata.parityPendingKey,
+        SyncMetadata.lastFullSyncAtKey,
+      ]);
+      expect(done[SyncMetadata.parityPendingKey], '0');
+      expect(done[SyncMetadata.lastFullSyncAtKey] ?? '', isNotEmpty);
+      // The poisoned cursors are gone in the process.
+      for (final entity in entities) {
         expect(
-          (await laptop.metadata.readAll([SyncMetadata.parityPendingKey]))[
-              SyncMetadata.parityPendingKey],
-          '1',
+          await laptop.metadata.cursor(entity.type),
+          const PullCursor('', ''),
+          reason: '${entity.type} cursor re-verified',
         );
       }
-    }
 
-    // One extra cycle: completion is recognized at the START of the parity
-    // pass following the last cleared entity.
-    await engine.syncNow(pullOnly: true, reason: 'parity-finalize');
-    final done = await laptop.metadata.readAll([
-      SyncMetadata.parityPendingKey,
-      SyncMetadata.lastFullSyncAtKey,
-    ]);
-    expect(done[SyncMetadata.parityPendingKey], '0');
-    expect(done[SyncMetadata.lastFullSyncAtKey] ?? '', isNotEmpty);
-    // The poisoned cursors are gone in the process.
-    for (final entity in entities) {
-      expect(
-        await laptop.metadata.cursor(entity.type),
-        const PullCursor('', ''),
-        reason: '${entity.type} cursor re-verified',
-      );
-    }
-
-    // Satisfied sweep does not run again: counters do not re-arm.
-    await engine.syncNow(pullOnly: true, reason: 'parity-idle');
-    final after = await laptop.metadata.readAll([SyncMetadata.parityIndexKey]);
-    expect(after[SyncMetadata.parityIndexKey], '${entities.length}');
-  });
+      // Satisfied sweep does not run again: counters do not re-arm.
+      await engine.syncNow(pullOnly: true, reason: 'parity-idle');
+      final after = await laptop.metadata.readAll([
+        SyncMetadata.parityIndexKey,
+      ]);
+      expect(after[SyncMetadata.parityIndexKey], '${entities.length}');
+    },
+  );
 
   test('a skipped-documents error arms the sweep without a restore', () async {
     final entities = laptop.puller(remote).entities;
@@ -193,16 +200,17 @@ void main() {
     var armed = false;
     for (var i = 0; i < entities.length + 4; i++) {
       await engine.syncNow(pullOnly: true, reason: 'parity-test');
-      if ((await laptop.metadata.readAll([SyncMetadata.parityPendingKey]))[
-              SyncMetadata.parityPendingKey] ==
+      if ((await laptop.metadata.readAll([
+            SyncMetadata.parityPendingKey,
+          ]))[SyncMetadata.parityPendingKey] ==
           '1') {
         armed = true;
         await laptop.metadata.markError(null);
       }
       if ((await laptop.metadata.readAll([
-        SyncMetadata.parityPendingKey,
-        SyncMetadata.lastFullSyncAtKey,
-      ]))[SyncMetadata.parityPendingKey] ==
+            SyncMetadata.parityPendingKey,
+            SyncMetadata.lastFullSyncAtKey,
+          ]))[SyncMetadata.parityPendingKey] ==
           '0') {
         break;
       }
@@ -213,8 +221,9 @@ void main() {
       reason: 'skipped-document errors must trigger a full re-verification',
     );
     expect(
-      (await laptop.metadata.readAll([SyncMetadata.lastFullSyncAtKey]))[
-          SyncMetadata.lastFullSyncAtKey],
+      (await laptop.metadata.readAll([
+        SyncMetadata.lastFullSyncAtKey,
+      ]))[SyncMetadata.lastFullSyncAtKey],
       isNotEmpty,
     );
     for (final entity in entities) {
@@ -228,16 +237,16 @@ void main() {
 
   test('sweep pauses while a pull error is live, resumes after', () async {
     await poisonAllCursors();
-    // markParityDue, then a live error that the next pull does NOT clear
-    // (simulated by re-writing last_error between cycles).
-    final engine = laptop.engine(remote);
+    final failing = _FailingPullRemote();
+    final engine = laptop.engine(failing);
     addTearDown(engine.dispose);
     await engine.markParityDue();
     await laptop.metadata.markError('Pull skipped 1 document');
 
     await engine.syncNow(pullOnly: true, reason: 'parity-blocked');
-    await laptop.metadata
-        .markError('Pull skipped 1 document'); // keep the error live
+    await laptop.metadata.markError(
+      'Pull skipped 1 document',
+    ); // keep the error live
     await engine.syncNow(pullOnly: true, reason: 'parity-blocked');
     await laptop.metadata.markError('Pull skipped 1 document');
     await engine.syncNow(pullOnly: true, reason: 'parity-blocked');
@@ -250,12 +259,33 @@ void main() {
       reason: 'with live errors the sweep must not churn cursors',
     );
 
-    // Clearing the error lets the sweep resume: index advances.
-    await laptop.metadata.markError(null);
+    // A real successful pull clears the error and resumes the sweep.
+    failing.failing = false;
     await engine.syncNow(pullOnly: true, reason: 'parity-resume');
     final resumed = (await laptop.metadata.readAll([
       SyncMetadata.parityIndexKey,
     ]))[SyncMetadata.parityIndexKey];
     expect(resumed ?? '0', '1');
   });
+}
+
+class _FailingPullRemote extends InMemoryDataSource {
+  bool failing = true;
+  @override
+  Future<RemotePage> listSince({
+    required String organizationId,
+    required SyncCollection collection,
+    String startAtTs = '',
+    String startAtId = '',
+    int limit = 300,
+  }) {
+    if (failing) throw StateError('live pull failure');
+    return super.listSince(
+      organizationId: organizationId,
+      collection: collection,
+      startAtTs: startAtTs,
+      startAtId: startAtId,
+      limit: limit,
+    );
+  }
 }

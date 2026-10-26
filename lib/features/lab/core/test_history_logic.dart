@@ -89,37 +89,39 @@ List<Map<String, dynamic>> thFilterModeRows(
     return [
       for (final r in rows)
         if (thParseTestedAt(r['tested_at']) case final d?)
-          if (d.millisecondsSinceEpoch >= cutoff) r
+          if (d.millisecondsSinceEpoch >= cutoff) r,
     ];
   }
   if (mode == 'specific-date' && specificDate.isNotEmpty) {
     return [
       for (final r in rows)
-        if ('${r['tested_at'] ?? ''}'.startsWith(specificDate)) r
+        if ('${r['tested_at'] ?? ''}'.startsWith(specificDate)) r,
     ];
   }
   return rows;
 }
 
 String thSearchHaystack(Map<String, dynamic> row) {
-  return thNormalizeText([
-    row['sample_name'],
-    row['source_name'],
-    row['entry_code'],
-    row['analysis_name'],
-    row['analysis_unit'],
-    row['result_text'],
-    row['value'],
-    row['min'],
-    row['max'],
-    row['range_unit'],
-    row['tested_by_name'],
-    row['id'],
-    row['decision_reason'],
-    thRangeLabel('${row['range_state'] ?? ''}'),
-    thSourceLabel('${row['source_type'] ?? ''}'),
-    '${row['tested_at'] ?? ''}',
-  ].where((v) => v != null).join(' '));
+  return thNormalizeText(
+    [
+      row['sample_name'],
+      row['source_name'],
+      row['entry_code'],
+      row['analysis_name'],
+      row['analysis_unit'],
+      row['result_text'],
+      row['value'],
+      row['min'],
+      row['max'],
+      row['range_unit'],
+      row['tested_by_name'],
+      row['id'],
+      row['decision_reason'],
+      thRangeLabel('${row['range_state'] ?? ''}'),
+      thSourceLabel('${row['source_type'] ?? ''}'),
+      '${row['tested_at'] ?? ''}',
+    ].where((v) => v != null).join(' '),
+  );
 }
 
 List<Map<String, dynamic>> thApplyRowFilters(
@@ -137,49 +139,49 @@ List<Map<String, dynamic>> thApplyRowFilters(
   if (analysisWant.isNotEmpty) {
     result = [
       for (final r in result)
-        if ('${r['analysis_id'] ?? ''}' == analysisWant) r
+        if ('${r['analysis_id'] ?? ''}' == analysisWant) r,
     ];
   }
   final sourceWant = '$sourceType';
   if (sourceWant.isNotEmpty) {
     result = [
       for (final r in result)
-        if ('${r['source_type'] ?? ''}' == sourceWant) r
+        if ('${r['source_type'] ?? ''}' == sourceWant) r,
     ];
   }
   final chemWant = '$chemicalId';
   if (chemWant.isNotEmpty) {
     result = [
       for (final r in result)
-        if (chemTestMap['${r['id']}']?.contains(chemWant) ?? false) r
+        if (chemTestMap['${r['id']}']?.contains(chemWant) ?? false) r,
     ];
   }
   final rangeWant = '$rangeState';
   if (rangeWant.isNotEmpty) {
     result = [
       for (final r in result)
-        if ('${r['range_state'] ?? 'none'}' == rangeWant) r
+        if ('${r['range_state'] ?? 'none'}' == rangeWant) r,
     ];
   }
   // Reason filter (سبب القرار): `has` keeps only the tests whose محضر
   // carries a decision reason — the register stays column-free, it just
   // hides the records without a reason.
-  final reasonWant = '$reasonState';
+  final reasonWant = reasonState;
   if (reasonWant == 'has') {
     result = [
       for (final r in result)
-        if ('${r['decision_reason'] ?? ''}'.trim().isNotEmpty) r
+        if ('${r['decision_reason'] ?? ''}'.trim().isNotEmpty) r,
     ];
   }
   final q = thNormalizeText(query);
   if (q.isNotEmpty) {
     final terms = [
       for (final t in q.split('&'))
-        if (thNormalizeText(t).isNotEmpty) thNormalizeText(t)
+        if (thNormalizeText(t).isNotEmpty) thNormalizeText(t),
     ];
     result = [
       for (final r in result)
-        if (terms.any((t) => thSearchHaystack(r).contains(t))) r
+        if (terms.any((t) => thSearchHaystack(r).contains(t))) r,
     ];
   }
   return result;
@@ -190,7 +192,11 @@ List<Map<String, dynamic>> thSlice(List<Map<String, dynamic>> rows, int limit) {
   return rows.sublist(0, limit);
 }
 
-({String key, int dir}) thNextSort(String key, String currentKey, int currentDir) {
+({String key, int dir}) thNextSort(
+  String key,
+  String currentKey,
+  int currentDir,
+) {
   if (currentKey == key) {
     return (key: key, dir: currentDir * -1);
   }
@@ -198,7 +204,10 @@ List<Map<String, dynamic>> thSlice(List<Map<String, dynamic>> rows, int limit) {
 }
 
 List<Map<String, dynamic>> thSortRows(
-    List<Map<String, dynamic>> rows, String key, int dir) {
+  List<Map<String, dynamic>> rows,
+  String key,
+  int dir,
+) {
   final list = rows.sublist(0);
   if (key.isEmpty) return list;
   list.sort((a, b) {
@@ -227,12 +236,19 @@ List<Map<String, dynamic>> thSortRows(
 }
 
 ({int pageCount, int start, List<Map<String, dynamic>> slice, int pageSize})
-    thPagination(List<Map<String, dynamic>> rows, int page, [int pageSize = thPageSize]) {
+thPagination(
+  List<Map<String, dynamic>> rows,
+  int page, [
+  int pageSize = thPageSize,
+]) {
   final count = rows.isEmpty ? 1 : ((rows.length / pageSize).ceil());
   final start = (page - 1) * pageSize;
   final slice = start >= rows.length || rows.isEmpty
       ? <Map<String, dynamic>>[]
-      : rows.sublist(start, (start + pageSize) > rows.length ? rows.length : start + pageSize);
+      : rows.sublist(
+          start,
+          (start + pageSize) > rows.length ? rows.length : start + pageSize,
+        );
   return (pageCount: count, start: start, slice: slice, pageSize: pageSize);
 }
 
@@ -256,33 +272,40 @@ Map<String, Set<String>> thBuildChemTestMap(List<Map<String, dynamic>> log) {
   final map = <String, Set<String>>{};
   for (final e in log) {
     if (e['sample_test_id'] == null) continue;
-    map.putIfAbsent('${e['sample_test_id']}', () => <String>{})
+    map
+        .putIfAbsent('${e['sample_test_id']}', () => <String>{})
         .add('${e['inventory_id']}');
   }
   return map;
 }
 
 List<({String value, String label})> thBuildChemicalOptions(
-    List<Map<String, dynamic>> log) {
+  List<Map<String, dynamic>> log,
+) {
   final seen = <String>{};
   final opts = <({String value, String label})>[];
   for (final e in log) {
     if (e['inventory_id'] == null) continue;
     final k = '${e['inventory_id']}';
     if (seen.add(k)) {
-      opts.add((
-        value: k,
-        label: '${e['inventory_name'] ?? '#$k'}',
-      ));
+      opts.add((value: k, label: '${e['inventory_name'] ?? '#$k'}'));
     }
   }
   opts.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
   return opts;
 }
 
-({String filterMode, String specificDate, String analysisId, String sourceType,
-        String chemicalId, String rangeState, String reasonState, String query})
-    thClearChip({
+({
+  String filterMode,
+  String specificDate,
+  String analysisId,
+  String sourceType,
+  String chemicalId,
+  String rangeState,
+  String reasonState,
+  String query,
+})
+thClearChip({
   required String filterMode,
   required String specificDate,
   required String analysisId,
@@ -337,7 +360,10 @@ List<({String key, String label})> thBuildChips({
   final chips = <({String key, String label})>[];
   switch (filterMode) {
     case 'last24h':
-      chips.add((key: 'mode', label: AppText.t('آخر 24 ساعة', 'Last 24 hours')));
+      chips.add((
+        key: 'mode',
+        label: AppText.t('آخر 24 ساعة', 'Last 24 hours'),
+      ));
     case 'specific-date':
       chips.add((
         key: 'mode',
@@ -351,9 +377,9 @@ List<({String key, String label})> thBuildChips({
   }
   if (analysisId.isNotEmpty) {
     final a = analyses.cast<Map<String, dynamic>?>().firstWhere(
-          (x) => '${x?['id'] ?? ''}' == analysisId,
-          orElse: () => null,
-        );
+      (x) => '${x?['id'] ?? ''}' == analysisId,
+      orElse: () => null,
+    );
     chips.add((
       key: 'analysis',
       label: a == null
@@ -365,13 +391,13 @@ List<({String key, String label})> thBuildChips({
     chips.add((key: 'source', label: thSourceLabel(sourceType)));
   }
   if (chemicalId.isNotEmpty) {
-    final opt = chemicalOptions.cast<({String value, String label})?>().firstWhere(
-          (o) => o!.value == chemicalId,
-          orElse: () => null,
-        );
+    final opt = chemicalOptions
+        .cast<({String value, String label})?>()
+        .firstWhere((o) => o!.value == chemicalId, orElse: () => null);
     chips.add((
       key: 'chemical',
-      label: opt?.label ?? AppText.t('مادة #$chemicalId', 'Material #$chemicalId'),
+      label:
+          opt?.label ?? AppText.t('مادة #$chemicalId', 'Material #$chemicalId'),
     ));
   }
   if (rangeState.isNotEmpty) {

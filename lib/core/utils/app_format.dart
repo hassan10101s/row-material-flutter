@@ -9,7 +9,10 @@ import 'app_exceptions.dart';
 /// formatting used in reports.
 String jsonDumps(Object? value) => jsonEncode(value);
 
-Map<String, dynamic> jsonLoads(String? value, [Map<String, dynamic> fallback = const {}]) {
+Map<String, dynamic> jsonLoads(
+  String? value, [
+  Map<String, dynamic> fallback = const {},
+]) {
   if (value == null || value.trim().isEmpty) return fallback;
   try {
     final decoded = jsonDecode(value);
@@ -20,7 +23,10 @@ Map<String, dynamic> jsonLoads(String? value, [Map<String, dynamic> fallback = c
   return fallback;
 }
 
-List<dynamic> jsonLoadsList(String? value, [List<dynamic> fallback = const []]) {
+List<dynamic> jsonLoadsList(
+  String? value, [
+  List<dynamic> fallback = const [],
+]) {
   if (value == null || value.trim().isEmpty) return fallback;
   try {
     final decoded = jsonDecode(value);
@@ -84,7 +90,8 @@ String formatQuantity(Object? value) {
   if (value == null) return '-';
   final s = value.toString().trim();
   final n = safeFloat(value) ?? 0.0;
-  final isNumericText = value is num ||
+  final isNumericText =
+      value is num ||
       (value is String && s.isNotEmpty && RegExp(r'^[0-9.,]+$').hasMatch(s));
   if (n == 0 && !isNumericText) return s.isEmpty ? '-' : s;
   return _qtyFormatter.format(n);

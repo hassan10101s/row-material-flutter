@@ -7,6 +7,7 @@ import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../router/app_router.dart';
 import '../cubit/qc_custom_tables_cubit.dart';
@@ -102,6 +103,8 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
           child: QcNcrDashboardScreen(
             embedded: true,
             onOpenList: () => context.push(AppRoutes.qcNcrList),
+            onOpenFinding: (id) =>
+                context.push('${AppRoutes.qcNcrDetail}?findingId=$id'),
           ),
         ),
       ),
@@ -139,7 +142,7 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
             children: [
               const SizedBox(height: AppSpacing.page),
               SizedBox(
-                height: 46.h,
+                height: appUsesDesktopChrome(context) ? 46.h : 56,
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(
@@ -156,6 +159,9 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
                             label: Text(allTabs[index].label),
                             avatar: Icon(allTabs[index].icon, size: 18.r),
                             selected: _selectedTab == index,
+                            materialTapTargetSize: appUsesDesktopChrome(context)
+                                ? MaterialTapTargetSize.shrinkWrap
+                                : MaterialTapTargetSize.padded,
                             onSelected: (_) =>
                                 setState(() => _selectedTab = index),
                           ),
@@ -187,18 +193,33 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
                 ),
               ),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(AppSpacing.page),
-                  child: IndexedStack(
-                    index: _selectedTab,
-                    children: [
-                      for (var index = 0; index < allTabs.length; index++)
-                        _LazyQualityTab(
-                          key: ValueKey('quality-tab-$index'),
-                          active: _selectedTab == index,
-                          builder: allTabs[index].builder,
-                        ),
-                    ],
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragEnd: appUsesDesktopChrome(context)
+                      ? null
+                      : (details) {
+                          final velocity = details.primaryVelocity ?? 0;
+                          if (velocity.abs() < 350) return;
+                          setState(() {
+                            _selectedTab = (_selectedTab +
+                                    (velocity < 0 ? 1 : -1))
+                                .clamp(0, allTabs.length - 1)
+                                .toInt();
+                          });
+                        },
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.page),
+                    child: IndexedStack(
+                      index: _selectedTab,
+                      children: [
+                        for (var index = 0; index < allTabs.length; index++)
+                          _LazyQualityTab(
+                            key: ValueKey('quality-tab-$index'),
+                            active: _selectedTab == index,
+                            builder: allTabs[index].builder,
+                          ),
+                      ],
+                    ),
                   ),
                 ),
               ),

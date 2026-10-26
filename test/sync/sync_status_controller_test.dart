@@ -35,23 +35,26 @@ void main() {
   });
 
   SyncStatusController controller() => SyncStatusController(
-        queue: queue,
-        metadata: metadata,
-        isOnline: () => online,
-        connectivityChanges: connectivity.stream,
-        refreshInterval: const Duration(days: 1),
-      );
+    queue: queue,
+    metadata: metadata,
+    isOnline: () => online,
+    connectivityChanges: connectivity.stream,
+    refreshInterval: const Duration(days: 1),
+  );
 
-  Future<void> enqueueSample(String entryCode) => fixture.transaction((txn) => queue.enqueue(
-        txn,
-        entityType: 'sample',
-        entityId: entryCode,
-        localRef: 1,
-        operation: 'create',
-        payload: <String, dynamic>{'entryCode': entryCode},
-      ));
+  Future<void> enqueueSample(String entryCode) => fixture.transaction(
+    (txn) => queue.enqueue(
+      txn,
+      entityType: 'sample',
+      entityId: entryCode,
+      localRef: 1,
+      operation: 'create',
+      payload: <String, dynamic>{'entryCode': entryCode},
+    ),
+  );
 
-  Future<void> insertBlocked(String entryCode) => fixture.db.insert('sync_queue', {
+  Future<void> insertBlocked(String entryCode) =>
+      fixture.db.insert('sync_queue', {
         'entity_type': 'sample',
         'entity_id': entryCode,
         'operation': 'update',
@@ -102,6 +105,25 @@ void main() {
     expect(notifications, 1, reason: 'a second identical refresh is silent');
   });
 
+  test(
+    'pull errors and incomplete downloads remain visible with an empty outbox',
+    () async {
+      final c = controller();
+      addTearDown(c.dispose);
+      await metadata.markError('network unavailable');
+      await metadata.set(SyncMetadata.pullIncompleteKey, '1');
+      await c.refresh();
+      expect(c.status.pending, 0);
+      expect(c.status.hasError, isTrue);
+      expect(c.status.pullIncomplete, isTrue);
+      await metadata.markError(null);
+      await metadata.set(SyncMetadata.pullIncompleteKey, '0');
+      await c.refresh();
+      expect(c.status.hasError, isFalse);
+      expect(c.status.pullIncomplete, isFalse);
+    },
+  );
+
   test('lastSync is the most recent successful push or pull', () async {
     final c = controller();
     addTearDown(c.dispose);
@@ -112,12 +134,20 @@ void main() {
 
     await metadata.markPush(DateTime(2026, 9, 3, 9));
     await c.refresh();
-    expect(c.status.lastSync, DateTime(2026, 9, 3, 9), reason: 'push wins when newer');
+    expect(
+      c.status.lastSync,
+      DateTime(2026, 9, 3, 9),
+      reason: 'push wins when newer',
+    );
 
     await metadata.remove(SyncMetadata.lastPushAtKey);
     await metadata.remove(SyncMetadata.lastPullAtKey);
     await c.refresh();
-    expect(c.status.lastSync, isNull, reason: 'a fresh install has never synced');
+    expect(
+      c.status.lastSync,
+      isNull,
+      reason: 'a fresh install has never synced',
+    );
   });
 
   test('coming back online refreshes the counters', () async {

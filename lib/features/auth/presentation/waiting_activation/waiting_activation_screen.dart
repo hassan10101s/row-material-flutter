@@ -32,7 +32,10 @@ class WaitingActivationScreen extends StatelessWidget {
     final gate = getIt<AuthGate>();
     final session = gate.session;
     if (session.isOrgSuspended) {
-      return _TrialExpiredView(email: session.email, orgId: session.organizationId);
+      return _TrialExpiredView(
+        email: session.email,
+        orgId: session.organizationId,
+      );
     }
     final status = session.isDisabled
         ? AppText.t(
@@ -40,14 +43,14 @@ class WaitingActivationScreen extends StatelessWidget {
             'Your account was disabled by the company admin.',
           )
         : session.isPendingActivation
-            ? AppText.t(
-                'سجّلت دخولك بنجاح. حسابك في انتظار التفعيل من مدير الشركة.',
-                'You signed in successfully. Your account is waiting for activation by the company admin.',
-              )
-            : AppText.t(
-                'حسابك في انتظار التفعيل من مدير الشركة.',
-                'Your account is waiting for activation by the company admin.',
-              );
+        ? AppText.t(
+            'سجّلت دخولك بنجاح. حسابك في انتظار التفعيل من مدير الشركة.',
+            'You signed in successfully. Your account is waiting for activation by the company admin.',
+          )
+        : AppText.t(
+            'حسابك في انتظار التفعيل من مدير الشركة.',
+            'Your account is waiting for activation by the company admin.',
+          );
     return Scaffold(
       backgroundColor: AppColors.background,
       body: Center(
@@ -61,114 +64,114 @@ class WaitingActivationScreen extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                    Icon(
-                      Icons.hourglass_top,
-                      size: 44.r,
-                      color: AppColors.warning,
+                  Icon(
+                    Icons.hourglass_top,
+                    size: 44.r,
+                    color: AppColors.warning,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    AppText.t(
+                      'الحساب بانتظار التفعيل',
+                      'Account pending activation',
                     ),
-                    const SizedBox(height: AppSpacing.md),
-                    Text(
-                      AppText.t(
-                        'الحساب بانتظار التفعيل',
-                        'Account pending activation',
-                      ),
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.headlineSmall,
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    status,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13.spMax,
                     ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(
-                      status,
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 13.spMax,
-                      ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Container(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(AppRadii.md),
                     ),
-                    const SizedBox(height: AppSpacing.md),
-                    Container(
-                      padding: const EdgeInsets.all(AppSpacing.md),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface,
-                        borderRadius: BorderRadius.circular(AppRadii.md),
-                      ),
-                      child: Column(
-                        children: [
-                          _Row(
-                            label: AppText.t('البريد', 'Email'),
-                            value: session.email,
-                          ),
-                          _Row(
-                            label: AppText.t('الشركة', 'Company'),
-                            value: session.organizationId,
-                          ),
-                          _Row(
-                            label: AppText.t('الدور', 'Role'),
-                            value: AppRoles.label(session.role),
-                          ),
-                          _Row(
-                            label: AppText.t('الحالة', 'Status'),
-                            value: session.status,
-                          ),
-                        ],
-                      ),
+                    child: Column(
+                      children: [
+                        _Row(
+                          label: AppText.t('البريد', 'Email'),
+                          value: session.email,
+                        ),
+                        _Row(
+                          label: AppText.t('الشركة', 'Company'),
+                          value: session.organizationId,
+                        ),
+                        _Row(
+                          label: AppText.t('الدور', 'Role'),
+                          value: AppRoles.labelMany(session.effectiveRoles),
+                        ),
+                        _Row(
+                          label: AppText.t('الحالة', 'Status'),
+                          value: session.status,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: AppSpacing.md),
-                    Text(
-                      AppText.t(
-                        'لا يمكنك رؤية بيانات الشركة أو الكتابة فيها قبل التفعيل، ولم تبدأ المزامنة بعد.',
-                        'You cannot see or write company data before activation, and sync has not started.',
-                      ),
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12.spMax,
-                      ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Text(
+                    AppText.t(
+                      'لا يمكنك رؤية بيانات الشركة أو الكتابة فيها قبل التفعيل، ولم تبدأ المزامنة بعد.',
+                      'You cannot see or write company data before activation, and sync has not started.',
                     ),
-                    const SizedBox(height: AppSpacing.lg),
-                    AppButton(
-                      label: AppText.t('تحديث الحالة', 'Refresh status'),
-                      expanded: true,
-                      onPressed: () async {
-                        await gate.auth.resolveProfile();
-                        gate.updated();
-                      },
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12.spMax,
                     ),
-                    const SizedBox(height: AppSpacing.sm),
-                    AppButton(
-                      label: AppText.t('تسجيل الخروج', 'Sign out'),
-                      onPressed: () async {
-                        await gate.auth.signOut();
-                        gate.updated();
-                        if (context.mounted) context.go('/login');
-                      },
-                      style: AppButtonStyle.ghost,
-                      expanded: true,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  AppButton(
+                    label: AppText.t('تحديث الحالة', 'Refresh status'),
+                    expanded: true,
+                    onPressed: () async {
+                      await gate.auth.resolveProfile();
+                      gate.updated();
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  AppButton(
+                    label: AppText.t('تسجيل الخروج', 'Sign out'),
+                    onPressed: () async {
+                      await gate.auth.signOut();
+                      gate.updated();
+                      if (context.mounted) context.go('/login');
+                    },
+                    style: AppButtonStyle.ghost,
+                    expanded: true,
+                  ),
+                  AppButton(
+                    label: AppText.t(
+                      'مغادرة الشركة والعودة',
+                      'Leave the company',
                     ),
-                    AppButton(
-                      label: AppText.t(
-                        'مغادرة الشركة والعودة',
-                        'Leave the company',
-                      ),
-                      onPressed: () async {
-                        // Leave the pending company so this account returns to
-                        // `no_company` and may create a trial company or join
-                        // with a new invite (plan §3). Best-effort: a failing
-                        // remote leave still signs out locally below.
-                        try {
-                          await getIt<MemberRepository>().leave();
-                        } on Object {
-                          // Remote leave failed (offline, revoked): the local
-                          // sign-out below must still happen.
-                        }
-                        await gate.auth.signOut();
-                        gate.updated();
-                        if (context.mounted) context.go('/login');
-                      },
-                      style: AppButtonStyle.ghost,
-                      expanded: true,
-                    ),
-                  ],
-                ),
+                    onPressed: () async {
+                      // Leave the pending company so this account returns to
+                      // `no_company` and may create a trial company or join
+                      // with a new invite (plan §3). Best-effort: a failing
+                      // remote leave still signs out locally below.
+                      try {
+                        await getIt<MemberRepository>().leave();
+                      } on Object {
+                        // Remote leave failed (offline, revoked): the local
+                        // sign-out below must still happen.
+                      }
+                      await gate.auth.signOut();
+                      gate.updated();
+                      if (context.mounted) context.go('/login');
+                    },
+                    style: AppButtonStyle.ghost,
+                    expanded: true,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -255,10 +258,7 @@ class _TrialExpiredView extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   Text(
-                    AppText.t(
-                      'انتهت فترة التجربة',
-                      'Trial period has ended',
-                    ),
+                    AppText.t('انتهت فترة التجربة', 'Trial period has ended'),
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.headlineSmall,
                   ),
@@ -283,10 +283,7 @@ class _TrialExpiredView extends StatelessWidget {
                     ),
                     child: Column(
                       children: [
-                        _Row(
-                          label: AppText.t('البريد', 'Email'),
-                          value: email,
-                        ),
+                        _Row(label: AppText.t('البريد', 'Email'), value: email),
                         _Row(
                           label: AppText.t('الشركة', 'Company'),
                           value: orgId,
@@ -307,10 +304,7 @@ class _TrialExpiredView extends StatelessWidget {
                         background: AppColors.surface,
                         foreground: AppColors.primary,
                         border: AppColors.border,
-                        tooltip: AppText.t(
-                          'فتح الموقع',
-                          'Open the website',
-                        ),
+                        tooltip: AppText.t('فتح الموقع', 'Open the website'),
                         onTap: () =>
                             AppSupport.openLink(context, AppSupport.site),
                       ),
@@ -319,10 +313,7 @@ class _TrialExpiredView extends StatelessWidget {
                         icon: Icons.phone_outlined,
                         background: AppColors.primary,
                         foreground: Colors.white,
-                        tooltip: AppText.t(
-                          'اتصال بالدعم',
-                          'Call support',
-                        ),
+                        tooltip: AppText.t('اتصال بالدعم', 'Call support'),
                         onTap: () =>
                             AppSupport.openLink(context, AppSupport.phone),
                       ),
@@ -331,10 +322,7 @@ class _TrialExpiredView extends StatelessWidget {
                         icon: Icons.chat_outlined,
                         background: AppColors.whatsapp,
                         foreground: Colors.white,
-                        tooltip: AppText.t(
-                          'تواصل واتساب',
-                          'Chat on WhatsApp',
-                        ),
+                        tooltip: AppText.t('تواصل واتساب', 'Chat on WhatsApp'),
                         onTap: () =>
                             AppSupport.openLink(context, AppSupport.whatsapp),
                       ),

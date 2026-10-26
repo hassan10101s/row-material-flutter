@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_strings.dart';
+import 'app_select_field.dart';
 
 /// One option of [AppDropdown].
 class AppDropdownItem<T> {
@@ -86,7 +87,7 @@ class AppDropdown<T> extends StatelessWidget {
         ),
       );
     }
-    return DropdownButtonFormField<T>(
+    return AppSelectField<T>(
       initialValue: value,
       isDense: isDense,
       isExpanded: true,
@@ -95,7 +96,6 @@ class AppDropdown<T> extends StatelessWidget {
         isDense: isDense,
         labelText: labelText,
         errorText: errorText,
-        border: const OutlineInputBorder(),
       ),
       hint: hintText == null
           ? null

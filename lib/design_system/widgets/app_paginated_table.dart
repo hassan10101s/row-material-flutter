@@ -111,7 +111,7 @@ class AppPaginatedTable extends StatefulWidget {
     this.totalLabel,
     this.loading = false,
     this.headerTrailing,
-    this.rowHeight = 52,
+    this.rowHeight = AppControlSizes.tableRow,
     this.total,
     this.page,
     this.onPageChanged,
@@ -241,8 +241,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
-                final scrollable =
-                    constraints.maxWidth < widget.minTableWidth;
+                final scrollable = constraints.maxWidth < widget.minTableWidth;
                 final width = scrollable
                     ? widget.minTableWidth
                     : constraints.maxWidth;
@@ -265,8 +264,9 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
                                 final row = pageRows[index];
                                 // Client mode indexes into the full list;
                                 // server mode indexes into the fetched page.
-                                final realIndex =
-                                    _server ? index : leftIndex + index;
+                                final realIndex = _server
+                                    ? index
+                                    : leftIndex + index;
                                 return _dataRow(
                                   context,
                                   widths,
@@ -305,7 +305,9 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
     // select mode, the select toggle otherwise. Reserving it on
     // `_showSelectColumn` instead overflowed the header by exactly 44px in
     // hidden mode.
-    if (widget.selectable) usable = math.max(0.0, usable - AppPaginatedTable.selectionWidth);
+    if (widget.selectable) {
+      usable = math.max(0.0, usable - AppPaginatedTable.selectionWidth);
+    }
     if (widget.headerTrailing != null) {
       usable = math.max(0.0, usable - widget.headerTrailingWidth);
     }
@@ -325,14 +327,17 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
   }
 
   /// Modern circular checkbox shared by the header (tristate) and the rows.
-  Widget _selectBox({required bool? value, required ValueChanged<bool?>? onChanged}) {
+  Widget _selectBox({
+    required bool? value,
+    required ValueChanged<bool?>? onChanged,
+  }) {
     return Checkbox(
       tristate: value == null,
       value: value ?? false,
       shape: const CircleBorder(),
       side: BorderSide(color: AppColors.borderMuted, width: 1.5),
       activeColor: AppColors.primary,
-      checkColor: Colors.white,
+      checkColor: Theme.of(context).colorScheme.onPrimary,
       visualDensity: VisualDensity.compact,
       onChanged: onChanged,
     );
@@ -345,7 +350,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
 
   Widget _header(BuildContext context, List<double> widths) {
     return Container(
-      height: 46,
+      height: AppControlSizes.tableHeading,
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
       color: AppColors.surfaceSoft,
       child: Row(
@@ -381,7 +386,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
                 padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
                 child: Align(
                   alignment: AlignmentDirectional.centerStart,
-                  child: _headerCell(i),
+                  child: _headerCell(context, i),
                 ),
               ),
             ),
@@ -393,30 +398,23 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
 
   /// One header label, optionally a sort target ([headerSortKeys]) that shows
   /// the ▲/▼ mark for the active [sortKey].
-  Widget _headerCell(int i) {
+  Widget _headerCell(BuildContext context, int i) {
     final label = widget.headers[i];
-    final key = widget.headerSortKeys != null &&
-            i < widget.headerSortKeys!.length
+    final key =
+        widget.headerSortKeys != null && i < widget.headerSortKeys!.length
         ? widget.headerSortKeys![i]
         : null;
     final active = key != null && key == widget.sortKey;
     final text = Text(
       active ? '$label${widget.sortAscending ? ' ▲' : ' ▼'}' : label,
       overflow: TextOverflow.ellipsis,
-      style: TextStyle(
-        fontSize: 12.spMax,
-        fontWeight: FontWeight.w700,
-        color: AppColors.textMuted,
-      ),
+      style: Theme.of(context).dataTableTheme.headingTextStyle,
     );
     if (key == null || widget.onSortChanged == null) return text;
     return InkWell(
       onTap: () => widget.onSortChanged!(key),
       borderRadius: BorderRadius.circular(4),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: text,
-      ),
+      child: MouseRegion(cursor: SystemMouseCursors.click, child: text),
     );
   }
 
@@ -431,7 +429,8 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
         (inSelectMode && widget.onToggleIndex != null) ||
         widget.onRowTap != null ||
         (!inSelectMode && widget.selectable && widget.selectHidden);
-    final bg = widget.rowBackgrounds != null &&
+    final bg =
+        widget.rowBackgrounds != null &&
             realIndex < widget.rowBackgrounds!.length
         ? widget.rowBackgrounds![realIndex]
         : null;
@@ -439,8 +438,8 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
       onTap: inSelectMode && widget.onToggleIndex != null
           ? () => widget.onToggleIndex!(realIndex)
           : widget.onRowTap == null
-              ? null
-              : () => widget.onRowTap!(realIndex),
+          ? null
+          : () => widget.onRowTap!(realIndex),
       onLongPress: !inSelectMode && widget.selectable && widget.selectHidden
           ? () => _enterSelectMode(realIndex)
           : null,
@@ -456,8 +455,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
                 SizedBox(
                   width: AppPaginatedTable.selectionWidth,
                   child: _selectBox(
-                    value:
-                        widget.selectedIndices?.contains(realIndex) ?? false,
+                    value: widget.selectedIndices?.contains(realIndex) ?? false,
                     onChanged: (_) => widget.onToggleIndex!(realIndex),
                   ),
                 ),
@@ -471,7 +469,10 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
                     ),
                     child: Align(
                       alignment: AlignmentDirectional.centerStart,
-                      child: row[i],
+                      child: DefaultTextStyle.merge(
+                        style: Theme.of(context).dataTableTheme.dataTextStyle,
+                        child: row[i],
+                      ),
                     ),
                   ),
                 ),
@@ -484,9 +485,7 @@ class _AppPaginatedTableState extends State<AppPaginatedTable> {
       cursor: interactive ? SystemMouseCursors.click : MouseCursor.defer,
       // A tinted row needs its own opaque Material so the ink ripple paints
       // on top of the tint instead of being hidden behind it.
-      child: bg == null
-          ? content
-          : Material(color: bg, child: content),
+      child: bg == null ? content : Material(color: bg, child: content),
     );
   }
 

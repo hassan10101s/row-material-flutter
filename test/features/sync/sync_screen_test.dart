@@ -7,11 +7,14 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/app/auth_gate.dart';
 import 'package:material_lab/core/auth/app_session.dart';
+import 'package:material_lab/core/commands/command_outbox.dart';
 import 'package:material_lab/core/sync/conflict_resolver.dart';
 import 'package:material_lab/core/sync/sync_engine.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/di/service_locator.dart';
 import 'package:material_lab/features/sync/presentation/sync/sync_screen.dart';
+
+class _MockOutbox extends Mock implements CommandOutbox {}
 
 class _MockEngine extends Mock implements SyncEngine {}
 
@@ -54,17 +57,23 @@ void main() {
     when(() => gate.online).thenReturn(online);
     when(() => gate.organizationId).thenReturn('7');
     when(() => gate.session).thenReturn(
-      AppSession(uid: 'uid-1', organizationId: '7', deviceId: 'dev-1', offline: offline),
+      AppSession(
+        uid: 'uid-1',
+        organizationId: '7',
+        deviceId: 'dev-1',
+        offline: offline,
+      ),
     );
   }
 
   Future<void> pump(WidgetTester tester) async {
-    await tester.pumpWidget(ScreenUtilInit(
-      designSize: const Size(1280, 800),
-      builder: (context, child) => const MaterialApp(
-        home: Scaffold(body: SyncScreen()),
+    await tester.pumpWidget(
+      ScreenUtilInit(
+        designSize: const Size(1280, 800),
+        builder: (context, child) =>
+            const MaterialApp(home: Scaffold(body: SyncScreen())),
       ),
-    ));
+    );
     // Drain the deferred first load (a post-frame callback) and the banner
     // animation. `pump` twice: once to run the callback, once to settle.
     await tester.pump();
@@ -78,14 +87,36 @@ void main() {
     resolver = _MockResolver();
     gate = _MockGate();
 
-    when(() => engine.status).thenAnswer((_) => const Stream<SyncStatusSnapshot>.empty());
-    when(() => queue.listConflicts(limit: any(named: 'limit')))
-        .thenAnswer((_) async => const <Map<String, Object?>>[]);
-    when(() => queue.listQueue(limit: any(named: 'limit')))
-        .thenAnswer((_) async => const <Map<String, Object?>>[]);
+    when(
+      () => engine.status,
+    ).thenAnswer((_) => const Stream<SyncStatusSnapshot>.empty());
+    when(
+      () => queue.listConflicts(limit: any(named: 'limit')),
+    ).thenAnswer((_) async => const <Map<String, Object?>>[]);
+    when(
+      () => queue.listQueue(limit: any(named: 'limit')),
+    ).thenAnswer((_) async => const <Map<String, Object?>>[]);
     when(() => queue.retryBlocked()).thenAnswer((_) async => 0);
-    when(() => queue.retryRow(any(that: isA<int>()))).thenAnswer((_) async => 1);
+    when(
+      () => queue.retryRow(any(that: isA<int>())),
+    ).thenAnswer((_) async => 1);
     stubGate();
+    final outbox = _MockOutbox();
+    when(
+      () => outbox.list(limit: any(named: 'limit')),
+    ).thenAnswer((_) async => []);
+    when(outbox.counts).thenAnswer(
+      (_) async => const CommandOutboxCounts(
+        pending: 0,
+        inFlight: 0,
+        approved: 0,
+        rejected: 0,
+        needsReview: 0,
+        requiresAuth: 0,
+      ),
+    );
+    getIt.registerSingleton<CommandOutbox>(outbox);
+    cleanups.add(() => getIt.unregister<CommandOutbox>());
 
     // Registered under the concrete type the screen asks `getIt` for; an
     // `instanceName` under `Object` would not resolve.
@@ -107,9 +138,53 @@ void main() {
     }
   });
 
+  testWidgets(
+    'cleanup requires confirmation and cancelling preserves conflicts',
+    (tester) async {
+      when(
+        () => engine.syncNow(reason: 'screen'),
+      ).thenAnswer((_) async => clean);
+      when(() => gate.session).thenReturn(
+        const AppSession(
+          uid: 'uid-1',
+          organizationId: '7',
+          deviceId: 'dev-1',
+          role: 'admin',
+          status: 'active',
+        ),
+      );
+      when(() => queue.listConflicts(limit: any(named: 'limit'))).thenAnswer(
+        (_) async => [
+          {
+            'id': 41,
+            'entity_type': 'sample',
+            'entity_id': 'S-41',
+            'direction': 'push',
+            'local_payload': '{}',
+            'remote_payload': '{}',
+            'detected_at': '2026-10-25',
+          },
+        ],
+      );
+      await pump(tester);
+      expect(find.text('رفع المتأخر'), findsNothing);
+      await tester.tap(find.text('تنظيف التعارضات'));
+      // The underlying screen remains busy while the confirmation is open.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.text('اعتماد نسخة السيرفر'), findsOneWidget);
+      await tester.tap(find.text('إلغاء'));
+      await tester.pumpAndSettle();
+      verifyZeroInteractions(resolver);
+      expect(find.text('تنظيف التعارضات'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('a failed initial load is reported to the user', (tester) async {
-    when(() => engine.syncNow(reason: any(named: 'reason')))
-        .thenThrow(StateError('database_closed'));
+    when(
+      () => engine.syncNow(reason: any(named: 'reason')),
+    ).thenThrow(StateError('database_closed'));
 
     await pump(tester);
 
@@ -118,24 +193,28 @@ void main() {
     expect(find.textContaining(unexpectedBanner), findsOneWidget);
   });
 
-  testWidgets('the error banner is not an unhandled async exception',
-      (tester) async {
-    when(() => engine.syncNow(reason: any(named: 'reason')))
-        .thenThrow(StateError('boom'));
+  testWidgets('the error banner is not an unhandled async exception', (
+    tester,
+  ) async {
+    when(
+      () => engine.syncNow(reason: any(named: 'reason')),
+    ).thenThrow(StateError('boom'));
 
     // A throw that escaped `_guarded` would fail this test rather than render.
     await pump(tester);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('a failed manual sync is reported and clears the busy state',
-      (tester) async {
+  testWidgets('a failed manual sync is reported and clears the busy state', (
+    tester,
+  ) async {
     when(() => engine.syncNow(reason: 'screen')).thenAnswer((_) async => clean);
     await pump(tester);
     expect(find.textContaining('boom'), findsNothing);
 
-    when(() => engine.syncNow(reason: 'manual'))
-        .thenThrow(StateError('permission-denied'));
+    when(
+      () => engine.syncNow(reason: 'manual'),
+    ).thenThrow(StateError('permission-denied'));
     await tester.tap(find.text('مزامنة الآن'));
     await tester.pump();
     await tester.pump(const Duration(seconds: 1));
@@ -148,8 +227,9 @@ void main() {
 
   testWidgets('a failed download-history is reported', (tester) async {
     when(() => engine.syncNow(reason: 'screen')).thenAnswer((_) async => clean);
-    when(() => engine.syncNow(reason: any(named: 'reason'), pullOnly: true))
-        .thenThrow(StateError('pull-failed'));
+    when(
+      () => engine.syncNow(reason: any(named: 'reason'), pullOnly: true),
+    ).thenThrow(StateError('pull-failed'));
     await pump(tester);
 
     await tester.tap(find.text('تنزيل السجل'));
@@ -167,7 +247,9 @@ void main() {
       blocked: 1,
       conflicts: 0,
     );
-    when(() => engine.syncNow(reason: 'screen')).thenAnswer((_) async => blocked);
+    when(
+      () => engine.syncNow(reason: 'screen'),
+    ).thenAnswer((_) async => blocked);
     when(() => queue.retryBlocked()).thenThrow(StateError('retry-failed'));
     await pump(tester);
     expect(find.text('إعادة المحاولة'), findsOneWidget);
@@ -180,14 +262,15 @@ void main() {
   });
 
   testWidgets('a successful load shows counters and no banner', (tester) async {
-    when(() => engine.syncNow(reason: any(named: 'reason')))
-        .thenAnswer((_) async => const SyncStatusSnapshot(
-              online: true,
-              syncing: false,
-              pending: 4,
-              blocked: 2,
-              conflicts: 1,
-            ));
+    when(() => engine.syncNow(reason: any(named: 'reason'))).thenAnswer(
+      (_) async => const SyncStatusSnapshot(
+        online: true,
+        syncing: false,
+        pending: 4,
+        blocked: 2,
+        conflicts: 1,
+      ),
+    );
 
     await pump(tester);
 
@@ -203,18 +286,21 @@ void main() {
     final controller = StreamController<SyncStatusSnapshot>();
     addTearDown(controller.close);
     when(() => engine.status).thenAnswer((_) => controller.stream);
-    when(() => engine.syncNow(reason: any(named: 'reason')))
-        .thenAnswer((_) async => clean);
+    when(
+      () => engine.syncNow(reason: any(named: 'reason')),
+    ).thenAnswer((_) async => clean);
 
     await pump(tester);
 
-    controller.add(const SyncStatusSnapshot(
-      online: true,
-      syncing: true,
-      pending: 9,
-      blocked: 0,
-      conflicts: 0,
-    ));
+    controller.add(
+      const SyncStatusSnapshot(
+        online: true,
+        syncing: true,
+        pending: 9,
+        blocked: 0,
+        conflicts: 0,
+      ),
+    );
     // Two frames: the event is delivered in a microtask, and the setState it
     // triggers schedules the rebuild for the frame after it.
     await tester.pump();
@@ -224,8 +310,9 @@ void main() {
     expect(find.text('9'), findsOneWidget);
   });
 
-  testWidgets('the header and the tiles lay out on a narrow phone',
-      (tester) async {
+  testWidgets('the header and the tiles lay out on a narrow phone', (
+    tester,
+  ) async {
     // 360dp is the narrowest phone this ships to. As one `Row` with a `Spacer`
     // the title plus three Arabic-labelled buttons exceeded it, and the buttons
     // were pushed off-screen behind a RenderFlex overflow - the sync button was
@@ -234,8 +321,9 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
-    when(() => engine.syncNow(reason: any(named: 'reason')))
-        .thenAnswer((_) async => clean);
+    when(
+      () => engine.syncNow(reason: any(named: 'reason')),
+    ).thenAnswer((_) async => clean);
 
     await pump(tester);
 
@@ -247,8 +335,9 @@ void main() {
     expect(find.text('في الانتظار'), findsOneWidget);
   });
 
-  testWidgets('the tiles stack on a narrow phone instead of overflowing',
-      (tester) async {
+  testWidgets('the tiles stack on a narrow phone instead of overflowing', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(360, 740);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);

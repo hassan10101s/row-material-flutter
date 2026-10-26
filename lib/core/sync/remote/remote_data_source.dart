@@ -7,6 +7,8 @@
 /// Test implementation: `lib/core/sync/remote/in_memory_data_source.dart`.
 library;
 
+import '../../auth/permissions.dart';
+
 /// A remote document plus the bookkeeping the sync engine needs.
 class RemoteDocument {
   const RemoteDocument({
@@ -14,6 +16,7 @@ class RemoteDocument {
     required this.data,
     required this.version,
     this.updatedAt,
+    this.cursorTimestamp,
     this.exists = true,
   });
 
@@ -24,6 +27,7 @@ class RemoteDocument {
   final int version;
 
   final String? updatedAt;
+  final String? cursorTimestamp;
 
   /// False when the document is missing (deleted upstream).
   final bool exists;
@@ -112,7 +116,17 @@ abstract interface class RemoteDataSource {
     required String documentId,
   });
 
+  /// Legacy batch payloads carried only the originating numeric parent id.
+  /// Resolve it within that exact device, never against a receiver's ids.
+  /// Missing or ambiguous matches return [RemoteDocument.missing].
+  Future<RemoteDocument> findProductBatchHeader({
+    required String organizationId,
+    required String deviceId,
+    required int localId,
+  });
+
   /// Incremental page for `pull_worker` (plan §9.3).
+  /// Exclusive `(timestamp, documentId)` anchor, with full server precision.
   Future<RemotePage> listSince({
     required String organizationId,
     required SyncCollection collection,
@@ -165,6 +179,7 @@ enum SyncCollection {
   members('members'),
   invites('invites'),
   auditLogs('auditLogs'),
+  syncReceipts('syncReceipts'),
   devices('devices'),
   meta('meta'),
   inventoryItems('inventoryItems'),
@@ -194,7 +209,13 @@ enum SyncCollection {
   qcResponses('qcResponses'),
   qcTaskLogs('qcTaskLogs'),
   qcFindingsNc('qcFindingsNc'),
-  qcCapa('qcCapa');
+  qcCapa('qcCapa'),
+  parameters('parameters'),
+  materialBounds('materialBounds'),
+  organizationSettings('organizationSettings'),
+  qcSops('qcSops'),
+  qcSopRevisions('qcSopRevisions'),
+  qcSopReads('qcSopReads');
 
   const SyncCollection(this.path);
 
@@ -277,6 +298,7 @@ abstract interface class AuthRemoteDataSource {
     required String organizationId,
     required String email,
     required String role,
+    List<String>? roles,
     required String invitedBy,
   });
 
@@ -366,6 +388,7 @@ class UserProfile {
     required this.email,
     required this.organizationId,
     required this.role,
+    this.roles = const [],
     required this.status,
     this.memberId = '',
     this.displayName = '',
@@ -377,7 +400,12 @@ class UserProfile {
   final String email;
   final String organizationId;
   final String role;
+  final List<String> roles;
   final String status;
+
+  List<String> get effectiveRoles => roles.isEmpty
+      ? [role]
+      : AppRoles.normalizeRoles(roles, fallbackRole: role);
   final String memberId;
   final String displayName;
   final String? photoUrl;
@@ -402,6 +430,10 @@ class UserProfile {
       email: '${data['email'] ?? email}',
       organizationId: orgId,
       role: '${data['role'] ?? 'viewer'}',
+      roles: AppRoles.normalizeRoles(
+        data.containsKey('roles') ? (data['roles'] ?? const []) : null,
+        fallbackRole: '${data['role'] ?? 'viewer'}',
+      ),
       status: status,
       memberId: '${data['memberId'] ?? ''}',
       displayName: '${data['displayName'] ?? ''}',
@@ -416,6 +448,7 @@ class Invite {
     required this.organizationId,
     required this.email,
     required this.role,
+    this.roles = const [],
     this.memberId = '',
     this.status = 'invited',
   });
@@ -423,8 +456,13 @@ class Invite {
   final String organizationId;
   final String email;
   final String role;
+  final List<String> roles;
   final String memberId;
   final String status;
+
+  List<String> get effectiveRoles => roles.isEmpty
+      ? [role]
+      : AppRoles.normalizeRoles(roles, fallbackRole: role);
 
   static Invite? fromMap(String organizationId, Map<String, dynamic>? data) {
     if (data == null) return null;
@@ -432,6 +470,10 @@ class Invite {
       organizationId: '${data['organizationId'] ?? organizationId}',
       email: '${data['email'] ?? ''}',
       role: '${data['role'] ?? 'viewer'}',
+      roles: AppRoles.normalizeRoles(
+        data.containsKey('roles') ? (data['roles'] ?? const []) : null,
+        fallbackRole: '${data['role'] ?? 'viewer'}',
+      ),
       memberId: '${data['memberId'] ?? ''}',
       status: '${data['status'] ?? 'invited'}',
     );

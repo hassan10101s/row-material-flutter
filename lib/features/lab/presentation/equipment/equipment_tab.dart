@@ -26,6 +26,7 @@ import '../../../inspections/presentation/qr/qr_scan_screen.dart';
 import '../../../reports/domain/report_repository.dart';
 import '../../domain/lab_local_repository.dart';
 import 'equipment_dialogs.dart';
+import '../../../../design_system/widgets/app_text_field.dart';
 
 /// Lab equipment registry: master list + per-device event log
 /// (calibration / maintenance / repair).
@@ -280,12 +281,12 @@ class _MasterListState extends State<EquipmentMasterList> {
     // Pairs with AppExportIconButton in the narrow search row.
     final scanButton = IconButton.outlined(
       tooltip: AppText.t('مسح رمز', 'Scan QR'),
-      onPressed: () => Navigator.of(context).push(
-        AppPageRoute(builder: (_) => const QrScanScreen()),
-      ),
+      onPressed: () => Navigator.of(
+        context,
+      ).push(AppPageRoute(builder: (_) => const QrScanScreen())),
       icon: Icon(Icons.qr_code_scanner_outlined, size: 20.r),
     );
-    final search = TextField(
+    final search = AppTextField(
       controller: query,
       onChanged: (_) {
         if (_selected.isNotEmpty) setState(_selected.clear);
@@ -305,8 +306,6 @@ class _MasterListState extends State<EquipmentMasterList> {
           'بحث بالاسم أو الكود أو الشركة...',
           'Search by name, code or manufacturer...',
         ),
-        border: const OutlineInputBorder(),
-        isDense: true,
       ),
     );
     final exportButton = IconButton(
@@ -341,9 +340,9 @@ class _MasterListState extends State<EquipmentMasterList> {
                   icon: Icon(Icons.qr_code_scanner_outlined, size: 18.r),
                   label: AppText.t('مسح رمز', 'Scan QR'),
                   style: AppButtonStyle.secondary,
-                  onPressed: () => Navigator.of(context).push(
-                    AppPageRoute(builder: (_) => const QrScanScreen()),
-                  ),
+                  onPressed: () => Navigator.of(
+                    context,
+                  ).push(AppPageRoute(builder: (_) => const QrScanScreen())),
                 ),
                 const SizedBox(width: AppSpacing.sm),
               ],
@@ -871,17 +870,15 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
                         : Icon(Icons.print_outlined, size: 20.r),
                   ),
                   IconButton(
-                    tooltip: AppText.t(
-                      'رقم فورم الجودة',
-                      'QA form number',
-                    ),
+                    tooltip: AppText.t('رقم فورم الجودة', 'QA form number'),
                     constraints: const BoxConstraints(
                       minWidth: 48,
                       minHeight: 48,
                     ),
                     onPressed: _editFormNo,
                     icon: Icon(Icons.settings_outlined, size: 20.r),
-                  ),                  IconButton(
+                  ),
+                  IconButton(
                     tooltip: AppText.t('تعديل', 'Edit'),
                     constraints: const BoxConstraints(
                       minWidth: 48,

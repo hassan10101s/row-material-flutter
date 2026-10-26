@@ -1,3 +1,4 @@
+import '../../../../design_system/widgets/app_top_app_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -40,8 +41,8 @@ class QcSettingsScreen extends StatelessWidget {
     return BlocProvider<QcCustomTablesCubit>(
       create: (_) => getIt<QcCustomTablesCubit>()..load(),
       child: Scaffold(
-        appBar: AppBar(
-          title: Text(AppText.t('إعدادات الجودة', 'Quality settings')),
+        appBar: AppTopAppBar(
+          title: AppText.t('إعدادات الجودة', 'Quality settings'),
         ),
         body: const SafeArea(child: _SettingsBody()),
       ),

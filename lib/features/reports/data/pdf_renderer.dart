@@ -155,7 +155,6 @@ class PdfRenderer {
     Map<String, dynamic> ctx,
   ) => _labelRenderInIsolate(ctx, renderBatchLabels);
 
-
   static const _ink = PdfColor.fromInt(0xFF1F1F1F);
   static const _muted = PdfColor.fromInt(0xFF555555);
   static const _accent = PdfColor.fromInt(0xFF1B5E20);
@@ -180,7 +179,8 @@ class PdfRenderer {
     );
   }
 
-  static bool _hasArabic(String? s) {    if (s == null) return false;
+  static bool _hasArabic(String? s) {
+    if (s == null) return false;
     for (final codeUnit in s.codeUnits) {
       if (codeUnit >= 0x0600 && codeUnit <= 0x06FF) return true;
     }
@@ -286,7 +286,11 @@ class PdfRenderer {
             children: [
               _txt(dept, size: 14, bold: true, color: _ink),
               _spacer(2),
-              _txt(_t('تقرير فحص / Inspection Report', 'Inspection Report'), size: 11, color: _muted),
+              _txt(
+                _t('تقرير فحص / Inspection Report', 'Inspection Report'),
+                size: 11,
+                color: _muted,
+              ),
               _spacer(2),
               _txt('${ctx['sample_number'] ?? ''}', size: 9, color: _muted),
               if (_formNo(ctx).isNotEmpty) ...[
@@ -308,7 +312,11 @@ class PdfRenderer {
       [_t('الخاصية / Field', 'Field'), _t('القيمة / Value', 'Value')],
       [
         [
-          _txt(_t('رقم العينة / Sample No.', 'Sample No.'), size: 9, bold: true),
+          _txt(
+            _t('رقم العينة / Sample No.', 'Sample No.'),
+            size: 9,
+            bold: true,
+          ),
           _txt('${ctx['sample_number'] ?? '-'}', size: 9),
         ],
         [
@@ -321,7 +329,9 @@ class PdfRenderer {
         ],
         [
           _txt(
-            isProduct ? _t('اسم المنتج / Product', 'Product') : _t('اسم الخامة / Material', 'Material'),
+            isProduct
+                ? _t('اسم المنتج / Product', 'Product')
+                : _t('اسم الخامة / Material', 'Material'),
             size: 9,
             bold: true,
           ),
@@ -333,11 +343,19 @@ class PdfRenderer {
         ],
         if (isProduct) ...[
           [
-            _txt(_t('رقم الفورمولا / Formula No.', 'Formula No.'), size: 9, bold: true),
+            _txt(
+              _t('رقم الفورمولا / Formula No.', 'Formula No.'),
+              size: 9,
+              bold: true,
+            ),
             _txt('${ctx['formula_number'] ?? '-'}', size: 9),
           ],
           [
-            _txt(_t('رقم التشغيلة / Batch No.', 'Batch No.'), size: 9, bold: true),
+            _txt(
+              _t('رقم التشغيلة / Batch No.', 'Batch No.'),
+              size: 9,
+              bold: true,
+            ),
             _txt('${ctx['batch_number'] ?? '-'}', size: 9),
           ],
         ] else ...[
@@ -346,12 +364,20 @@ class PdfRenderer {
             _txt('${ctx['supplier'] ?? '-'}', size: 9),
           ],
           [
-            _txt(_t('رقم الشاحنة / Truck No.', 'Truck No.'), size: 9, bold: true),
+            _txt(
+              _t('رقم الشاحنة / Truck No.', 'Truck No.'),
+              size: 9,
+              bold: true,
+            ),
             _txt('${ctx['truck_number'] ?? '-'}', size: 9),
           ],
         ],
         [
-          _txt(_t('أخذ العينة / Sample taken by', 'Sample taken by'), size: 9, bold: true),
+          _txt(
+            _t('أخذ العينة / Sample taken by', 'Sample taken by'),
+            size: 9,
+            bold: true,
+          ),
           _txt('${ctx['sample_taken_by'] ?? '-'}', size: 9),
         ],
         [
@@ -359,7 +385,11 @@ class PdfRenderer {
           _txt('${ctx['specialist_name'] ?? '-'}', size: 9),
         ],
         [
-          _txt(_t('أنشئ بواسطة / Created by', 'Created by'), size: 9, bold: true),
+          _txt(
+            _t('أنشئ بواسطة / Created by', 'Created by'),
+            size: 9,
+            bold: true,
+          ),
           _txt('${ctx['created_by_name'] ?? '-'}', size: 9),
         ],
       ],
@@ -393,11 +423,18 @@ class PdfRenderer {
         children: [
           pw.Row(
             children: [
-              _txt(_t('النتيجة / Decision: ', 'Decision: '), size: 10, bold: true),
+              _txt(
+                _t('النتيجة / Decision: ', 'Decision: '),
+                size: 10,
+                bold: true,
+              ),
               _txt(decision, size: 10.5, bold: true, color: verdictColor),
               _spacer(1),
               _txt(
-                _t('الإصدار ${ctx['decision_version'] ?? 1}', 'Version ${ctx['decision_version'] ?? 1}'),
+                _t(
+                  'الإصدار ${ctx['decision_version'] ?? 1}',
+                  'Version ${ctx['decision_version'] ?? 1}',
+                ),
                 size: 9,
                 color: _muted,
               ),
@@ -408,7 +445,13 @@ class PdfRenderer {
               '${ctx['decision_reason']}'.isNotEmpty &&
               ctx['decision_status'] != 'APPROVED') ...[
             _spacer(4),
-            _txt(_t('السبب / Reason: ${ctx['decision_reason']}', 'Reason: ${ctx['decision_reason']}'), size: 9.5),
+            _txt(
+              _t(
+                'السبب / Reason: ${ctx['decision_reason']}',
+                'Reason: ${ctx['decision_reason']}',
+              ),
+              size: 9.5,
+            ),
           ],
         ],
       ),
@@ -432,13 +475,23 @@ class PdfRenderer {
     // only render empty result columns, so they are skipped entirely.
     if (physical.isNotEmpty && !isProduct) {
       widgets.add(_spacer(10));
-      widgets.add(_sectionTitle(_t('الفحوصات الفيزيائية / Physical Properties', 'Physical Properties')));
+      widgets.add(
+        _sectionTitle(
+          _t(
+            'الفحوصات الفيزيائية / Physical Properties',
+            'Physical Properties',
+          ),
+        ),
+      );
       widgets.add(_spacer(4));
       final cols = <int, pw.FlexColumnWidth>{
         0: const pw.FlexColumnWidth(2.2),
         1: const pw.FlexColumnWidth(1.6),
       };
-      final header = <String>[_t('الخاصية / Property', 'Property'), _t('المتطلب / Requirement', 'Requirement')];
+      final header = <String>[
+        _t('الخاصية / Property', 'Property'),
+        _t('المتطلب / Requirement', 'Requirement'),
+      ];
       for (final name in sampleNames) {
         cols[header.length] = const pw.FlexColumnWidth(1.6);
         header.add('${name ?? ''}');
@@ -474,7 +527,11 @@ class PdfRenderer {
 
     if (chemical.isNotEmpty && !isProduct) {
       widgets.add(_spacer(10));
-      widgets.add(_sectionTitle(_t('النتائج الكيميائية / Chemical Results', 'Chemical Results')));
+      widgets.add(
+        _sectionTitle(
+          _t('النتائج الكيميائية / Chemical Results', 'Chemical Results'),
+        ),
+      );
       widgets.add(_spacer(4));
       final cols = <int, pw.FlexColumnWidth>{
         0: const pw.FlexColumnWidth(2.0),
@@ -541,9 +598,7 @@ class PdfRenderer {
         final cols = <int, pw.FlexColumnWidth>{
           0: const pw.FlexColumnWidth(2.0),
         };
-        final header = <String>[
-          _t('البيان / Parameter', 'Parameter'),
-        ];
+        final header = <String>[_t('البيان / Parameter', 'Parameter')];
         // Two header rows are not supported by `_simpleTable`'s single-row
         // header, so the sample label/meta takes the first result column and
         // the visual/chemical split is signalled via the sub-header row below.
@@ -551,10 +606,7 @@ class PdfRenderer {
           final h = Map<String, dynamic>.from(mergedSamples[i] as Map);
           cols[1 + i * 2] = const pw.FlexColumnWidth(1.1);
           cols[2 + i * 2] = const pw.FlexColumnWidth(1.1);
-          header.addAll([
-            '${h['label'] ?? ''}\n${h['meta'] ?? ''}',
-            '',
-          ]);
+          header.addAll(['${h['label'] ?? ''}\n${h['meta'] ?? ''}', '']);
         }
         final rows = <List<pw.Widget>>[];
         final subHeader = <pw.Widget>[_txt('', size: 8.2)];
@@ -667,7 +719,10 @@ class PdfRenderer {
               border: pw.Border(left: pw.BorderSide(color: _accent, width: 3)),
             ),
             child: _txt(
-              _t('ملاحظة المتابعة / Follow-up note: $note', 'Follow-up note: $note'),
+              _t(
+                'ملاحظة المتابعة / Follow-up note: $note',
+                'Follow-up note: $note',
+              ),
               size: 9,
               color: _accent,
             ),
@@ -685,7 +740,10 @@ class PdfRenderer {
             border: pw.Border(left: pw.BorderSide(color: _red, width: 3)),
           ),
           child: _txt(
-            _t('الكمية المرفوضة / Rejected quantity: ${ctx['rejected_quantity']}', 'Rejected quantity: ${ctx['rejected_quantity']}'),
+            _t(
+              'الكمية المرفوضة / Rejected quantity: ${ctx['rejected_quantity']}',
+              'Rejected quantity: ${ctx['rejected_quantity']}',
+            ),
             size: 9,
             color: _red,
           ),
@@ -714,7 +772,9 @@ class PdfRenderer {
     }
     return [
       _spacer(10),
-      _sectionTitle(_t('تاريخ القرارات / Decision History', 'Decision History')),
+      _sectionTitle(
+        _t('تاريخ القرارات / Decision History', 'Decision History'),
+      ),
       _spacer(4),
       _simpleTable(
         [
@@ -752,8 +812,7 @@ class PdfRenderer {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
-          if (pwImage != null)
-            pw.Center(child: pwImage),
+          if (pwImage != null) pw.Center(child: pwImage),
           if (pwImage != null) _spacer(4),
           pw.Row(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -763,18 +822,27 @@ class PdfRenderer {
                   crossAxisAlignment: pw.CrossAxisAlignment.start,
                   children: [
                     _txt(
-                      _t('تاريخ الإنشاء / Generated: ${ctx['generated_at']}', 'Generated: ${ctx['generated_at']}'),
+                      _t(
+                        'تاريخ الإنشاء / Generated: ${ctx['generated_at']}',
+                        'Generated: ${ctx['generated_at']}',
+                      ),
                       size: 8,
                       color: _muted,
                     ),
                     _spacer(3),
                     _txt(
-                      _t('توقيع الأخصائي / Specialist signature: ______________', 'Specialist signature: ______________'),
+                      _t(
+                        'توقيع الأخصائي / Specialist signature: ______________',
+                        'Specialist signature: ______________',
+                      ),
                       size: 8.5,
                     ),
                     _spacer(3),
                     _txt(
-                      _t('توقيع مدير الجودة / QA manager signature: ____________', 'QA manager signature: ____________'),
+                      _t(
+                        'توقيع مدير الجودة / QA manager signature: ____________',
+                        'QA manager signature: ____________',
+                      ),
                       size: 8.5,
                     ),
                   ],
@@ -839,7 +907,13 @@ class PdfRenderer {
                       spacing: 6,
                       runSpacing: 1,
                       children: [
-                        _txt(_t('رقم: ${insp['entry_code'] ?? ''}', 'No: ${insp['entry_code'] ?? ''}'), size: 7),
+                        _txt(
+                          _t(
+                            'رقم: ${insp['entry_code'] ?? ''}',
+                            'No: ${insp['entry_code'] ?? ''}',
+                          ),
+                          size: 7,
+                        ),
                         _txt('${insp['inspection_date'] ?? ''}', size: 7),
                       ],
                     ),
@@ -848,20 +922,44 @@ class PdfRenderer {
                       spacing: 6,
                       runSpacing: 1,
                       children: [
-                        _txt(_t('كمية: ${ctx['quantity_display']}', 'Qty: ${ctx['quantity_display']}'), size: 7),
+                        _txt(
+                          _t(
+                            'كمية: ${ctx['quantity_display']}',
+                            'Qty: ${ctx['quantity_display']}',
+                          ),
+                          size: 7,
+                        ),
                         if ('${insp['inspection_kind'] ?? 'raw'}' ==
                             'product') ...[
                           _txt(
-                            _t('فورمولا: ${insp['formula_number'] ?? ''}', 'Formula: ${insp['formula_number'] ?? ''}'),
+                            _t(
+                              'فورمولا: ${insp['formula_number'] ?? ''}',
+                              'Formula: ${insp['formula_number'] ?? ''}',
+                            ),
                             size: 7,
                           ),
                           _txt(
-                            _t('تشغيلة: ${insp['batch_number'] ?? ''}', 'Batch: ${insp['batch_number'] ?? ''}'),
+                            _t(
+                              'تشغيلة: ${insp['batch_number'] ?? ''}',
+                              'Batch: ${insp['batch_number'] ?? ''}',
+                            ),
                             size: 7,
                           ),
                         ] else ...[
-                          _txt(_t('مورد: ${insp['supplier'] ?? ''}', 'Supplier: ${insp['supplier'] ?? ''}'), size: 7),
-                          _txt(_t('شاحنة: ${insp['truck_number'] ?? ''}', 'Truck: ${insp['truck_number'] ?? ''}'), size: 7),
+                          _txt(
+                            _t(
+                              'مورد: ${insp['supplier'] ?? ''}',
+                              'Supplier: ${insp['supplier'] ?? ''}',
+                            ),
+                            size: 7,
+                          ),
+                          _txt(
+                            _t(
+                              'شاحنة: ${insp['truck_number'] ?? ''}',
+                              'Truck: ${insp['truck_number'] ?? ''}',
+                            ),
+                            size: 7,
+                          ),
                         ],
                       ],
                     ),
@@ -870,9 +968,18 @@ class PdfRenderer {
                       spacing: 6,
                       runSpacing: 1,
                       children: [
-                        _txt(_t('أخذ: ${insp['sample_taken_by'] ?? ''}', 'Taken: ${insp['sample_taken_by'] ?? ''}'), size: 7),
                         _txt(
-                          _t('أخصائي: ${insp['specialist_name'] ?? ''}', 'Specialist: ${insp['specialist_name'] ?? ''}'),
+                          _t(
+                            'أخذ: ${insp['sample_taken_by'] ?? ''}',
+                            'Taken: ${insp['sample_taken_by'] ?? ''}',
+                          ),
+                          size: 7,
+                        ),
+                        _txt(
+                          _t(
+                            'أخصائي: ${insp['specialist_name'] ?? ''}',
+                            'Specialist: ${insp['specialist_name'] ?? ''}',
+                          ),
                           size: 7,
                         ),
                       ],
@@ -923,18 +1030,14 @@ class PdfRenderer {
     final next = '${eq['next_calibration_date'] ?? ''}'.trim();
     final overdue =
         next.isNotEmpty &&
-        next.substring(0, 10).compareTo(
-              DateTime.now().toString().substring(0, 10),
-            ) <
+        next
+                .substring(0, 10)
+                .compareTo(DateTime.now().toString().substring(0, 10)) <
             0;
     final payload = '${ctx['qr_payload_text'] ?? ''}';
     final img = payload.isEmpty
         ? null
-        : pw.Image(
-            pw.MemoryImage(qrPngBytes(payload)),
-            width: 30,
-            height: 30,
-          );
+        : pw.Image(pw.MemoryImage(qrPngBytes(payload)), width: 30, height: 30);
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -942,25 +1045,26 @@ class PdfRenderer {
           child: pw.Column(
             crossAxisAlignment: pw.CrossAxisAlignment.start,
             children: [
-              _txt(
-                '${eq['name'] ?? ''}',
-                size: 8.5,
-                bold: true,
-              ),
+              _txt('${eq['name'] ?? ''}', size: 8.5, bold: true),
               _spacer(1),
-              _txt(
-                '${ctx['department_label']}',
-                size: 6.5,
-                color: _muted,
-              ),
+              _txt('${ctx['department_label']}', size: 6.5, color: _muted),
               _spacer(2),
               pw.Wrap(
                 spacing: 6,
                 runSpacing: 1,
                 children: [
-                  _txt(_t('كود: ${eq['code'] ?? ''}', 'Code: ${eq['code'] ?? ''}'), size: 7),
+                  _txt(
+                    _t('كود: ${eq['code'] ?? ''}', 'Code: ${eq['code'] ?? ''}'),
+                    size: 7,
+                  ),
                   if ('${eq['manufacturer'] ?? ''}'.trim().isNotEmpty)
-                    _txt(_t('الشركة: ${eq['manufacturer']}', 'Manufacturer: ${eq['manufacturer']}'), size: 7),
+                    _txt(
+                      _t(
+                        'الشركة: ${eq['manufacturer']}',
+                        'Manufacturer: ${eq['manufacturer']}',
+                      ),
+                      size: 7,
+                    ),
                 ],
               ),
               _spacer(1),
@@ -969,12 +1073,19 @@ class PdfRenderer {
                 runSpacing: 1,
                 children: [
                   if ('${eq['serial_number'] ?? ''}'.trim().isNotEmpty)
-                    _txt(_t('سيريال: ${eq['serial_number']}', 'Serial: ${eq['serial_number']}'), size: 7),
-                  if ('${eq['last_calibration_date'] ?? ''}'
-                      .trim()
-                      .isNotEmpty)
                     _txt(
-                      _t('آخر معايرة: ${eq['last_calibration_date']}', 'Last cal.: ${eq['last_calibration_date']}'),
+                      _t(
+                        'سيريال: ${eq['serial_number']}',
+                        'Serial: ${eq['serial_number']}',
+                      ),
+                      size: 7,
+                    ),
+                  if ('${eq['last_calibration_date'] ?? ''}'.trim().isNotEmpty)
+                    _txt(
+                      _t(
+                        'آخر معايرة: ${eq['last_calibration_date']}',
+                        'Last cal.: ${eq['last_calibration_date']}',
+                      ),
                       size: 7,
                     ),
                 ],
@@ -987,7 +1098,10 @@ class PdfRenderer {
                   if (next.isNotEmpty)
                     _txt(
                       overdue
-                          ? _t('المعايرة القادمة: $next (متأخرة!)', 'Next cal.: $next (overdue!)')
+                          ? _t(
+                              'المعايرة القادمة: $next (متأخرة!)',
+                              'Next cal.: $next (overdue!)',
+                            )
                           : _t('المعايرة القادمة: $next', 'Next cal.: $next'),
                       size: 7,
                       color: overdue
@@ -1003,7 +1117,10 @@ class PdfRenderer {
                 children: [
                   if ('${ctx['form_no'] ?? ''}'.trim().isNotEmpty)
                     _txt(
-                      _t('نموذج رقم / Form No: ${ctx['form_no']}', 'Form No: ${ctx['form_no']}'),
+                      _t(
+                        'نموذج رقم / Form No: ${ctx['form_no']}',
+                        'Form No: ${ctx['form_no']}',
+                      ),
                       size: 7,
                     ),
                 ],
@@ -1083,7 +1200,10 @@ class PdfRenderer {
     }
     if (pages.isEmpty) {
       pages.add(
-        pw.Page(pageFormat: _a4(), build: (_) => _txt(_t('لا توجد QR', 'No QR'), size: 10)),
+        pw.Page(
+          pageFormat: _a4(),
+          build: (_) => _txt(_t('لا توجد QR', 'No QR'), size: 10),
+        ),
       );
     }
     for (final p in pages) {
@@ -1138,7 +1258,10 @@ class PdfRenderer {
     }
     if (pages.isEmpty) {
       pages.add(
-        pw.Page(pageFormat: _a4(), build: (_) => _txt(_t('لا توجد QR', 'No QR'), size: 10)),
+        pw.Page(
+          pageFormat: _a4(),
+          build: (_) => _txt(_t('لا توجد QR', 'No QR'), size: 10),
+        ),
       );
     }
     for (final p in pages) {
@@ -1166,31 +1289,49 @@ class PdfRenderer {
               if (formNo.trim().isNotEmpty) ...[
                 _spacer(1),
                 _txt(
-                  _t('نموذج رقم / Form No: ${formNo.trim()}', 'Form No: ${formNo.trim()}'),
+                  _t(
+                    'نموذج رقم / Form No: ${formNo.trim()}',
+                    'Form No: ${formNo.trim()}',
+                  ),
                   size: 6,
                   color: _muted,
                 ),
               ],
               _spacer(1),
               _txt(
-                _t('رقم: ${label['entry_code'] ?? ''} | ${label['inspection_date'] ?? ''}', 'No: ${label['entry_code'] ?? ''} | ${label['inspection_date'] ?? ''}'),
+                _t(
+                  'رقم: ${label['entry_code'] ?? ''} | ${label['inspection_date'] ?? ''}',
+                  'No: ${label['entry_code'] ?? ''} | ${label['inspection_date'] ?? ''}',
+                ),
                 size: 7,
               ),
               _spacer(1),
               _txt(
                 label['is_product'] == true
-                    ? _t('فورمولا: ${label['formula_number'] ?? ''} | تشغيلة: ${label['batch_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}', 'Formula: ${label['formula_number'] ?? ''} | Batch: ${label['batch_number'] ?? ''} | Qty: ${label['quantity_display'] ?? ''}')
-                    : _t('مورد: ${label['supplier'] ?? ''} | شاحنة: ${label['truck_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}', 'Supplier: ${label['supplier'] ?? ''} | Truck: ${label['truck_number'] ?? ''} | Qty: ${label['quantity_display'] ?? ''}'),
+                    ? _t(
+                        'فورمولا: ${label['formula_number'] ?? ''} | تشغيلة: ${label['batch_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}',
+                        'Formula: ${label['formula_number'] ?? ''} | Batch: ${label['batch_number'] ?? ''} | Qty: ${label['quantity_display'] ?? ''}',
+                      )
+                    : _t(
+                        'مورد: ${label['supplier'] ?? ''} | شاحنة: ${label['truck_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}',
+                        'Supplier: ${label['supplier'] ?? ''} | Truck: ${label['truck_number'] ?? ''} | Qty: ${label['quantity_display'] ?? ''}',
+                      ),
                 size: 7,
               ),
               _spacer(1),
               _txt(
-                _t('أخذ: ${label['sample_taken_by'] ?? ''} | أخصائي: ${label['specialist_name'] ?? ''}', 'Taken: ${label['sample_taken_by'] ?? ''} | Specialist: ${label['specialist_name'] ?? ''}'),
+                _t(
+                  'أخذ: ${label['sample_taken_by'] ?? ''} | أخصائي: ${label['specialist_name'] ?? ''}',
+                  'Taken: ${label['sample_taken_by'] ?? ''} | Specialist: ${label['specialist_name'] ?? ''}',
+                ),
                 size: 7,
               ),
               _spacer(1),
               _txt(
-                _t('الحالة: ${label['decision_status'] ?? ''} (v${label['decision_version'] ?? 1})', 'Status: ${label['decision_status'] ?? ''} (v${label['decision_version'] ?? 1})'),
+                _t(
+                  'الحالة: ${label['decision_status'] ?? ''} (v${label['decision_version'] ?? 1})',
+                  'Status: ${label['decision_status'] ?? ''} (v${label['decision_version'] ?? 1})',
+                ),
                 size: 7,
                 bold: true,
               ),
@@ -1271,7 +1412,10 @@ class PdfRenderer {
       pw.Row(
         children: [
           pw.Expanded(
-            child: _statCard(_t('إجمالي / Total', 'Total'), '${ctx['total'] ?? 0}'),
+            child: _statCard(
+              _t('إجمالي / Total', 'Total'),
+              '${ctx['total'] ?? 0}',
+            ),
           ),
           pw.Expanded(
             child: _statCard(
@@ -1287,10 +1431,16 @@ class PdfRenderer {
             ),
           ),
           pw.Expanded(
-            child: _statCard(_t('رفض جزئي / Partial', 'Partial'), '${ctx['partial'] ?? 0}'),
+            child: _statCard(
+              _t('رفض جزئي / Partial', 'Partial'),
+              '${ctx['partial'] ?? 0}',
+            ),
           ),
           pw.Expanded(
-            child: _statCard(_t('رفض كلي / Rejected', 'Rejected'), '${ctx['rejected'] ?? 0}'),
+            child: _statCard(
+              _t('رفض كلي / Rejected', 'Rejected'),
+              '${ctx['rejected'] ?? 0}',
+            ),
           ),
         ],
       ),
@@ -1379,9 +1529,9 @@ class PdfRenderer {
     final gen = '${ctx['generation_time'] ?? ''}';
     var s = date;
     if (shift.isNotEmpty) s = '$s — $shift';
-    if (gen.isNotEmpty)
-      s =
-          '$s   (${_t('انشئ', 'Generated')} ${gen.substring(0, gen.length > 16 ? 16 : gen.length)})';
+    if (gen.isNotEmpty) {
+      s = '$s   (${_t('انشئ', 'Generated')} ${gen.substring(0, gen.length > 16 ? 16 : gen.length)})';
+    }
     return s;
   }
 
@@ -1400,9 +1550,7 @@ class PdfRenderer {
         ? '${ctx['month_name_ar']}'
         : '';
     final en = '${ctx['month_name']}';
-    var s = _ar
-        ? '$label ${ctx['year']} — $en'
-        : '$en ${ctx['year']}';
+    var s = _ar ? '$label ${ctx['year']} — $en' : '$en ${ctx['year']}';
     final now = '${ctx['now'] ?? ''}';
     if (now.isNotEmpty) s = '$s   (${_t('انشئ', 'Generated')} $now)';
     return s;
@@ -1449,15 +1597,24 @@ class PdfRenderer {
     if (kind == _Kind.monthly) {
       body.addAll([
         _spacer(10),
-        _sectionTitle(_t('الاتجاه الشهري / Monthly Trend (آخر 6 شهور)', 'Monthly Trend (last 6 months)')),
+        _sectionTitle(
+          _t(
+            'الاتجاه الشهري / Monthly Trend (آخر 6 شهور)',
+            'Monthly Trend (last 6 months)',
+          ),
+        ),
         _spacer(4),
         _trendTable((ctx['trend_months'] as List?) ?? const []),
         _spacer(10),
-        _sectionTitle(_t('تفصيل حسب الخامة / Material Summary', 'Material Summary')),
+        _sectionTitle(
+          _t('تفصيل حسب الخامة / Material Summary', 'Material Summary'),
+        ),
         _spacer(4),
         ..._materialSectionsTables(ctx['materials'] as List? ?? const []),
         _spacer(10),
-        _sectionTitle(_t('تفصيل حسب المورد / Supplier Summary', 'Supplier Summary')),
+        _sectionTitle(
+          _t('تفصيل حسب المورد / Supplier Summary', 'Supplier Summary'),
+        ),
         _spacer(4),
         _supplierTable(ctx['suppliers'] as List? ?? const []),
       ]);
@@ -1468,22 +1625,30 @@ class PdfRenderer {
         _spacer(4),
         _yearlyMonthlyTable((ctx['monthly_stats'] as List?) ?? const []),
         _spacer(10),
-        _sectionTitle(_t('تحليل رباعي / Quarterly Analysis', 'Quarterly Analysis')),
+        _sectionTitle(
+          _t('تحليل رباعي / Quarterly Analysis', 'Quarterly Analysis'),
+        ),
         _spacer(4),
         _quarterlyTable((ctx['quarterly_stats'] as List?) ?? const []),
         _spacer(10),
-        _sectionTitle(_t('تفصيل حسب الخامة / Material Summary', 'Material Summary')),
+        _sectionTitle(
+          _t('تفصيل حسب الخامة / Material Summary', 'Material Summary'),
+        ),
         _spacer(4),
         ..._materialSectionsTables(ctx['materials'] as List? ?? const []),
         _spacer(10),
-        _sectionTitle(_t('أهم خمسة موردين / Top 5 Suppliers', 'Top 5 Suppliers')),
+        _sectionTitle(
+          _t('أهم خمسة موردين / Top 5 Suppliers', 'Top 5 Suppliers'),
+        ),
         _spacer(4),
         _supplierTable(ctx['top_suppliers'] as List? ?? const []),
       ]);
     } else {
       body.addAll([
         _spacer(10),
-        _sectionTitle(_t('تفصيل حسب الخامة / Material Summary', 'Material Summary')),
+        _sectionTitle(
+          _t('تفصيل حسب الخامة / Material Summary', 'Material Summary'),
+        ),
         _spacer(4),
         ..._materialSectionsTables(
           (ctx['material_sections'] as List?) ??
@@ -1496,7 +1661,9 @@ class PdfRenderer {
     final recommendations = (ctx['recommendations'] as List?) ?? const [];
     if (recommendations.isNotEmpty) {
       body.add(_spacer(10));
-      body.add(_sectionTitle(_t('التوصيات / Recommendations', 'Recommendations')));
+      body.add(
+        _sectionTitle(_t('التوصيات / Recommendations', 'Recommendations')),
+      );
       body.add(_spacer(4));
       final recs = <pw.Widget>[];
       for (var i = 0; i < recommendations.length; i++) {
@@ -1626,7 +1793,15 @@ class PdfRenderer {
       ]);
     }
     return _simpleTable(
-      [_t('الربع', 'Quarter'), _t('العدد', 'Count'), _t('قبول', 'Accept'), _t('جزئي', 'Partial'), _t('رفض', 'Reject'), _t('قبول %', 'Accept %'), _t('رفض %', 'Reject %')],
+      [
+        _t('الربع', 'Quarter'),
+        _t('العدد', 'Count'),
+        _t('قبول', 'Accept'),
+        _t('جزئي', 'Partial'),
+        _t('رفض', 'Reject'),
+        _t('قبول %', 'Accept %'),
+        _t('رفض %', 'Reject %'),
+      ],
       rows,
       const {
         0: pw.FlexColumnWidth(2.2),
@@ -1667,7 +1842,14 @@ class PdfRenderer {
                       color: _accent,
                     ),
                   ),
-                  _txt(_t('العدد: ${s['count'] ?? 0}', 'Count: ${s['count'] ?? 0}'), size: 8, color: _muted),
+                  _txt(
+                    _t(
+                      'العدد: ${s['count'] ?? 0}',
+                      'Count: ${s['count'] ?? 0}',
+                    ),
+                    size: 8,
+                    color: _muted,
+                  ),
                 ],
               ),
               _spacer(3),
@@ -1676,7 +1858,11 @@ class PdfRenderer {
               if (s['rows'] != null)
                 _detailRows(s['rows'] as List? ?? const [])
               else if (s['suppliers'] != null) ...[
-                _txt(_t('الموردين / Suppliers:', 'Suppliers:'), size: 8, bold: true),
+                _txt(
+                  _t('الموردين / Suppliers:', 'Suppliers:'),
+                  size: 8,
+                  bold: true,
+                ),
                 _spacer(2),
                 _supplierTable(s['suppliers'] as List? ?? const []),
               ],
@@ -1691,15 +1877,39 @@ class PdfRenderer {
   static pw.Widget _supplierRow(Map s) {
     return pw.Row(
       children: [
-        pw.Expanded(child: _txt(_t('قبول: ${s['approved'] ?? 0}', 'Accept: ${s['approved'] ?? 0}'), size: 8)),
-        pw.Expanded(
-          child: _txt(_t('مقبول مشروط: ${s['conditional'] ?? 0}', 'Conditional: ${s['conditional'] ?? 0}'), size: 8),
-        ),
-        pw.Expanded(child: _txt(_t('جزئي: ${s['partial'] ?? 0}', 'Partial: ${s['partial'] ?? 0}'), size: 8)),
-        pw.Expanded(child: _txt(_t('رفض: ${s['rejected'] ?? 0}', 'Reject: ${s['rejected'] ?? 0}'), size: 8)),
         pw.Expanded(
           child: _txt(
-            _t('نسبة القبول: ${s['approval_rate'] ?? 0}%', 'Accept %: ${s['approval_rate'] ?? 0}%'),
+            _t('قبول: ${s['approved'] ?? 0}', 'Accept: ${s['approved'] ?? 0}'),
+            size: 8,
+          ),
+        ),
+        pw.Expanded(
+          child: _txt(
+            _t(
+              'مقبول مشروط: ${s['conditional'] ?? 0}',
+              'Conditional: ${s['conditional'] ?? 0}',
+            ),
+            size: 8,
+          ),
+        ),
+        pw.Expanded(
+          child: _txt(
+            _t('جزئي: ${s['partial'] ?? 0}', 'Partial: ${s['partial'] ?? 0}'),
+            size: 8,
+          ),
+        ),
+        pw.Expanded(
+          child: _txt(
+            _t('رفض: ${s['rejected'] ?? 0}', 'Reject: ${s['rejected'] ?? 0}'),
+            size: 8,
+          ),
+        ),
+        pw.Expanded(
+          child: _txt(
+            _t(
+              'نسبة القبول: ${s['approval_rate'] ?? 0}%',
+              'Accept %: ${s['approval_rate'] ?? 0}%',
+            ),
             size: 8,
             bold: true,
           ),
@@ -1722,7 +1932,14 @@ class PdfRenderer {
       ]);
     }
     return _simpleTable(
-      ['#', _t('رقم العينة', 'Sample No.'), _t('المورد', 'Supplier'), _t('وقت القرار', 'Decision time'), _t('الكمية', 'Qty'), _t('الحالة', 'Status')],
+      [
+        '#',
+        _t('رقم العينة', 'Sample No.'),
+        _t('المورد', 'Supplier'),
+        _t('وقت القرار', 'Decision time'),
+        _t('الكمية', 'Qty'),
+        _t('الحالة', 'Status'),
+      ],
       tr,
       const {
         0: pw.FlexColumnWidth(0.4),
@@ -1898,7 +2115,14 @@ class PdfRenderer {
     }
     body.add(_spacer(8));
     body.add(
-      _txt(_t('انشئ في: ${ctx['generation_time'] ?? ''}', 'Generated at: ${ctx['generation_time'] ?? ''}'), size: 8, color: _muted),
+      _txt(
+        _t(
+          'انشئ في: ${ctx['generation_time'] ?? ''}',
+          'Generated at: ${ctx['generation_time'] ?? ''}',
+        ),
+        size: 8,
+        color: _muted,
+      ),
     );
 
     doc.addPage(
@@ -1937,8 +2161,7 @@ class PdfRenderer {
     );
     final table = pw.Table(
       columnWidths: {
-        for (var i = 0; i < headers.length; i++)
-          i: const pw.FlexColumnWidth(1),
+        for (var i = 0; i < headers.length; i++) i: const pw.FlexColumnWidth(1),
       },
       border: pw.TableBorder.all(
         color: PdfColor.fromInt(0xFFCCCCCC),
@@ -1952,9 +2175,7 @@ class PdfRenderer {
         ),
         for (var ri = 0; ri < rows.length; ri++)
           pw.TableRow(
-            decoration: pw.BoxDecoration(
-              color: ri.isEven ? _zebraA : _zebraB,
-            ),
+            decoration: pw.BoxDecoration(color: ri.isEven ? _zebraA : _zebraB),
             children: [
               for (var ci = 0; ci < headers.length; ci++)
                 cell(ci < rows[ri].length ? rows[ri][ci] : ''),

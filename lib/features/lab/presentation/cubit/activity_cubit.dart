@@ -5,7 +5,9 @@ import 'activity_state.dart';
 
 /// Loads the lab activity log (stock adjustments + consumptions).
 class ActivityCubit extends AppCubit<ActivityState> {
-  ActivityCubit({required this.repo}) : super(const ActivityState());
+  ActivityCubit({required this.repo}) : super(const ActivityState()) {
+    refreshOnSync(load);
+  }
 
   final LabLocalRepository repo;
 

@@ -15,29 +15,35 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
     required WidgetBuilder builder,
     Duration duration = const Duration(milliseconds: 240),
   }) : super(
-          transitionDuration: duration,
-          reverseTransitionDuration: Duration(milliseconds: duration.inMilliseconds ~/ 2),
-          pageBuilder: (context, animation, secondaryAnimation) {
-            final changes = appearanceChanges;
-            if (changes == null) return builder(context);
-            return ListenableBuilder(
-              listenable: changes,
-              builder: (context, _) => builder(context),
-            );
-          },
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            final slide = SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0, 0.018),
-                end: Offset.zero,
-              ).animate(
-                CurvedAnimation(parent: animation, curve: Curves.easeOutCubic),
-              ),
-              child: child,
-            );
-            return FadeTransition(opacity: animation, child: slide);
-          },
-        );
+         transitionDuration: duration,
+         reverseTransitionDuration: Duration(
+           milliseconds: duration.inMilliseconds ~/ 2,
+         ),
+         pageBuilder: (context, animation, secondaryAnimation) {
+           final changes = appearanceChanges;
+           if (changes == null) return builder(context);
+           return ListenableBuilder(
+             listenable: changes,
+             builder: (context, _) => builder(context),
+           );
+         },
+         transitionsBuilder: (context, animation, secondaryAnimation, child) {
+           final slide = SlideTransition(
+             position:
+                 Tween<Offset>(
+                   begin: const Offset(0, 0.018),
+                   end: Offset.zero,
+                 ).animate(
+                   CurvedAnimation(
+                     parent: animation,
+                     curve: Curves.easeOutCubic,
+                   ),
+                 ),
+             child: child,
+           );
+           return FadeTransition(opacity: animation, child: slide);
+         },
+       );
 }
 
 /// Convenience builder for [AppPageRoute] with a named route / screen.
@@ -132,8 +138,10 @@ class _AppEntranceState extends State<AppEntrance>
   Widget build(BuildContext context) {
     final animation = CurvedAnimation(parent: _controller, curve: widget.curve);
     final slide = SlideTransition(
-      position: Tween<Offset>(begin: widget.offset, end: Offset.zero)
-          .animate(animation),
+      position: Tween<Offset>(
+        begin: widget.offset,
+        end: Offset.zero,
+      ).animate(animation),
       child: widget.child,
     );
     return FadeTransition(opacity: animation, child: slide);
@@ -168,8 +176,8 @@ class _AppStaggerState extends State<AppStagger>
     super.initState();
     _controller = AnimationController(
       vsync: this,
-      duration: widget.itemDuration +
-          widget.interval * (widget.children.length - 1),
+      duration:
+          widget.itemDuration + widget.interval * (widget.children.length - 1),
     )..forward();
   }
 
@@ -183,23 +191,31 @@ class _AppStaggerState extends State<AppStagger>
   Widget build(BuildContext context) {
     final count = widget.children.length;
     if (count == 0) return const SizedBox.shrink();
-    final intervalShare = widget.interval.inMilliseconds /
-        _controller.duration!.inMilliseconds;
-    final itemShare = widget.itemDuration.inMilliseconds /
+    final intervalShare =
+        widget.interval.inMilliseconds / _controller.duration!.inMilliseconds;
+    final itemShare =
+        widget.itemDuration.inMilliseconds /
         _controller.duration!.inMilliseconds;
     final children = <Widget>[];
     for (var i = 0; i < count; i++) {
       final start = intervalShare * i;
       final animation = CurvedAnimation(
         parent: _controller,
-        curve: Interval(start, (start + itemShare).clamp(0.0, 1.0),
-            curve: Curves.easeOutCubic),
+        curve: Interval(
+          start,
+          (start + itemShare).clamp(0.0, 1.0),
+          curve: Curves.easeOutCubic,
+        ),
       );
-      children.add(SlideTransition(
-        position: Tween<Offset>(begin: widget.offset, end: Offset.zero)
-            .animate(animation),
-        child: FadeTransition(opacity: animation, child: widget.children[i]),
-      ));
+      children.add(
+        SlideTransition(
+          position: Tween<Offset>(
+            begin: widget.offset,
+            end: Offset.zero,
+          ).animate(animation),
+          child: FadeTransition(opacity: animation, child: widget.children[i]),
+        ),
+      );
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -247,11 +263,13 @@ class _AppShimmerState extends State<AppShimmer>
   @override
   Widget build(BuildContext context) {
     final brightness = Theme.of(context).brightness;
-    final base = widget.baseColor ??
+    final base =
+        widget.baseColor ??
         (brightness == Brightness.dark
             ? const Color(0xFF243147)
             : const Color(0xFFE8ECF1));
-    final highlight = widget.highlightColor ??
+    final highlight =
+        widget.highlightColor ??
         (brightness == Brightness.dark
             ? const Color(0xFF334155)
             : const Color(0xFFF4F7FB));

@@ -1,4 +1,7 @@
 import '../sync_codec.dart';
+import '../sync_cursor_time.dart';
+import '../remote_write_policy.dart';
+import '../append_delivery_identity.dart';
 import 'remote_data_source.dart';
 
 /// In-memory [RemoteDataSource] used by the sync tests and by the offline
@@ -21,6 +24,7 @@ class InMemoryDataSource implements RemoteDataSource {
 
   final List<RemoteDocument> registeredDevices = [];
   final List<String> removedDevices = [];
+  final Map<String, String> appendReceipts = {};
 
   static const int maxPayloadBytes = 900000;
 
@@ -39,7 +43,7 @@ class InMemoryDataSource implements RemoteDataSource {
   /// Substitutes the sentinels the way the server would.
   Map<String, dynamic> _withServerTimestamps(Map<String, dynamic> data) {
     final out = Map<String, dynamic>.from(data);
-    for (final field in const ['updatedAt', 'createdAt']) {
+    for (final field in const ['updatedAt', 'createdAt', 'deletedAt']) {
       if (out[field] == '__SERVER_TIMESTAMP__') out[field] = _serverNow();
     }
     return out;
@@ -68,33 +72,32 @@ class InMemoryDataSource implements RemoteDataSource {
     if (offline) return PushResult.retryable('offline');
     if (!signedIn) return const PushResult.rejected('unauthenticated');
     final bytes = SyncCodec.byteSize(data);
-    if (bytes > maxPayloadBytes) return PushResult.oversized('too large: $bytes');
+    if (bytes > maxPayloadBytes) {
+      return PushResult.oversized('too large: $bytes');
+    }
     final key = _key(organizationId, collection, documentId);
     final existing = documents[key];
-    if (existing != null) {
-      final currentVersion = (existing['version'] as num?)?.toInt() ?? 0;
-      if (currentVersion != baseVersion) {
-        return PushResult.rejected(
-          'Version conflict: remote=$currentVersion local=$baseVersion',
-          remote: existing,
-        );
-      }
+    final plan = RemoteWritePolicy.plan(
+      organizationId: organizationId,
+      data: data,
+      baseVersion: baseVersion,
+      current: existing,
+    );
+    if (plan.refusal != null) return plan.refusal!;
+    if (plan.alreadyApplied) {
+      return PushResult.success(
+        plan.version,
+        payload: SyncCodec.encodeMap(plan.payload),
+      );
     }
-    final payload = _withServerTimestamps(SyncCodec.sanitizeMap(data))
-      ..['version'] = baseVersion + 1;
-    if (existing == null) {
-      documents[key] = payload;
-    } else {
-      // `FirestoreDataSourceImpl` issues `ref.update(payload)`, a partial write:
-      // absent keys keep their stored value. Replacing the whole document here
-      // would diverge from production exactly where it matters most - an
-      // immutable field omitted from an update payload (`createdAt`) would
-      // disappear from the double and no sync test could ever prove that the
-      // real server preserves it.
-      documents[key] = Map<String, dynamic>.from(existing)..addAll(payload);
-    }
+    final payload = _withServerTimestamps(SyncCodec.sanitizeMap(plan.payload));
+    documents[key] = existing == null
+        ? payload
+        : (Map<String, dynamic>.from(existing)..addAll(payload));
     return PushResult.success(
-        baseVersion + 1, payload: SyncCodec.encodeMap(payload));
+      plan.version,
+      payload: SyncCodec.encodeMap(payload),
+    );
   }
 
   @override
@@ -106,13 +109,27 @@ class InMemoryDataSource implements RemoteDataSource {
   }) async {
     if (offline) return PushResult.retryable('offline');
     if (!signedIn) return const PushResult.rejected('unauthenticated');
-    final key = _key(organizationId, collection, documentId);
-    if (documents.containsKey(key)) {
-      return const PushResult.rejected('append-only document already exists');
+    final bytes = SyncCodec.byteSize(data);
+    if (bytes > maxPayloadBytes) {
+      return PushResult.oversized('too large: $bytes');
     }
-    final payload = _withServerTimestamps(SyncCodec.sanitizeMap(data))
-      ..['version'] = 1;
+    final key = _key(organizationId, collection, documentId);
+    final fingerprint = AppendDeliveryIdentity.fingerprint(data);
+    if (appendReceipts.containsKey(key)) {
+      return appendReceipts[key] == fingerprint
+          ? const PushResult.success(1)
+          : PushResult.rejected('Append-only identity collision');
+    }
+    final existing = documents[key];
+    if (existing != null &&
+        AppendDeliveryIdentity.fingerprint(existing) != fingerprint) {
+      return const PushResult.rejected('Append-only identity collision');
+    }
+    final payload =
+        existing ??
+        (_withServerTimestamps(SyncCodec.sanitizeMap(data))..['version'] = 1);
     documents[key] = payload;
+    appendReceipts[key] = fingerprint;
     return PushResult.success(1, payload: SyncCodec.encodeMap(payload));
   }
 
@@ -134,6 +151,36 @@ class InMemoryDataSource implements RemoteDataSource {
   }
 
   @override
+  Future<RemoteDocument> findProductBatchHeader({
+    required String organizationId,
+    required String deviceId,
+    required int localId,
+  }) async {
+    if (!isSignedIn || deviceId.isEmpty || localId <= 0) {
+      return RemoteDocument.missing;
+    }
+    final matches = documents.entries
+        .where(
+          (entry) =>
+              entry.key.startsWith(
+                '$organizationId/${SyncCollection.samples.path}/',
+              ) &&
+              entry.value['deviceId'] == deviceId &&
+              entry.value['localId'] == localId &&
+              entry.value['inspectionKind'] == 'product',
+        )
+        .take(2)
+        .toList();
+    if (matches.length != 1) return RemoteDocument.missing;
+    return RemoteDocument(
+      id: matches.single.key.split('/').last,
+      data: Map<String, dynamic>.from(matches.single.value),
+      version: (matches.single.value['version'] as num?)?.toInt() ?? 1,
+      updatedAt: '${matches.single.value['updatedAt'] ?? ''}',
+    );
+  }
+
+  @override
   Future<RemotePage> listSince({
     required String organizationId,
     required SyncCollection collection,
@@ -149,18 +196,20 @@ class InMemoryDataSource implements RemoteDataSource {
       final id = key.substring(prefix.length);
       final ts = '${value['updatedAt'] ?? ''}';
       if (startAtTs.isNotEmpty && startAtId.isNotEmpty) {
-        final cmp = ts.compareTo(startAtTs);
+        final cmp = SyncCursorTime.compare(ts, startAtTs);
         if (cmp < 0 || (cmp == 0 && id.compareTo(startAtId) <= 0)) return;
       }
-      docs.add(RemoteDocument(
-        id: id,
-        data: Map<String, dynamic>.from(value),
-        version: (value['version'] as num?)?.toInt() ?? 1,
-        updatedAt: ts,
-      ));
+      docs.add(
+        RemoteDocument(
+          id: id,
+          data: Map<String, dynamic>.from(value),
+          version: (value['version'] as num?)?.toInt() ?? 1,
+          updatedAt: ts,
+        ),
+      );
     });
     docs.sort((a, b) {
-      final cmp = (a.updatedAt ?? '').compareTo(b.updatedAt ?? '');
+      final cmp = SyncCursorTime.compare(a.updatedAt ?? '', b.updatedAt ?? '');
       return cmp != 0 ? cmp : a.id.compareTo(b.id);
     });
     final hasMore = docs.length > limit;
@@ -261,7 +310,9 @@ class InMemoryDataSource implements RemoteDataSource {
   }) {
     final payload = Map<String, dynamic>.from(seedData)
       ..['version'] = version
-      ..['updatedAt'] = updatedAt ?? '2026-01-01T00:00:${(documentId.hashCode % 60).toString().padLeft(2, '0')}.000Z';
+      ..['updatedAt'] =
+          updatedAt ??
+          '2026-01-01T00:00:${(documentId.hashCode % 60).toString().padLeft(2, '0')}.000Z';
     documents[_key(organizationId, collection, documentId)] = payload;
   }
 }

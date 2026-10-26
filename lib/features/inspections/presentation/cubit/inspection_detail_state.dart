@@ -28,15 +28,14 @@ class InspectionDetailState extends Equatable {
     bool? loading,
     String? error,
     String? busy,
-  }) =>
-      InspectionDetailState(
-        inspection: inspection ?? this.inspection,
-        history: history ?? this.history,
-        chemicalAnalyses: chemicalAnalyses ?? this.chemicalAnalyses,
-        loading: loading ?? this.loading,
-        error: error ?? this.error,
-        busy: busy ?? this.busy,
-      );
+  }) => InspectionDetailState(
+    inspection: inspection ?? this.inspection,
+    history: history ?? this.history,
+    chemicalAnalyses: chemicalAnalyses ?? this.chemicalAnalyses,
+    loading: loading ?? this.loading,
+    error: error ?? this.error,
+    busy: busy ?? this.busy,
+  );
 
   @override
   List<Object?> get props => [

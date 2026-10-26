@@ -8,16 +8,22 @@ class AppSpacing {
   static const double md = 12;
   static const double lg = 16;
   static const double xl = 20;
+
   /// Standard page gutter (desktop). Phones use [pageMobile].
   static const double page = 24;
+
   /// Phone page gutter (pernit-style 16.w padding).
   static const double pageMobile = 16;
+
   /// Primary mobile CTA height (pernit `PernitButton`: 52.h full-width).
   static const double mobileCtaHeight = 52;
+
   /// Minimum touch target (pernit clamps to 48; desktop keeps 34 via LayoutSpec).
   static const double minTouchMobile = 48;
+
   /// Bottom-sheet handle + content padding mirror of pernit sheet recipe.
   static const double sheetRadius = 16;
+
   /// 32. The previous scale had both `xxl = 24` (a duplicate of [page] with
   /// zero call sites) and `xxxl = 32`; the duplicate step is gone.
   static const double xxxl = 32;
@@ -39,8 +45,18 @@ class AppRadii {
   static const double md = 12;
   static const double lg = 16;
   static const double xl = 20;
+
   /// Fully rounded (pills, avatars, status badges).
   static const double pill = 999;
+}
+
+/// Component geometry stays in logical pixels when a desktop window resizes.
+class AppControlSizes {
+  static const double compact = 34;
+  static const double regular = 42;
+  static const double touch = 48;
+  static const double tableHeading = 46;
+  static const double tableRow = 52;
 }
 
 /// Elevation.
@@ -59,14 +75,35 @@ class AppShadows {
         : const Color(0xFF0F172A);
     return [
       BoxShadow(
-        color: tint.withValues(alpha: brightness == Brightness.dark ? 0.35 : 0.06),
+        color: tint.withValues(
+          alpha: brightness == Brightness.dark ? 0.35 : 0.06,
+        ),
         blurRadius: 16,
         offset: const Offset(0, 4),
       ),
       BoxShadow(
-        color: tint.withValues(alpha: brightness == Brightness.dark ? 0.18 : 0.03),
+        color: tint.withValues(
+          alpha: brightness == Brightness.dark ? 0.18 : 0.03,
+        ),
         blurRadius: 4,
         offset: const Offset(0, 1),
+      ),
+    ];
+  }
+
+  /// Quietest lift for dense mobile list cards: a single soft layer, so a
+  /// screen of stacked rows reads lighter than the floating shell chrome.
+  static List<BoxShadow> flat(Brightness brightness) {
+    final tint = brightness == Brightness.dark
+        ? const Color(0xFF000000)
+        : const Color(0xFF0F172A);
+    return [
+      BoxShadow(
+        color: tint.withValues(
+          alpha: brightness == Brightness.dark ? 0.25 : 0.04,
+        ),
+        blurRadius: 12,
+        offset: const Offset(0, 2),
       ),
     ];
   }
@@ -78,12 +115,16 @@ class AppShadows {
         : const Color(0xFF0F172A);
     return [
       BoxShadow(
-        color: tint.withValues(alpha: brightness == Brightness.dark ? 0.5 : 0.12),
+        color: tint.withValues(
+          alpha: brightness == Brightness.dark ? 0.5 : 0.12,
+        ),
         blurRadius: 28,
         offset: const Offset(0, 10),
       ),
       BoxShadow(
-        color: tint.withValues(alpha: brightness == Brightness.dark ? 0.25 : 0.05),
+        color: tint.withValues(
+          alpha: brightness == Brightness.dark ? 0.25 : 0.05,
+        ),
         blurRadius: 8,
         offset: const Offset(0, 2),
       ),

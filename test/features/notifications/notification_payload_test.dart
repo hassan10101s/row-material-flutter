@@ -13,7 +13,10 @@ void main() {
         NotificationType.fromStorage(NotificationType.labResult.storage),
         NotificationType.labResult,
       );
-      expect(NotificationType.fromStorage('unknown'), NotificationType.inspection);
+      expect(
+        NotificationType.fromStorage('unknown'),
+        NotificationType.inspection,
+      );
     });
 
     test('payload encodes type and ref id', () {

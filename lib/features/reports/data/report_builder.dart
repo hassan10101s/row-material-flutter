@@ -336,9 +336,9 @@ Map<String, dynamic> buildInspectionContext(
     final chemical = <Map<String, dynamic>>[];
     for (final r in decodeBatchChemical(s['chemical_results_json'])) {
       chemical.add({
-        'analysis_name': '${r['name'] ?? ''}',
-        'result_text': '${r['result'] ?? ''}'.isEmpty ? '-' : '${r['result']}',
-        'unit': '${r['unit'] ?? ''}',
+        'analysis_name': r['name'] ?? '',
+        'result_text': (r['result'] ?? '').isEmpty ? '-' : '${r['result']}',
+        'unit': r['unit'] ?? '',
       });
     }
     final taker = '${s['sample_taker'] ?? ''}'.trim();
@@ -407,7 +407,7 @@ Map<String, dynamic> buildInspectionContext(
         'name': name,
         'cells': [
           for (var i = 0; i < batchSamples.length; i++)
-            {'p': physicalCells[name]![i], 'c': ''}
+            {'p': physicalCells[name]![i], 'c': ''},
         ],
       });
     }
@@ -416,7 +416,7 @@ Map<String, dynamic> buildInspectionContext(
         'name': name,
         'cells': [
           for (var i = 0; i < batchSamples.length; i++)
-            {'p': '', 'c': chemicalCells[name]![i]}
+            {'p': '', 'c': chemicalCells[name]![i]},
         ],
       });
     }
@@ -1445,6 +1445,7 @@ List<Map<String, dynamic>> buildFollowUpParameterSections(
         if (!columns.contains(key)) columns.add(key);
       }
     }
+
     for (final item in items) {
       collect(jsonLoads('${item['physical_results_json'] ?? ''}'));
       collect(jsonLoads('${item['chemical_results_json'] ?? ''}'));
@@ -1456,7 +1457,7 @@ List<Map<String, dynamic>> buildFollowUpParameterSections(
       final chemical = jsonLoads('${item['chemical_results_json'] ?? ''}');
       final names = [
         for (final n in jsonLoadsList('${item['sample_names_json'] ?? ''}'))
-          if ('${n}'.trim().isNotEmpty) '${n}'.trim(),
+          if ('$n'.trim().isNotEmpty) '$n'.trim(),
       ];
       final sampleCount = names.isEmpty ? 1 : names.length;
       final takenBy = '${item['sample_taken_by'] ?? ''}'.trim();

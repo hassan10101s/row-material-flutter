@@ -1,6 +1,7 @@
 {
   "indexes": [],
   "fieldOverrides": [
+    {"collectionGroup": "changeEvents", "fieldPath": "changes", "indexes": []},
     {
       "collectionGroup": "samples",
       "fieldPath": "updatedAt",

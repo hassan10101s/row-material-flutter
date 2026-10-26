@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/sync/sync_metadata.dart';
 import '../../../core/sync/sync_queue.dart';
+import '../../../core/commands/command_outbox.dart';
 
 /// Everything the topbar badge shows (plan §14-P8.1): the connectivity state,
 /// how much is still waiting to be pushed and when the last exchange with the
@@ -18,9 +19,13 @@ class SyncBadgeStatus {
     this.pending = 0,
     this.blocked = 0,
     this.lastSync,
+    this.hasError = false,
+    this.pullIncomplete = false,
   });
 
   final bool online;
+  final bool hasError;
+  final bool pullIncomplete;
 
   /// Rows in `sync_queue` with status `pending`/`in_flight`.
   final int pending;
@@ -38,13 +43,16 @@ class SyncBadgeStatus {
     int? pending,
     int? blocked,
     DateTime? lastSync,
-  }) =>
-      SyncBadgeStatus(
-        online: online ?? this.online,
-        pending: pending ?? this.pending,
-        blocked: blocked ?? this.blocked,
-        lastSync: lastSync ?? this.lastSync,
-      );
+    bool? hasError,
+    bool? pullIncomplete,
+  }) => SyncBadgeStatus(
+    online: online ?? this.online,
+    pending: pending ?? this.pending,
+    blocked: blocked ?? this.blocked,
+    lastSync: lastSync ?? this.lastSync,
+    hasError: hasError ?? this.hasError,
+    pullIncomplete: pullIncomplete ?? this.pullIncomplete,
+  );
 }
 
 /// Feeds [SyncBadge] from the real services: the connectivity signal, the
@@ -54,11 +62,12 @@ class SyncStatusController extends ChangeNotifier {
   SyncStatusController({
     required this.queue,
     required this.metadata,
+    this.commandOutbox,
     required bool Function() isOnline,
     Stream<bool>? connectivityChanges,
     this.refreshInterval = const Duration(seconds: 20),
-  })  : _isOnline = isOnline,
-        _status = SyncBadgeStatus(online: isOnline()) {
+  }) : _isOnline = isOnline,
+       _status = SyncBadgeStatus(online: isOnline()) {
     _subscription = connectivityChanges?.listen((online) {
       _status = _status.copyWith(online: online);
       notifyListeners();
@@ -68,6 +77,7 @@ class SyncStatusController extends ChangeNotifier {
 
   final SyncQueue queue;
   final SyncMetadata metadata;
+  final CommandOutbox? commandOutbox;
   final Duration refreshInterval;
   final bool Function() _isOnline;
 
@@ -120,27 +130,48 @@ class SyncStatusController extends ChangeNotifier {
     if (_refreshing) return;
     _refreshing = true;
     try {
-      final results = await Future.wait([
+      final results = await Future.wait<Object?>([
         queue.countBadge(),
-        metadata.readAll([SyncMetadata.lastPushAtKey, SyncMetadata.lastPullAtKey]),
+        metadata.readAll([
+          SyncMetadata.lastPushAtKey,
+          SyncMetadata.lastPullAtKey,
+          SyncMetadata.lastErrorKey,
+          SyncMetadata.pullIncompleteKey,
+        ]),
+        if (commandOutbox != null) commandOutbox!.counts(),
       ]);
       final badge = results[0] as SyncQueueCounts;
       final keys = results[1] as Map<String, String>;
       final push = _asDate(keys[SyncMetadata.lastPushAtKey]);
       final pull = _asDate(keys[SyncMetadata.lastPullAtKey]);
-      final pending = badge.pending;
-      final blocked = badge.blocked;
+      final central = commandOutbox == null
+          ? null
+          : results[2] as CommandOutboxCounts;
+      // CommandOutboxCounts.pending already includes in_flight rows.
+      final pending =
+          badge.pending +
+          (central?.pending ?? 0) +
+          (central?.awaitingProjection ?? 0);
+      final blocked =
+          badge.blocked +
+          (central == null
+              ? 0
+              : central.rejected + central.needsReview + central.requiresAuth);
       final last = _latest(push, pull);
       final next = SyncBadgeStatus(
         online: _isOnline(),
         pending: pending,
         blocked: blocked,
         lastSync: last,
+        hasError: (keys[SyncMetadata.lastErrorKey] ?? '').isNotEmpty,
+        pullIncomplete: keys[SyncMetadata.pullIncompleteKey] == '1',
       );
       if (next.online != _status.online ||
           next.pending != _status.pending ||
           next.blocked != _status.blocked ||
-          next.lastSync != _status.lastSync) {
+          next.lastSync != _status.lastSync ||
+          next.hasError != _status.hasError ||
+          next.pullIncomplete != _status.pullIncomplete) {
         _status = next;
         notifyListeners();
       }

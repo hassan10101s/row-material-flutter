@@ -1,9 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Black in both modes: the logo background is black, so the splash is
-         seamless instead of showing a black box on a light field. -->
-    <color name="splash_background">#FF000000</color>
-    <color name="splash_background_dark">#FF000000</color>
+    <!-- Light in both modes (matches the Flutter launch splash in main.dart):
+         the logo artwork is navy/grey drawn for a light field, so a black
+         splash showed poor contrast and flashed dark as soon as Flutter
+         painted. -->
+    <color name="splash_background">#FFF3F6FB</color>
+    <color name="splash_background_dark">#FFF3F6FB</color>
+    <color name="launch_background_color">#FFF3F6FB</color>
     <!-- FCM tray accent (teal 700, matches app primary). -->
     <color name="material_lab_push_color">#FF0F766E</color>
 </resources>

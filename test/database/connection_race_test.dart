@@ -59,8 +59,11 @@ void main() {
     ]);
 
     for (final handle in handles) {
-      expect(identical(handle, handles.first), isTrue,
-          reason: 'every caller must get the same Database instance');
+      expect(
+        identical(handle, handles.first),
+        isTrue,
+        reason: 'every caller must get the same Database instance',
+      );
     }
   });
 
@@ -70,8 +73,11 @@ void main() {
     ]);
 
     for (final handle in readers) {
-      expect(identical(handle, readers.first), isTrue,
-          reason: 'every caller must get the same read-only instance');
+      expect(
+        identical(handle, readers.first),
+        isTrue,
+        reason: 'every caller must get the same read-only instance',
+      );
     }
   });
 
@@ -90,13 +96,20 @@ void main() {
     expect(results.whereType<Database>().length, 5);
   });
 
-  test('the connection stays usable for writes after a concurrent open', () async {
-    await Future.wait([helper.database, helper.database, helper.database]);
-    final db = await helper.database;
-    await db.insert('settings', {'key': 'probe', 'value': '1'});
-    final rows = await db.query('settings', where: 'key = ?', whereArgs: ['probe']);
-    expect(rows, hasLength(1));
-  });
+  test(
+    'the connection stays usable for writes after a concurrent open',
+    () async {
+      await Future.wait([helper.database, helper.database, helper.database]);
+      final db = await helper.database;
+      await db.insert('settings', {'key': 'probe', 'value': '1'});
+      final rows = await db.query(
+        'settings',
+        where: 'key = ?',
+        whereArgs: ['probe'],
+      );
+      expect(rows, hasLength(1));
+    },
+  );
 
   test('close() during an in-flight open does not leak a connection', () async {
     // bindOrg() is `close()` then `database`, and `rebuild()`/restore call
@@ -109,32 +122,44 @@ void main() {
     // open works and yields a working connection.
     final reopened = await helper.database;
     await reopened.insert('settings', {'key': 'after_close', 'value': '1'});
-    final rows = await reopened.query('settings',
-        where: 'key = ?', whereArgs: ['after_close']);
+    final rows = await reopened.query(
+      'settings',
+      where: 'key = ?',
+      whereArgs: ['after_close'],
+    );
     expect(rows, hasLength(1));
   });
 
-  test('reopening after close yields a different, working connection', () async {
-    final first = await helper.database;
-    await helper.close();
-    final second = await helper.database;
+  test(
+    'reopening after close yields a different, working connection',
+    () async {
+      final first = await helper.database;
+      await helper.close();
+      final second = await helper.database;
 
-    expect(identical(first, second), isFalse);
-    await second.insert('settings', {'key': 'second', 'value': '1'});
-    final rows = await second.query('settings', where: 'key = ?', whereArgs: ['second']);
-    expect(rows, hasLength(1));
-  });
+      expect(identical(first, second), isFalse);
+      await second.insert('settings', {'key': 'second', 'value': '1'});
+      final rows = await second.query(
+        'settings',
+        where: 'key = ?',
+        whereArgs: ['second'],
+      );
+      expect(rows, hasLength(1));
+    },
+  );
 
-  test('readDatabase is the same handle, not a phantom second connection',
-      () async {
-    // Regression: the helper used to open `readOnly: true` as a second handle.
-    // sqflite's single-instance cache ignores `readOnly` and keys by path, so
-    // that open returned the identical object. Nothing ever gained a second
-    // connection, and `close()` shut one connection down twice.
-    final write = await helper.database;
-    final read = await helper.readDatabase;
-    expect(identical(write, read), isTrue);
-  });
+  test(
+    'readDatabase is the same handle, not a phantom second connection',
+    () async {
+      // Regression: the helper used to open `readOnly: true` as a second handle.
+      // sqflite's single-instance cache ignores `readOnly` and keys by path, so
+      // that open returned the identical object. Nothing ever gained a second
+      // connection, and `close()` shut one connection down twice.
+      final write = await helper.database;
+      final read = await helper.readDatabase;
+      expect(identical(write, read), isTrue);
+    },
+  );
 
   test('a close that races a poll never yields a null dereference', () async {
     // The startup crash in production. The sync engine reads its counters from
@@ -154,28 +179,34 @@ void main() {
     }
   });
 
-  test('overlapping polls across many close cycles leave no dead handle',
-      () async {
-    await helper.database;
-    for (var i = 0; i < 25; i++) {
-      final poll = Future.wait([helper.database, helper.readDatabase]);
-      final closing = helper.close();
-      final handles = await poll;
-      await closing;
+  test(
+    'overlapping polls across many close cycles leave no dead handle',
+    () async {
+      await helper.database;
+      for (var i = 0; i < 25; i++) {
+        final poll = Future.wait([helper.database, helper.readDatabase]);
+        final closing = helper.close();
+        final handles = await poll;
+        await closing;
 
-      // Handles captured before the close are genuinely closed, so they are not
-      // used here; what matters is that the helper is usable again afterwards
-      // and that no handle was a null dereference in disguise.
-      expect(handles.whereType<Database>().length, 2);
-      final fresh = await helper.database;
-      await fresh.insert('settings', {'key': 'cycle_$i', 'value': '1'});
-      expect(
-        await fresh
-            .query('settings', where: 'key = ?', whereArgs: ['cycle_$i']),
-        hasLength(1),
-      );
-    }
-  });
+        // Handles captured before the close are genuinely closed, so they are not
+        // used here; what matters is that the helper is usable again afterwards
+        // and that no handle was a null dereference in disguise.
+        expect(handles.whereType<Database>().length, 2);
+        final fresh = await helper.database;
+        await fresh.insert('settings', {'key': 'cycle_$i', 'value': '1'});
+        expect(
+          await fresh.query(
+            'settings',
+            where: 'key = ?',
+            whereArgs: ['cycle_$i'],
+          ),
+          hasLength(1),
+        );
+      }
+    },
+    timeout: const Timeout(Duration(minutes: 2)),
+  );
 
   test('close() is idempotent and a second close does not throw', () async {
     await helper.database;
@@ -196,8 +227,11 @@ void main() {
     final reopened = await helper.database;
     await reopened.insert('settings', {'key': 'concurrent', 'value': '1'});
     expect(
-      await reopened.query('settings',
-          where: 'key = ?', whereArgs: ['concurrent']),
+      await reopened.query(
+        'settings',
+        where: 'key = ?',
+        whereArgs: ['concurrent'],
+      ),
       hasLength(1),
     );
   });

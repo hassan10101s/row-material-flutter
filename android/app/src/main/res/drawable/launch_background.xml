@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Legacy launch splash (below Android 12): black base to match the logo,
-     image scaled to ~48% and centered, mirroring the morattab reference. -->
+<!-- Legacy launch splash (below Android 12): light field (matches the Flutter
+     launch splash), logo centered at ~48% of the screen width. -->
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <item android:drawable="@android:color/black" />
+    <item android:drawable="@color/launch_background_color" />
 
     <item android:gravity="center">
         <scale

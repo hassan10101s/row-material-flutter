@@ -30,7 +30,9 @@ class AppMotion {
       MediaQuery.disableAnimationsOf(context) ? Duration.zero : duration;
 
   /// Whether looping animations (the shimmer) may run at all.
-  static bool get isAnimationsDisabled =>
-      WidgetsBinding.instance.platformDispatcher.accessibilityFeatures
-          .disableAnimations;
+  static bool get isAnimationsDisabled => WidgetsBinding
+      .instance
+      .platformDispatcher
+      .accessibilityFeatures
+      .disableAnimations;
 }

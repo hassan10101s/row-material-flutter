@@ -27,8 +27,8 @@ class AppChartPalette {
   /// First [count] series colors, cycling past the end so long series never
   /// crash (more than 8 series on one chart is a UX smell regardless).
   static List<Color> series(int count) => [
-        for (var i = 0; i < count; i++) _order[i % _order.length],
-      ];
+    for (var i = 0; i < count; i++) _order[i % _order.length],
+  ];
 
   /// Color for the [index]-th categorical series (cycling).
   static Color forIndex(int index) => _order[index % _order.length];
@@ -40,32 +40,29 @@ class AppChartPalette {
   /// Theme-aware chart tooltip text style (the fl_chart default ignores the
   /// app theme and hard-codes white-on-navy).
   static TextStyle tooltipStyle() => TextStyle(
-        color: AppContrast.on(AppColors.surfaceDeep),
-        fontWeight: FontWeight.w600,
-        fontSize: 11,
-        leadingDistribution: TextLeadingDistribution.even,
-      );
+    color: AppContrast.on(AppColors.surfaceDeep),
+    fontWeight: FontWeight.w600,
+    fontSize: 11,
+    leadingDistribution: TextLeadingDistribution.even,
+  );
 }
 
 /// Shared axis-label style: theme muted text at compact size for hour/month
 /// and year labels under bars and lines.
 TextStyle appChartAxisStyle() => TextStyle(
-      color: AppColors.textMuted,
-      fontSize: 11.spMax,
-      fontWeight: FontWeight.w500,
-    );
+  color: AppColors.textMuted,
+  fontSize: 11.spMax,
+  fontWeight: FontWeight.w500,
+);
 
 /// Standard grid + border configuration shared by bar and line charts.
-FlGridData appChartGrid() => FlGridData(
-      show: true,
-      drawVerticalLine: false,
-      horizontalInterval: 1,
-    );
+FlGridData appChartGrid() =>
+    FlGridData(show: true, drawVerticalLine: false, horizontalInterval: 1);
 
 FlBorderData appChartBorder() => FlBorderData(show: false);
 
 /// Hides every title axis except the explicit ones a chart enables.
 FlTitlesData appChartTitles() => FlTitlesData(
-      topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-      rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
-    );
+  topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+  rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+);

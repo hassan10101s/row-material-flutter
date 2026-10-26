@@ -84,7 +84,7 @@ class DesktopAppShell extends StatelessWidget {
                 explicitChildNodes: true,
                 label: 'Application navigation',
                 child: Container(
-                  width: 224.w,
+                  width: 224,
                   decoration: BoxDecoration(
                     color: AppColors.surface,
                     border: BorderDirectional(
@@ -184,7 +184,9 @@ class _Sidebar extends StatelessWidget {
                         ShellNavItem(
                           label: e.label,
                           icon: e.icon,
-                          active: e.path == currentPath,
+                          active:
+                              entries.indexOf(e) ==
+                              shellSectionIndex(entries, currentPath),
                           onTap: () => onSelect(e.path),
                         ),
                     ],

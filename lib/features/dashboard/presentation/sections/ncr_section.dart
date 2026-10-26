@@ -45,9 +45,8 @@ class NcrSection extends StatelessWidget {
                     color: AppColors.warning,
                     icon: Icons.folder_open_outlined,
                     hint: '${AppText.t('إجمالي', 'Total')}: ${n.total}',
-                    onTap: () => context.go(
-                      '${AppRoutes.qcNcrList}?status=Open',
-                    ),
+                    onTap: () =>
+                        context.go('${AppRoutes.qcNcrList}?status=Open'),
                   ),
                 ),
                 SizedBox(
@@ -58,8 +57,7 @@ class NcrSection extends StatelessWidget {
                     color: AppColors.danger,
                     icon: Icons.schedule_outlined,
                     hint: '${n.overduePct.toStringAsFixed(1)}%',
-                    onTap: () =>
-                        context.go('${AppRoutes.qcNcrList}?overdue=1'),
+                    onTap: () => context.go('${AppRoutes.qcNcrList}?overdue=1'),
                   ),
                 ),
                 SizedBox(

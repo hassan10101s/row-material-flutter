@@ -72,6 +72,7 @@ void main() {
     await fixture.db.insert('lab_inventory', <String, dynamic>{
       'id': 3,
       'name': 'Hydrochloric acid',
+      'remote_id': 'legacy_lab_inventory_3',
       'category': 'liquid',
       'unit': 'L',
       'current_qty': 0,
@@ -277,10 +278,7 @@ void main() {
         // always holds the seeded default symbols too, so the mg row is
         // picked out by symbol rather than assumed alone.
         final units = await fixture.db.query('lab_units');
-        expect(
-          units.where((u) => u['symbol'] == 'mg'),
-          hasLength(1),
-        );
+        expect(units.where((u) => u['symbol'] == 'mg'), hasLength(1));
         expect(
           units.firstWhere((u) => u['symbol'] == 'mg')['name'],
           'Milligram',
@@ -330,9 +328,9 @@ void main() {
           expect(products.single['name'], 'Cement bag');
           // The products pull must not register units: only the registry
           // defaults seeded on every open may be present.
-          final unitSymbols = (await fixture.db.query('lab_units'))
-              .map((u) => '${u['symbol']}')
-              .toSet();
+          final unitSymbols = (await fixture.db.query(
+            'lab_units',
+          )).map((u) => '${u['symbol']}').toSet();
           expect(unitSymbols, {'%', 'L', 'mL', 'kg', 'g', 'pc'});
           expect(await fixture.db.query('lab_analyses'), isEmpty);
           expect(await fixture.db.query('lab_analysis_items'), isEmpty);

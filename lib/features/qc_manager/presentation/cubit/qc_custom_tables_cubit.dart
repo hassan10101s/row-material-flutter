@@ -53,7 +53,9 @@ const _unset = Object();
 
 class QcCustomTablesCubit extends AppCubit<QcCustomTablesState> {
   QcCustomTablesCubit({required this.repo})
-    : super(const QcCustomTablesState(loading: true));
+    : super(const QcCustomTablesState(loading: true)) {
+    refreshOnSync(load);
+  }
 
   final QcCustomTablesRepository repo;
 

@@ -9,6 +9,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_summary_card.dart';
 import '../cubit/dashboard_kpis_state.dart';
 import '../widgets/dashboard_section_title.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class VolumeQualitySection extends StatelessWidget {
   final DashboardKpisState kpi;
@@ -126,7 +127,9 @@ class VolumeQualitySection extends StatelessWidget {
         // Decision donut: approved / conditional / partial / full + legend
         // with shares (data-analyst upgrade: composition, not just counts).
         if (q.total > 0)
-          Card(
+          AppCard(
+            padding: EdgeInsets.zero,
+            enableHover: false,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(

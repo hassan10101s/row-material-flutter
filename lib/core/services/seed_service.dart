@@ -38,19 +38,23 @@ class SeedService {
 
   Future<bool> isSeedDone() async {
     final db = await dbHelper.database;
-    final rows = await db
-        .query('settings', where: 'key = ?', whereArgs: ['reference_seed_done']);
+    final rows = await db.query(
+      'settings',
+      where: 'key = ?',
+      whereArgs: ['reference_seed_done'],
+    );
     return rows.isNotEmpty && '${rows.first['value']}' == '1';
   }
 
   Future<void> _markSeedDone() async {
     final db = await dbHelper.database;
-    await db.insert('settings', {'key': 'reference_seed_done', 'value': '1'},
-        conflictAlgorithm: ConflictAlgorithm.replace);
+    await db.insert('settings', {
+      'key': 'reference_seed_done',
+      'value': '1',
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<List<List<dynamic>>> _readSheet(
-      ByteData bytes, String label) async {
+  Future<List<List<dynamic>>> _readSheet(ByteData bytes, String label) async {
     // Excel parsing is CPU-heavy: decode off the main isolate. The raw
     // bytes cross the isolate boundary once; only plain stringified cells
     // come back, so the result stays transferable.
@@ -74,9 +78,7 @@ class SeedService {
     final bytes = await rootBundle.load(_referenceAsset);
     final sheet = await _readSheet(bytes, 'Reference.xlsx');
     if (sheet.isEmpty) return 0;
-    final headers = [
-      for (final v in sheet.first) '${v ?? ''}'.trim(),
-    ];
+    final headers = [for (final v in sheet.first) '${v ?? ''}'.trim()];
     final missing = _requiredColumns.difference(headers.toSet());
     if (missing.isNotEmpty) {
       throw ValidationError(AppErrors.seedMissingColumns(missing.join(', ')));
@@ -92,13 +94,18 @@ class SeedService {
       batch = db.batch();
       pending = 0;
     }
+
     for (var i = 1; i < sheet.length; i++) {
       final row = sheet[i];
-      final materialName = '${_at(row, headerMap['Raw_Material_Name']) ?? ''}'.trim();
+      final materialName = '${_at(row, headerMap['Raw_Material_Name']) ?? ''}'
+          .trim();
       if (materialName.isEmpty) continue;
       final materialCode = '${_at(row, headerMap['code']) ?? ''}'.trim();
-      final physicalRaw = '${_at(row, headerMap['Physical_Aspects_Reference']) ?? '{}'}'.trim();
-      final chemicalRaw = '${_at(row, headerMap['Chemical_Analysis_Reference']) ?? '{}'}'.trim();
+      final physicalRaw =
+          '${_at(row, headerMap['Physical_Aspects_Reference']) ?? '{}'}'.trim();
+      final chemicalRaw =
+          '${_at(row, headerMap['Chemical_Analysis_Reference']) ?? '{}'}'
+              .trim();
       final physical = jsonLoads(physicalRaw);
       final chemical = jsonLoads(chemicalRaw);
       batch.execute(
@@ -171,7 +178,9 @@ class SeedService {
     final sheet = await _readSheet(bytes, 'units.xlsx');
     if (sheet.isEmpty) return 0;
     final headers = [for (final v in sheet.first) '${v ?? ''}'.trim()];
-    if (!headers.contains('Element Name') || !headers.contains('Unit')) return 0;
+    if (!headers.contains('Element Name') || !headers.contains('Unit')) {
+      return 0;
+    }
     final nameIdx = headers.indexOf('Element Name');
     final unitIdx = headers.indexOf('Unit');
     final typeIdx = headers.indexOf('Type');
@@ -185,6 +194,7 @@ class SeedService {
       batch = db.batch();
       pending = 0;
     }
+
     for (var i = 1; i < sheet.length; i++) {
       final row = sheet[i];
       final name = '${_at(row, nameIdx) ?? ''}'.trim();
@@ -301,13 +311,15 @@ class SeedService {
     }
     final db = await dbHelper.database;
     final count = Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) AS c FROM reference_materials'));
+      await db.rawQuery('SELECT COUNT(*) AS c FROM reference_materials'),
+    );
     if (count == 0) {
       await importReference();
       await importUnits();
     } else {
       final paramCount = Sqflite.firstIntValue(
-          await db.rawQuery('SELECT COUNT(*) AS c FROM parameters'));
+        await db.rawQuery('SELECT COUNT(*) AS c FROM parameters'),
+      );
       if (paramCount == 0) await importUnits();
     }
     await repairParameterTypes();

@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -261,12 +262,10 @@ class _AnalysisEditorRouteState extends State<_AnalysisEditorRoute> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.analysis == null
-              ? AppText.t('إضافة تحليل', 'Add analysis')
-              : AppText.t('تعديل تحليل', 'Edit analysis'),
-        ),
+      appBar: AppTopAppBar(
+        title: widget.analysis == null
+            ? AppText.t('إضافة تحليل', 'Add analysis')
+            : AppText.t('تعديل تحليل', 'Edit analysis'),
       ),
       body: SafeArea(
         child: Column(

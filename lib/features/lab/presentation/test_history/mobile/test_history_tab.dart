@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -59,7 +60,7 @@ class MobileTestHistoryTab extends StatelessWidget {
             local: getIt<LabLocalRepository>(),
           )..load(),
           child: Scaffold(
-            appBar: AppBar(title: Text(AppText.t('اختبار جديد', 'New Test'))),
+            appBar: AppTopAppBar(title: AppText.t('اختبار جديد', 'New Test')),
             body: SafeArea(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(AppSpacing.pageMobile),
@@ -216,43 +217,48 @@ class MobileTestHistoryTab extends StatelessWidget {
             body: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Pinned: search + filters + counts never scroll away.
-                AppCard(
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      TestHistoryToolbar(
-                        chips: d.chips,
-                        hasQuery: scope.query.text.isNotEmpty,
-                        onOpenFilters: () => _openFilterSheet(
-                          context,
-                          scope,
-                          state,
-                          d.chemOptions,
-                        ),
-                        onClearAll: scope.clearAllFilters,
-                        onExportPdf: d.sorted.isEmpty
-                            ? null
-                            : () => TestHistoryPdf.export(context, d.sorted),
-                      ),
-                      // Active filters ride on their own single scrollable
-                      // line, and only when something is actually filtered —
-                      // so the pinned header is one row by default and never
-                      // grows past two single-line rows. The filter button
-                      // badge already carries the active count.
-                      if (d.chips.isNotEmpty) ...[
-                        const SizedBox(height: AppSpacing.sm),
-                        TestHistoryChips(
+                // Pinned: search + filters + counts never scroll away. One
+                // entrance for the header only — per-card entrances would
+                // keep timers/saveLayers alive while the card list scrolls
+                // (same rule the analyses tab documents).
+                AppEntrance(
+                  child: AppCard(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        TestHistoryToolbar(
                           chips: d.chips,
-                          showing: d.paged.slice.length,
-                          total: d.sorted.length,
-                          summary: d.summary,
+                          hasQuery: scope.query.text.isNotEmpty,
+                          onOpenFilters: () => _openFilterSheet(
+                            context,
+                            scope,
+                            state,
+                            d.chemOptions,
+                          ),
                           onClearAll: scope.clearAllFilters,
+                          onExportPdf: d.sorted.isEmpty
+                              ? null
+                              : () => TestHistoryPdf.export(context, d.sorted),
                         ),
+                        // Active filters ride on their own single scrollable
+                        // line, and only when something is actually filtered —
+                        // so the pinned header is one row by default and never
+                        // grows past two single-line rows. The filter button
+                        // badge already carries the active count.
+                        if (d.chips.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.sm),
+                          TestHistoryChips(
+                            chips: d.chips,
+                            showing: d.paged.slice.length,
+                            total: d.sorted.length,
+                            summary: d.summary,
+                            onClearAll: scope.clearAllFilters,
+                          ),
+                        ],
                       ],
-                    ],
+                    ),
                   ),
                 ),
                 if (scope.selecting) ...[

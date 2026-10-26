@@ -3,6 +3,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
+import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/design_system/widgets/app_delete_confirm.dart';
 import 'package:material_lab/design_system/widgets/app_search_field.dart';
 import 'package:material_lab/design_system/widgets/app_status_badge.dart';
@@ -13,8 +14,9 @@ import 'package:material_lab/features/inspections/presentation/detail/widgets/in
 /// confirmation (bottom sheet on phones, dialog on wide screens).
 void main() {
   group('DebouncedSearchField', () {
-    testWidgets('collapses a burst of keystrokes into one query',
-        (tester) async {
+    testWidgets('collapses a burst of keystrokes into one query', (
+      tester,
+    ) async {
       final queries = <String>[];
       await tester.pumpWidget(
         MaterialApp(
@@ -37,8 +39,9 @@ void main() {
       expect(queries, ['abc']);
     });
 
-    testWidgets('fires immediately per pause, not per character',
-        (tester) async {
+    testWidgets('fires immediately per pause, not per character', (
+      tester,
+    ) async {
       final queries = <String>[];
       await tester.pumpWidget(
         MaterialApp(
@@ -101,8 +104,9 @@ void main() {
       expect(find.textContaining('مورد طويل'), findsWidgets);
     });
 
-    testWidgets('status badge ellipsizes a long status in a tight cell',
-        (tester) async {
+    testWidgets('status badge ellipsizes a long status in a tight cell', (
+      tester,
+    ) async {
       await pumpNarrow(
         tester,
         const Padding(
@@ -117,8 +121,9 @@ void main() {
       );
     });
 
-    testWidgets('trace-style icon+text wraps instead of clipping',
-        (tester) async {
+    testWidgets('trace-style icon+text wraps instead of clipping', (
+      tester,
+    ) async {
       await pumpNarrow(
         tester,
         Padding(
@@ -174,6 +179,8 @@ void main() {
     }
 
     testWidgets('renders a bottom sheet on phone widths', (tester) async {
+      FormFactor.debugSet(AppFormFactor.mobile);
+      addTearDown(() => FormFactor.debugSet(null));
       await pumpSized(tester, 400);
       final future = showConfirm(tester);
       await tester.pumpAndSettle();
@@ -186,6 +193,8 @@ void main() {
     });
 
     testWidgets('renders a dialog on wide screens', (tester) async {
+      FormFactor.debugSet(AppFormFactor.desktop);
+      addTearDown(() => FormFactor.debugSet(null));
       await pumpSized(tester, 1280);
       final future = showConfirm(tester);
       await tester.pumpAndSettle();

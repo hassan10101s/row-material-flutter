@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -265,6 +266,8 @@ class _UnitCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppCard(
       enableHover: false,
+      // Flat shadow tier: a page of stacked cards reads lighter.
+      flat: true,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
         children: [
@@ -347,7 +350,7 @@ class _UnitEditorRoute extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(unitsEditorTitle(unit == null))),
+      appBar: AppTopAppBar(title: unitsEditorTitle(unit == null)),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.md),

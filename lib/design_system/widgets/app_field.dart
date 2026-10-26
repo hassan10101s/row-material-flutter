@@ -76,8 +76,9 @@ class _AppFieldState extends State<AppField> {
 
   TextEditingController get _effectiveController =>
       widget.controller ??
-      (_internalController ??=
-          TextEditingController(text: widget.initialValue));
+      (_internalController ??= TextEditingController(
+        text: widget.initialValue,
+      ));
 
   @override
   void didUpdateWidget(covariant AppField oldWidget) {
@@ -105,6 +106,7 @@ class _AppFieldState extends State<AppField> {
         Text(widget.label, style: decorationTheme.labelStyle),
         const SizedBox(height: AppSpacing.xs),
         TextFormField(
+          style: Theme.of(context).textTheme.bodyMedium,
           controller: effectiveController,
           onChanged: widget.onChanged,
           obscureText: widget.obscure,
@@ -155,8 +157,7 @@ class Validators {
     return null;
   }
 
-  static String? Function(String?) minLength(int min,
-      [String? message]) {
+  static String? Function(String?) minLength(int min, [String? message]) {
     return (value) {
       if (value == null || value.trim().length < min) {
         return message ??
@@ -177,7 +178,8 @@ class Validators {
 
   /// Compose several validators: first error wins.
   static String? Function(String?) compose(
-      List<String? Function(String?)> validators) {
+    List<String? Function(String?)> validators,
+  ) {
     return (value) {
       for (final v in validators) {
         final error = v(value);

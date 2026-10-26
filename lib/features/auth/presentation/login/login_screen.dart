@@ -1,3 +1,4 @@
+import '../../../../design_system/widgets/app_window.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -193,8 +194,8 @@ class LoginScreen extends StatelessWidget {
     // The cubit is scoped to the login page route; the dialog opens on a
     // new route above it, so re-provide the same instance into the dialog.
     final cubit = context.read<LoginCubit>();
-    await showDialog<void>(
-      context: context,
+    await showAppDialog<void>(
+      context,
       builder: (_) => BlocProvider.value(
         value: cubit,
         child: _EmailPasswordDialog(create: create),
@@ -350,8 +351,8 @@ class _MobileLoginViewState extends State<_MobileLoginView> {
                   ),
                   onPressed: state.busy
                       ? null
-                      : () => showDialog<void>(
-                          context: context,
+                      : () => showAppDialog<void>(
+                          context,
                           // Same scoping fix as [_openEmailDialog]: the dialog
                           // route sits above the page provider.
                           builder: (_) => BlocProvider.value(
@@ -439,14 +440,27 @@ class _EmailPasswordDialogState extends State<_EmailPasswordDialog> {
     final state = context.watch<LoginCubit>().state;
     // scrollable: the whole dialog scrolls on short windows / open keyboard
     // instead of overflowing (no nested scroll view inside).
-    return AlertDialog(
-      scrollable: true,
-      title: Text(
-        widget.create
-            ? AppText.t('إنشاء كلمة مرور للتطبيق', 'Create an app password')
-            : AppText.t('تسجيل الدخول بالبريد', 'Sign in with email'),
-      ),
-      content: BlocBuilder<LoginCubit, LoginState>(
+    return AppDialog(
+      icon: Icons.lock_outline,
+      title: widget.create
+          ? AppText.t('إنشاء كلمة مرور للتطبيق', 'Create an app password')
+          : AppText.t('تسجيل الدخول بالبريد', 'Sign in with email'),
+      actions: [
+        AppButton(
+          label: AppText.t('إلغاء', 'Cancel'),
+          onPressed: state.busy ? null : () => Navigator.of(context).pop(),
+          style: AppButtonStyle.ghost,
+        ),
+        AppButton(
+          label: widget.create
+              ? AppText.t('إنشاء', 'Create')
+              : AppText.t('دخول', 'Sign in'),
+          icon: const Icon(Icons.check),
+          loading: state.busy,
+          onPressed: state.busy ? null : _submit,
+        ),
+      ],
+      child: BlocBuilder<LoginCubit, LoginState>(
         builder: (context, state) => Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -494,21 +508,6 @@ class _EmailPasswordDialogState extends State<_EmailPasswordDialog> {
           ],
         ),
       ),
-      actions: [
-        AppButton(
-          label: AppText.t('إلغاء', 'Cancel'),
-          onPressed: state.busy ? null : () => Navigator.of(context).pop(),
-          style: AppButtonStyle.ghost,
-        ),
-        AppButton(
-          label: widget.create
-              ? AppText.t('إنشاء', 'Create')
-              : AppText.t('دخول', 'Sign in'),
-          icon: const Icon(Icons.check),
-          loading: state.busy,
-          onPressed: state.busy ? null : _submit,
-        ),
-      ],
     );
   }
 }

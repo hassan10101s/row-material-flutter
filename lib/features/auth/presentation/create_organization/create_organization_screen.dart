@@ -11,6 +11,7 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../cubit/create_organization_cubit.dart';
 import '../cubit/create_organization_state.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 /// `noProfile` destination of the auth state machine (plan §8.5).
 ///
@@ -64,7 +65,9 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                 padding: const EdgeInsets.all(24),
                 child: ConstrainedBox(
                   constraints: BoxConstraints(maxWidth: 460.w),
-                  child: Card(
+                  child: AppCard(
+                    padding: EdgeInsets.zero,
+                    enableHover: false,
                     child: Padding(
                       padding: const EdgeInsets.all(28),
                       child: Column(
@@ -122,39 +125,39 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                             AppField(
                               label: AppText.t('كود الشركة', 'Company code'),
                               controller: _inviteCode,
-                              hint: AppText.t(
-                                'org_…',
-                                'org_…',
-                              ),
+                              hint: AppText.t('org_…', 'org_…'),
                               onChanged: cubit.setInviteCode,
                             ),
                           const SizedBox(height: AppSpacing.lg),
                           AppButton(
                             label: isCreate
                                 ? AppText.t('إنشاء الشركة', 'Create company')
-                                : AppText.t('انضمام بالدعوة', 'Join with invite'),
+                                : AppText.t(
+                                    'انضمام بالدعوة',
+                                    'Join with invite',
+                                  ),
                             expanded: true,
                             loading: state.busy,
                             onPressed: state.busy ? null : cubit.submit,
                           ),
                           const SizedBox(height: AppSpacing.sm),
-                          TextButton(
+                          AppButton(
                             onPressed: state.busy
                                 ? null
                                 : () => isCreate
                                       ? cubit.useInvite()
                                       : cubit.useCreate(),
-                            child: Text(
-                              isCreate
-                                  ? AppText.t(
-                                      'لدي دعوة انضمام',
-                                      'I have an invite',
-                                    )
-                                  : AppText.t(
-                                      'إنشاء شركة جديدة',
-                                      'Create a new company',
-                                    ),
-                            ),
+                            label: isCreate
+                                ? AppText.t(
+                                    'لدي دعوة انضمام',
+                                    'I have an invite',
+                                  )
+                                : AppText.t(
+                                    'إنشاء شركة جديدة',
+                                    'Create a new company',
+                                  ),
+                            style: AppButtonStyle.ghost,
+                            small: true,
                           ),
                         ],
                       ),

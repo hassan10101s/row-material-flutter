@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -15,6 +16,8 @@ import '../../cubit/test_history_state.dart';
 import '../test_history_print.dart';
 import '../test_history_pdf.dart';
 import '../test_history_scope.dart';
+import '../../../../../design_system/widgets/app_select_field.dart';
+import '../../../../../design_system/widgets/app_text_field.dart';
 
 /// Small widgets composing the test-history tab on both experiences.
 ///
@@ -52,7 +55,7 @@ class TestHistoryToolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scope = TestHistoryScope.of(context);
-    final search = TextField(
+    final search = AppTextField(
       controller: scope.query,
       onChanged: (_) => scope.onQueryChanged(),
       decoration: InputDecoration(
@@ -69,8 +72,6 @@ class TestHistoryToolbar extends StatelessWidget {
           'بحث في: تحليل / عينة / مصدر / كود دخول / نتيجة / فاحص / حالة...',
           'Search analysis, sample, source, entry code, result...',
         ),
-        border: const OutlineInputBorder(),
-        isDense: true,
       ),
     );
     final actions = [
@@ -91,9 +92,9 @@ class TestHistoryToolbar extends StatelessWidget {
         ),
       ?trailing,
     ];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth >= AppBreakpoints.expanded) {
+    return Builder(
+      builder: (context) {
+        if (!FormFactor.current.isMobile) {
           return Row(
             children: [
               Expanded(child: search),
@@ -191,18 +192,17 @@ class TestHistoryChips extends StatelessWidget {
           ),
           onDeleted: () => scope.clearChip(chip.key),
         ),
-      TextButton(
+      AppButton(
         onPressed: onClearAll,
-        child: Text(
-          AppText.t('مسح الكل', 'Clear all'),
-          style: TextStyle(fontSize: 12.spMax),
-        ),
+        label: AppText.t('مسح الكل', 'Clear all'),
+        style: AppButtonStyle.ghost,
+        small: true,
       ),
     ];
     final trailingItems = <Widget>[count, ...badges];
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < 480) {
+    return Builder(
+      builder: (context) {
+        if (FormFactor.current.isMobile) {
           return SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -368,8 +368,8 @@ class TestHistoryTable extends StatelessWidget {
       selectAllValue: allOnPageSelected
           ? true
           : selectedIndices.isEmpty
-              ? false
-              : null,
+          ? false
+          : null,
       onToggleAll: onToggleSelectAll == null
           ? null
           : (_) => onToggleSelectAll!(),
@@ -537,7 +537,11 @@ Widget _sourceEntryCell(Map<String, dynamic> r, {VoidCallback? onOpenReport}) {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.qr_code_2_outlined, size: 13, color: AppColors.primary),
+              Icon(
+                Icons.qr_code_2_outlined,
+                size: 13,
+                color: AppColors.primary,
+              ),
               const SizedBox(width: 4),
               Flexible(
                 child: Text(
@@ -669,6 +673,9 @@ class TestHistoryCard extends StatelessWidget {
       // comes free with onTap. In select mode a tap toggles the checkbox
       // instead of opening the editor, so a stray tap can never land the
       // user in the edit screen while selecting.
+      // Dense list card: flat shadow tier on mobile keeps long registers
+      // light; the desktop grid keeps the standard lift.
+      flat: FormFactor.current.isMobile,
       onTap: showSelect ? onToggleSelect : onTap,
       onLongPress: onLongPress,
       color: selected ? AppColors.primary.withValues(alpha: 0.06) : null,
@@ -1008,12 +1015,11 @@ class TestHistoryPagination extends StatelessWidget {
                               ),
                             ),
                           )
-                        : TextButton(
+                        : AppButton(
                             onPressed: () => scope.setPage(p),
-                            child: Text(
-                              '$p',
-                              style: TextStyle(fontSize: 13.spMax),
-                            ),
+                            label: '$p',
+                            style: AppButtonStyle.ghost,
+                            small: true,
                           ),
                   ),
               IconButton(
@@ -1134,9 +1140,9 @@ Widget testHistoryFilterGrid(
     );
   }
 
-  return LayoutBuilder(
-    builder: (context, constraints) {
-      final narrow = constraints.maxWidth < AppBreakpoints.expanded;
+  return Builder(
+    builder: (context) {
+      final narrow = FormFactor.current.isMobile;
       final children = <Widget>[
         field(
           label: AppText.t('التصفية', 'Period'),
@@ -1158,8 +1164,6 @@ Widget testHistoryFilterGrid(
               borderRadius: BorderRadius.circular(8),
               child: InputDecorator(
                 decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  isDense: true,
                   suffixIcon: Icon(Icons.calendar_today, size: 16.r),
                 ),
                 child: Text(specificDate),
@@ -1168,14 +1172,11 @@ Widget testHistoryFilterGrid(
           ),
         field(
           label: AppText.t('حد السجلات', 'Record limit'),
-          child: DropdownButtonFormField<String>(
+          child: AppSelectField<String>(
             initialValue: recordLimit,
             isExpanded: true,
             menuMaxHeight: 320,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
+            decoration: const InputDecoration(),
             items: [
               for (final l in TestHistoryScopeState.recordLimits)
                 DropdownMenuItem(value: l, child: Text(l)),
@@ -1185,14 +1186,11 @@ Widget testHistoryFilterGrid(
         ),
         field(
           label: AppText.t('التحليل', 'Analysis'),
-          child: DropdownButtonFormField<String>(
+          child: AppSelectField<String>(
             initialValue: analysisId,
             isExpanded: true,
             menuMaxHeight: 320,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
+            decoration: const InputDecoration(),
             items: [
               DropdownMenuItem(
                 value: '',
@@ -1209,14 +1207,11 @@ Widget testHistoryFilterGrid(
         ),
         field(
           label: AppText.t('النوع', 'Source type'),
-          child: DropdownButtonFormField<String>(
+          child: AppSelectField<String>(
             initialValue: sourceType,
             isExpanded: true,
             menuMaxHeight: 320,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
+            decoration: const InputDecoration(),
             items: [
               DropdownMenuItem(
                 value: '',
@@ -1240,14 +1235,11 @@ Widget testHistoryFilterGrid(
         ),
         field(
           label: AppText.t('المواد المستهلكة', 'Consumables'),
-          child: DropdownButtonFormField<String>(
+          child: AppSelectField<String>(
             initialValue: chemicalId,
             isExpanded: true,
             menuMaxHeight: 320,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
+            decoration: const InputDecoration(),
             items: [
               DropdownMenuItem(
                 value: '',
@@ -1282,14 +1274,11 @@ Widget testHistoryFilterGrid(
         ),
         field(
           label: AppText.t('الحالة', 'Range state'),
-          child: DropdownButtonFormField<String>(
+          child: AppSelectField<String>(
             initialValue: rangeState,
             isExpanded: true,
             menuMaxHeight: 320,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              isDense: true,
-            ),
+            decoration: const InputDecoration(),
             items: [
               DropdownMenuItem(
                 value: '',

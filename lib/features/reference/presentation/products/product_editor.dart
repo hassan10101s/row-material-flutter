@@ -191,8 +191,7 @@ class ProductEditorState extends State<ProductEditor> {
       // Legacy product (ranges only): convert ranges into chemical rows.
       chemMap = {
         for (final r in (product['ranges'] as List? ?? []))
-          if (r is Map &&
-              '${r['analysis_name'] ?? ''}'.trim().isNotEmpty)
+          if (r is Map && '${r['analysis_name'] ?? ''}'.trim().isNotEmpty)
             '${r['analysis_name']}'.trim(): {
               'value': _legacyRangeText(r),
               'unit': '${r['unit'] ?? ''}',
@@ -232,8 +231,7 @@ class ProductEditorState extends State<ProductEditor> {
   Future<void> _loadParameters() async {
     setState(() => _loading = true);
     try {
-      final params =
-          await getIt<ReferenceRepository>().listParameters();
+      final params = await getIt<ReferenceRepository>().listParameters();
       if (!mounted) return;
       setState(() {
         _parameters = params;
@@ -541,7 +539,11 @@ class ProductEditorState extends State<ProductEditor> {
       children: [
         Expanded(
           child: _loading
-              ? const AppSkeletonList(rows: 4, height: 320, padding: EdgeInsets.zero)
+              ? const AppSkeletonList(
+                  rows: 4,
+                  height: 320,
+                  padding: EdgeInsets.zero,
+                )
               : SingleChildScrollView(
                   padding: EdgeInsets.symmetric(
                     horizontal: _compact ? 0 : AppSpacing.lg,

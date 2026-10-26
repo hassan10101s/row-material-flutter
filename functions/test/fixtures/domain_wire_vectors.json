@@ -1,0 +1,292 @@
+{
+  "inspection": {
+    "payload": {
+      "writes": [
+        {
+          "entityType": "sample",
+          "entityId": "dca15f09-2b08-4e0e-ae63-0d9af7403c07",
+          "operation": "create",
+          "expectedVersion": 0,
+          "payload": {
+            "localId": 1,
+            "entryCode": "WIRE-INSPECTION",
+            "materialId": 1,
+            "materialName": "Cement",
+            "materialCode": "M-CEM-01",
+            "inspectionDate": "2026-10-26",
+            "supplier": "Test Supplier",
+            "truckNumber": "",
+            "quantity": "10,5",
+            "sampleTakenBy": "Test Taker",
+            "specialistName": "Test Admin",
+            "physicalResultsJson": "{\"color\":\"good\"}",
+            "chemicalResultsJson": "{}",
+            "physicalReferenceJson": "{\"color\":\"good\"}",
+            "chemicalReferenceJson": "{}",
+            "decisionStatus": "APPROVED",
+            "decisionReason": "",
+            "followUpNote": "",
+            "rejectedQuantity": "",
+            "snapshotJson": "{\"inspection_kind\":\"raw\",\"product_id\":null,\"formula_number\":\"\",\"batch_number\":\"\",\"material_id\":1,\"material_name\":\"Cement\",\"material_code\":\"M-CEM-01\",\"physical_reference\":{\"color\":\"good\"},\"chemical_reference\":{},\"physical_results\":{\"color\":\"good\"},\"chemical_results\":{},\"sample_names\":[\"S1\"]}",
+            "sampleNamesJson": "[\"S1\"]",
+            "decisionVersion": 1,
+            "createdBy": "local_1",
+            "createdByName": "Test Admin",
+            "updatedAt": "__SERVER_TIMESTAMP__",
+            "expiryDate": "",
+            "inspectionKind": "raw",
+            "productId": null,
+            "formulaNumber": "",
+            "batchNumber": "",
+            "version": 1,
+            "deletedAt": null,
+            "remoteId": "dca15f09-2b08-4e0e-ae63-0d9af7403c07",
+            "updatedBy": "uid_admin",
+            "deviceId": "dev_1",
+            "organizationId": "org_test",
+            "createdAt": "__SERVER_TIMESTAMP__",
+            "payloadBytes": 1260
+          },
+          "relations": {
+            "materialId": {
+              "entityType": "referenceMaterial",
+              "entityId": "server-material-1",
+              "expectedVersion": 1
+            }
+          }
+        }
+      ]
+    },
+    "payloadHash": "e28cfe5d9e6d07a9b3eeeed5bf0c1e846d169d00c21814e5b7bbe8304e74fa07"
+  },
+  "inventory": {
+    "payload": {
+      "writes": [
+        {
+          "entityType": "inventoryItem",
+          "entityId": "15cc048b-bd77-4bf6-9efb-faa13c83f138",
+          "operation": "create",
+          "expectedVersion": 0,
+          "payload": {
+            "localId": 1,
+            "name": "Test Reagent",
+            "category": "liquid",
+            "unit": "mL",
+            "currentQty": 10.0,
+            "minQty": 1.0,
+            "description": "",
+            "createdBy": "local_1",
+            "updatedAt": "__SERVER_TIMESTAMP__",
+            "version": 1,
+            "deletedAt": null,
+            "remoteId": "15cc048b-bd77-4bf6-9efb-faa13c83f138",
+            "updatedBy": "uid_admin",
+            "deviceId": "dev_1",
+            "organizationId": "org_test",
+            "createdAt": "__SERVER_TIMESTAMP__"
+          },
+          "relations": {}
+        },
+        {
+          "entityType": "inventoryLot",
+          "entityId": "89f6c179-0a35-47ae-a595-a43abb6a2f88",
+          "operation": "create",
+          "expectedVersion": 0,
+          "payload": {
+            "localId": 1,
+            "remoteId": "89f6c179-0a35-47ae-a595-a43abb6a2f88",
+            "inventoryId": 1,
+            "inventoryRemoteId": null,
+            "lotNo": "L-0001",
+            "qtyReceived": 10.0,
+            "qtyRemaining": 10.0,
+            "expiryDate": "",
+            "supplier": "",
+            "note": "",
+            "receivedBy": null,
+            "receivedAt": "2026-10-26 19:34:28",
+            "updatedAt": "__SERVER_TIMESTAMP__",
+            "updatedBy": "uid_admin",
+            "deviceId": "dev_1",
+            "version": 1,
+            "deletedAt": null,
+            "organizationId": "org_test",
+            "createdAt": "__SERVER_TIMESTAMP__",
+            "createdBy": "uid_admin"
+          },
+          "relations": {
+            "inventoryId": {
+              "entityType": "inventoryItem",
+              "entityId": "15cc048b-bd77-4bf6-9efb-faa13c83f138",
+              "expectedVersion": 0
+            }
+          }
+        },
+        {
+          "entityType": "inventoryTransaction",
+          "entityId": "9b20dbe7-558b-4d09-acea-5f3c3014f878",
+          "operation": "create",
+          "expectedVersion": 0,
+          "payload": {
+            "localId": 1,
+            "remoteId": "9b20dbe7-558b-4d09-acea-5f3c3014f878",
+            "inventoryId": 1,
+            "inventoryRemoteId": "15cc048b-bd77-4bf6-9efb-faa13c83f138",
+            "quantityDelta": 10.0,
+            "transactionType": "OPENING_BALANCE",
+            "referenceType": null,
+            "referenceId": null,
+            "referenceRemoteId": null,
+            "reason": "Opening balance for Test Reagent",
+            "createdBy": "local_1",
+            "updatedAt": "__SERVER_TIMESTAMP__",
+            "updatedBy": "uid_admin",
+            "deviceId": "dev_1",
+            "version": 1,
+            "deletedAt": null,
+            "organizationId": "org_test",
+            "createdAt": "__SERVER_TIMESTAMP__"
+          },
+          "relations": {
+            "inventoryId": {
+              "entityType": "inventoryItem",
+              "entityId": "15cc048b-bd77-4bf6-9efb-faa13c83f138",
+              "expectedVersion": 0
+            }
+          }
+        }
+      ]
+    },
+    "payloadHash": "5b545829da468274a68e6ae528be48cde499358048a79acaae9d8ff3a0de68a8"
+  },
+  "qualityDecision": {
+    "payload": {
+      "writes": [
+        {
+          "entityType": "sample",
+          "entityId": "server-existing-inspection",
+          "operation": "update",
+          "expectedVersion": 1,
+          "payload": {
+            "localId": 2,
+            "entryCode": "WIRE-EXISTING",
+            "materialId": 1,
+            "materialName": "Cement",
+            "materialCode": "M-CEM-01",
+            "inspectionDate": "2026-09-01",
+            "supplier": null,
+            "truckNumber": null,
+            "quantity": "10",
+            "sampleTakenBy": null,
+            "specialistName": "Test Admin",
+            "physicalResultsJson": "{}",
+            "chemicalResultsJson": "{}",
+            "physicalReferenceJson": "{}",
+            "chemicalReferenceJson": "{}",
+            "decisionStatus": "FULL_REJECTION",
+            "decisionReason": "Test rejection",
+            "followUpNote": "",
+            "rejectedQuantity": "",
+            "snapshotJson": "{}",
+            "sampleNamesJson": "[]",
+            "decisionVersion": 2,
+            "createdBy": "local_1",
+            "createdByName": "Ahmed Ali",
+            "updatedAt": "__SERVER_TIMESTAMP__",
+            "expiryDate": null,
+            "inspectionKind": "raw",
+            "productId": null,
+            "formulaNumber": null,
+            "batchNumber": null,
+            "version": 2,
+            "deletedAt": null,
+            "remoteId": "server-existing-inspection",
+            "updatedBy": "uid_admin",
+            "deviceId": "dev_1",
+            "organizationId": "org_test",
+            "payloadBytes": 844
+          },
+          "relations": {
+            "materialId": {
+              "entityType": "referenceMaterial",
+              "entityId": "server-material-1",
+              "expectedVersion": 1
+            }
+          }
+        },
+        {
+          "entityType": "qualityCheck",
+          "entityId": "f31f0da8-ac1a-4572-b994-fd56e537645e",
+          "operation": "create",
+          "expectedVersion": 0,
+          "payload": {
+            "localId": 1,
+            "inspectionId": 2,
+            "version": 1,
+            "oldStatus": "PENDING",
+            "newStatus": "FULL_REJECTION",
+            "changeReason": "Test rejection",
+            "followUpNote": "",
+            "rejectedQuantity": "",
+            "changedBy": "uid_admin",
+            "changedByName": "Test Admin",
+            "changedAt": "2026-10-26 19:34:28",
+            "deletedAt": null,
+            "remoteId": "f31f0da8-ac1a-4572-b994-fd56e537645e",
+            "updatedAt": "__SERVER_TIMESTAMP__",
+            "updatedBy": "uid_admin",
+            "deviceId": "dev_1",
+            "organizationId": "org_test",
+            "createdAt": "__SERVER_TIMESTAMP__",
+            "createdBy": "uid_admin",
+            "businessVersion": 2
+          },
+          "relations": {
+            "inspectionId": {
+              "entityType": "sample",
+              "entityId": "server-existing-inspection",
+              "expectedVersion": 1
+            }
+          }
+        }
+      ]
+    },
+    "payloadHash": "0eaba60505782f18c3ea5929265b9cf5bfeb42f689d623ab84ecc8f5f188b050",
+    "current": {
+      "entryCode": "WIRE-EXISTING",
+      "materialId": 1,
+      "materialName": "Cement",
+      "materialCode": "M-CEM-01",
+      "inspectionDate": "2026-09-01",
+      "specialistName": "Ahmed Ali",
+      "physicalResultsJson": "{}",
+      "chemicalResultsJson": "{}",
+      "physicalReferenceJson": "{}",
+      "chemicalReferenceJson": "{}",
+      "decisionStatus": "PENDING",
+      "snapshotJson": "{}",
+      "sampleNamesJson": "[]",
+      "decisionVersion": 1,
+      "createdBy": "uid_admin",
+      "createdByName": "Ahmed Ali",
+      "updatedAt": "2026-10-26T00:00:00.000Z",
+      "quantity": "10",
+      "remoteId": "server-existing-inspection",
+      "version": 1,
+      "localId": 2,
+      "organizationId": "org_test",
+      "updatedBy": "uid_admin",
+      "deviceId": "dev_1",
+      "createdAt": "2026-10-26T00:00:00.000Z",
+      "deletedAt": null,
+      "payloadBytes": 643,
+      "parentRefs": {
+        "materialId": {
+          "entityType": "referenceMaterial",
+          "entityId": "server-material-1",
+          "version": 1
+        }
+      }
+    }
+  }
+}

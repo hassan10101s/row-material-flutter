@@ -302,6 +302,7 @@ void main() {
             organizationId: any(named: 'organizationId'),
             email: any(named: 'email'),
             role: any(named: 'role'),
+            roles: any(named: 'roles'),
             invitedBy: any(named: 'invitedBy'),
           ),
         ).thenAnswer((_) async => 'member_2');
@@ -315,6 +316,7 @@ void main() {
             organizationId: any(named: 'organizationId'),
             email: captureAny(named: 'email'),
             role: captureAny(named: 'role'),
+            roles: any(named: 'roles'),
             invitedBy: any(named: 'invitedBy'),
           ),
         ).captured;
@@ -344,6 +346,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       );

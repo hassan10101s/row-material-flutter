@@ -49,8 +49,8 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     SyncQueue? queue,
     AuditLogger? syncAudit,
   }) : sync = queue == null
-       ? null
-       : QcSyncWriter(queue: queue, guard: guard, syncAudit: syncAudit);
+           ? null
+           : QcSyncWriter(queue: queue, guard: guard, syncAudit: syncAudit);
 
   final DatabaseHelper dbHelper;
   final WriteGuard guard;
@@ -232,8 +232,9 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
         AppText.t('القائمة تحتاج إلى اسم', 'A list needs a name'),
       );
     }
-    final cleanRecurrence =
-        recurrence == QcRecurrence.monthly ? QcRecurrence.monthly : QcRecurrence.daily;
+    final cleanRecurrence = recurrence == QcRecurrence.monthly
+        ? QcRecurrence.monthly
+        : QcRecurrence.daily;
     final db = await dbHelper.database;
     return db.transaction((txn) async {
       final stamp = nowIso();
@@ -267,9 +268,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
           limit: 1,
         );
         if (existing.isEmpty) {
-          throw NotFoundError(
-            AppText.t('السجل غير موجود', 'Record not found'),
-          );
+          throw NotFoundError(AppText.t('السجل غير موجود', 'Record not found'));
         }
         id = templateId;
         await txn.update(
@@ -294,8 +293,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
             where: 'template_id = ?',
             whereArgs: [id],
             limit: 1,
-          ))
-              .first,
+          )).first,
           meta: {'routine': true},
           exec: txn,
         );
@@ -627,7 +625,13 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
       WHERE (i.deleted_at IS NULL) AND (i.template_id = ?)
       ORDER BY i.order_index ASC, i.item_id ASC
       ''',
-      [inspectionId, inspectionId, inspectionId, inspectionId, inspection.templateId],
+      [
+        inspectionId,
+        inspectionId,
+        inspectionId,
+        inspectionId,
+        inspection.templateId,
+      ],
     );
     final out = <RoutineRow>[];
     for (final r in rows) {
@@ -655,15 +659,15 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
           updatedAt: '${r['r_updated_at'] ?? ''}',
         );
       }
-        out.add(
-          RoutineRow(
-            item: item,
-            response: response,
-            taskLogCount: ((r['task_log_count'] as num?)?.toInt() ?? 0),
-            lastTaskLogAt: '${r['last_task_log_at'] ?? ''}',
-            lastTaskLogByName: '${r['last_task_log_by_name'] ?? ''}',
-          ),
-        );
+      out.add(
+        RoutineRow(
+          item: item,
+          response: response,
+          taskLogCount: ((r['task_log_count'] as num?)?.toInt() ?? 0),
+          lastTaskLogAt: '${r['last_task_log_at'] ?? ''}',
+          lastTaskLogByName: '${r['last_task_log_by_name'] ?? ''}',
+        ),
+      );
     }
     final day = inspection.inspectionDate.length >= 10
         ? inspection.inspectionDate.substring(0, 10)
@@ -844,7 +848,9 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
 
       // Keep the period scorecard in sync: the row reads as done with the
       // newest stamp. The EXISTING notes win when the press carries none.
-      final mergedNote = note.trim().isNotEmpty ? note.trim() : current.response.notes;
+      final mergedNote = note.trim().isNotEmpty
+          ? note.trim()
+          : current.response.notes;
       if (current.response.respId == null) {
         final respId = await txn.insert('qc_responses', {
           'inspection_id': inspectionId,
@@ -940,7 +946,9 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     final db = await dbHelper.database;
     final rows = await db.query(
       'qc_task_log',
-      where: itemId == null ? 'inspection_id = ?' : 'inspection_id = ? AND item_id = ?',
+      where: itemId == null
+          ? 'inspection_id = ?'
+          : 'inspection_id = ? AND item_id = ?',
       whereArgs: itemId == null ? [inspectionId] : [inspectionId, itemId],
       orderBy: 'log_id DESC',
     );
@@ -964,11 +972,15 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
       values.add(filters.templateId);
     }
     if (filters.from != null && filters.from!.trim().isNotEmpty) {
-      clauses.add('substr(COALESCE(i.inspection_date,i.created_at,\'\'),1,10) >= ?');
+      clauses.add(
+        'substr(COALESCE(i.inspection_date,i.created_at,\'\'),1,10) >= ?',
+      );
       values.add(filters.from!.trim());
     }
     if (filters.to != null && filters.to!.trim().isNotEmpty) {
-      clauses.add('substr(COALESCE(i.inspection_date,i.created_at,\'\'),1,10) <= ?');
+      clauses.add(
+        'substr(COALESCE(i.inspection_date,i.created_at,\'\'),1,10) <= ?',
+      );
       values.add(filters.to!.trim());
     }
     final person = filters.person.trim();
@@ -1035,11 +1047,12 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
         pageIds,
       );
       for (final p in peopleRows) {
-        final names = ('${p['names'] ?? ''}')
-            .split(',')
-            .where((n) => n.trim().isNotEmpty)
-            .toList()
-          ..sort();
+        final names =
+            ('${p['names'] ?? ''}')
+                .split(',')
+                .where((n) => n.trim().isNotEmpty)
+                .toList()
+              ..sort();
         peopleBySheet[(p['inspection_id'] as num).toInt()] = names;
       }
     }

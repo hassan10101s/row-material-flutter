@@ -1,5 +1,6 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
+import '../../../../core/commands/central_authoring_gateway.dart';
 import '../../../reference/domain/reference_repository.dart';
 import '../../domain/inspection_repository.dart';
 import 'inspection_form_state.dart';
@@ -236,7 +237,7 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
     Map<String, dynamic> payload,
     UserContext userContext,
   ) async {
-    safeEmit(state.copyWith(saving: true, error: null));
+    safeEmit(state.copyWith(saving: true, error: null, pendingApproval: false));
     try {
       final editingId = _editingId;
       if (editingId != null) {
@@ -244,6 +245,14 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
       } else {
         await repo.create(payload, userContext);
       }
+      return true;
+    } on CentralDraftPending {
+      // The durable draft/outbox row exists; leaving this form open invites a
+      // duplicate submission. Close it like a saved form and distinguish the
+      // pending approval in the confirmation feedback.
+      safeEmit(
+        state.copyWith(saving: false, error: null, pendingApproval: true),
+      );
       return true;
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));

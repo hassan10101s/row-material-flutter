@@ -16,9 +16,25 @@ class MainActivity : FlutterActivity() {
     }
 
     private var pendingResult: MethodChannel.Result? = null
+    private var htmlPdf: HtmlPdfRenderer? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        val renderer = HtmlPdfRenderer(this)
+        htmlPdf = renderer
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "material_lab/html_pdf")
+            .setMethodCallHandler { call, result ->
+                val html = call.argument<String>("html")
+                if (call.method != "render") result.notImplemented()
+                else if (html == null) result.error("INVALID_HTML", "HTML is required", null)
+                else renderer.render(html,
+                    call.argument<Int>("widthMils") ?: 8268,
+                    call.argument<Int>("heightMils") ?: 11693,
+                    intArrayOf(call.argument<Int>("leftMils") ?: 0,
+                        call.argument<Int>("topMils") ?: 0,
+                        call.argument<Int>("rightMils") ?: 0,
+                        call.argument<Int>("bottomMils") ?: 0), result)
+            }
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             CHANNEL,
@@ -59,6 +75,12 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+    }
+
+    override fun onDestroy() {
+        htmlPdf?.close()
+        htmlPdf = null
+        super.onDestroy()
     }
 
     private fun checkStatus(): String {

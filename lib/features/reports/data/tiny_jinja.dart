@@ -77,8 +77,8 @@ class _Loop {
   final bool last;
   final bool first;
   _Loop(this.index, this.index0, this.count)
-      : last = index0 == count - 1,
-        first = index0 == 0;
+    : last = index0 == count - 1,
+      first = index0 == 0;
 }
 
 /// Mutable object backing `namespace(...)` + `{% set ns.attr = value %}`.
@@ -103,7 +103,8 @@ class _OutputNode implements _Node {
   _OutputNode(this.expression);
   final String expression;
   @override
-  String render(_Scope scope) => _htmlEscape(_str(_evalTinyExpr(expression, scope)));
+  String render(_Scope scope) =>
+      _htmlEscape(_str(_evalTinyExpr(expression, scope)));
 }
 
 class _IfBranch {
@@ -158,7 +159,9 @@ void _assignAttr(Object? target, String key, Object? value) {
     (target as Map<String, dynamic>)[key] = value;
     return;
   }
-  throw StateError('Cannot assign attribute `$key` on $_runtimeTypeName(target)');
+  throw StateError(
+    'Cannot assign attribute `$key` on $_runtimeTypeName(target)',
+  );
 }
 
 String _runtimeTypeName(Object? v) => v == null ? 'None' : '${v.runtimeType}';
@@ -354,7 +357,10 @@ List<_Tok> _tokenizeExpr(String src) {
       while (j < src.length && _isDigit(src[j])) {
         j++;
       }
-      if (j < src.length && src[j] == '.' && j + 1 < src.length && _isDigit(src[j + 1])) {
+      if (j < src.length &&
+          src[j] == '.' &&
+          j + 1 < src.length &&
+          _isDigit(src[j + 1])) {
         j++;
         while (j < src.length && _isDigit(src[j])) {
           j++;
@@ -571,8 +577,9 @@ class _TernaryExpr implements _Expr {
   final _Expr whenTrue;
   final _Expr whenFalse;
   @override
-  Object? eval(_Scope scope) =>
-      _truthy(condition.eval(scope)) ? whenTrue.eval(scope) : whenFalse.eval(scope);
+  Object? eval(_Scope scope) => _truthy(condition.eval(scope))
+      ? whenTrue.eval(scope)
+      : whenFalse.eval(scope);
 }
 
 class _AddExpr implements _Expr {
@@ -585,7 +592,9 @@ class _AddExpr implements _Expr {
     final b = right.eval(scope);
     if (a is num && b is num) return a + b;
     if (a is String || b is String) return '${_str(a)}${_str(b)}';
-    throw StateError('Cannot add ${_runtimeTypeName(a)} + ${_runtimeTypeName(b)}');
+    throw StateError(
+      'Cannot add ${_runtimeTypeName(a)} + ${_runtimeTypeName(b)}',
+    );
   }
 }
 
@@ -689,7 +698,7 @@ class _BuiltinCallExpr implements _Expr {
             final v = a.eval(scope);
             if (v is num) return v.toInt();
             return int.tryParse('$v') ?? 0;
-          })()
+          })(),
       ];
       if (nums.length == 1) return List<int>.generate(nums[0], (i) => i);
       if (nums.length == 2) return [for (var i = nums[0]; i < nums[1]; i++) i];

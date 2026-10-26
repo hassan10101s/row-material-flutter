@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
@@ -84,10 +85,11 @@ class AnalysesHeader extends StatelessWidget {
         const SizedBox(height: AppSpacing.sm),
         SizedBox(
           width: double.infinity,
-          child: FilledButton.icon(
+          child: AppButton(
             onPressed: onAdd,
+            label: AppText.t('إضافة تحليل', 'Add analysis'),
             icon: Icon(Icons.add, size: 20.r),
-            label: Text(AppText.t('إضافة تحليل', 'Add analysis')),
+            style: AppButtonStyle.primary,
           ),
         ),
       ],
@@ -294,6 +296,9 @@ class AnalysisCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppCard(
       enableHover: false,
+      // Dense list card: flat shadow tier on mobile keeps long registers
+      // light; the desktop grid keeps the standard lift.
+      flat: FormFactor.current.isMobile,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

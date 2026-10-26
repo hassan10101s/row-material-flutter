@@ -5,6 +5,7 @@ import '../../../core/constants/app_errors.dart';
 import '../../../core/sync/audit_logger.dart';
 import '../../../core/sync/entity_registry.dart';
 import '../../../core/sync/sync_queue.dart';
+import '../../../core/sync/shared_data_writer.dart';
 import '../../../core/sync/sync_write.dart' as sync_write;
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
@@ -37,8 +38,9 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
   final SyncQueue queue;
   final AuditLogger audit;
 
-  static final SyncEntity _labUnit =
-      syncEntities.firstWhere((e) => e.type == 'labUnit');
+  static final SyncEntity _labUnit = syncEntities.firstWhere(
+    (e) => e.type == 'labUnit',
+  );
   static SyncEntity _entity(String type) =>
       SyncEntity.byType(type) ??
       (throw StateError('Unknown sync entity: $type'));
@@ -69,31 +71,18 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     Map<String, dynamic> row,
     String operation,
   ) async {
-    try {
-      await sync_write.enqueueLocalChange(
-        executor: txn,
-        entity: _entity('referenceMaterial'),
-        row: row,
-        operation: operation,
-        queue: queue,
-        audit: audit,
-        auditAction: AuditAction.settingsUpdated,
-        organizationId: guard.organizationId,
-        uid: guard.uid,
-        deviceId: guard.deviceId,
-      );
-    } on Object {
-      try {
-        await txn.update(
-          'reference_materials',
-          {'sync_state': 'queued'},
-          where: 'id = ?',
-          whereArgs: [(row['id'] as num?)?.toInt()],
-        );
-      } on Object {
-        // Best-effort.
-      }
-    }
+    await sync_write.enqueueLocalChange(
+      executor: txn,
+      entity: _entity('referenceMaterial'),
+      row: row,
+      operation: operation,
+      queue: queue,
+      audit: audit,
+      auditAction: AuditAction.settingsUpdated,
+      organizationId: guard.organizationId,
+      uid: guard.uid,
+      deviceId: guard.deviceId,
+    );
   }
 
   // ── §9.4 writes: Materials ────────────────────────────────────
@@ -108,9 +97,8 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     DatabaseExecutor? exec,
   }) async {
     _check(Permission.samplesUpdate);
-    final db = await dbHelper.database;
     late final int id;
-    await db.transaction((txn) async {
+    await dbHelper.businessTransaction((txn) async {
       id = await super.createMaterial(
         materialName: materialName,
         materialCode: materialCode,
@@ -154,8 +142,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     DatabaseExecutor? exec,
   }) async {
     _check(Permission.samplesUpdate);
-    final db = await dbHelper.database;
-    await db.transaction((txn) async {
+    await dbHelper.businessTransaction((txn) async {
       await super.updateMaterial(
         id,
         materialName: materialName,
@@ -193,8 +180,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
   @override
   Future<void> deleteMaterial(int id, [DatabaseExecutor? exec]) async {
     _check(Permission.samplesUpdate);
-    final db = await dbHelper.database;
-    await db.transaction((txn) async {
+    await dbHelper.businessTransaction((txn) async {
       final before = await getMaterialRaw(id, exec: txn);
       await super.deleteMaterial(id, txn);
       if (before != null) {
@@ -222,10 +208,21 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     DatabaseExecutor? exec,
   }) async {
     _check(Permission.labResultsUpdate);
-    final db = await dbHelper.database;
-    await db.transaction((txn) async {
-      await super.upsertParameter(name, unit,
-          parameterType: parameterType, exec: txn);
+    await dbHelper.businessTransaction((txn) async {
+      await super.upsertParameter(
+        name,
+        unit,
+        parameterType: parameterType,
+        exec: txn,
+      );
+      await queueSharedRows(
+        txn,
+        type: 'parameter',
+        queue: queue,
+        guard: guard,
+        where: 'parameter_name = ? COLLATE NOCASE',
+        whereArgs: [name.trim()],
+      );
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,
@@ -243,9 +240,49 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
   @override
   Future<void> deleteParameter(String name, [DatabaseExecutor? exec]) async {
     _check(Permission.labResultsUpdate);
-    final db = await dbHelper.database;
-    await db.transaction((txn) async {
-      await super.deleteParameter(name, txn);
+    await dbHelper.businessTransaction((txn) async {
+      final rows = await txn.query(
+        'parameters',
+        where: 'parameter_name = ?',
+        whereArgs: [name],
+      );
+      for (final row in rows) {
+        final at = nowIso();
+        await txn.update(
+          'material_parameter_bounds',
+          {'deleted_at': at, 'active': 0},
+          where: 'parameter_id = ?',
+          whereArgs: [row['id']],
+        );
+        await queueSharedRows(
+          txn,
+          type: 'materialBound',
+          queue: queue,
+          guard: guard,
+          where: 'parameter_id = ?',
+          whereArgs: [row['id']],
+        );
+        await txn.update(
+          'lab_analyses',
+          {'parameter_id': null},
+          where: 'parameter_id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+      await txn.update(
+        'parameters',
+        {'deleted_at': nowIso()},
+        where: 'parameter_name = ?',
+        whereArgs: [name],
+      );
+      await queueSharedRows(
+        txn,
+        type: 'parameter',
+        queue: queue,
+        guard: guard,
+        where: 'parameter_name = ?',
+        whereArgs: [name],
+      );
       await audit.log(
         txn,
         action: AuditAction.settingsUpdated,
@@ -266,9 +303,13 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
     DatabaseExecutor? exec,
   }) async {
     _check(Permission.labResultsUpdate);
-    final db = await dbHelper.database;
-    await db.transaction((txn) async {
-      await super.upsertUnit(symbol, name: name, dimension: dimension, exec: txn);
+    await dbHelper.businessTransaction((txn) async {
+      await super.upsertUnit(
+        symbol,
+        name: name,
+        dimension: dimension,
+        exec: txn,
+      );
       final trimmed = symbol.trim();
       final rows = await txn.query(
         'lab_units',
@@ -297,8 +338,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
   /// the lab-config sync like a Units-tab creation.
   @override
   Future<void> ensureUnit(String symbol, [DatabaseExecutor? exec]) async {
-    final db = await dbHelper.database;
-    await db.transaction((txn) async {
+    await dbHelper.businessTransaction((txn) async {
       await ReferenceRepo.registerUnit(txn, symbol);
       final trimmed = symbol.trim();
       if (trimmed.isEmpty) return;
@@ -323,8 +363,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
   @override
   Future<void> deleteUnit(String symbol, [DatabaseExecutor? exec]) async {
     _check(Permission.labResultsUpdate);
-    final db = await dbHelper.database;
-    await db.transaction((txn) async {
+    await dbHelper.businessTransaction((txn) async {
       final trimmed = symbol.trim();
       final rows = await txn.query(
         'lab_units',
@@ -382,10 +421,7 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
         : (localVersion > remoteVersion ? localVersion : remoteVersion) + 1;
     await txn.update(
       'lab_units',
-      {
-        'version': nextVersion,
-        'sync_state': 'queued',
-      },
+      {'version': nextVersion, 'sync_state': 'queued'},
       where: 'id = ?',
       whereArgs: [id],
     );
@@ -421,8 +457,12 @@ class OfflineFirstReferenceRepository extends ReferenceRepo {
       entityId: docId,
       localRef: id,
       operation: operation,
-      payload: buildRemotePayload(_labUnit, snapshot, ctx,
-          asCreate: isFirstPush || operation == 'tombstone'),
+      payload: buildRemotePayload(
+        _labUnit,
+        snapshot,
+        ctx,
+        asCreate: isFirstPush || operation == 'tombstone',
+      ),
       baseVersion: remoteVersion,
     );
     await audit.log(

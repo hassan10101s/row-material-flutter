@@ -6,6 +6,7 @@ import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/features/notifications/data/notification_service.dart';
 import 'package:material_lab/features/notifications/domain/notification_item.dart';
+import 'package:material_lab/features/notifications/domain/push_event.dart';
 
 class _FakeAppPaths extends AppPaths {
   _FakeAppPaths(this.base);
@@ -70,7 +71,8 @@ void main() {
   setUp(() async {
     tmp = await Directory.systemTemp.createTemp('matlab_notif');
     helper = DatabaseHelper(_FakeAppPaths(tmp.path));
-    final db = await helper.database; // creates schema incl. notifications table
+    final db =
+        await helper.database; // creates schema incl. notifications table
     // inspections.material_id is FK-enforced: seed one parent material.
     await db.insert('reference_materials', {
       'material_name': 'Wheat',
@@ -164,10 +166,7 @@ void main() {
     expect(await service.unreadCount(), 0);
 
     // Rows already seen are not re-reported after mark-all-read.
-    expect(
-      await service.checkForNew(labEnabled: false),
-      isEmpty,
-    );
+    expect(await service.checkForNew(labEnabled: false), isEmpty);
   });
 
   test('raw inspection subtitle carries the supplier handle', () async {
@@ -186,43 +185,115 @@ void main() {
     expect(found.single.subtitle, contains('Supplier X'));
   });
 
-  test('product lab result uses follow-up title with type/by/decision',
-      () async {
-    final db = await helper.database;
-    final now = DateTime.now().toIso8601String();
-    final batchId =
-        await _insertInspection(helper, entryCode: 'BATCH-50T');
-    final sampleId = await db.insert('product_batch_samples', {
-      'batch_id': batchId,
-      'sample_no': 1,
-      'sample_name': 'Sample 1',
-      'tested_by': 0,
-      'tested_at': now,
-      'decision_status': 'APPROVED',
-      'created_at': now,
-    });
-    await db.insert('lab_sample_tests', {
-      'analysis_id': 1,
-      'source_type': 'product',
-      'source_ref_id': sampleId,
-      'source_name': 'Flour 50T',
-      'sample_name': 'Sample 1',
-      'entry_code': 'BATCH-50T',
-      'tested_at': now,
-      'created_at': now,
-    });
+  test(
+    'product lab result uses follow-up title with type/by/decision',
+    () async {
+      final db = await helper.database;
+      final now = DateTime.now().toIso8601String();
+      final batchId = await _insertInspection(helper, entryCode: 'BATCH-50T');
+      final sampleId = await db.insert('product_batch_samples', {
+        'batch_id': batchId,
+        'sample_no': 1,
+        'sample_name': 'Sample 1',
+        'tested_by': 0,
+        'tested_at': now,
+        'decision_status': 'APPROVED',
+        'created_at': now,
+      });
+      await db.insert('lab_sample_tests', {
+        'analysis_id': 1,
+        'source_type': 'product',
+        'source_ref_id': sampleId,
+        'source_name': 'Flour 50T',
+        'sample_name': 'Sample 1',
+        'entry_code': 'BATCH-50T',
+        'tested_at': now,
+        'created_at': now,
+      });
 
-    final found = await service.checkForNew(inspectionEnabled: false);
-    expect(found, hasLength(1));
-    expect(found.single.title, contains('متابعة تحليل منتج'));
-    expect(found.single.subtitle, contains('Flour 50T'));
-    expect(found.single.subtitle, contains('مقبول'));
-  });
+      final found = await service.checkForNew(inspectionEnabled: false);
+      expect(found, hasLength(1));
+      expect(found.single.title, contains('متابعة تحليل منتج'));
+      expect(found.single.subtitle, contains('Flour 50T'));
+      expect(found.single.subtitle, contains('مقبول'));
+    },
+  );
 
   test('duplicate scans never duplicate stored rows', () async {
     await _insertInspection(helper, entryCode: 'E-030');
     await service.checkForNew(labEnabled: false);
     await service.checkForNew(labEnabled: false);
     expect(await service.recent(), hasLength(1));
+  });
+
+  test('concurrent callbacks return one new item across all callers', () async {
+    await _insertInspection(helper, entryCode: 'CONCURRENT');
+    final results = await Future.wait(
+      List.generate(5, (_) => service.checkForNew(labEnabled: false)),
+    );
+    expect(results.expand((items) => items), hasLength(1));
+    expect(await service.recent(), hasLength(1));
+  });
+
+  test(
+    'a burst larger than the scan limit is drained without skipping rows',
+    () async {
+      await _insertInspection(helper, entryCode: 'BASE');
+      await service.checkForNew(labEnabled: false);
+      for (var i = 0; i < 45; i++) {
+        await _insertInspection(helper, entryCode: 'BURST-$i');
+      }
+      final results = <NotificationItem>[];
+      for (var i = 0; i < 3; i++) {
+        results.addAll(await service.checkForNew(labEnabled: false));
+      }
+      expect(results, hasLength(45));
+      expect(results.map((item) => item.entryCode).toSet(), hasLength(45));
+      expect(await service.checkForNew(labEnabled: false), isEmpty);
+    },
+  );
+
+  test(
+    'a remote notification resolves the receiving device local row only',
+    () async {
+      final id = await _insertInspection(helper, entryCode: 'REMOTE');
+      await (await helper.database).update(
+        'inspections',
+        {'remote_id': 'remote-row-999'},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      helper.paths.orgId = 'org';
+      final event = PushEvent.forRecord(
+        organizationId: 'org',
+        kind: 'inspection',
+        remoteId: 'remote-row-999',
+      );
+      expect(
+        await service.resolvePayload(event.payload),
+        '/inspections?highlight=$id',
+      );
+      expect(
+        await service.resolvePayload(
+          PushEvent.forRecord(
+            organizationId: 'another-org',
+            kind: 'inspection',
+            remoteId: 'remote-row-999',
+          ).payload,
+        ),
+        isNull,
+      );
+    },
+  );
+
+  test('soft-deleted rows do not become new notifications', () async {
+    final id = await _insertInspection(helper, entryCode: 'DELETED');
+    await (await helper.database).update(
+      'inspections',
+      {'deleted_at': DateTime.now().toIso8601String()},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    expect(await service.checkForNew(labEnabled: false), isEmpty);
   });
 }

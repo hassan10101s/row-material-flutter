@@ -28,7 +28,10 @@ class DeviceEntry {
     this.isCurrentDevice = false,
   });
 
-  factory DeviceEntry.fromRemote(RemoteDocument document, {String? currentDeviceId}) {
+  factory DeviceEntry.fromRemote(
+    RemoteDocument document, {
+    String? currentDeviceId,
+  }) {
     final d = document.data;
     return DeviceEntry(
       id: document.id,
@@ -95,9 +98,45 @@ class DeviceRegistry {
 
   AppSession get _session => source.session;
 
-  bool get isSignedIn => _session.isSignedIn && _session.organizationId.isNotEmpty;
+  bool get isSignedIn =>
+      _session.isSignedIn && _session.organizationId.isNotEmpty;
 
   bool get canListDevices => _session.can(Permission.devicesRead);
+  bool? lastDeviceReadOnly;
+
+  /// Own-document reads are allowed to every active member. A revoked or
+  /// differently owned identity can only be replaced after a fresh sign-in;
+  /// it must never be silently reactivated by cached-session restoration.
+  Future<bool> requiresNewEnrollment({
+    required String organizationId,
+    required String uid,
+    required String deviceId,
+  }) async {
+    lastDeviceReadOnly = null;
+    if (!remote.isSignedIn || deviceId.isEmpty) return false;
+    try {
+      final document = await remote.getDocument(
+        organizationId: organizationId,
+        collection: SyncCollection.devices,
+        documentId: deviceId,
+      );
+      if (!document.exists) return false;
+      if (document.data['uid'] == uid && document.data['status'] != 'revoked') {
+        lastDeviceReadOnly = document.data['readOnly'] == true;
+      }
+      return document.data['status'] == 'revoked' ||
+          document.data['uid'] != uid;
+    } on Object catch (error) {
+      final text = '$error';
+      if (text.contains('permission-denied') ||
+          text.contains('PERMISSION_DENIED')) {
+        return true;
+      }
+      // A temporary outage preserves the offline-first cache contract.
+      debugPrint('[devices] enrollment check unavailable: $error');
+      return false;
+    }
+  }
 
   /// Registers the current device if it was never registered for this
   /// organization, or if the last registration is older than
@@ -125,10 +164,13 @@ class DeviceRegistry {
       data: {
         'uid': _session.uid,
         'email': _session.email,
-        'displayName': _session.displayName.isNotEmpty ? _session.displayName : _session.email,
+        'displayName': _session.displayName.isNotEmpty
+            ? _session.displayName
+            : _session.email,
         'platform': Platform.operatingSystem,
         'role': _session.role,
-        'readOnly': _session.readOnlyDevice || _session.role == AppRoles.viewer,
+        'readOnly':
+            _session.readOnlyDevice || rolesAreReadOnly(_session.effectiveRoles),
         'lastSeenAt': now,
       },
     );
@@ -145,10 +187,7 @@ class DeviceRegistry {
       await remote.registerDevice(
         organizationId: _session.organizationId,
         deviceId: _session.deviceId,
-        data: {
-          'uid': _session.uid,
-          'lastSeenAt': nowIso(),
-        },
+        data: {'uid': _session.uid, 'lastSeenAt': nowIso()},
       );
     } on Object catch (e) {
       debugPrint('[devices] lastSeenAt refresh skipped: $e');
@@ -160,14 +199,18 @@ class DeviceRegistry {
   Future<List<DeviceEntry>> list() async {
     if (!isSignedIn || !remote.isSignedIn || !canListDevices) return const [];
     final docs = await remote.listDevices(_session.organizationId);
-    final entries = docs
-        .map((d) => DeviceEntry.fromRemote(d, currentDeviceId: _session.deviceId))
-        .toList()
-      ..sort((a, b) {
-        final at = a.lastSeenAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final bt = b.lastSeenAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return bt.compareTo(at);
-      });
+    final entries =
+        docs
+            .map(
+              (d) =>
+                  DeviceEntry.fromRemote(d, currentDeviceId: _session.deviceId),
+            )
+            .toList()
+          ..sort((a, b) {
+            final at = a.lastSeenAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bt = b.lastSeenAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return bt.compareTo(at);
+          });
     return entries;
   }
 
@@ -189,7 +232,8 @@ class DeviceRegistry {
         'uid': isSelf ? _session.uid : '',
         'status': 'revoked',
         'revokedAt': nowIso(),
-        'revokedReason': reason ?? (isSelf ? 'signed_out_this_device' : 'revoked_by_admin'),
+        'revokedReason':
+            reason ?? (isSelf ? 'signed_out_this_device' : 'revoked_by_admin'),
       },
     );
     if (isSelf) {
@@ -214,13 +258,17 @@ class DeviceRegistry {
     // the queue, and a failing write must not block the sign-out itself.
     try {
       final db = await audit.queue.dbHelper.database;
-      await tracedTransaction(db, 'devices.signOutAudit', (txn) => audit.log(
-            txn,
-            action: AuditAction.deviceRegistered,
-            entityType: 'device',
-            entityId: deviceId,
-            details: <String, dynamic>{'event': 'signed_out_this_device'},
-          ));
+      await tracedTransaction(
+        db,
+        'devices.signOutAudit',
+        (txn) => audit.log(
+          txn,
+          action: AuditAction.deviceRegistered,
+          entityType: 'device',
+          entityId: deviceId,
+          details: <String, dynamic>{'event': 'signed_out_this_device'},
+        ),
+      );
     } on Object catch (e) {
       debugPrint('[devices] sign-out audit skipped: $e');
     }

@@ -21,7 +21,8 @@ class AppPaths {
 
   String? get orgId => _orgId;
 
-  set orgId(String? value) => _orgId = (value == null || value.isEmpty) ? null : value;
+  set orgId(String? value) =>
+      _orgId = (value == null || value.isEmpty) ? null : value;
 
   Future<Directory> appSupportRoot() async {
     final base = await getApplicationSupportDirectory();
@@ -39,7 +40,9 @@ class AppPaths {
   /// Folder of a single organization.
   Future<Directory> orgRoot(String? orgId) async {
     final orgs = await orgsRoot();
-    final dir = Directory(p.join(orgs.path, _safeSegment(orgId ?? legacyOrgId)));
+    final dir = Directory(
+      p.join(orgs.path, _safeSegment(orgId ?? legacyOrgId)),
+    );
     await dir.create(recursive: true);
     return dir;
   }
@@ -136,8 +139,9 @@ class AppPaths {
 
   /// Best-effort prune of staged share files older than [maxAge].
   /// Never throws — storage hygiene must not break an export.
-  Future<void> pruneShareCache(
-      {Duration maxAge = const Duration(hours: 24)}) async {
+  Future<void> pruneShareCache({
+    Duration maxAge = const Duration(hours: 24),
+  }) async {
     try {
       final dir = await shareCacheDir();
       await _pruneDir(dir, maxAge);
@@ -147,8 +151,9 @@ class AppPaths {
   /// Best-effort prune of legacy permanent mobile exports (pre-temp era files
   /// stranded in the unreachable sandbox). Grace period defaults to 7 days so
   /// a just-created file is never yanked from under the share sheet.
-  Future<void> pruneLegacyMobileExports(
-      {Duration grace = const Duration(days: 7)}) async {
+  Future<void> pruneLegacyMobileExports({
+    Duration grace = const Duration(days: 7),
+  }) async {
     try {
       final dir = await exportsRoot();
       await _pruneDir(

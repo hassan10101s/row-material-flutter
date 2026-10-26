@@ -19,11 +19,7 @@ import 'app_page_size.dart';
 /// optional secondary line, and any number of trailing facts - and
 /// [AppAdaptiveDataView] decides whether that becomes a table row or a card.
 class AppDataRow {
-  const AppDataRow({
-    required this.cells,
-    this.secondary,
-    this.onTap,
-  });
+  const AppDataRow({required this.cells, this.secondary, this.onTap});
 
   /// The cells, in the same order as the table's headers. Index 0 is the
   /// primary line; on a card it becomes the title.
@@ -92,9 +88,7 @@ class _AppAdaptiveDataViewState extends State<AppAdaptiveDataView> {
   Widget _buildDesktop(BuildContext context) {
     return AppPaginatedTable(
       headers: widget.headers,
-      rows: [
-        for (final row in widget.rows) row.cells,
-      ],
+      rows: [for (final row in widget.rows) row.cells],
       onRowTap: widget.onRowTap,
       rowsPerPage: widget.rowsPerPage,
       onPageSizeChanged: widget.onPageSizeChanged,
@@ -118,7 +112,8 @@ class _AppAdaptiveDataViewState extends State<AppAdaptiveDataView> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 240),
           child: Center(
-            child: widget.empty ??
+            child:
+                widget.empty ??
                 AppEmptyState(
                   icon: Icons.inbox_outlined,
                   title: appTextOf(context, 'لا توجد بيانات', 'No data'),
@@ -164,7 +159,9 @@ class _DataCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = row.cells.isEmpty ? const SizedBox.shrink() : row.cells.first;
+    final primary = row.cells.isEmpty
+        ? const SizedBox.shrink()
+        : row.cells.first;
     final facts = <({String label, Widget value})>[];
     for (var i = 1; i < row.cells.length && i < headers.length; i++) {
       facts.add((label: headers[i], value: row.cells[i]));
@@ -194,45 +191,50 @@ class _DataCard extends StatelessWidget {
               ),
               child: primary,
             ),
-          if (row.secondary != null) ...[
-            const SizedBox(height: 2),
-            Text(
-              row.secondary!,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11.spMax, color: AppColors.textMuted),
-            ),
-          ],
-          for (final fact in facts)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  SizedBox(
-                    width: 108,
-                    child: Text(
-                      fact.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 11.spMax,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textMuted,
+            if (row.secondary != null) ...[
+              const SizedBox(height: 2),
+              Text(
+                row.secondary!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 11.spMax,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ],
+            for (final fact in facts)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      width: 108,
+                      child: Text(
+                        fact.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11.spMax,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textMuted,
+                        ),
                       ),
                     ),
-                  ),
-                  Expanded(child: DefaultTextStyle.merge(
-                    style: TextStyle(
-                      fontSize: 12.5.spMax,
-                      height: 1.4,
-                      color: AppColors.textStrong,
+                    Expanded(
+                      child: DefaultTextStyle.merge(
+                        style: TextStyle(
+                          fontSize: 12.5.spMax,
+                          height: 1.4,
+                          color: AppColors.textStrong,
+                        ),
+                        child: fact.value,
+                      ),
                     ),
-                    child: fact.value,
-                  )),
-                ],
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),

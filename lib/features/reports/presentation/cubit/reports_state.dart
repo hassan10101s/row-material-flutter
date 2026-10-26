@@ -20,13 +20,12 @@ class ReportsState extends Equatable {
     String? error,
     String? lastExport,
     String? lastExportTitle,
-  }) =>
-      ReportsState(
-        busy: busy ?? this.busy,
-        error: error ?? this.error,
-        lastExport: lastExport ?? this.lastExport,
-        lastExportTitle: lastExportTitle ?? this.lastExportTitle,
-      );
+  }) => ReportsState(
+    busy: busy ?? this.busy,
+    error: error ?? this.error,
+    lastExport: lastExport ?? this.lastExport,
+    lastExportTitle: lastExportTitle ?? this.lastExportTitle,
+  );
 
   @override
   List<Object?> get props => [busy, error, lastExport, lastExportTitle];

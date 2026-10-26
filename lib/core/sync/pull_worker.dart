@@ -1,6 +1,10 @@
+import 'dart:convert';
+
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 import '../auth/app_session.dart';
+import '../auth/permissions.dart';
 import '../auth/session_source.dart';
 import '../database/db_trace.dart';
 import '../utils/app_dates.dart';
@@ -9,6 +13,8 @@ import 'entity_registry.dart';
 import 'remote/remote_data_source.dart';
 import 'sync_metadata.dart';
 import 'sync_queue.dart';
+import 'sync_run_scope.dart';
+import 'sync_cursor_time.dart';
 
 /// Outcome of one `pull_worker` pass.
 class PullReport {
@@ -58,6 +64,8 @@ class PullWorker {
        entities = _dependenciesFirst(entities ?? syncEntities);
   final SyncQueue queue;
   final SyncMetadata metadata;
+  SyncMetadata? _cycleMetadata;
+  SyncMetadata get _runMetadata => _cycleMetadata ?? metadata;
   final RemoteDataSource remote;
   final ConflictResolver conflicts;
 
@@ -89,6 +97,10 @@ class PullWorker {
   static List<SyncEntity> _dependenciesFirst(List<SyncEntity> input) {
     int rank(SyncEntity e) {
       if (e.localTable == 'users') return 0;
+      if (e.type == 'parameter' || e.type == 'organizationSetting') return 1;
+      if (e.type == 'materialBound') return 3;
+      if (e.type == 'qcSop') return 4;
+      if (e.type == 'qcSopRevision' || e.type == 'qcSopRead') return 5;
       if (e.collection == SyncCollection.referenceMaterials) return 1;
       if (e.collection == SyncCollection.labConfig) return 2;
       if (e.type == 'sample') return 3;
@@ -114,6 +126,7 @@ class PullWorker {
       if (e.localTable == 'qc_capa') return 14;
       return 4;
     }
+
     final indexed = [for (var i = 0; i < input.length; i++) (i, input[i])];
     indexed.sort((a, b) {
       final byRank = rank(a.$2).compareTo(rank(b.$2));
@@ -124,13 +137,47 @@ class PullWorker {
   }
 
   /// Read live: the session changes on sign-in, sign-out and org switch.
-  AppSession get _session => source.session;
+  AppSession get _session => _scope?.session ?? source.session;
+  SyncRunScope? _scope;
+  Future<PullReport>? _running;
+  bool Function()? cycleIsCurrent;
+  void cancel() => _scope?.cancel();
+  void _checkScope() {
+    _scope?.check();
+    if (cycleIsCurrent != null && !cycleIsCurrent!()) {
+      throw const SyncRunCancelled();
+    }
+  }
+
   final int pageSize;
 
   /// 5 × 300 = 1500 documents per cycle (plan §9.8).
   final int maxPagesPerCycle;
 
-  Future<PullReport> runOnce() async {
+  Future<PullReport> runOnce() => _running ??= _runScoped().whenComplete(() {
+    _running = null;
+    _scope = null;
+    _cycleMetadata = null;
+    _columnCache.clear();
+    _userIds.clear();
+  });
+
+  Future<PullReport> _runScoped() async {
+    _columnCache.clear();
+    _userIds.clear();
+    _scope = SyncRunScope(source, queue.dbHelper);
+    try {
+      final db = await queue.dbHelper.database;
+      _checkScope();
+      _cycleMetadata = metadata.bind(db);
+      return await _runOnce();
+    } on SyncRunCancelled {
+      return PullReport.empty;
+    }
+  }
+
+  Future<PullReport> _runOnce() async {
+    _checkScope();
     if (!remote.isSignedIn) return PullReport.empty;
     final organizationId = _session.organizationId;
     if (organizationId.isEmpty) return PullReport.empty;
@@ -155,27 +202,90 @@ class PullWorker {
     // per-entity dependency order is preserved by the groups' first-appearance
     // order (see `_dependenciesFirst`).
     final db = await queue.dbHelper.database;
+    _checkScope();
+    // One SQLite round trip for the whole cursor set. A root-handle read per
+    // entity (41 entities) made a no-change heartbeat walk compete with the
+    // foreground UI for dozens of separate FFI calls.
+    final savedCursors = await _runMetadata.readAll([
+      for (final entity in entities) SyncMetadata.cursorKey(entity.type),
+    ]);
+    _checkScope();
+    PullCursor savedCursor(SyncEntity entity) {
+      final raw = savedCursors[SyncMetadata.cursorKey(entity.type)];
+      if (raw == null || raw.isEmpty) return const PullCursor('', '');
+      try {
+        return PullCursor.fromJson(jsonDecode(raw) as Map<String, dynamic>);
+      } on Object {
+        return const PullCursor('', '');
+      }
+    }
+
     final groups = <String, List<SyncEntity>>{};
     for (final entity in entities) {
+      final permission = switch (entity.collection) {
+        SyncCollection.members => Permission.usersRead,
+        SyncCollection.samples ||
+        SyncCollection.referenceMaterials ||
+        SyncCollection.parameters ||
+        SyncCollection.materialBounds => Permission.samplesRead,
+        SyncCollection.labResults ||
+        SyncCollection.labConfig ||
+        SyncCollection.inventoryItems ||
+        SyncCollection.inventoryTransactions ||
+        SyncCollection.inventoryLots ||
+        SyncCollection.equipment ||
+        SyncCollection.equipmentEvents ||
+        SyncCollection.worksheets ||
+        SyncCollection.consumption ||
+        SyncCollection.stockAdjustments ||
+        SyncCollection.productBatchSamples => Permission.labResultsRead,
+        SyncCollection.qualityChecks ||
+        SyncCollection.qcCustomTables ||
+        SyncCollection.qcCustomTableFields ||
+        SyncCollection.qcCustomTableRows ||
+        SyncCollection.qcTemplates ||
+        SyncCollection.qcSections ||
+        SyncCollection.qcItems ||
+        SyncCollection.qcInspections ||
+        SyncCollection.qcResponses ||
+        SyncCollection.qcTaskLogs ||
+        SyncCollection.qcFindingsNc ||
+        SyncCollection.qcCapa ||
+        SyncCollection.qcSops ||
+        SyncCollection.qcSopRevisions ||
+        SyncCollection.qcSopReads => Permission.qcRead,
+        SyncCollection.organizationSettings => Permission.reportsRead,
+        SyncCollection.auditLogs => Permission.auditRead,
+        _ => null,
+      };
+      if (_session.isSignedIn &&
+          permission != null &&
+          !_session.can(permission)) {
+        continue;
+      }
       groups.putIfAbsent(entity.collection.name, () => []).add(entity);
     }
 
     for (final members in groups.values) {
+      _checkScope();
       // The per-page fetch reads the *earliest* member cursor so a member that
       // lags behind cannot lose stream positions the others have advanced
       // past. Cursors are cached per cycle (not re-read per page) and
       // refreshed whenever an advance writes them.
-      final cursors = <String, PullCursor>{};
-      Future<PullCursor> cursorOf(SyncEntity entity) async =>
-          cursors[entity.type] ??= await metadata.cursor(entity.type);
+      var groupHasMore = false;
+      final cursors = {
+        for (final member in members) member.type: savedCursor(member),
+      };
+      PullCursor cursorOf(SyncEntity entity) => cursors[entity.type]!;
 
       for (var page = 0; page < maxPagesPerCycle; page++) {
+        _checkScope();
         // The fetch position is purely the earliest member cursor — never the
         // ('', '') seed, which would be "earlier than everything" and would
         // pin every page to the head of the stream.
         PullCursor? walk;
         for (final member in members) {
-          final current = await cursorOf(member);
+          final current = cursorOf(member);
           if (walk == null || _cursorEarlier(current, walk)) walk = current;
         }
         final walkCursor = walk ?? const PullCursor('', '');
@@ -197,13 +307,14 @@ class PullWorker {
           error = '$e';
           break;
         }
+        _checkScope();
+        groupHasMore = result.hasMore;
         if (result.documents.isEmpty) {
-          hasMore = hasMore || result.hasMore;
           break;
         }
 
         for (final member in members) {
-          final memberCursor = await cursorOf(member);
+          final memberCursor = cursorOf(member);
           final accepts = member.accepts;
           final memberDocs = [
             for (final document in result.documents)
@@ -224,6 +335,15 @@ class PullWorker {
             );
             continue;
           }
+          if (member.type == 'productBatchSample') {
+            for (var i = 0; i < memberDocs.length; i++) {
+              memberDocs[i] = await _prepareLegacyBatchLink(
+                db,
+                organizationId,
+                memberDocs[i],
+              );
+            }
+          }
           // One transaction for the whole page instead of one per document.
           // A page is at most `pageSize` (300) rows, so a single commit is
           // bounded work, and the page either lands completely or not at all --
@@ -231,7 +351,17 @@ class PullWorker {
           final outcomes = await tracedTransaction(
             db,
             'pull.applyPage(${member.type})',
-            (txn) => _applyPage(txn, member, memberDocs, organizationId),
+            (txn) async {
+              _checkScope();
+              final outcomes = await _applyPage(
+                txn,
+                member,
+                memberDocs,
+                organizationId,
+              );
+              _checkScope();
+              return outcomes;
+            },
           );
           for (var i = 0; i < outcomes.length; i++) {
             switch (outcomes[i]) {
@@ -267,8 +397,8 @@ class PullWorker {
           }
         }
         if (!result.hasMore) break;
-        hasMore = true;
       }
+      hasMore = hasMore || groupHasMore;
     }
 
     if (failedDocs.isNotEmpty) {
@@ -282,13 +412,22 @@ class PullWorker {
       failed -= retried.resolved;
     }
 
-    if (marksPullTimestamp) await metadata.markPull(DateTime.now());
+    _checkScope();
+    if (marksPullTimestamp) {
+      await _runMetadata.set(
+        SyncMetadata.pullIncompleteKey,
+        hasMore || error != null || failed > 0 ? '1' : '0',
+      );
+      if (!hasMore && error == null && failed == 0) {
+        await _runMetadata.markPull(DateTime.now());
+      }
+    }
     if (error != null) {
-      await metadata.markError(error);
+      await _runMetadata.markError(error);
     } else if (failed > 0) {
       // Per-document schema failures used to stay inside PullReport only: the
       // badge kept saying "Synced" while remote rows were skipped every cycle.
-      await metadata.markError(
+      await _runMetadata.markError(
         'Pull skipped $failed document(s): local schema refused them. '
         'See "[sync] pull skipped" logs.',
       );
@@ -303,8 +442,10 @@ class PullWorker {
     );
   }
 
-  PullCursor _cursorOf(RemoteDocument document) =>
-      PullCursor(document.updatedAt ?? '', document.id);
+  PullCursor _cursorOf(RemoteDocument document) => PullCursor(
+    document.cursorTimestamp ?? document.updatedAt ?? '',
+    document.id,
+  );
 
   /// Writes [target] into the per-cycle cache and the persistent store, never
   /// moving a member cursor backwards over its own history.
@@ -313,18 +454,18 @@ class PullWorker {
     SyncEntity member,
     PullCursor target,
   ) async {
+    _checkScope();
     final current = cursors[member.type];
     if (current != null && !_cursorEarlier(current, target)) return;
     cursors[member.type] = target;
-    await metadata.setCursor(member.type, target);
+    await _runMetadata.setCursor(member.type, target);
   }
 
   /// Cursor-stream order: `(updatedAt, documentId)`, the same (ts, id) key
   /// `listSince` walks by; ISO timestamps compare lexicographically.
   bool _cursorEarlier(PullCursor a, PullCursor b) {
-    if (a.timestamp != b.timestamp) {
-      return a.timestamp.compareTo(b.timestamp) < 0;
-    }
+    final byTime = SyncCursorTime.compare(a.timestamp, b.timestamp);
+    if (byTime != 0) return byTime < 0;
     return a.documentId.compareTo(b.documentId) < 0;
   }
 
@@ -357,7 +498,12 @@ class PullWorker {
           'pull.retryInHand(${docs.length})',
           (txn) async => [
             for (final entry in docs.take(200))
-              await _applyDocument(txn, entry.entity, entry.doc, organizationId),
+              await _applyDocument(
+                txn,
+                entry.entity,
+                entry.doc,
+                organizationId,
+              ),
           ],
         );
         for (var i = 0; i < outcomes.length; i++) {
@@ -394,6 +540,7 @@ class PullWorker {
       } on Object {
         continue;
       }
+      _checkScope();
       if (!current.exists) continue;
       final outcome = await _applyRetryDoc(
         db,
@@ -448,6 +595,7 @@ class PullWorker {
         outcomes.add(_ApplyOutcome.failed);
       }
     }
+    _checkScope();
     return outcomes;
   }
 
@@ -457,6 +605,7 @@ class PullWorker {
     RemoteDocument document,
     String organizationId,
   ) async {
+    _checkScope();
     {
       // Several entities may share one remote collection (every lab-settings
       // table lives in `labConfig`), so the first question is whether this
@@ -484,7 +633,13 @@ class PullWorker {
               whereArgs: [localRef],
               limit: 1,
             );
+      _checkScope();
       final remoteVersion = document.version;
+      if (existing.isNotEmpty &&
+          remoteVersion <
+              ((existing.first['remote_version'] as num?)?.toInt() ?? 0)) {
+        return _ApplyOutcome.skipped;
+      }
 
       // A tombstone is intentionally a partial remote document. It must not
       // go through the normal INSERT/UPDATE mapper: tables have required
@@ -503,6 +658,8 @@ class PullWorker {
             'remote_synced_at': nowIso(),
           };
           final cols = await _availableColumns(txn, entity);
+          if (cols.contains('active')) patch['active'] = 0;
+          if (cols.contains('is_active')) patch['is_active'] = 0;
           patch.removeWhere((k, _) => !cols.contains(k));
           final remoteVersion = document.version;
           if (cols.contains('version')) {
@@ -518,6 +675,19 @@ class PullWorker {
             whereArgs: [localId],
           );
         }
+        // A server deletion is terminal. Keep no stale edit that could try
+        // to restore this record after the tombstone was applied.
+        await txn.delete(
+          'sync_queue',
+          where: 'entity_type = ? AND entity_id = ?',
+          whereArgs: [entity.type, document.id],
+        );
+        await txn.update(
+          'sync_conflicts',
+          {'resolution': 'remote_deleted', 'resolved_at': nowIso()},
+          where: 'entity_type = ? AND entity_id = ? AND resolution IS NULL',
+          whereArgs: [entity.type, document.id],
+        );
         return _ApplyOutcome.applied;
       }
 
@@ -534,7 +704,7 @@ class PullWorker {
         // A foreign document's `localId` is the origin device's row id and
         // must never become our primary key (see `naturalKeyIdentity`):
         // inserting with it would REPLACE our unrelated row of that id.
-        if (entity.naturalKeyIdentity) row.remove('id');
+        if (entity.naturalKeyIdentity) row.remove(entity.pkColumn);
         row['remote_synced_at'] = nowIso();
         row['sync_state'] = 'synced';
         row.removeWhere(
@@ -543,7 +713,9 @@ class PullWorker {
         await txn.insert(
           entity.localTable,
           _withDefaults(entity, row, await _availableColumns(txn, entity)),
-          conflictAlgorithm: ConflictAlgorithm.replace,
+          conflictAlgorithm: entity.type == 'productBatchSample'
+              ? ConflictAlgorithm.abort
+              : ConflictAlgorithm.replace,
         );
         await _repointAfterMaterialApply(txn, entity, document);
         return _ApplyOutcome.applied;
@@ -552,43 +724,65 @@ class PullWorker {
       final local = existing.first;
       final localVersion = (local['version'] as num?)?.toInt() ?? 0;
       final syncedVersion = (local['remote_version'] as num?)?.toInt() ?? 0;
+      final queued = await txn.query(
+        'sync_queue',
+        columns: ['id'],
+        where: 'entity_type = ? AND entity_id = ?',
+        whereArgs: [entity.type, entity.docId(local)],
+        limit: 1,
+      );
       final hasLocalEdits =
+          queued.isNotEmpty ||
           (local['sync_state'] == 'queued') ||
-          (localVersion > syncedVersion && syncedVersion > 0);
+          (local['sync_state'] != 'conflict' &&
+              localVersion > syncedVersion &&
+              syncedVersion > 0);
 
-      if (remoteVersion == syncedVersion) {
+      if (remoteVersion == syncedVersion &&
+          (!hasLocalEdits || queued.isNotEmpty)) {
+        if (entity.type == 'productBatchSample') {
+          final link = <String, dynamic>{
+            'batch_id': local['batch_id'],
+            'remote_id': local['remote_id'],
+          };
+          await resolveRemoteRowRefs(
+            txn,
+            entity,
+            link,
+            document.data,
+            ensureProductSentinel: (exec) =>
+                queue.dbHelper.ensureProductSentinelMaterialId(exec),
+          );
+          if (link.entries.any((entry) => local[entry.key] != entry.value)) {
+            await txn.update(
+              entity.localTable,
+              link,
+              where: '${entity.pkColumn} = ?',
+              whereArgs: [local[entity.pkColumn]],
+            );
+            return _ApplyOutcome.applied;
+          }
+        }
         await _healDivergentIdentity(txn, entity, document, local);
         return _ApplyOutcome.skipped;
       }
-      if (remoteVersion < localVersion && hasLocalEdits) {
-        // Local is newer: keep the local edit and push it on top of the remote.
-        final localId = (local[entity.pkColumn] as num?)?.toInt();
-        await txn.update(
-          entity.localTable,
-          {'sync_state': 'queued'},
-          where: '${entity.pkColumn} = ?',
-          whereArgs: [localId],
-        );
-        await queue.enqueue(
-          txn,
-          entityType: entity.type,
-          entityId: entity.docId(local),
-          localRef: localId,
-          operation: local['deleted_at'] == null ? 'update' : 'tombstone',
-          payload: buildRemotePayload(
-            entity,
-            Map<String, Object?>.from(local).cast<String, dynamic>(),
-            SyncPayloadContext(
-              organizationId: organizationId,
-              uid: _session.uid,
-              deviceId: _session.deviceId,
-              version: syncedVersion,
-              versionField: 'version',
-            ),
-          ),
-          baseVersion: syncedVersion,
-        );
-        return _ApplyOutcome.pushedBack;
+      if (hasLocalEdits) {
+        // Device-local version counters do not order concurrent edits from
+        // different devices. A pull must never overwrite an unacknowledged
+        // queued payload, including a first create still at local version 1.
+        if (queued.isNotEmpty) return _ApplyOutcome.skipped;
+        // Preserve untracked legacy values for inspection, but never invent
+        // an outbound operation under the account that happens to be signed in.
+        await txn.insert('sync_conflicts', {
+          'entity_type': entity.type,
+          'entity_id': document.id,
+          'direction': 'legacy_local_archive',
+          'local_payload': jsonEncode(local),
+          'remote_payload': jsonEncode(document.data),
+          'detected_at': nowIso(),
+          'resolution': 'archived_unqueued',
+          'resolved_at': nowIso(),
+        });
       }
 
       final row = await _localRow(
@@ -598,6 +792,17 @@ class PullWorker {
       );
       row['remote_synced_at'] = nowIso();
       row['sync_state'] = 'synced';
+      // `organization_settings.key` is UNIQUE across the whole table; a stale
+      // same-key sibling would abort the UPDATE with code 2067 every cycle
+      // and the document would never apply. See
+      // `dropStaleOrgSettingSiblings` for the full rationale.
+      if (entity.localTable == 'organization_settings') {
+        await dropStaleOrgSettingSiblings(
+          txn,
+          key: row['key'],
+          keepLocalId: local[entity.pkColumn],
+        );
+      }
       await txn.update(
         entity.localTable,
         _withDefaults(entity, row, await _availableColumns(txn, entity))
@@ -607,6 +812,49 @@ class PullWorker {
       );
       await _repointAfterMaterialApply(txn, entity, document);
       return _ApplyOutcome.applied;
+    }
+  }
+
+  Future<RemoteDocument> _prepareLegacyBatchLink(
+    Database db,
+    String organizationId,
+    RemoteDocument document,
+  ) async {
+    if ('${document.data['batchEntryCode'] ?? document.data['batch_entry_code'] ?? ''}'
+            .isNotEmpty ||
+        document.data['deletedAt'] != null) {
+      return document;
+    }
+    try {
+      final saved = await db.rawQuery(
+        'SELECT i.entry_code FROM product_batch_samples s '
+        'JOIN inspections i ON s.batch_id=i.id '
+        "WHERE s.remote_id=? AND i.inspection_kind='product' AND s.batch_entry_code=i.entry_code LIMIT 1",
+        [document.id],
+      );
+      String code = saved.isNotEmpty ? '${saved.single['entry_code']}' : '';
+      if (code.isEmpty) {
+        final localId = (document.data['batchId'] as num?)?.toInt() ?? 0;
+        final deviceId = '${document.data['deviceId'] ?? ''}';
+        if (localId <= 0 || deviceId.isEmpty) return document;
+        final parent = await remote.findProductBatchHeader(
+          organizationId: organizationId,
+          deviceId: deviceId,
+          localId: localId,
+        );
+        if (!parent.exists) return document;
+        code = parent.id;
+      }
+      return RemoteDocument(
+        id: document.id,
+        data: {...document.data, 'batchEntryCode': code},
+        version: document.version,
+        updatedAt: document.updatedAt,
+        cursorTimestamp: document.cursorTimestamp,
+      );
+    } on Object catch (error) {
+      debugPrint('[sync] legacy batch parent lookup unavailable: $error');
+      return document;
     }
   }
 
@@ -702,11 +950,13 @@ class PullWorker {
     final parent = SyncEntity.byType(error.parentEntity);
     if (parent == null) return false;
     try {
+      _checkScope();
       final doc = await remote.getDocument(
         organizationId: organizationId,
         collection: parent.collection,
         documentId: error.parentRemoteId,
       );
+      _checkScope();
       if (!doc.exists) return false;
       final outcome = await tracedTransaction(
         await queue.dbHelper.database,
@@ -752,8 +1002,8 @@ class PullWorker {
       entity,
       resolved,
       row,
-      ensureProductSentinel:
-          (exec) => queue.dbHelper.ensureProductSentinelMaterialId(exec),
+      ensureProductSentinel: (exec) =>
+          queue.dbHelper.ensureProductSentinelMaterialId(exec),
       userIdFor: (uid) => _localUserId(txn, uid),
     );
     return resolved;

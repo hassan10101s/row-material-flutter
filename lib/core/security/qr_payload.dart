@@ -51,12 +51,8 @@ String encodeAppQrPayload({
   required String entryCode,
   required String body,
   String kind = '',
-}) => '$appQrMagic${jsonEncode({
-      'v': 1,
-      'ec': entryCode,
-      if (kind.isNotEmpty) 'kind': kind,
-      'body': body,
-    })}';
+}) =>
+    '$appQrMagic${jsonEncode({'v': 1, 'ec': entryCode, if (kind.isNotEmpty) 'kind': kind, 'body': body})}';
 
 /// Parses scanned text. Returns null for anything that is not an app QR —
 /// callers must treat null as "reject", never as data.

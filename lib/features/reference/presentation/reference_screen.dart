@@ -4,6 +4,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../design_system/widgets/app_adaptive.dart';
 import '../../../di/service_locator.dart';
 import '../../lab/domain/lab_result_repository.dart';
 import '../domain/parameter_type.dart';
@@ -67,6 +68,16 @@ class ReferenceScreen extends StatefulWidget {
 class _ReferenceScreenState extends State<ReferenceScreen> {
   int _tab = 0;
 
+  void _swipeTab(DragEndDetails details, int count) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < 350) return;
+    setState(
+      () => _tab = (_tab + (velocity < 0 ? 1 : -1))
+          .clamp(0, count - 1)
+          .toInt(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final refRepo = getIt<ReferenceRepository>();
@@ -120,7 +131,7 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
       children: [
         const SizedBox(height: AppSpacing.page),
         SizedBox(
-          height: 46.h,
+          height: appUsesDesktopChrome(context) ? 46.h : 56,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
@@ -135,6 +146,12 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
                       label: Text(tabs[i].label),
                       avatar: Icon(tabs[i].icon, size: 18.r),
                       selected: _tab == i,
+                      materialTapTargetSize: appUsesDesktopChrome(context)
+                          ? MaterialTapTargetSize.shrinkWrap
+                          : MaterialTapTargetSize.padded,
+                      labelStyle: TextStyle(
+                        fontWeight: _tab == i ? FontWeight.w700 : FontWeight.w500,
+                      ),
                       onSelected: (_) => setState(() => _tab = i),
                     ),
                   ),
@@ -143,7 +160,12 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
           ),
         ),
         Expanded(
-          child: Padding(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragEnd: appUsesDesktopChrome(context)
+                ? null
+                : (details) => _swipeTab(details, tabs.length),
+            child: Padding(
             padding: const EdgeInsets.all(AppSpacing.page),
             child: IndexedStack(
               index: _tab,
@@ -151,6 +173,7 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
                 for (var i = 0; i < tabs.length; i++)
                   _LazyTab(active: _tab == i, builder: tabs[i].builder),
               ],
+            ),
             ),
           ),
         ),

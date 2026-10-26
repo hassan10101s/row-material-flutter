@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../../design_system/feedback/app_error_feedback.dart';
+import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
@@ -44,70 +45,74 @@ class MobileInspectionDetailScreen extends StatelessWidget {
       final samples = sampleLabels(inspection);
       body = SingleChildScrollView(
         padding: const EdgeInsets.all(AppSpacing.pageMobile),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            DetailHeader(
-              inspection: inspection,
-              state: state,
-              onExportPdf: (kind) => exportInspectionPdf(context, kind),
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            DetailInfo(inspection: inspection),
-            // Header result cards are raw-only: product batches keep no
-            // header values (always empty) — their results live inside the
-            // batch samples below, one expandable card per sample.
-            if ('${inspection['inspection_kind'] ?? 'raw'}' != 'product') ...[
+        // One-shot page entrance: header + facts slide in together, the
+        // scrolling content underneath stays static thereafter.
+        child: AppEntrance(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              DetailHeader(
+                inspection: inspection,
+                state: state,
+                onExportPdf: (kind) => exportInspectionPdf(context, kind),
+              ),
               const SizedBox(height: AppSpacing.lg),
-              ResultsCards(
-                title: AppText.t('النتائج الفيزيائية', 'Physical results'),
-                reference: asMap(inspection['physical_reference']),
-                results: asMap(inspection['physical_results']),
-                samples: samples,
-                numeric: false,
+              DetailInfo(inspection: inspection),
+              // Header result cards are raw-only: product batches keep no
+              // header values (always empty) — their results live inside the
+              // batch samples below, one expandable card per sample.
+              if ('${inspection['inspection_kind'] ?? 'raw'}' != 'product') ...[
+                const SizedBox(height: AppSpacing.lg),
+                ResultsCards(
+                  title: AppText.t('النتائج الفيزيائية', 'Physical results'),
+                  reference: asMap(inspection['physical_reference']),
+                  results: asMap(inspection['physical_results']),
+                  samples: samples,
+                  numeric: false,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                ResultsCards(
+                  title: AppText.t('النتائج الكيميائية', 'Chemical results'),
+                  reference: asMap(inspection['chemical_reference']),
+                  results: asMap(inspection['chemical_results']),
+                  samples: samples,
+                  numeric: true,
+                ),
+                const SizedBox(height: AppSpacing.md),
+              ] else ...[
+                const SizedBox(height: AppSpacing.md),
+              ],
+              LabAnalysesCard(analyses: state.chemicalAnalyses),
+              // Product batches only (محضر التشغيلة): the sample table inside
+              // the report. Raw-material detail is untouched.
+              if ('${inspection['inspection_kind'] ?? 'raw'}' == 'product') ...[
+                const SizedBox(height: AppSpacing.md),
+                ProductBatchSection(
+                  batchId: inspectionId,
+                  productId: (inspection['product_id'] as num?)?.toInt() ?? 0,
+                  productName: '${inspection['material_name'] ?? ''}',
+                  entryCode: '${inspection['entry_code'] ?? ''}',
+                ),
+              ],
+              // Decision history is raw-only; products decide per sample.
+              if ('${inspection['inspection_kind'] ?? 'raw'}' != 'product' &&
+                  state.history.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.md),
+                HistoryCard(history: state.history),
+              ],
+              const SizedBox(height: AppSpacing.lg),
+              DetailFooterActions(
+                state: state,
+                isProduct:
+                    '${inspection['inspection_kind'] ?? 'raw'}' == 'product',
+                onEdit: () => openEditForm(context, inspection),
+                onUpdateDecision: () =>
+                    openDecisionDialog(context, inspectionId, inspection),
+                onDelete: () => deleteInspection(context),
               ),
-              const SizedBox(height: AppSpacing.md),
-              ResultsCards(
-                title: AppText.t('النتائج الكيميائية', 'Chemical results'),
-                reference: asMap(inspection['chemical_reference']),
-                results: asMap(inspection['chemical_results']),
-                samples: samples,
-                numeric: true,
-              ),
-              const SizedBox(height: AppSpacing.md),
-            ] else ...[
-              const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.xl),
             ],
-            LabAnalysesCard(analyses: state.chemicalAnalyses),
-            // Product batches only (محضر التشغيلة): the sample table inside
-            // the report. Raw-material detail is untouched.
-            if ('${inspection['inspection_kind'] ?? 'raw'}' == 'product') ...[
-              const SizedBox(height: AppSpacing.md),
-              ProductBatchSection(
-                batchId: inspectionId,
-                productId: (inspection['product_id'] as num?)?.toInt() ?? 0,
-                productName: '${inspection['material_name'] ?? ''}',
-                entryCode: '${inspection['entry_code'] ?? ''}',
-              ),
-            ],
-            // Decision history is raw-only; products decide per sample.
-            if ('${inspection['inspection_kind'] ?? 'raw'}' != 'product' &&
-                state.history.isNotEmpty) ...[
-              const SizedBox(height: AppSpacing.md),
-              HistoryCard(history: state.history),
-            ],
-            const SizedBox(height: AppSpacing.lg),
-            DetailFooterActions(
-              state: state,
-              isProduct:
-                  '${inspection['inspection_kind'] ?? 'raw'}' == 'product',
-              onEdit: () => openEditForm(context, inspection),
-              onUpdateDecision: () =>
-                  openDecisionDialog(context, inspectionId, inspection),
-              onDelete: () => deleteInspection(context),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-          ],
+          ),
         ),
       );
     }

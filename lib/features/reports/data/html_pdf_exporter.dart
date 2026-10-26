@@ -2,7 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart'
+    show rootBundle, MethodChannel, PlatformException;
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:path/path.dart' as p;
 
 /// Raised when the headless browser finished but did not produce a PDF.
@@ -15,8 +17,10 @@ class HtmlToPdfException implements Exception {
 
 /// Raised when no Edge/Chrome binary is available for headless conversion.
 class HtmlToPdfUnavailableException implements Exception {
-  HtmlToPdfUnavailableException(
-      [this.message = 'No headless browser (Edge/Chrome) available for HTML->PDF export.']);
+  HtmlToPdfUnavailableException([
+    this.message =
+        'No headless browser (Edge/Chrome) available for HTML->PDF export.',
+  ]);
   final String message;
   @override
   String toString() => message;
@@ -36,13 +40,18 @@ class HtmlPdfExporter {
     List<String>? browserCandidates,
     Duration? browserTimeout,
     Future<Map<String, Uint8List>> Function()? fontLoader,
-  })  : _browserCandidates = browserCandidates ?? defaultCandidates,
-        _browserTimeout = browserTimeout ?? const Duration(seconds: 45),
-        _fontLoader = fontLoader ?? _loadFontsFromAssets;
+    Future<Process> Function(String, List<String>)? processStarter,
+  }) : _browserCandidates = browserCandidates ?? defaultCandidates,
+       _browserTimeout = browserTimeout ?? const Duration(seconds: 45),
+       _fontLoader = fontLoader ?? _loadFontsFromAssets,
+       _processStarter =
+           processStarter ??
+           ((executable, args) => Process.start(executable, args));
 
   final List<String> _browserCandidates;
   final Duration _browserTimeout;
   final Future<Map<String, Uint8List>> Function() _fontLoader;
+  final Future<Process> Function(String, List<String>) _processStarter;
 
   /// Same candidate list as `pdf_headless.py:_find_headless_browser`.
   static const List<String> defaultCandidates = [
@@ -171,8 +180,7 @@ class HtmlPdfExporter {
   /// works inside MSIX containers. Returns null on any failure.
   static Future<String?> _registryAppPath(String key) async {
     try {
-      final result =
-          await Process.run('reg', ['query', key, '/ve']).timeout(
+      final result = await Process.run('reg', ['query', key, '/ve']).timeout(
         const Duration(seconds: 5),
         onTimeout: () => ProcessResult(0, 1, '', 'timeout'),
       );
@@ -200,9 +208,100 @@ class HtmlPdfExporter {
     String html, {
     String? baseHref,
     bool noPageOverride = false,
-  }) =>
-      _serialized(() => _exportPdf(html,
-          baseHref: baseHref, noPageOverride: noPageOverride));
+  }) => _serialized(
+    () => Platform.isAndroid
+        ? _exportAndroid(html, noPageOverride: noPageOverride)
+        : _exportPdf(html, baseHref: baseHref, noPageOverride: noPageOverride),
+  );
+
+  Future<Uint8List> _exportAndroid(
+    String html, {
+    required bool noPageOverride,
+  }) async {
+    final request = await androidRequest(html, noPageOverride: noPageOverride);
+    try {
+      final bytes = await const MethodChannel(
+        'material_lab/html_pdf',
+      ).invokeMethod<Uint8List>('render', request);
+      if (bytes == null ||
+          bytes.length < 5 ||
+          ascii.decode(bytes.sublist(0, 5)) != '%PDF-') {
+        throw HtmlToPdfException('Android did not return a valid PDF document');
+      }
+      return bytes;
+    } on PlatformException catch (e) {
+      throw HtmlToPdfException(e.message ?? e.code);
+    }
+  }
+
+  @visibleForTesting
+  Future<Map<String, Object>> androidRequest(
+    String html, {
+    bool noPageOverride = false,
+  }) async {
+    final fonts = await _cachedFonts();
+    var css = utf8.decode(fonts['fonts.css']!);
+    for (final entry in fonts.entries) {
+      if (entry.key == 'fonts.css') continue;
+      css = css.replaceAll(
+        entry.key,
+        'data:font/woff2;base64,${base64Encode(entry.value)}',
+      );
+    }
+    var document = noPageOverride ? html : _applyPageOverride(html);
+    document = document.replaceAll(
+      RegExp(
+        r'<link\b[^>]*href=["\x27]fonts/fonts\.css["\x27][^>]*>',
+        caseSensitive: false,
+      ),
+      '<style>$css</style>',
+    );
+    if (!document.contains('data:font/woff2')) {
+      document = document.replaceFirst('</head>', '<style>$css</style></head>');
+    }
+    final size =
+        RegExp(
+          r'@page\s*\{[^}]*\bsize\s*:\s*([^;}]*)',
+          caseSensitive: false,
+        ).firstMatch(document)?.group(1)?.trim().toLowerCase() ??
+        'a4';
+    double width = 210, height = 297;
+    final mm = RegExp(r'([\d.]+)(mm|cm)\s+([\d.]+)(mm|cm)').firstMatch(size);
+    if (mm != null) {
+      width = double.parse(mm.group(1)!) * (mm.group(2) == 'cm' ? 10 : 1);
+      height = double.parse(mm.group(3)!) * (mm.group(4) == 'cm' ? 10 : 1);
+    } else if (size.contains('landscape')) {
+      width = 297;
+      height = 210;
+    }
+    final marginMatches = RegExp(
+      r'@page\s*\{[^}]*\bmargin\s*:\s*([^;}]+)',
+      caseSensitive: false,
+    ).allMatches(document);
+    final margins = (marginMatches.isEmpty ? '0' : marginMatches.last.group(1)!)
+        .trim()
+        .split(RegExp(r'\s+'))
+        .map((token) {
+          final value =
+              double.tryParse(token.replaceAll(RegExp(r'[^\d.]'), '')) ?? 0;
+          return (value * (token.endsWith('cm') ? 10 : 1) / 25.4 * 1000)
+              .round();
+        })
+        .toList();
+    return {
+      'html': document,
+      'widthMils': (width / 25.4 * 1000).round(),
+      'heightMils': (height / 25.4 * 1000).round(),
+      'topMils': margins.first,
+      'rightMils': margins.length > 1 ? margins[1] : margins.first,
+      'bottomMils': margins.length > 2 ? margins[2] : margins.first,
+      'leftMils': margins.length > 3
+          ? margins[3]
+          : margins.length > 1
+          ? margins[1]
+          : margins.first,
+    };
+  }
 
   Future<Uint8List> _exportPdf(
     String html, {
@@ -216,7 +315,9 @@ class HtmlPdfExporter {
     final tmp = await Directory.systemTemp.createTemp('material_lab_pdf_');
     try {
       final htmlWithCss = _injectBaseHref(
-          noPageOverride ? html : _applyPageOverride(html), baseHref);
+        noPageOverride ? html : _applyPageOverride(html),
+        baseHref,
+      );
       final htmlFile = File(p.join(tmp.path, 'report.html'));
 
       // Staging in parallel: HTML + font bytes + font dir resolve together
@@ -230,8 +331,9 @@ class HtmlPdfExporter {
       final fonts = results[1] as Map<String, Uint8List>;
       await Future.wait([
         for (final entry in fonts.entries)
-          File(p.join(fontsDir.path, entry.key))
-              .writeAsBytes(entry.value, flush: true),
+          File(
+            p.join(fontsDir.path, entry.key),
+          ).writeAsBytes(entry.value, flush: true),
       ]);
 
       final outFile = File(p.join(tmp.path, 'out.pdf'));
@@ -248,11 +350,18 @@ class HtmlPdfExporter {
         // A stale Singleton lock from a killed run can wedge the shared
         // profile; retry once with a throwaway profile instead of failing
         // the whole report.
-        if (!_looksLikeProfileLock(e.message)) rethrow;
-        final fallbackProfile =
-            await Directory(p.join(tmp.path, 'profile_fresh'))
-                .create(recursive: true);
-        return _runBrowser(
+        if (!_looksLikeProfileLock(e.message) &&
+            !e.message.contains('timed out') &&
+            !e.message.contains('did not create the file')) {
+          rethrow;
+        }
+        final fallbackProfile = await Directory(
+          p.join(tmp.path, 'profile_fresh'),
+        ).create(recursive: true);
+        // Keep the staged HTML/fonts alive until the retry has finished.
+        // Returning the future directly would run `finally` immediately and
+        // remove the input files while the fallback browser still uses them.
+        return await _runBrowser(
           browser,
           profileDir: fallbackProfile.path,
           outFile: outFile,
@@ -288,7 +397,11 @@ class HtmlPdfExporter {
       htmlFile.path,
     ];
 
-    final process = await Process.start(browser, args);
+    final process = await _processStarter(browser, args);
+    // Drain while the browser runs; a full stderr pipe can otherwise stop the
+    // child before it exits, leaving a completed report waiting on a timeout.
+    final stdoutDone = process.stdout.drain<void>();
+    final stderrDone = process.stderr.transform(utf8.decoder).join();
     final exitCode = await process.exitCode.timeout(
       _browserTimeout,
       onTimeout: () {
@@ -296,20 +409,24 @@ class HtmlPdfExporter {
         throw HtmlToPdfException('External browser PDF export timed out.');
       },
     );
-    final stderr = await process.stderr.transform(utf8.decoder).join();
+    await stdoutDone;
+    final stderr = await stderrDone;
     if (exitCode != 0) {
       final details = stderr.trim();
       throw HtmlToPdfException(
-          details.isEmpty ? 'External browser PDF export failed.' : details);
+        details.isEmpty ? 'External browser PDF export failed.' : details,
+      );
     }
     if (!await outFile.exists()) {
       throw HtmlToPdfException(
-          'External browser PDF export did not create the file.');
+        'External browser PDF export did not create the file.',
+      );
     }
     final bytes = await outFile.readAsBytes();
     if (bytes.isEmpty) {
       throw HtmlToPdfException(
-          'External browser PDF export created an empty file.');
+        'External browser PDF export created an empty file.',
+      );
     }
     return bytes;
   }
@@ -328,7 +445,7 @@ class HtmlPdfExporter {
   /// The shared warm profile, created once per process.
   static Future<Directory> _warmProfileDir() {
     return _profileDirFuture ??= Directory(
-      p.join(Directory.systemTemp.path, 'material_lab_pdf_profile'),
+      p.join(Directory.systemTemp.path, 'material_lab_pdf_profile_$pid'),
     ).create(recursive: true);
   }
 
@@ -342,7 +459,8 @@ class HtmlPdfExporter {
 
   /// Port of `_apply_page_override` CSS: `@page` margins + hide header/footer.
   static String _applyPageOverride(String html) {
-    const cssHide = '<style>'
+    const cssHide =
+        '<style>'
         '@page { margin: 9mm 8mm; }'
         '@page { '
         '@top-left { content: none; }'
@@ -359,7 +477,9 @@ class HtmlPdfExporter {
   }
 
   static String _injectBaseHref(String html, String? baseHref) {
-    if (baseHref == null || baseHref.isEmpty || html.toLowerCase().contains('<base ')) {
+    if (baseHref == null ||
+        baseHref.isEmpty ||
+        html.toLowerCase().contains('<base ')) {
       return html;
     }
     final href = baseHref.replaceAll('\\', '/');

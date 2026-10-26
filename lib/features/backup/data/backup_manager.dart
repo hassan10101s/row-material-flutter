@@ -559,8 +559,9 @@ class BackupManager implements BackupService {
           final pendingMaterials = <String>{};
           for (final insp in sourceInspections) {
             final entryCode = '${insp['entry_code'] ?? ''}'.trim();
-            if (entryCode.isEmpty || existingCodes.contains(entryCode))
+            if (entryCode.isEmpty || existingCodes.contains(entryCode)) {
               continue;
+            }
             final materialName = '${insp['material_name'] ?? 'Unknown'}'.trim();
             final materialCode = '${insp['material_code'] ?? ''}'.trim();
             final key = materialName.toLowerCase();
@@ -604,8 +605,9 @@ class BackupManager implements BackupService {
 
           for (final insp in sourceInspections) {
             final entryCode = '${insp['entry_code'] ?? ''}'.trim();
-            if (entryCode.isEmpty || existingCodes.contains(entryCode))
+            if (entryCode.isEmpty || existingCodes.contains(entryCode)) {
               continue;
+            }
             final materialName = '${insp['material_name'] ?? 'Unknown'}'.trim();
             final materialId = materialNameToId[materialName]!;
             final createdByName = '${insp['created_by_name'] ?? ''}'.trim();

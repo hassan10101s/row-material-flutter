@@ -6,6 +6,7 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../cubit/dashboard_kpis_state.dart';
 import '../widgets/decision_badge.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class QcQuickCard extends StatelessWidget {
   final DashboardKpisState kpi;
@@ -17,7 +18,9 @@ class QcQuickCard extends StatelessWidget {
     final total = qc.total;
     final acceptRate = total == 0 ? 0.0 : (qc.pass / total * 100);
     final rejectRate = total == 0 ? 0.0 : (qc.fail / total * 100);
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

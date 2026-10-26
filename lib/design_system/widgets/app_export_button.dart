@@ -48,11 +48,7 @@ class AppExportIconButton extends StatelessWidget {
 
 /// Horizontal breathing room shared by phone search rows.
 class AppSearchRow extends StatelessWidget {
-  const AppSearchRow({
-    super.key,
-    required this.search,
-    required this.export,
-  });
+  const AppSearchRow({super.key, required this.search, required this.export});
 
   final Widget search;
   final Widget export;

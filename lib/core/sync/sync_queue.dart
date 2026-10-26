@@ -20,6 +20,7 @@ class QueueEntry {
     required this.retryCount,
     required this.status,
     this.revision = 0,
+    this.ownerUid = '',
     this.localRef,
     this.lastError,
   });
@@ -40,6 +41,7 @@ class QueueEntry {
   /// still carries it, so a settlement whose entity was re-edited while the
   /// push was in flight cannot delete that newer edit.
   final int revision;
+  final String ownerUid;
   final int? localRef;
   final String? lastError;
 
@@ -55,9 +57,24 @@ class QueueEntry {
     retryCount: (row['retry_count'] as num?)?.toInt() ?? 0,
     status: '${row['status']}',
     revision: (row['revision'] as num?)?.toInt() ?? 0,
+    ownerUid: '${row['owner_uid'] ?? ''}',
     localRef: (row['local_ref'] as num?)?.toInt(),
     lastError: row['last_error'] as String?,
   );
+
+  static String? payloadOwner(
+    String entityType,
+    String operation,
+    Map<String, dynamic> payload,
+  ) {
+    final actor = entityType == 'auditLog'
+        ? payload['userId']
+        : payload['updatedBy'] ??
+              (operation == 'create' ? payload['createdBy'] : null);
+    return actor is String && actor.isNotEmpty && !actor.startsWith('local_')
+        ? actor
+        : null;
+  }
 
   /// A copy carrying [revision], used by [SyncQueue.claim] to stamp the token
   /// it wrote so the settlement can match it.
@@ -71,6 +88,7 @@ class QueueEntry {
     retryCount: retryCount,
     status: status,
     revision: revision,
+    ownerUid: ownerUid,
     localRef: localRef,
     lastError: lastError,
   );
@@ -201,8 +219,10 @@ class SyncQueue {
     final existing = await txn.query(
       'sync_queue',
       where:
-          "entity_type = ? AND entity_id = ? AND status IN ('pending','in_flight','blocked')",
+          "entity_type = ? AND entity_id = ? AND status IN ('pending','in_flight','blocked','conflict','failed')",
       whereArgs: [entityType, entityId],
+      orderBy:
+          "CASE WHEN status IN ('pending','in_flight','blocked') THEN 0 ELSE 1 END, id DESC",
       limit: 1,
     );
     final now = nowIso();
@@ -216,6 +236,7 @@ class SyncQueue {
         'local_ref': localRef,
         'operation': operation,
         'payload': encoded,
+        'owner_uid': QueueEntry.payloadOwner(entityType, operation, payload),
         'base_version': baseVersion,
         'created_at': now,
         'updated_at': now,
@@ -229,12 +250,27 @@ class SyncQueue {
       return;
     }
     final row = existing.first;
+    // Editing a parked record supersedes its old conflict, not its new edit.
+    // Reuse the same queue identity so late responses keep their revision guard.
+    await txn.update(
+      'sync_conflicts',
+      {'resolution': 'superseded', 'resolved_at': now},
+      where: 'entity_type = ? AND entity_id = ? AND resolution IS NULL',
+      whereArgs: [entityType, entityId],
+    );
+    await txn.delete(
+      'sync_queue',
+      where:
+          "entity_type = ? AND entity_id = ? AND id <> ? AND status IN ('conflict','failed')",
+      whereArgs: [entityType, entityId, row['id']],
+    );
     final mergedOperation = _mergeOperations('${row['operation']}', operation);
     await txn.update(
       'sync_queue',
       {
         'operation': mergedOperation,
         'payload': encoded,
+        'owner_uid': QueueEntry.payloadOwner(entityType, operation, payload),
         'base_version': maxOf(
           baseVersion,
           (row['base_version'] as num?)?.toInt() ?? 0,
@@ -268,22 +304,57 @@ class SyncQueue {
   /// Each claim bumps `revision` and returns the bump it wrote, so the
   /// settlement that follows only lands while the row is untouched (see
   /// [QueueEntry.revision]).
-  Future<List<QueueEntry>> claim({int limit = 400}) async {
+  Future<List<QueueEntry>> claim({
+    int limit = 400,
+    String? uid,
+    void Function()? checkCurrent,
+  }) async {
     return _withDb(
       'queue.claim',
       (db) => tracedTransaction<List<QueueEntry>>(db, 'queue.claim', (
         txn,
       ) async {
+        checkCurrent?.call();
+        if (uid != null) {
+          if (uid.isEmpty) return [];
+          // Bounded lazy migration: explicit historical actors are retained,
+          // never replaced with whichever account happened to sign in next.
+          final legacy = await txn.query(
+            'sync_queue',
+            where: "owner_uid = ''",
+            orderBy: 'id ASC',
+            limit: 400,
+          );
+          for (final row in legacy) {
+            checkCurrent?.call();
+            final decoded =
+                jsonDecode('${row['payload']}') as Map<String, dynamic>;
+            await txn.update(
+              'sync_queue',
+              {
+                'owner_uid': QueueEntry.payloadOwner(
+                  '${row['entity_type']}',
+                  '${row['operation']}',
+                  decoded,
+                ),
+              },
+              where: "id = ? AND owner_uid = ''",
+              whereArgs: [row['id']],
+            );
+          }
+        }
         final rows = await txn.query(
           'sync_queue',
           where:
-              "status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)",
-          whereArgs: [nowIso()],
+              "status = 'pending' AND (next_attempt_at IS NULL OR next_attempt_at <= ?)"
+              "${uid == null ? '' : ' AND (owner_uid = ? OR owner_uid IS NULL)'}",
+          whereArgs: [nowIso(), ?uid],
           orderBy: 'id ASC',
           limit: limit,
         );
         final claimed = <QueueEntry>[];
         for (final row in rows) {
+          checkCurrent?.call();
           final id = (row['id'] as num).toInt();
           final revision = ((row['revision'] as num?)?.toInt() ?? 0) + 1;
           final updated = await txn.update(
@@ -300,6 +371,7 @@ class SyncQueue {
             claimed.add(QueueEntry.fromRow(row).withRevision(revision));
           }
         }
+        checkCurrent?.call();
         return claimed;
       }),
     );
@@ -325,9 +397,10 @@ class SyncQueue {
   /// crashes the process every attempt keeps climbing the backoff ladder
   /// instead of being granted an infinite series of fresh first attempts.
   /// It never parks for a manual tap — transient work retries forever.
-  Future<int> recoverStalled() async {
+  Future<int> recoverStalled({void Function()? checkCurrent}) async {
     return _withDb('queue.recoverStalled', (db) async {
       return tracedTransaction(db, 'queue.recoverStalled', (txn) async {
+        checkCurrent?.call();
         final rows = await txn.query(
           'sync_queue',
           columns: ['id', 'retry_count', 'revision'],
@@ -336,6 +409,7 @@ class SyncQueue {
         final now = nowIso();
         var recovered = 0;
         for (final row in rows) {
+          checkCurrent?.call();
           // Crash recovery preserves the backoff climb: a push that crashes
           // the process every attempt keeps its retry_count (see the note on
           // recoverStalled), it just never parks for a manual tap anymore.
@@ -358,6 +432,7 @@ class SyncQueue {
           );
           if (updated > 0) recovered++;
         }
+        checkCurrent?.call();
         return recovered;
       });
     });
@@ -365,13 +440,52 @@ class SyncQueue {
 
   /// Push succeeded: the row is deleted and the local row is marked `synced`
   /// with the new remote version.
-  Future<void> markDone(QueueEntry entry, {required int remoteVersion}) async {
+  Future<void> markDone(
+    QueueEntry entry, {
+    required int remoteVersion,
+    DatabaseExecutor? executor,
+  }) async {
+    if (executor != null) {
+      await _markDone(executor, entry, remoteVersion);
+      return;
+    }
     await tracedTransaction(
       await _db,
       'queue.markDone',
       (txn) => _markDone(txn, entry, remoteVersion),
     );
   }
+
+  /// Reconsider old transport denials once after installing the corrected
+  /// envelope protocol. This does not grant permission: the local guard and
+  /// server rules still evaluate every retry. Genuine denials park again.
+  Future<int> recoverEnvelopeUpgrade({
+    void Function()? checkCurrent,
+  }) async => _withDb(
+    'queue.envelopeUpgrade',
+    (db) => tracedTransaction(db, 'queue.envelopeUpgrade', (txn) async {
+      checkCurrent?.call();
+      const marker = 'remote_envelope_policy_v2';
+      final done = await txn.query(
+        'sync_metadata',
+        columns: const ['value'],
+        where: 'key = ?',
+        whereArgs: [marker],
+        limit: 1,
+      );
+      if (done.isNotEmpty) return 0;
+      final count = await txn.rawUpdate(
+        "UPDATE sync_queue SET status='pending', retry_count=0, next_attempt_at=NULL, "
+        "last_error=NULL, updated_at=?, revision=revision+1 "
+        "WHERE status='conflict' AND operation<>'tombstone' "
+        "AND last_error LIKE '%Missing or insufficient permissions%'",
+        [nowIso()],
+      );
+      await txn.insert('sync_metadata', {'key': marker, 'value': '1'});
+      checkCurrent?.call();
+      return count;
+    }),
+  );
 
   /// [markDone] on an existing transaction.
   ///
@@ -389,7 +503,10 @@ class SyncQueue {
       where: 'id = ? AND revision = ?',
       whereArgs: [entry.id, entry.revision],
     );
-    if (deleted == 0) return;
+    if (deleted == 0) {
+      await _acknowledgePredecessor(txn, entry, remoteVersion);
+      return;
+    }
     final entity = entry.entity;
     if (entity == null) return;
     await txn.update(
@@ -398,11 +515,71 @@ class SyncQueue {
         'remote_version': remoteVersion,
         'remote_synced_at': nowIso(),
         'sync_state': 'synced',
+        if (!entity.appendOnly &&
+            !const {
+              'qc_templates',
+              'qc_inspections',
+            }.contains(entity.localTable))
+          'version': remoteVersion,
       },
       where: '${entity.pkColumn} = ?',
       whereArgs: [entry.localRef],
     );
+    await txn.update(
+      'sync_conflicts',
+      {'resolution': 'synced', 'resolved_at': nowIso()},
+      where:
+          "entity_type=? AND entity_id=? AND direction='push_rejected' AND resolution IS NULL",
+      whereArgs: [entry.entityType, entry.entityId],
+    );
   }
+
+  /// The old payload reached the server while a newer local edit was staged.
+  /// Keep that edit queued, but advance its known server base. Otherwise the
+  /// next pull/retry can mistake our own predecessor for a competing edit and
+  /// overwrite the newer values with the server's older payload.
+  Future<void> _acknowledgePredecessor(
+    DatabaseExecutor txn,
+    QueueEntry entry,
+    int remoteVersion,
+  ) async {
+    final entity = entry.entity;
+    if (entity == null || entity.appendOnly || remoteVersion <= 0) return;
+    final rows = await txn.query(
+      'sync_queue',
+      where:
+          "id = ? AND entity_type = ? AND entity_id = ? AND status = 'pending' AND revision > ?",
+      whereArgs: [entry.id, entry.entityType, entry.entityId, entry.revision],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+    final pending = rows.single;
+    final base = (pending['base_version'] as num?)?.toInt() ?? 0;
+    if (base > remoteVersion) return;
+    await txn.update(
+      'sync_queue',
+      {'base_version': remoteVersion, 'updated_at': nowIso()},
+      where: 'id = ? AND revision = ?',
+      whereArgs: [entry.id, pending['revision']],
+    );
+    if (entry.localRef == null || pending['local_ref'] != entry.localRef) {
+      return;
+    }
+    await txn.rawUpdate(
+      'UPDATE ${entity.localTable} SET remote_version = MAX(COALESCE(remote_version, 0), ?), '
+      "sync_state = 'queued' WHERE ${entity.pkColumn} = ?",
+      [remoteVersion, entry.localRef],
+    );
+  }
+
+  Future<bool> isCurrentClaim(DatabaseExecutor txn, QueueEntry entry) async =>
+      (await txn.query(
+        'sync_queue',
+        columns: ['id'],
+        where: "id = ? AND revision = ? AND status = 'in_flight'",
+        whereArgs: [entry.id, entry.revision],
+        limit: 1,
+      )).isNotEmpty;
 
   /// Applies many push outcomes in a single transaction.
   ///
@@ -410,11 +587,18 @@ class SyncQueue {
   /// their own transaction, so a 400-entry batch paid 400 fsyncs. A push
   /// worker runs a whole batch at once and only needs the results to be
   /// visible together, so the batch shares one commit.
-  Future<void> settleAll(List<QueueSettlement> settlements) async {
+  Future<void> settleAll(
+    List<QueueSettlement> settlements, {
+    bool Function()? isCurrent,
+    void Function()? checkCurrent,
+  }) async {
     if (settlements.isEmpty) return;
     await _withDb('queue.settleAll', (db) async {
       await tracedTransaction(db, 'queue.settleAll', (txn) async {
+        if (isCurrent != null && !isCurrent()) return;
+        checkCurrent?.call();
         for (final settlement in settlements) {
+          checkCurrent?.call();
           final entry = settlement.entry;
           switch (settlement.kind) {
             case QueueOutcome.done:
@@ -431,6 +615,7 @@ class SyncQueue {
               );
           }
         }
+        checkCurrent?.call();
       });
     });
   }
@@ -590,7 +775,9 @@ class SyncQueue {
     if (resolution != 'keep_local' && resolution != 'keep_remote') {
       throw ArgumentError.value(resolution, 'resolution');
     }
-    final conflicts = await (await _db).query(
+    final generation = dbHelper.connectionGeneration;
+    final conflictDb = await _db;
+    final conflicts = await conflictDb.query(
       'sync_conflicts',
       where: 'id = ?',
       whereArgs: [conflictId],
@@ -609,44 +796,56 @@ class SyncQueue {
     // there is nothing left to push. Leaving it in `conflict` would keep the
     // blocked counter up forever and show the entity twice in the queue. The
     // full history stays in `sync_conflicts`.
-    final db = await _db;
-    await db.delete(
-      'sync_queue',
-      where: "status = 'conflict' AND entity_type = ? AND entity_id = ?",
-      whereArgs: [conflict['entity_type'], conflict['entity_id']],
-    );
-    await db.update(
-      'sync_conflicts',
-      {'resolution': resolution, 'resolved_at': nowIso()},
-      where: 'id = ?',
-      whereArgs: [conflictId],
-    );
+    if (dbHelper.connectionGeneration != generation) {
+      throw StateError('Database changed during conflict resolution');
+    }
+    await tracedTransaction(conflictDb, 'queue.finishResolution', (txn) async {
+      final remaining = await txn.query(
+        'sync_conflicts',
+        where: 'id = ? AND resolution IS NULL',
+        whereArgs: [conflictId],
+      );
+      if (remaining.isEmpty) return; // Resolver already committed atomically.
+      await assertCurrentConflict(txn, conflict);
+      await txn.delete(
+        'sync_queue',
+        where: "status = 'conflict' AND entity_type = ? AND entity_id = ?",
+        whereArgs: [conflict['entity_type'], conflict['entity_id']],
+      );
+      await txn.update(
+        'sync_conflicts',
+        {'resolution': resolution, 'resolved_at': nowIso()},
+        where: 'id = ?',
+        whereArgs: [conflictId],
+      );
+    });
   }
 
-  /// Dismiss every unresolved conflict without picking a side
-  /// (`resolution='ignored'`).
-  ///
-  /// Escape hatch for stale conflicts — e.g. payloads queued before a schema
-  /// change during development that can never push cleanly again. Unlike
-  /// [resolveConflict] no data direction is chosen: the parked `conflict`
-  /// queue rows (which hold the stale payloads) are dropped and the history
-  /// stays in `sync_conflicts` for inspection. Local rows keep whatever
-  /// `sync_state` they have; the next edit re-queues a fresh payload built
-  /// from the current schema, so dismissed state self-heals on next write.
-  /// Returns how many conflicts were dismissed.
-  Future<int> dismissAllConflicts() => _withDb(
-    'queue.dismissAll',
-    (db) => tracedTransaction<int>(db, 'queue.dismissAll', (txn) async {
-      final dismissed = await txn.update('sync_conflicts', {
-        'resolution': 'ignored',
-        'resolved_at': nowIso(),
-      }, where: 'resolution IS NULL');
-      if (dismissed > 0) {
-        await txn.delete('sync_queue', where: "status = 'conflict'");
-      }
-      return dismissed;
-    }),
-  );
+  /// Revalidate inside the same transaction that applies a manual choice.
+  /// A screen can stay open while another edit supersedes its old conflict.
+  Future<void> assertCurrentConflict(
+    DatabaseExecutor txn,
+    Map<String, Object?> conflict,
+  ) async {
+    final open = await txn.query(
+      'sync_conflicts',
+      columns: ['id'],
+      where: 'id = ? AND resolution IS NULL',
+      whereArgs: [conflict['id']],
+      limit: 1,
+    );
+    if (open.isEmpty) {
+      throw StateError('Conflict was already superseded or resolved');
+    }
+    final newer = await txn.query(
+      'sync_queue',
+      columns: ['id'],
+      where: "entity_type = ? AND entity_id = ? AND status <> 'conflict'",
+      whereArgs: [conflict['entity_type'], conflict['entity_id']],
+      limit: 1,
+    );
+    if (newer.isNotEmpty) throw StateError('Conflict has a newer local edit');
+  }
 
   /// Manual retry from the Sync screen: `failed`/`conflict` → `pending`.
   Future<int> retryBlocked({String? entityType}) async {
@@ -740,7 +939,7 @@ class SyncQueue {
               WHERE status = 'failed') AS failed,
             (SELECT COUNT(*) FROM sync_conflicts
               WHERE resolution IS NULL
-                 OR resolution NOT IN ('keep_local','keep_remote','ignored')) AS conflicts
+                 OR resolution NOT IN ('keep_local','keep_remote','ignored','synced')) AS conflicts
         ''');
         final row = rows.first;
         return SyncQueueCounts(
@@ -765,7 +964,7 @@ class SyncQueue {
   Future<int> countConflicts() => _withDb('queue.countConflicts', (db) async {
     final rows = await db.rawQuery(
       "SELECT COUNT(*) AS c FROM sync_conflicts WHERE resolution IS NULL "
-      "OR resolution NOT IN ('keep_local','keep_remote','ignored')",
+      "OR resolution NOT IN ('keep_local','keep_remote','ignored','synced')",
     );
     return (rows.first['c'] as num).toInt();
   });

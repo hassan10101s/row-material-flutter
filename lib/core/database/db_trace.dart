@@ -464,11 +464,7 @@ class TracedBatch implements Batch {
   }
 
   @override
-  void delete(
-    String table, {
-    String? where,
-    List<Object?>? whereArgs,
-  }) {
+  void delete(String table, {String? where, List<Object?>? whereArgs}) {
     _added();
     _inner.delete(table, where: where, whereArgs: whereArgs);
   }
@@ -502,10 +498,7 @@ class TracedBatch implements Batch {
   }
 
   @override
-  void rawQuery(
-    String sql, [
-    List<Object?>? arguments,
-  ]) {
+  void rawQuery(String sql, [List<Object?>? arguments]) {
     _added();
     _inner.rawQuery(sql, arguments);
   }
@@ -528,13 +521,12 @@ class TracedBatch implements Batch {
   );
 
   @override
-  Future<List<Object?>> apply({
-    bool? noResult,
-    bool? continueOnError,
-  }) => DbTrace.run(
-    'db.batchApply($_ops)',
-    () => _inner.apply(noResult: noResult, continueOnError: continueOnError),
-  );
+  Future<List<Object?>> apply({bool? noResult, bool? continueOnError}) =>
+      DbTrace.run(
+        'db.batchApply($_ops)',
+        () =>
+            _inner.apply(noResult: noResult, continueOnError: continueOnError),
+      );
 }
 
 /// [Database.transaction] under [DbTrace], so a transaction that never commits

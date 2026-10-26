@@ -35,7 +35,8 @@ class RoutineHistoryScreen extends StatefulWidget {
       MaterialPageRoute(
         builder: (_) => BlocProvider(
           create: (_) =>
-              RoutineHistoryCubit(repo: getIt<RoutineListsRepository>())..load(),
+              RoutineHistoryCubit(repo: getIt<RoutineListsRepository>())
+                ..load(),
           child: const RoutineHistoryScreen(),
         ),
       ),
@@ -403,10 +404,7 @@ class _FiltersBar extends StatelessWidget {
                 AppButton(
                   small: true,
                   style: AppButtonStyle.secondary,
-                  label: AppText.t(
-                    'قائمة السجل الكامل',
-                    'Full sheet history',
-                  ),
+                  label: AppText.t('قائمة السجل الكامل', 'Full sheet history'),
                   icon: Icon(Icons.calendar_view_day, size: 18.r),
                   onPressed: () => _showSheetsWindow(context),
                 ),
@@ -415,20 +413,11 @@ class _FiltersBar extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Row(
               children: [
-                SizedBox(
-                  width: 180,
-                  child: listDropdown,
-                ),
+                SizedBox(width: 180, child: listDropdown),
                 const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  flex: 2,
-                  child: dates,
-                ),
+                Expanded(flex: 2, child: dates),
                 const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  flex: 2,
-                  child: textFilters,
-                ),
+                Expanded(flex: 2, child: textFilters),
                 const SizedBox(width: AppSpacing.sm),
                 refresh,
               ],
@@ -472,11 +461,9 @@ class _FiltersBar extends StatelessWidget {
 /// The per-sheet scorecards (list × period, progress, who) live behind one
 /// entry, since the visible surface is the flat per-item log.
 void _showSheetsWindow(BuildContext context) {
-  Navigator.of(context).push<void>(
-    MaterialPageRoute<void>(
-      builder: (_) => const _SheetsScreen(),
-    ),
-  );
+  Navigator.of(
+    context,
+  ).push<void>(MaterialPageRoute<void>(builder: (_) => const _SheetsScreen()));
 }
 
 /// Full sheet history: every list × period page with its scorecard and the

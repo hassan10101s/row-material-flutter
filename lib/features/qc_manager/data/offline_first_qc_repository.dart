@@ -44,8 +44,8 @@ import 'qc_sync_writer.dart';
 /// `qcResponses`/`qcTaskLogs`/`qcFindingsNc`/`qcCapa` collections and the
 /// read-only viewers pull it. The queue/writer is *optional at
 /// construction* — legacy call sites and tests that build a facade without
-/// one keep the old purely-local behavior. SOPs alone stay device-local by
-/// design (their document lifecycles did not get a remote collection).
+/// one keep the old purely-local behavior. SOPs, revisions and read records
+/// also participate when a writer is configured.
 ///
 /// ## Why not the core `AuditLogger` either
 /// The P3 row of the phase table says "WriteGuard/AuditLogger integration", but
@@ -209,8 +209,7 @@ class _QcWrite {
   Future<T> transaction<T>(
     Future<T> Function(DatabaseExecutor txn) body,
   ) async {
-    final db = await dbHelper.database;
-    return db.transaction<T>(body);
+    return dbHelper.businessTransaction<T>(body);
   }
 
   /// Appends one entry, but only if it is not going to blow up the write it is
@@ -311,7 +310,6 @@ abstract final class QcAuditAction {
   static const String capaActionComplete = 'CAPA_ACTION_COMPLETE';
   static const String capaVerified = 'CAPA_VERIFIED';
   static const String capaClosed = 'CAPA_CLOSED';
-
 }
 
 /// Statuses that constitute a QC decision rather than authoring.
@@ -345,15 +343,16 @@ abstract final class _QcDecision {
 
 /// SOPs, revisions and read/acknowledgement records (plan P3).
 ///
-/// Device-local by design (plan P8): SOP lifecycles have no remote
-/// collection, so this facade never queues even when a sync writer exists.
+/// SOP bodies, published revisions and acknowledgements share the same outbox
+/// as the checklist records, with parent identities remapped on each viewer.
 class OfflineFirstQcSopRepository implements QcSopRepository {
   OfflineFirstQcSopRepository({
     required QcSopRepo local,
     required WriteGuard guard,
     required QcAuditRepo audit,
     required DatabaseHelper dbHelper,
-  }) : _w = _QcWrite(guard, audit, dbHelper),
+    QcSyncWriter? sync,
+  }) : _w = _QcWrite(guard, audit, dbHelper, sync),
        localRepo = local;
 
   final _QcWrite _w;
@@ -401,6 +400,7 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
         after: sop.toMap(withId: false),
         meta: {'code': sop.code, 'status': sop.status},
       );
+      await _queueSop(txn, id);
       return id;
     });
   }
@@ -429,6 +429,7 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
         before: before,
         after: await _w.snapshot(txn, 'qc_sops', 'sop_id', id),
       );
+      await _queueSop(txn, id);
     });
   }
 
@@ -447,6 +448,7 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
         before: before,
         after: await _w.snapshot(txn, 'qc_sops', 'sop_id', sopId),
       );
+      await _queueSop(txn, sopId);
     });
   }
 
@@ -515,6 +517,15 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
           if (effectiveFrom.isNotEmpty) 'effectiveFrom': effectiveFrom,
         },
       );
+      await _queueSop(txn, sopId);
+      await _w.queueChildRows(
+        txn,
+        table: 'qc_sop_revisions',
+        pk: 'rev_id',
+        entityType: 'qcSopRevision',
+        where: 'sop_id = ?',
+        whereArgs: [sopId],
+      );
       return revId;
     });
   }
@@ -536,6 +547,13 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
           'ackMethod': read.ackMethod,
         },
       );
+      await _w.queueRow(
+        txn,
+        entityType: 'qcSopRead',
+        table: 'qc_sop_reads',
+        pk: 'id',
+        id: readId,
+      );
       return readId;
     });
   }
@@ -544,6 +562,14 @@ class OfflineFirstQcSopRepository implements QcSopRepository {
   @override
   Future<List<QcSopRead>> listSopReads(int sopId) =>
       localRepo.listSopReads(sopId);
+
+  Future<void> _queueSop(DatabaseExecutor txn, int id) => _w.queueRow(
+    txn,
+    entityType: 'qcSop',
+    table: 'qc_sops',
+    pk: 'sop_id',
+    id: id,
+  );
 }
 
 /// Checklist templates and their trees (plan P3).
@@ -578,10 +604,7 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
   Future<int> createTemplate(QcTemplate template) async {
     if (template.name.trim().isEmpty) {
       throw ValidationError(
-        AppText.t(
-          'قائمة الفحص تحتاج إلى اسم',
-          'A checklist needs a name',
-        ),
+        AppText.t('قائمة الفحص تحتاج إلى اسم', 'A checklist needs a name'),
       );
     }
     _w.check(Permission.qcWrite);
@@ -793,9 +816,9 @@ class OfflineFirstQcTemplateRepository implements QcTemplateRepository {
   @override
   Future<int> duplicateTemplate(
     int templateId,
-    String newName,
-    {String newCode = ''}
-  ) async {
+    String newName, {
+    String newCode = '',
+  }) async {
     _w.check(Permission.qcWrite);
     if (newCode.trim().isEmpty && newName.trim().isEmpty) {
       throw const ValidationError(
@@ -1366,7 +1389,6 @@ class OfflineFirstQcNcCapaRepository implements QcNcCapaRepository {
   }
 }
 
-
 /// Convenience bundle for the DI registrations (plan P8).
 ///
 /// Every QC facade needs the same three collaborators. Passing them
@@ -1403,17 +1425,14 @@ class QcRepositories {
     final audit = QcAuditRepo(dbHelper: dbHelper, actorReader: actorReader);
     final sync = queue == null
         ? null
-        : QcSyncWriter(
-            queue: queue,
-            guard: guard,
-            syncAudit: syncAudit,
-          );
+        : QcSyncWriter(queue: queue, guard: guard, syncAudit: syncAudit);
     return QcRepositories(
       sops: OfflineFirstQcSopRepository(
         local: QcSopRepo(dbHelper),
         guard: guard,
         audit: audit,
         dbHelper: dbHelper,
+        sync: sync,
       ),
       templates: OfflineFirstQcTemplateRepository(
         local: QcTemplateRepo(dbHelper),

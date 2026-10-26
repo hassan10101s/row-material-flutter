@@ -45,10 +45,7 @@ class MobileFileDelivery implements FileDelivery {
       final file = File(filePath);
       if (!await file.exists()) return false;
       await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(filePath)],
-          subject: subject,
-        ),
+        ShareParams(files: [XFile(filePath)], subject: subject),
       );
       return true;
     } on Object {

@@ -27,7 +27,10 @@ Future<void> openLinkedInspection(
 
   Map<String, dynamic>? inspection;
   try {
-    final rows = await getIt<InspectionRepository>().list(query: code, limit: 50);
+    final rows = await getIt<InspectionRepository>().list(
+      query: code,
+      limit: 50,
+    );
     for (final r in rows) {
       if ('${r['entry_code'] ?? ''}' == code) {
         inspection = r;
@@ -72,8 +75,6 @@ Future<void> openLinkedInspection(
       child: screen(context),
     );
   } else {
-    await Navigator.of(context).push<bool>(
-      AppPageRoute(builder: screen),
-    );
+    await Navigator.of(context).push<bool>(AppPageRoute(builder: screen));
   }
 }

@@ -9,7 +9,7 @@ part of '../firebase_auth.dart';
 ///
 /// This class is only usable on web based platforms.
 class ConfirmationResult {
-  ConfirmationResultPlatform _delegate;
+  final ConfirmationResultPlatform _delegate;
 
   final FirebaseAuth _auth;
 

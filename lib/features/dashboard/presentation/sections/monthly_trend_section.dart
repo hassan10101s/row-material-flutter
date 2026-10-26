@@ -5,6 +5,7 @@ import 'package:material_lab/core/l10n/app_localizations_x.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class MonthlyTrendSection extends StatelessWidget {
   final Map<String, dynamic> summary;
@@ -16,7 +17,9 @@ class MonthlyTrendSection extends StatelessWidget {
         summary['comparison'] as Map<String, dynamic>? ?? const {};
     final deltaLabel = '${comparison['label'] ?? ''}';
     final sign = '${comparison['approvalDeltaSign'] ?? ''}';
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(

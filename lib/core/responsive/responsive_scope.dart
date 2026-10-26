@@ -11,28 +11,25 @@ import 'layout_spec.dart';
 /// that opened them. A dialog that disagreed with its page about the form
 /// factor would be the hardest kind of bug to reproduce.
 class ResponsiveScope extends InheritedWidget {
-  const ResponsiveScope({
-    super.key,
-    required this.spec,
-    required super.child,
-  });
+  const ResponsiveScope({super.key, required this.spec, required super.child});
 
   /// Resolves the platform form factor itself. Used by `main()`.
   ResponsiveScope.forPlatform({super.key, required super.child})
-      : spec = LayoutSpec.of(FormFactor.resolve());
+    : spec = LayoutSpec.of(FormFactor.resolve());
 
   final LayoutSpec spec;
 
+  static LayoutSpec? maybeOf(BuildContext context) =>
+      context.dependOnInheritedWidgetOfExactType<ResponsiveScope>()?.spec;
+
   static LayoutSpec of(BuildContext context) {
-    final scope = context
-        .dependOnInheritedWidgetOfExactType<ResponsiveScope>();
+    final scope = context.dependOnInheritedWidgetOfExactType<ResponsiveScope>();
     assert(scope != null, 'No ResponsiveScope above this widget.');
     return scope!.spec;
   }
 
   @override
-  bool updateShouldNotify(ResponsiveScope oldWidget) =>
-      oldWidget.spec != spec;
+  bool updateShouldNotify(ResponsiveScope oldWidget) => oldWidget.spec != spec;
 }
 
 extension ResponsiveContext on BuildContext {

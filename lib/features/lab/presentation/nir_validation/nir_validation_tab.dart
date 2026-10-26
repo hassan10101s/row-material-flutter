@@ -1,506 +1,720 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
-
+import '../../../../app/auth_gate.dart';
+import '../../../../core/auth/permissions.dart';
 import '../../../../core/constants/app_strings.dart';
-import '../../../../core/responsive/form_factor.dart';
-import '../../../../core/responsive/layout_spec.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_adaptive.dart';
+import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_card.dart';
+import '../../../../design_system/widgets/app_data_table.dart';
 import '../../../../design_system/widgets/app_date_field.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
 import '../../../../design_system/widgets/app_search_field.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../design_system/widgets/app_text_field.dart';
+import '../../../../design_system/widgets/app_window.dart';
+import '../../../../di/service_locator.dart';
 import '../../domain/nir_validation_repository.dart';
 import '../cubit/nir_validation_cubit.dart';
 import '../cubit/nir_validation_state.dart';
 import 'nir_item_details_window.dart';
+import 'nir_validation_components.dart';
 
-/// NIR فلديشن tab: validates the NIR device against laboratory references.
-///
-/// Every محضر فحص result (خامات + منتجات) is a NIR reading; the paired lab
-/// result (سجل الفحوصات, same entry code) is the reference. Per
-/// خامة/منتج × تحليل it shows the average deviation, the proposed
-/// slope/intercept and accuracy metrics — plus the horizon (last reset date)
-/// and the reset action.
-class NirValidationTab extends StatelessWidget {
+class NirValidationTab extends StatefulWidget {
   const NirValidationTab({super.key});
+  @override
+  State<NirValidationTab> createState() => _NirValidationTabState();
+}
 
+class _NirValidationTabState extends State<NirValidationTab> {
+  NirReliability? _reliability;
+  int _searchRevision = 0;
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<NirValidationCubit>();
     final state = context.watch<NirValidationCubit>().state;
+    final scoped = state.filteredStats;
+    final visible = scoped
+        .where((s) => _reliability == null || s.reliability == _reliability)
+        .toList();
     return AppErrorFeedback<NirValidationCubit, NirValidationState>(
       selector: (s) => s.error,
       child: RefreshIndicator(
-        onRefresh: () => cubit.load(),
+        onRefresh: cubit.load,
         child: CustomScrollView(
+          key: const PageStorageKey('nir-validation-scroll'),
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
             SliverToBoxAdapter(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (FormFactor.current.isMobile) ...[
-                    AppPageHeader(
-                      title: AppText.t('فلديشن NIR', 'NIR Validation'),
-                      subtitle: AppText.t(
-                        'التأكد من دقة جهاز NIR بالمقارنة مع نتائج المعمل',
-                        'NIR device accuracy versus laboratory references',
+                  AppPageHeader(
+                    title: AppText.t('التحقق من دقة NIR', 'NIR validation'),
+                    subtitle: AppText.t(
+                      'قارن قراءات الجهاز بالمعمل، وراجع كل تحليل بثقة.',
+                      'Compare device readings with the laboratory and review each analysis.',
+                    ),
+                    icon: Icons.query_stats_outlined,
+                    actions: [
+                      AppButton(
+                        label: AppText.t('تحديث النتائج', 'Refresh results'),
+                        icon: const Icon(Icons.refresh_rounded, size: 18),
+                        style: AppButtonStyle.secondary,
+                        small: true,
+                        loading: state.loading,
+                        onPressed: state.loading ? null : cubit.load,
                       ),
-                      icon: Icons.query_stats_outlined,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
                   if (state.loading && state.stats.isEmpty)
-                    const AppSkeletonList(rows: 5, lines: 3, height: 320)
+                    const AppSkeletonList(rows: 4, lines: 3, height: 320)
                   else ...[
-                    _FilterRow(
-                      selected: state.scopeFilter,
-                      query: state.query,
-                      onScope: cubit.setScope,
-                      onQuery: cubit.setQuery,
+                    _Overview(
+                      stats: scoped,
+                      selected: _reliability,
+                      onSelected: (value) =>
+                          setState(() => _reliability = value),
                     ),
                     const SizedBox(height: AppSpacing.md),
+                    _Filters(
+                      key: ValueKey(_searchRevision),
+                      state: state,
+                      reliability: _reliability,
+                      onReliability: (value) =>
+                          setState(() => _reliability = value),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    const _ReadingGuide(),
+                    const SizedBox(height: AppSpacing.sectionGap),
+                    Text(
+                      AppText.t(
+                        '${visible.length} تحليل مطابق للفلاتر',
+                        '${visible.length} analyses match the filters',
+                      ),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textMuted,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
                   ],
                 ],
               ),
             ),
-            SliverPadding(
-              padding: const EdgeInsets.only(bottom: AppSpacing.page),
-              sliver: _StatsGroupList(stats: state.filteredStats),
-            ),
+            if (!(state.loading && state.stats.isEmpty))
+              SliverPadding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.page),
+                sliver: _StatsGroupList(
+                  stats: visible,
+                  filtered:
+                      state.query.trim().isNotEmpty ||
+                      state.scopeFilter != null ||
+                      _reliability != null,
+                  onClear: () {
+                    cubit.setQuery('');
+                    cubit.setScope(null);
+                    setState(() {
+                      _reliability = null;
+                      _searchRevision++;
+                    });
+                  },
+                  onOpen: (stats) => _openDetails(context, stats),
+                ),
+              ),
           ],
         ),
       ),
     );
   }
 
-}
-
-String _todayIso() => DateTime.now().toIso8601String().substring(0, 10);
-
-/// `yyyy-MM-dd` → `dd/MM/yyyy` (Arabic) / ISO (English).
-String _displayDate(String iso) {
-  final parts = iso.split('-');
-  if (parts.length == 3) {
-    return AppText.t('${parts[2]}/${parts[1]}/${parts[0]}', iso);
+  Future<void> _openDetails(
+    BuildContext context,
+    NirParameterStats stats,
+  ) async {
+    final cubit = context.read<NirValidationCubit>();
+    final canReset =
+        getIt.isRegistered<AuthGate>() &&
+        getIt<AuthGate>().canWrite(Permission.labResultsUpdate);
+    await showNirItemDetails(
+      context,
+      stats,
+      onReset: canReset && !cubit.state.saving
+          ? () => _showResetDialog(context, cubit, target: stats)
+          : null,
+    );
   }
-  return iso;
 }
 
-/// Opens the reset dialog for a single (خامة/منتج × تحليل) item — resets are
-/// always per-item; there is no whole-calibration reset action.
-Future<void> _showResetDialog(
-  BuildContext context,
-  NirValidationCubit cubit, {
-  required NirParameterStats target,
-}) async {
-  final dateController = TextEditingController(text: _todayIso());
-  final noteController = TextEditingController();
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(
-        AppText.t(
-          'تصفير ${target.parameter} — ${target.entityName}',
-          'Reset ${target.parameter} — ${target.entityName}',
-        ),
-      ),
-      content: SizedBox(
-        // Fixed pixel dimensions are a desktop affordance only; a phone
-        // dialog runs its own intrinsic width (LayoutSpec contract).
-        width:
-            LayoutSpec.of(FormFactor.current).allowsFixedDialog ? 420 : null,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              AppText.t(
-                'سيبدأ حساب «${target.parameter}» لهذا البند من التاريخ المحدد من جديد — بقية البنود تستمر من تصفيرها الخاص.',
-                'Counting for “${target.parameter}” restarts from the chosen date — other items keep their own horizon.',
-              ),
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: AppSpacing.md),
-            AppDateField(
-              label: AppText.t('تاريخ بداية جديد', 'New start date'),
-              controller: dateController,
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            TextField(
-              controller: noteController,
-              maxLines: 2,
-              decoration: InputDecoration(
-                labelText: AppText.t('ملاحظة (اختياري)', 'Note (optional)'),
-                border: const OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context, false),
-          child: Text(AppText.t('إلغاء', 'Cancel')),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, true),
-          child: Text(AppText.t('تصفير', 'Reset')),
-        ),
-      ],
-    ),
-  );
-  if (ok != true || !context.mounted) return;
-  await cubit.reset(
-    dateController.text.trim(),
-    noteController.text.trim(),
-    scope: target.scope,
-    entityId: target.entityId,
-    entityName: target.entityName,
-    parameter: target.parameter,
-  );
-}
-
-/// Scope chips + search.
-class _FilterRow extends StatelessWidget {
-  const _FilterRow({
+class _Overview extends StatelessWidget {
+  const _Overview({
+    required this.stats,
     required this.selected,
-    required this.query,
-    required this.onScope,
-    required this.onQuery,
+    required this.onSelected,
   });
-
-  final NirScope? selected;
-  final String query;
-  final ValueChanged<NirScope?> onScope;
-  final ValueChanged<String> onQuery;
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: AppSpacing.sm,
-      runSpacing: AppSpacing.sm,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        ChoiceChip(
-          label: Text(AppText.t('الكل', 'All')),
-          selected: selected == null,
-          onSelected: (_) => onScope(null),
-        ),
-        ChoiceChip(
-          label: Text(AppText.t('خامات', 'Raw materials')),
-          selected: selected == NirScope.rawMaterial,
-          onSelected: (_) => onScope(NirScope.rawMaterial),
-        ),
-        ChoiceChip(
-          label: Text(AppText.t('منتجات', 'Products')),
-          selected: selected == NirScope.product,
-          onSelected: (_) => onScope(NirScope.product),
-        ),
-        SizedBox(
-          width: 280.w,
-          child: DebouncedSearchField(
-            label: AppText.t('بحث', 'Search'),
-            initialValue: query,
-            onChanged: onQuery,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Groups the stats rows by خامة/منتج; each group is a card whose rows are
-/// expandable into the matched-point table.
-class _StatsGroupList extends StatelessWidget {
-  const _StatsGroupList({required this.stats});
-
   final List<NirParameterStats> stats;
-
+  final NirReliability? selected;
+  final ValueChanged<NirReliability?> onSelected;
   @override
   Widget build(BuildContext context) {
-    if (stats.isEmpty) {
-      return SliverFillRemaining(
-        hasScrollBody: false,
-        child: AppEmptyState(
-          icon: Icons.query_stats_outlined,
-          title: AppText.t('لا يوجد نقاط مطابقة', 'No matched points'),
-          subtitle: AppText.t(
-            'يلزم وجود تحليل كيميائي معملي (ريفرنس) على نفس المحضر لتظهر الانحرافات.',
-            'A laboratory reference test on the same محضر is required to produce deviations.',
-          ),
-        ),
-      );
-    }
-    // Group by (scope, entityId, entityName): raw-material ids and product
-    // ids come from different tables and collide, so grouping on the id alone
-    // would merge a product into a raw-material card (wrong name + icon).
-    // Scope + identity are part of the key so each product is shown on its
-    // own, even when legacy rows have no product id.
-    final groups = <(NirScope, int, String), List<NirParameterStats>>{};
-    for (final s in stats) {
-      (groups[(s.scope, s.entityId, s.entityName)] ??= []).add(s);
-    }
-    return SliverList.separated(
-      itemCount: groups.length,
-      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
-      itemBuilder: (context, i) {
-        final rows = groups.values.elementAt(i);
-        final groupPoints = rows.fold<int>(0, (n, s) => n + s.count);
-        return _EntityGroupCard(
-          entityName: rows.first.entityName,
-          scope: rows.first.scope,
-          rows: rows,
-          statsHeader: AppText.t(
-            '$groupPoints نقطة مطابقة',
-            '$groupPoints matched points',
-          ),
+    final items = <(NirReliability?, String, IconData, Color)>[
+      (
+        null,
+        AppText.t('كل التحاليل', 'All analyses'),
+        Icons.analytics_outlined,
+        AppColors.primary,
+      ),
+      (
+        NirReliability.trusted,
+        AppText.t('موثوق', 'Trusted'),
+        Icons.verified_outlined,
+        AppColors.success,
+      ),
+      (
+        NirReliability.needsReview,
+        AppText.t('يحتاج مراجعة', 'Needs review'),
+        Icons.fact_check_outlined,
+        AppColors.warning,
+      ),
+      (
+        NirReliability.insufficientData,
+        AppText.t('بيانات غير كافية', 'More data needed'),
+        Icons.hourglass_empty_rounded,
+        AppColors.textMuted,
+      ),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns =
+            constraints.maxWidth >= 800 &&
+                MediaQuery.textScalerOf(context).scale(14) < 19
+            ? 4
+            : 2;
+        final width =
+            (constraints.maxWidth - AppSpacing.sm * (columns - 1)) / columns;
+        return Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            for (final (status, label, icon, color) in items)
+              SizedBox(
+                width: width,
+                child: Semantics(
+                  selected: selected == status,
+                  child: AppCard(
+                    padding: const EdgeInsets.all(AppSpacing.md),
+                    color: selected == status
+                        ? color.withValues(alpha: .08)
+                        : null,
+                    onTap: () => onSelected(status),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(icon, size: 20, color: color),
+                            const Spacer(),
+                            if (selected == status)
+                              Icon(Icons.check_circle, size: 16, color: color),
+                          ],
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          '${status == null ? stats.length : stats.where((s) => s.reliability == status).length}',
+                          style: Theme.of(context).textTheme.headlineSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          label,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+          ],
         );
       },
     );
   }
 }
 
-/// One خامة/منتج card with a parameter table.
-class _EntityGroupCard extends StatelessWidget {
-  const _EntityGroupCard({
-    required this.entityName,
-    required this.scope,
-    required this.rows,
-    required this.statsHeader,
+class _Filters extends StatelessWidget {
+  const _Filters({
+    super.key,
+    required this.state,
+    required this.reliability,
+    required this.onReliability,
   });
-
-  final String entityName;
-  final NirScope scope;
-  final List<NirParameterStats> rows;
-  final String statsHeader;
-
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                scope == NirScope.rawMaterial
-                    ? Icons.grass_outlined
-                    : Icons.inventory_2_outlined,
-                color: scope == NirScope.rawMaterial
-                    ? AppColors.info
-                    : AppColors.primary,
-                size: 20.r,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  entityName,
-                  style: Theme.of(context).textTheme.titleMedium,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Text(
-                statsHeader,
-                style: Theme.of(context).textTheme.bodySmall!.copyWith(
-                      color: AppColors.textMuted,
-                    ),
-              ),
-            ],
-          ),
-          const Divider(height: AppSpacing.md),
-          for (final row in rows) _ParameterRow(stats: row),
-        ],
-      ),
-    );
-  }
-}
-
-/// One parameter row: metrics + expansion of the point table.
-class _ParameterRow extends StatelessWidget {
-  const _ParameterRow({required this.stats});
-
-  final NirParameterStats stats;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final n = stats.count;
-    final biasText =
-        n == 0 ? '-' : stats.bias.toStringAsFixed(3);
-    final slopeText = n < 2 ? '-' : stats.slope.toStringAsFixed(4);
-    final interceptText = n < 2 ? '-' : stats.intercept.toStringAsFixed(4);
-    return ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      childrenPadding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      dense: true,
-      // The arrow stays at the start; the trailing slot holds the details
-      // window button (diagram + full metrics + adjustment mode choice).
-      controlAffinity: ListTileControlAffinity.leading,
-      title: Text(
-        '${stats.parameter}${_unitSuffix()}  ·  ${NirValidationState.scopeLabel(stats.scope)}',
-        style: theme.textTheme.titleSmall,
-      ),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Wrap(
-          spacing: 10,
-          runSpacing: 4,
-          children: [
-            _MetricChip(label: 'N', value: '$n'),
-            _MetricChip(
-              label: AppText.t('الانحراف', 'Bias'),
-              value: biasText,
-              color: stats.bias > 0 ? AppColors.danger : AppColors.success,
-            ),
-            _MetricChip(label: 'Slope', value: slopeText),
-            _MetricChip(label: 'Intercept', value: interceptText),
-            _MetricChip(
-              label: 'R²',
-              value: n < 2 ? '-' : stats.r2.toStringAsFixed(3),
-            ),
-            _MetricChip(
-              label: 'RMSE',
-              value: n < 2 ? '-' : stats.rmse.toStringAsFixed(3),
-            ),
-            _ReliabilityChip(stats: stats),
-            if (stats.scopedHorizon)
-              _MetricChip(
-                label: AppText.t('تصفير خاص', 'Item reset'),
-                value: _displayDate(stats.horizonStart),
-                color: AppColors.primary,
-              ),
-          ],
-        ),
-      ),
-      trailing: IconButton(
-        tooltip: AppText.t('الرسم والتفاصيل', 'Diagram & details'),
-        icon: const Icon(Icons.insights_outlined, size: 20),
-        onPressed: () => showNirItemDetails(context, stats),
-      ),
-      children: [
-        _ItemHorizonBar(stats: stats),
-        NirPointsTable(points: stats.points, unit: stats.unit),
-      ],
-    );
-  }
-
-  String _unitSuffix() {
-    final u = stats.unit.trim();
-    return u.isEmpty ? '' : ' ($u)';
-  }
-}
-
-/// The effective horizon of one parameter row plus its per-item reset action:
-/// resetting here restarts only this (خامة/منتج × تحليل) item, leaving every
-/// other row counting from its own horizon.
-class _ItemHorizonBar extends StatelessWidget {
-  const _ItemHorizonBar({required this.stats});
-
-  final NirParameterStats stats;
-
+  final NirValidationState state;
+  final NirReliability? reliability;
+  final ValueChanged<NirReliability?> onReliability;
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<NirValidationCubit>();
-    final saving = context.watch<NirValidationCubit>().state.saving;
-    final horizon = stats.horizonStart.trim();
-    final label = horizon.isEmpty
-        ? AppText.t(
-            'بلا تصفير — كل النقاط محسوبة',
-            'No reset — all points count',
-          )
-        : AppText.t(
-            'حساب البند من: ${_displayDate(horizon)}${stats.scopedHorizon ? ' (تصفير خاص)' : ' (تصفير عام)'}',
-            'Counting from: ${_displayDate(horizon)}${stats.scopedHorizon ? ' (item reset)' : ' (global reset)'}',
-          );
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-      child: Row(
-        children: [
-          Icon(
-            stats.scopedHorizon ? Icons.flag : Icons.flag_outlined,
-            size: 14.r,
-            color: stats.scopedHorizon
-                ? AppColors.primary
-                : AppColors.textMuted,
+    final scopes = Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      children: [
+        for (final scope in <NirScope?>[null, ...NirScope.values])
+          ChoiceChip(
+            label: Text(
+              scope == null
+                  ? AppText.t('الكل', 'All')
+                  : scope == NirScope.rawMaterial
+                  ? AppText.t('الخامات', 'Raw materials')
+                  : AppText.t('المنتجات', 'Products'),
+            ),
+            selected: state.scopeFilter == scope,
+            onSelected: (_) => cubit.setScope(scope),
           ),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall!.copyWith(
-                    color: AppColors.textMuted,
-                  ),
+      ],
+    );
+    final search = DebouncedSearchField(
+      label: AppText.t(
+        'ابحث باسم الخامة أو المنتج أو التحليل',
+        'Search material, product or analysis',
+      ),
+      initialValue: state.query,
+      onChanged: cubit.setQuery,
+    );
+    return AppCard(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          appAdaptiveVariant(
+            context,
+            desktop: (_) => LayoutBuilder(
+              builder: (_, c) => c.maxWidth < 650
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        search,
+                        const SizedBox(height: AppSpacing.sm),
+                        scopes,
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(child: search),
+                        const SizedBox(width: AppSpacing.lg),
+                        scopes,
+                      ],
+                    ),
+            ),
+            mobile: (_) => Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                search,
+                const SizedBox(height: AppSpacing.sm),
+                scopes,
+              ],
             ),
           ),
-          TextButton.icon(
-            onPressed: saving
-                ? null
-                : () => _showResetDialog(context, cubit, target: stats),
-            icon: const Icon(Icons.restart_alt_outlined, size: 16),
-            label: Text(AppText.t('تصفير هذا البند', 'Reset this item')),
-          ),
+          if (reliability != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            InputChip(
+              label: Text(nirReliabilityLabel(reliability!)),
+              onDeleted: () => onReliability(null),
+              deleteButtonTooltipMessage: AppText.t(
+                'إلغاء فلتر الحالة',
+                'Clear status filter',
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 }
 
-class _MetricChip extends StatelessWidget {
-  const _MetricChip({required this.label, required this.value, this.color});
+class _ReadingGuide extends StatelessWidget {
+  const _ReadingGuide();
+  @override
+  Widget build(BuildContext context) => AppCard(
+    padding: EdgeInsets.zero,
+    child: ExpansionTile(
+      tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      childrenPadding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        0,
+        AppSpacing.md,
+        AppSpacing.md,
+      ),
+      leading: Icon(
+        Icons.help_outline_rounded,
+        size: 20,
+        color: AppColors.info,
+      ),
+      title: Text(
+        AppText.t('كيف أقرأ النتائج؟', 'How do I read the results?'),
+        style: Theme.of(context).textTheme.titleSmall,
+      ),
+      children: [
+        Text(
+          AppText.t(
+            '١. تُطابق قراءة NIR مع التحليل المعملي لنفس محضر الفحص.\n٢. «موثوق» تعني 5 نقاط على الأقل وR² لا يقل عن 0.90 وفق المنطق الحالي.\n٣. الانحراف = NIR − المعمل؛ الإشارة توضّح اتجاه الفرق، وليست حكم قبول أو رفض. افتح التحليل لرؤية التوصية والنقاط.',
+            '1. NIR and laboratory results are paired using the same inspection.\n2. Trusted means at least 5 pairs and R² ≥ 0.90 under the existing rules.\n3. Bias = NIR − lab. Its sign shows direction, not a pass or fail. Open an analysis for the recommendation and pairs.',
+          ),
+          style: Theme.of(context).textTheme.bodySmall,
+        ),
+      ],
+    ),
+  );
+}
 
-  final String label;
-  final String value;
-  final Color? color;
-
+class _StatsGroupList extends StatelessWidget {
+  const _StatsGroupList({
+    required this.stats,
+    required this.filtered,
+    required this.onClear,
+    required this.onOpen,
+  });
+  final List<NirParameterStats> stats;
+  final bool filtered;
+  final VoidCallback onClear;
+  final ValueChanged<NirParameterStats> onOpen;
   @override
   Widget build(BuildContext context) {
-    final resolved = color ?? Theme.of(context).colorScheme.primary;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: resolved.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        '$label: $value',
-        style: TextStyle(
-          fontSize: 12.spMin,
-          fontWeight: FontWeight.w600,
-          color: resolved,
+    if (stats.isEmpty) {
+      return SliverToBoxAdapter(
+        child: AppCard(
+          child: Column(
+            children: [
+              AppEmptyState(
+                icon: filtered
+                    ? Icons.search_off_rounded
+                    : Icons.query_stats_outlined,
+                title: filtered
+                    ? AppText.t(
+                        'لا توجد نتائج بهذه الفلاتر',
+                        'No results for these filters',
+                      )
+                    : AppText.t(
+                        'ابدأ بأول مقارنة',
+                        'Start with your first comparison',
+                      ),
+                subtitle: filtered
+                    ? AppText.t(
+                        'جرّب اسمًا آخر أو ألغِ الفلاتر لعرض كل التحاليل.',
+                        'Try another name or clear the filters.',
+                      )
+                    : AppText.t(
+                        'سجّل قراءة NIR وتحليلًا معمليًا لنفس محضر الفحص لتظهر المقارنة هنا.',
+                        'Record an NIR reading and a laboratory test for the same inspection to see the comparison here.',
+                      ),
+              ),
+              if (filtered)
+                AppButton(
+                  label: AppText.t('مسح الفلاتر', 'Clear filters'),
+                  style: AppButtonStyle.secondary,
+                  onPressed: onClear,
+                ),
+            ],
+          ),
         ),
-      ),
+      );
+    }
+    final groups = <(NirScope, int, String), List<NirParameterStats>>{};
+    for (final row in stats) {
+      (groups[(row.scope, row.entityId, row.entityName)] ??= []).add(row);
+    }
+    final entries = groups.values.toList();
+    return SliverList.separated(
+      itemCount: entries.length,
+      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
+      itemBuilder: (_, index) =>
+          _EntityCard(rows: entries[index], onOpen: onOpen),
     );
   }
 }
 
-class _ReliabilityChip extends StatelessWidget {
-  const _ReliabilityChip({required this.stats});
-
-  final NirParameterStats stats;
-
+class _EntityCard extends StatelessWidget {
+  const _EntityCard({required this.rows, required this.onOpen});
+  final List<NirParameterStats> rows;
+  final ValueChanged<NirParameterStats> onOpen;
   @override
-  Widget build(BuildContext context) {
-    final (color, label) = switch (stats.reliability) {
-      NirReliability.trusted => (
-          AppColors.success,
-          AppText.t('موثوق', 'Trusted'),
+  Widget build(BuildContext context) => AppCard(
+    padding: EdgeInsets.zero,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: NirSectionTitle(
+            title: rows.first.entityName,
+            icon: rows.first.scope == NirScope.rawMaterial
+                ? Icons.grass_outlined
+                : Icons.inventory_2_outlined,
+            subtitle:
+                '${NirValidationState.scopeLabel(rows.first.scope)} · ${rows.length} ${AppText.t('تحليل', 'analyses')}',
+          ),
         ),
-      NirReliability.needsReview => (
-          AppColors.warning,
-          AppText.t('يحتاج مراجعة', 'Needs review'),
+        Divider(height: 1, color: AppColors.borderMuted),
+        appAdaptiveVariant(
+          context,
+          desktop: (_) => LayoutBuilder(
+            builder: (_, constraints) => SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minWidth: constraints.maxWidth),
+                child: AppDataTable(
+                  showCheckboxColumn: false,
+                  columns: [
+                    DataColumn(label: Text(AppText.t('التحليل', 'Analysis'))),
+                    DataColumn(
+                      label: Text(AppText.t('النقاط', 'Pairs')),
+                      numeric: true,
+                    ),
+                    DataColumn(
+                      label: Text(AppText.t('الانحراف', 'Bias')),
+                      numeric: true,
+                    ),
+                    const DataColumn(label: Text('R²'), numeric: true),
+                    const DataColumn(label: Text('RMSE'), numeric: true),
+                    DataColumn(label: Text(AppText.t('الحالة', 'Status'))),
+                    const DataColumn(label: Text('')),
+                  ],
+                  rows: [
+                    for (final stats in rows)
+                      DataRow(
+                        cells: [
+                          DataCell(
+                            Text(
+                              '${stats.parameter}${stats.unit.trim().isEmpty ? '' : ' (${stats.unit})'}',
+                            ),
+                          ),
+                          DataCell(Text('${stats.count}')),
+                          DataCell(
+                            Text(
+                              stats.count == 0
+                                  ? '—'
+                                  : stats.bias.toStringAsFixed(3),
+                              textDirection: TextDirection.ltr,
+                            ),
+                          ),
+                          DataCell(
+                            Text(
+                              stats.count < 2
+                                  ? '—'
+                                  : stats.r2.toStringAsFixed(3),
+                              textDirection: TextDirection.ltr,
+                            ),
+                          ),
+                          DataCell(
+                            Text(
+                              stats.count < 2
+                                  ? '—'
+                                  : stats.rmse.toStringAsFixed(3),
+                              textDirection: TextDirection.ltr,
+                            ),
+                          ),
+                          DataCell(
+                            NirReliabilityBadge(reliability: stats.reliability),
+                          ),
+                          DataCell(
+                            AppButton(
+                              label: AppText.t('عرض التحليل', 'View analysis'),
+                              icon: const Icon(
+                                Icons.insights_outlined,
+                                size: 18,
+                              ),
+                              style: AppButtonStyle.ghost,
+                              small: true,
+                              onPressed: () => onOpen(stats),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          mobile: (_) => Column(
+            children: [
+              for (var i = 0; i < rows.length; i++) ...[
+                if (i > 0) Divider(height: 1, color: AppColors.borderMuted),
+                _MobileParameter(stats: rows[i], onOpen: () => onOpen(rows[i])),
+              ],
+            ],
+          ),
         ),
-      NirReliability.insufficientData => (
-          AppColors.textMuted,
-          AppText.t('نقاط غير كافية', 'Not enough points'),
-        ),
-    };
-    return _MetricChip(label: label, value: '', color: color);
-  }
+      ],
+    ),
+  );
 }
 
+class _MobileParameter extends StatelessWidget {
+  const _MobileParameter({required this.stats, required this.onOpen});
+  final NirParameterStats stats;
+  final VoidCallback onOpen;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(AppSpacing.md),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          '${stats.parameter}${stats.unit.trim().isEmpty ? '' : ' (${stats.unit})'}',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.xs,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            NirReliabilityBadge(reliability: stats.reliability),
+            Text(
+              '${stats.count} ${AppText.t('نقطة مطابقة', 'matched pairs')}',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        NirMetricGrid(
+          columns: 2,
+          children: [
+            NirMetricTile(
+              label: AppText.t('متوسط الانحراف', 'Mean bias'),
+              value: stats.count == 0 ? '—' : stats.bias.toStringAsFixed(3),
+              hint: stats.count == 0
+                  ? null
+                  : stats.bias == 0
+                  ? AppText.t('لا فرق في المتوسط', 'No average difference')
+                  : stats.bias > 0
+                  ? AppText.t('NIR أعلى من المعمل', 'NIR reads higher')
+                  : AppText.t('NIR أقل من المعمل', 'NIR reads lower'),
+            ),
+            NirMetricTile(
+              label: AppText.t('معامل التحديد R²', 'Determination R²'),
+              value: stats.count < 2 ? '—' : stats.r2.toStringAsFixed(3),
+              hint: stats.count < 2
+                  ? AppText.t(
+                      'يلزم نقطتان على الأقل',
+                      'At least 2 pairs needed',
+                    )
+                  : AppText.t('جودة ملاءمة الخط', 'Fit of the regression line'),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppButton(
+          label: AppText.t(
+            'عرض التحليل والتوصية',
+            'View analysis & recommendation',
+          ),
+          icon: const Icon(Icons.insights_outlined, size: 18),
+          style: AppButtonStyle.secondary,
+          expanded: true,
+          onPressed: onOpen,
+        ),
+      ],
+    ),
+  );
+}
+
+class _ResetForm extends StatefulWidget {
+  const _ResetForm({required this.target});
+  final NirParameterStats target;
+  @override
+  State<_ResetForm> createState() => _ResetFormState();
+}
+
+class _ResetFormState extends State<_ResetForm> {
+  final _date = TextEditingController(
+    text: DateTime.now().toIso8601String().substring(0, 10),
+  );
+  final _note = TextEditingController();
+  @override
+  void dispose() {
+    _date.dispose();
+    _note.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AppDialog(
+    icon: Icons.restart_alt_outlined,
+    title: AppText.t('بدء فترة مقارنة جديدة', 'Start a new comparison period'),
+    subtitle: '${widget.target.entityName} · ${widget.target.parameter}',
+    actions: [
+      AppButton(
+        onPressed: () => Navigator.pop(context),
+        label: AppText.t('إلغاء', 'Cancel'),
+        style: AppButtonStyle.secondary,
+      ),
+      AppButton(
+        onPressed: () =>
+            Navigator.pop(context, (_date.text.trim(), _note.text.trim())),
+        label: AppText.t('تأكيد بدء الفترة', 'Confirm new period'),
+      ),
+    ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          AppText.t(
+            'سيُحسب هذا التحليل من التاريخ الجديد. القراءات القديمة تبقى محفوظة، وباقي التحاليل لا تتغير.',
+            'This analysis will use the new start date. Older readings remain saved and other analyses keep their current periods.',
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppDateField(
+          label: AppText.t('تاريخ البداية', 'Start date'),
+          controller: _date,
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        AppTextField(
+          controller: _note,
+          maxLines: 2,
+          decoration: InputDecoration(
+            labelText: AppText.t(
+              'سبب بدء الفترة (اختياري)',
+              'Reason (optional)',
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+Future<void> _showResetDialog(
+  BuildContext context,
+  NirValidationCubit cubit, {
+  required NirParameterStats target,
+}) async {
+  final result = await showAppDialog<(String, String)>(
+    context,
+    builder: (_) => _ResetForm(target: target),
+  );
+  if (result == null || !context.mounted) return;
+  final saved = await cubit.reset(
+    result.$1,
+    result.$2,
+    scope: target.scope,
+    entityId: target.entityId,
+    entityName: target.entityName,
+    parameter: target.parameter,
+  );
+  if (saved && cubit.state.pendingApproval && context.mounted) {
+    AppFeedback.show(
+      context,
+      AppText.t(
+        'حُفظ طلب تصفير NIR؛ سيُحدّث الأرشيف بعد اعتماد السيرفر.',
+        'NIR reset request saved; the archive will update after server approval.',
+      ),
+      type: AppFeedbackType.info,
+    );
+  }
+}

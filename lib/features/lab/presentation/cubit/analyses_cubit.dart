@@ -11,7 +11,9 @@ import 'analyses_state.dart';
 /// Mobile infinite-scroll model: DB-side search + `LIMIT/OFFSET`.
 class AnalysesCubit extends AppCubit<AnalysesState> {
   AnalysesCubit({required this.repo, this.pageSize = kMobilePageSize})
-    : super(const AnalysesState());
+    : super(const AnalysesState()) {
+    refreshOnSync(load);
+  }
 
   final LabConfigurationRepository repo;
   final int pageSize;

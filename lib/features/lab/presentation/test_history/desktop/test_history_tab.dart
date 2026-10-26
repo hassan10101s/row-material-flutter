@@ -216,8 +216,12 @@ class DesktopTestHistoryTab extends StatelessWidget {
                     TestHistoryToolbar(
                       chips: d.chips,
                       hasQuery: scope.query.text.isNotEmpty,
-                      onOpenFilters: () =>
-                          _openFilterDialog(context, scope, state, d.chemOptions),
+                      onOpenFilters: () => _openFilterDialog(
+                        context,
+                        scope,
+                        state,
+                        d.chemOptions,
+                      ),
                       onClearAll: scope.clearAllFilters,
                       onExportPdf: d.sorted.isEmpty
                           ? null

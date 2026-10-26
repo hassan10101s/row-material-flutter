@@ -132,10 +132,7 @@ class ParamEditorState extends State<ParamEditor> {
               : '',
           labelText: AppText.t('الوحدة المرجعية', 'Reference unit'),
           items: [
-            AppDropdownItem(
-              value: '',
-              label: AppText.t('بلا وحدة', 'No unit'),
-            ),
+            AppDropdownItem(value: '', label: AppText.t('بلا وحدة', 'No unit')),
             for (final unit in _unitOptions)
               AppDropdownItem(value: unit, label: unit),
           ],

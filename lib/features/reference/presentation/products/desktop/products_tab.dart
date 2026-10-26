@@ -136,10 +136,8 @@ class DesktopProductsTab extends StatelessWidget {
                     hasMore: state.hasMore,
                     loadingMore: state.loadingMore,
                     errorMore: state.errorMore,
-                    onLoadMore: () =>
-                        context.read<ProductsCubit>().loadMore(),
-                    onRetry: () =>
-                        context.read<ProductsCubit>().loadMore(),
+                    onLoadMore: () => context.read<ProductsCubit>().loadMore(),
+                    onRetry: () => context.read<ProductsCubit>().loadMore(),
                   ),
                 ],
               ),

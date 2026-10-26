@@ -147,7 +147,9 @@ abstract interface class LabLocalRepository {
 
   /// Product-inspection records for one product, including formula/batch
   /// numbers and the record's sample labels.
-  Future<List<Map<String, dynamic>>> listProductInspectionRecords(int productId);
+  Future<List<Map<String, dynamic>>> listProductInspectionRecords(
+    int productId,
+  );
 
   // ── Equipment (device-local registry + event log) ────────────────────
 
@@ -175,10 +177,7 @@ abstract interface class LabLocalRepository {
     DatabaseExecutor? executor,
   ]);
 
-  Future<void> deleteEquipment(
-    int equipmentId, [
-    DatabaseExecutor? executor,
-  ]);
+  Future<void> deleteEquipment(int equipmentId, [DatabaseExecutor? executor]);
 
   /// The event log of one device, newest first.
   Future<List<Map<String, dynamic>>> listEquipmentEvents(int equipmentId);
@@ -199,8 +198,5 @@ abstract interface class LabLocalRepository {
     DatabaseExecutor? executor,
   ]);
 
-  Future<void> deleteEquipmentEvent(
-    int eventId, [
-    DatabaseExecutor? executor,
-  ]);
+  Future<void> deleteEquipmentEvent(int eventId, [DatabaseExecutor? executor]);
 }

@@ -5,6 +5,7 @@ import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
+import '../../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../../design_system/widgets/app_field.dart';
@@ -186,35 +187,76 @@ class InspectionFilterChips extends StatelessWidget {
   Widget build(BuildContext context) {
     if (chips.isEmpty) return const SizedBox.shrink();
     return Padding(
-      padding: const EdgeInsets.only(top: AppSpacing.sm),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 6,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          Text(
-            AppText.t('الفلاتر:', 'Filters:'),
-            style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-          ),
-          for (final chip in chips)
-            InputChip(
-              visualDensity: VisualDensity.compact,
-              label: Text(
-                chip.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(fontSize: 12.spMax),
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: appUsesDesktopChrome(context)
+          ? Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  AppText.t('الفلاتر:', 'Filters:'),
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 12.spMax,
+                  ),
+                ),
+                for (final chip in chips)
+                  InputChip(
+                    visualDensity: VisualDensity.compact,
+                    label: Text(
+                      chip.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 12.spMax),
+                    ),
+                    onDeleted: () => onClearChip(chip.key),
+                  ),
+                AppButton(
+                  label: AppText.t('مسح الكل', 'Clear all'),
+                  style: AppButtonStyle.ghost,
+                  small: true,
+                  onPressed: onClearAll,
+                ),
+              ],
+            )
+          : SizedBox(
+              height: 40,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    Text(
+                      AppText.t('الفلاتر:', 'Filters:'),
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 12.spMax,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    for (final chip in chips) ...[
+                      InputChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(
+                          chip.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 12.spMax),
+                        ),
+                        onDeleted: () => onClearChip(chip.key),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+                    AppButton(
+                      label: AppText.t('مسح الكل', 'Clear all'),
+                      style: AppButtonStyle.ghost,
+                      small: true,
+                      onPressed: onClearAll,
+                    ),
+                  ],
+                ),
               ),
-              onDeleted: () => onClearChip(chip.key),
             ),
-          AppButton(
-            label: AppText.t('مسح الكل', 'Clear all'),
-            style: AppButtonStyle.ghost,
-            small: true,
-            onPressed: onClearAll,
-          ),
-        ],
-      ),
     );
   }
 }
@@ -241,11 +283,7 @@ class InspectionPeriodButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final presets = <(String value, String from, String to)>[
-      (
-        'today',
-        inspectionDayIso(),
-        inspectionDayIso(),
-      ),
+      ('today', inspectionDayIso(), inspectionDayIso()),
       ('d7', inspectionDaysAgoIso(7), inspectionDayIso()),
       ('d30', inspectionDaysAgoIso(30), inspectionDayIso()),
     ];
@@ -254,9 +292,7 @@ class InspectionPeriodButton extends StatelessWidget {
         .where(((p) => p.$2 == dateFrom && p.$3 == dateTo))
         .isNotEmpty;
     final style = active
-        ? IconButton.styleFrom(
-            foregroundColor: AppColors.primary,
-          )
+        ? IconButton.styleFrom(foregroundColor: AppColors.primary)
         : null;
     return Badge(
       isLabelVisible: active,
@@ -264,9 +300,7 @@ class InspectionPeriodButton extends StatelessWidget {
         tooltip: AppText.t('الفترة', 'Period'),
         style: style,
         icon: Icon(
-          active
-              ? Icons.date_range
-              : Icons.date_range_outlined,
+          active ? Icons.date_range : Icons.date_range_outlined,
           size: 20.r,
         ),
         onSelected: (v) {
@@ -295,19 +329,25 @@ class InspectionPeriodButton extends StatelessWidget {
             'today',
             AppText.t('اليوم', 'Today'),
             Icons.today_outlined,
-            presets.any(((p) => p.$1 == 'today' && p.$2 == dateFrom && p.$3 == dateTo)),
+            presets.any(
+              ((p) => p.$1 == 'today' && p.$2 == dateFrom && p.$3 == dateTo),
+            ),
           ),
           _item(
             'd7',
             AppText.t('آخر ٧ أيام', 'Last 7 days'),
             Icons.date_range_outlined,
-            presets.any(((p) => p.$1 == 'd7' && p.$2 == dateFrom && p.$3 == dateTo)),
+            presets.any(
+              ((p) => p.$1 == 'd7' && p.$2 == dateFrom && p.$3 == dateTo),
+            ),
           ),
           _item(
             'd30',
             AppText.t('آخر ٣٠ يومًا', 'Last 30 days'),
             Icons.calendar_view_month_outlined,
-            presets.any(((p) => p.$1 == 'd30' && p.$2 == dateFrom && p.$3 == dateTo)),
+            presets.any(
+              ((p) => p.$1 == 'd30' && p.$2 == dateFrom && p.$3 == dateTo),
+            ),
           ),
           const PopupMenuDivider(),
           _item(

@@ -43,6 +43,7 @@ void main() {
         organizationId: any(named: 'organizationId'),
         email: any(named: 'email'),
         role: any(named: 'role'),
+        roles: any(named: 'roles'),
         invitedBy: any(named: 'invitedBy'),
       ),
     ).thenAnswer((_) async => 'member_new');
@@ -55,9 +56,7 @@ void main() {
         details: any(named: 'details'),
       ),
     ).thenAnswer((_) async {});
-    when(
-      () => remote.listMembers(any()),
-    ).thenAnswer((_) async => const []);
+    when(() => remote.listMembers(any())).thenAnswer((_) async => const []);
   });
 
   test('only admin holds users.create locally', () {
@@ -68,11 +67,7 @@ void main() {
       AppRoles.viewer,
       AppRoles.trialOwner,
     ]) {
-      expect(
-        roleHas(role, Permission.usersCreate),
-        isFalse,
-        reason: role,
-      );
+      expect(roleHas(role, Permission.usersCreate), isFalse, reason: role);
     }
   });
 
@@ -115,6 +110,7 @@ void main() {
             organizationId: any(named: 'organizationId'),
             email: any(named: 'email'),
             role: any(named: 'role'),
+            roles: any(named: 'roles'),
             invitedBy: any(named: 'invitedBy'),
           ),
         );
@@ -140,6 +136,7 @@ void main() {
             organizationId: any(named: 'organizationId'),
             email: any(named: 'email'),
             role: any(named: 'role'),
+            roles: any(named: 'roles'),
             invitedBy: any(named: 'invitedBy'),
           ),
         );
@@ -198,6 +195,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       );

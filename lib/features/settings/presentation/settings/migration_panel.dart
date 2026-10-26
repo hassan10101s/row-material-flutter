@@ -252,9 +252,10 @@ class _MigrationPanelState extends State<MigrationPanel> {
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
-            OutlinedButton(
+            AppButton(
               onPressed: _busyKey != null ? null : () => _pick(pickKey),
-              child: Text(AppText.t('اختيار', 'Choose')),
+              label: AppText.t('اختيار', 'Choose'),
+              style: AppButtonStyle.secondary,
             ),
             const SizedBox(width: AppSpacing.sm),
             AppButton(

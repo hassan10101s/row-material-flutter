@@ -13,12 +13,7 @@ class AppSkeleton extends StatelessWidget {
   final double? height;
   final double radius;
 
-  const AppSkeleton({
-    super.key,
-    this.width,
-    this.height,
-    this.radius = 8,
-  });
+  const AppSkeleton({super.key, this.width, this.height, this.radius = 8});
 
   @override
   Widget build(BuildContext context) {
@@ -74,8 +69,7 @@ class AppSkeletonList extends StatelessWidget {
           // overflow the stretched Column (the inspections mobile skeleton).
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final boxHeight =
-                  constraints.maxHeight.isFinite
+              final boxHeight = constraints.maxHeight.isFinite
                   ? constraints.maxHeight
                   : height - padding.vertical;
               // Header block: 36dp avatar tile + one lg gap below it.
@@ -120,8 +114,9 @@ class AppSkeletonList extends StatelessWidget {
                                   start: l == 0 ? 0 : AppSpacing.md,
                                 ),
                                 child: AppSkeletonLine(
-                                    width: double.infinity,
-                                    height: i.isEven ? 14 : 12),
+                                  width: double.infinity,
+                                  height: i.isEven ? 14 : 12,
+                                ),
                               ),
                             ),
                         ],

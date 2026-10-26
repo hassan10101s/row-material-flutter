@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
-import '../tokens/app_breakpoints.dart';
+import 'app_adaptive.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
 
@@ -76,14 +76,13 @@ class AppWindow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accentColor = accent ?? AppColors.primary;
     final width = maxWidth ?? size.maxWidth;
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
       backgroundColor: AppColors.surface,
       elevation: 8,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadii.xl),
         side: BorderSide(color: AppColors.borderMuted),
       ),
       child: ConstrainedBox(
@@ -98,7 +97,13 @@ class AppWindow extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _header(context, accentColor),
+              _AppWindowHeader(
+                title: title,
+                subtitle: subtitle,
+                icon: icon,
+                accent: accent,
+                showClose: showClose,
+              ),
               Divider(height: 1, color: AppColors.borderMuted),
               if (scrollBody)
                 Flexible(
@@ -185,6 +190,44 @@ class AppWindow extends StatelessWidget {
   static Widget _footerRow({List<Widget>? leading, List<Widget>? actions}) {
     final hasLeading = leading != null && leading.isNotEmpty;
     final hasActions = actions != null && actions.isNotEmpty;
+    final children = [...?leading, ...?actions];
+    // Expanded mobile actions need Flex parent data. Ordinary actions can
+    // flow vertically on small windows and with enlarged text.
+    if (!children.any((child) => child is Flexible)) {
+      if (hasLeading && hasActions) {
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: OverflowBar(
+                alignment: MainAxisAlignment.start,
+                overflowAlignment: OverflowBarAlignment.start,
+                spacing: AppSpacing.sm,
+                overflowSpacing: AppSpacing.sm,
+                children: leading,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: OverflowBar(
+                alignment: MainAxisAlignment.end,
+                overflowAlignment: OverflowBarAlignment.end,
+                spacing: AppSpacing.sm,
+                overflowSpacing: AppSpacing.sm,
+                children: actions,
+              ),
+            ),
+          ],
+        );
+      }
+      return OverflowBar(
+        alignment: hasLeading ? MainAxisAlignment.start : MainAxisAlignment.end,
+        overflowAlignment: OverflowBarAlignment.end,
+        spacing: AppSpacing.sm,
+        overflowSpacing: AppSpacing.sm,
+        children: children,
+      );
+    }
     return Row(
       mainAxisAlignment: hasLeading
           ? MainAxisAlignment.start
@@ -196,8 +239,26 @@ class AppWindow extends StatelessWidget {
       ],
     );
   }
+}
 
-  Widget _header(BuildContext context, Color accentColor) {
+class _AppWindowHeader extends StatelessWidget {
+  const _AppWindowHeader({
+    required this.title,
+    this.subtitle,
+    this.icon,
+    this.accent,
+    this.showClose = true,
+  });
+
+  final String title;
+  final String? subtitle;
+  final IconData? icon;
+  final Color? accent;
+  final bool showClose;
+
+  @override
+  Widget build(BuildContext context) {
+    final accentColor = accent ?? AppColors.primary;
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         AppSpacing.lg,
@@ -251,7 +312,10 @@ class AppWindow extends StatelessWidget {
           if (showClose)
             IconButton(
               tooltip: MaterialLocalizations.of(context).closeButtonTooltip,
-              visualDensity: VisualDensity.compact,
+              constraints: BoxConstraints.tightFor(
+                width: appControlHeight(context),
+                height: appControlHeight(context),
+              ),
               onPressed: () => Navigator.of(context).pop(),
               icon: const Icon(Icons.close),
             ),
@@ -260,6 +324,107 @@ class AppWindow extends StatelessWidget {
     );
   }
 }
+
+/// Shared chrome for stateful dialogs as well as simple overlay builders.
+/// The caller keeps its providers/controllers and its existing return value.
+class AppDialog extends StatelessWidget {
+  const AppDialog({
+    super.key,
+    required this.title,
+    required this.child,
+    this.icon,
+    this.subtitle,
+    this.accent,
+    this.actions,
+    this.leadingActions,
+    this.size = AppWindowSize.sm,
+    this.scrollBody = true,
+    this.height,
+  });
+
+  final String title;
+  final Widget child;
+  final IconData? icon;
+  final String? subtitle;
+  final Color? accent;
+  final List<Widget>? actions;
+  final List<Widget>? leadingActions;
+  final AppWindowSize size;
+  final bool scrollBody;
+  final double? height;
+
+  @override
+  Widget build(BuildContext context) => appAdaptiveVariant(
+    context,
+    desktop: (_) => AppWindow(
+      title: title,
+      subtitle: subtitle,
+      icon: icon,
+      accent: accent,
+      size: size,
+      actions: actions,
+      leadingActions: leadingActions,
+      scrollBody: scrollBody,
+      height: height,
+      child: child,
+    ),
+    mobile: (_) => SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SizedBox(
+          height: height,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _AppWindowHeader(
+                title: title,
+                subtitle: subtitle,
+                icon: icon,
+                accent: accent,
+              ),
+              Divider(height: 1, color: AppColors.borderMuted),
+              Flexible(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: scrollBody
+                      ? SingleChildScrollView(child: child)
+                      : child,
+                ),
+              ),
+              if ((actions?.isNotEmpty ?? false) ||
+                  (leadingActions?.isNotEmpty ?? false))
+                AppWindow.footer(leading: leadingActions, actions: actions),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+/// Opens the same dialog content as a desktop window or a mobile sheet.
+Future<T?> showAppDialog<T>(
+  BuildContext context, {
+  required WidgetBuilder builder,
+  bool barrierDismissible = true,
+}) => appUsesDesktopChrome(context)
+    ? showDialog<T>(
+        context: context,
+        barrierDismissible: barrierDismissible,
+        builder: builder,
+      )
+    : showModalBottomSheet<T>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        showDragHandle: true,
+        isDismissible: barrierDismissible,
+        enableDrag: barrierDismissible,
+        builder: builder,
+      );
 
 /// Shows [child] inside the unified [AppWindow] chrome and completes with
 /// whatever the window pops with (same contract as [showDialog]).
@@ -321,78 +486,24 @@ Future<T?> showAppOverlay<T>(
   AppWindowSize size = AppWindowSize.sm,
   List<Widget>? actions,
   List<Widget>? leadingActions,
+  bool scrollBody = true,
+  double? height,
 }) {
-  final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
-  if (wide) {
-    return showAppWindow<T>(
-      context,
+  return showAppDialog<T>(
+    context,
+    builder: (_) => AppDialog(
       title: title,
       icon: icon,
       accent: accent,
       size: size,
       actions: actions,
       leadingActions: leadingActions,
+      scrollBody: scrollBody,
+      height: height,
       child: Builder(
-        builder: (context) => builder(
-          context,
-          ([T? result]) => Navigator.of(context).pop(result),
-        ),
-      ),
-    );
-  }
-  return showModalBottomSheet<T>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (sheetContext) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.page,
-          0,
-          AppSpacing.page,
-          AppSpacing.page,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                if (icon != null) ...[
-                  Icon(icon, color: accent ?? AppColors.primary),
-                  const SizedBox(width: AppSpacing.sm),
-                ],
-                Expanded(
-                  child: Text(
-                    title,
-                    style: Theme.of(sheetContext).textTheme.titleMedium,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Flexible(
-              child: SingleChildScrollView(
-                child: builder(
-                  sheetContext,
-                  ([T? result]) => Navigator.of(sheetContext).pop(result),
-                ),
-              ),
-            ),
-            if ((leadingActions?.isNotEmpty ?? false) ||
-                (actions?.isNotEmpty ?? false)) ...[
-              const SizedBox(height: AppSpacing.lg),
-              Wrap(
-                spacing: AppSpacing.sm,
-                runSpacing: AppSpacing.sm,
-                alignment: WrapAlignment.end,
-                children: [
-                  ...?leadingActions,
-                  ...?actions,
-                ],
-              ),
-            ],
-          ],
+        builder: (overlayContext) => builder(
+          overlayContext,
+          ([T? result]) => Navigator.of(overlayContext).pop(result),
         ),
       ),
     ),

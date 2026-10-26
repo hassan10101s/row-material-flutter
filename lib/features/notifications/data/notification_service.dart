@@ -10,6 +10,8 @@ import '../../../design_system/tokens/app_colors.dart';
 import '../../lab/core/lab_result_format.dart';
 import '../domain/notification_item.dart';
 import '../domain/notifications_port.dart';
+import '../domain/push_event.dart';
+import 'notification_delivery_store.dart';
 
 /// Detects new inspections + lab test results and fans out to the bell list
 /// and (Android only) OS notifications.
@@ -18,10 +20,19 @@ import '../domain/notifications_port.dart';
 /// that inserts rows with fresh local ids and a local save are both caught.
 /// Dedupe inside `notifications` is `(type, entry_code, ref_id)`.
 class NotificationService implements NotificationsPort {
-  NotificationService({required this.dbHelper, required this.metadata});
+  NotificationService({
+    required this.dbHelper,
+    required this.metadata,
+    NotificationDeliveryStore? deliveryStore,
+    this.canReadNotification,
+  }) : deliveryStore = deliveryStore ?? NotificationDeliveryStore();
 
   final DatabaseHelper dbHelper;
   final SyncMetadata metadata;
+  final NotificationDeliveryStore deliveryStore;
+  final bool Function(String kind)? canReadNotification;
+  Future<void>? _osInitializing;
+  Future<void> _scanTail = Future.value();
 
   // v3 channel: Android keeps the importance of the channel created on
   // first install, so a new id is the only way to upgrade existing installs
@@ -63,7 +74,7 @@ class NotificationService implements NotificationsPort {
   /// Stashes and broadcasts a tap payload. Safe to call from any platform
   /// (listener failing is swallowed — routing must never crash a tap).
   void deliverPayload(String payload) {
-    pendingPayload = payload;
+    pendingPayload = _payloadListeners.isEmpty ? payload : null;
     for (final callback in List.of(_payloadListeners)) {
       try {
         callback(payload);
@@ -73,10 +84,77 @@ class NotificationService implements NotificationsPort {
     }
   }
 
+  Future<void> deliverPushPayload(String payload) async =>
+      deliverPayload(payload);
+
+  @override
+  Future<String?> resolvePayload(String payload) async {
+    final event = PushEvent.fromPayload(payload);
+    if (event == null) {
+      if (payload.startsWith('mlpush:')) return null;
+      final target = routeForPayload(payload);
+      if (target == null) return null;
+      return Uri(
+        path: target.route,
+        queryParameters: {
+          if (target.tab != null) 'tab': '${target.tab}',
+          if (target.highlight != null) 'highlight': target.highlight!,
+        },
+      ).toString();
+    }
+    if (event.organizationId != dbHelper.paths.orgId ||
+        canReadNotification?.call(event.kind) == false) {
+      return null;
+    }
+    final route = event.kind == 'lab' ? '/lab' : '/inspections';
+    final table = event.kind == 'lab'
+        ? 'lab_sample_tests'
+        : event.kind == 'productSample'
+        ? 'product_batch_samples'
+        : 'inspections';
+    final db = await dbHelper.database;
+    // Only opaque hashes travel in notifications. Resolve against local keys
+    // after sync, rather than trusting another device's numeric primary key.
+    final rows = await db.query(
+      table,
+      columns: ['id', 'remote_id'],
+      where: 'remote_id IS NOT NULL AND deleted_at IS NULL',
+    );
+    final matches = rows.where(
+      (row) => PushEvent.identityHash('${row['remote_id']}') == event.remoteId,
+    );
+    return Uri(
+      path: route,
+      queryParameters: {
+        if (route == '/lab') 'tab': '0',
+        // Product samples and chemistry results have different local tables.
+        if (matches.isNotEmpty && event.kind != 'productSample')
+          'highlight': '${matches.first['id']}',
+      },
+    ).toString();
+  }
+
   Future<void> initOs({bool requestPermission = true}) async {
     if (!Platform.isAndroid && !Platform.isIOS) return;
+    if (_osReady) return;
+    final pending = _osInitializing;
+    if (pending != null) return pending;
+    final work = _initOs(requestPermission: requestPermission);
+    _osInitializing = work;
+    try {
+      await work;
+    } finally {
+      _osInitializing = null;
+    }
+  }
+
+  Future<void> _initOs({required bool requestPermission}) async {
     const android = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const ios = DarwinInitializationSettings();
+    const ios = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
     await _os.initialize(
       const InitializationSettings(android: android, iOS: ios),
       onDidReceiveNotificationResponse: (r) {
@@ -121,8 +199,27 @@ class NotificationService implements NotificationsPort {
     bool inspectionEnabled = true,
     bool labEnabled = true,
     bool showOs = false,
+  }) {
+    final work = _scanTail.then(
+      (_) => _checkForNew(
+        inspectionEnabled: inspectionEnabled,
+        labEnabled: labEnabled,
+        showOs: showOs,
+      ),
+    );
+    _scanTail = work.then<void>((_) {});
+    return work;
+  }
+
+  Future<List<NotificationItem>> _checkForNew({
+    required bool inspectionEnabled,
+    required bool labEnabled,
+    required bool showOs,
   }) async {
     try {
+      inspectionEnabled =
+          inspectionEnabled && canReadNotification?.call('inspection') != false;
+      labEnabled = labEnabled && canReadNotification?.call('lab') != false;
       // One shared first-run decision: on a fresh database both watermarks
       // are unseen and the table is empty, and each scan's first-run path
       // seeds its own watermark. Decided once here so the two parallel scans
@@ -197,17 +294,18 @@ class NotificationService implements NotificationsPort {
       'i.formula_number, COALESCE(p.name, \'\') AS product_name '
       'FROM inspections i '
       'LEFT JOIN lab_products p ON p.id = i.product_id '
-      '${isFirst ? '' : 'WHERE i.id > ? '} '
-      'ORDER BY i.id DESC LIMIT ?',
+      'WHERE i.deleted_at IS NULL ${isFirst ? '' : 'AND i.id > ? '} '
+      'ORDER BY i.id ${isFirst ? 'DESC' : 'ASC'} LIMIT ?',
       isFirst ? [scanLimit] : [seen, scanLimit],
     );
     if (rows.isEmpty) {
-      if (isFirst)
+      if (isFirst) {
         await _setMaxSeen(
           SyncMetadata.notifSeenInspectionIdKey,
           db,
           'inspections',
         );
+      }
       return const [];
     }
     if (isFirst) {
@@ -268,17 +366,18 @@ class NotificationService implements NotificationsPort {
       'LEFT JOIN lab_analyses a ON a.id = t.analysis_id '
       'LEFT JOIN product_batch_samples s ON s.id = t.source_ref_id '
       'AND t.source_type = \'product\' '
-      '${isFirst ? '' : 'WHERE t.id > ?'} '
-      'ORDER BY t.id DESC LIMIT ?',
+      'WHERE t.deleted_at IS NULL ${isFirst ? '' : 'AND t.id > ?'} '
+      'ORDER BY t.id ${isFirst ? 'DESC' : 'ASC'} LIMIT ?',
       isFirst ? [scanLimit] : [seen, scanLimit],
     );
     if (rows.isEmpty) {
-      if (isFirst)
+      if (isFirst) {
         await _setMaxSeen(
           SyncMetadata.notifSeenLabIdKey,
           db,
           'lab_sample_tests',
         );
+      }
       return const [];
     }
     if (isFirst) {
@@ -702,7 +801,34 @@ class NotificationService implements NotificationsPort {
     if (!_osReady) return;
     if (!Platform.isAndroid && !Platform.isIOS) return;
     for (final item in items.take(5)) {
+      PushEvent? event;
       try {
+        if (item.type != NotificationType.sync) {
+          final table = item.type == NotificationType.inspection
+              ? 'inspections'
+              : 'lab_sample_tests';
+          final rows = await (await dbHelper.database).query(
+            table,
+            columns: ['remote_id', 'device_id'],
+            where: 'id = ?',
+            whereArgs: [item.refId],
+          );
+          final remoteId = rows.isEmpty
+              ? ''
+              : '${rows.single['remote_id'] ?? ''}';
+          final org = dbHelper.paths.orgId;
+          if (org != null && remoteId.isNotEmpty) {
+            event = PushEvent.forRecord(
+              organizationId: org,
+              kind: item.type == NotificationType.inspection
+                  ? 'inspection'
+                  : 'lab',
+              remoteId: remoteId,
+              sourceDeviceId: '${rows.single['device_id'] ?? ''}',
+            );
+            if (!await deliveryStore.claim(event)) continue;
+          }
+        }
         final heading = item.type == NotificationType.inspection
             ? (item.title.startsWith('تحليل منتج جديد')
                   ? 'تحليل منتج جديد • New product analysis'
@@ -720,7 +846,9 @@ class NotificationService implements NotificationsPort {
             ? AppColors.info
             : null;
         await _os.show(
-          item.id,
+          event == null
+              ? item.id
+              : NotificationDeliveryStore.notificationId(event),
           heading,
           body,
           NotificationDetails(
@@ -732,11 +860,15 @@ class NotificationService implements NotificationsPort {
               priority: Priority.high,
               styleInformation: BigTextStyleInformation(body),
               color: accent,
+              tag: event == null ? null : NotificationDeliveryStore.tag(event),
+              onlyAlertOnce: true,
             ),
           ),
-          payload: item.payload,
+          payload: event?.payload ?? item.payload,
         );
+        if (event != null) await deliveryStore.complete(event);
       } on Object catch (e) {
+        if (event != null) await deliveryStore.release(event);
         debugPrint('[notif] os show skipped: $e');
       }
     }
@@ -748,10 +880,11 @@ class NotificationService implements NotificationsPort {
   Future<void> showOsNotificationsFromPush({
     required String title,
     required String body,
-    String? payload,
+    required PushEvent event,
   }) async {
     if (!_osReady) return;
     if (!Platform.isAndroid && !Platform.isIOS) return;
+    if (!await deliveryStore.claim(event)) return;
     try {
       final text = '$title $body';
       final accent = text.contains('مرفوض') || text.contains('Rejected')
@@ -762,7 +895,7 @@ class NotificationService implements NotificationsPort {
           ? AppColors.info
           : null;
       await _os.show(
-        DateTime.now().microsecondsSinceEpoch ~/ 1000,
+        NotificationDeliveryStore.notificationId(event),
         title,
         body,
         NotificationDetails(
@@ -776,11 +909,15 @@ class NotificationService implements NotificationsPort {
                 ? null
                 : BigTextStyleInformation(body),
             color: accent,
+            tag: NotificationDeliveryStore.tag(event),
+            onlyAlertOnce: true,
           ),
         ),
-        payload: payload,
+        payload: event.payload,
       );
+      await deliveryStore.complete(event);
     } on Object catch (e) {
+      await deliveryStore.release(event);
       debugPrint('[notif] push show skipped: $e');
     }
   }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
@@ -10,6 +12,7 @@ import '../../../core/platform/file_delivery.dart';
 import '../../../core/platform/folder_picker.dart';
 import '../../../core/sync/sync_metadata.dart';
 import '../../../core/sync/sync_queue.dart';
+import '../../../core/commands/command_outbox.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../design_system/feedback/app_feedback.dart';
@@ -54,6 +57,7 @@ class AppShell extends StatefulWidget {
     required this.theme,
     required this.syncQueue,
     required this.syncMetadata,
+    this.commandOutbox,
     required this.connectivity,
     required this.exportRoot,
     required this.fileDelivery,
@@ -66,6 +70,7 @@ class AppShell extends StatefulWidget {
   final ThemeService theme;
   final SyncQueue syncQueue;
   final SyncMetadata syncMetadata;
+  final CommandOutbox? commandOutbox;
   final ConnectivityService connectivity;
   final ExportRootService exportRoot;
   final FileDelivery fileDelivery;
@@ -79,6 +84,7 @@ class _AppShellState extends State<AppShell> {
   late final SyncStatusController _syncStatus = SyncStatusController(
     queue: widget.syncQueue,
     metadata: widget.syncMetadata,
+    commandOutbox: widget.commandOutbox,
     isOnline: () => widget.connectivity.isOnline,
     connectivityChanges: widget.connectivity.onStatusChange,
   )..start();
@@ -96,8 +102,7 @@ class _AppShellState extends State<AppShell> {
         final payload = service.pendingPayload;
         if (payload == null || payload.isEmpty) return;
         service.pendingPayload = null;
-        final target = _routeForPayload(payload);
-        if (target != null && mounted) context.go(target);
+        _openPayload(payload);
       } on Object {
         // Best effort: stay on the current page (unregistered in tests).
       }
@@ -113,16 +118,14 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _openPayload(String payload) {
-    final target = _routeForPayload(payload);
-    if (target != null && mounted) context.go(target);
-  }
-
-  static String? _routeForPayload(String payload) {
-    final parts = payload.split(':');
-    if (parts.length != 2 || parts[1].isEmpty) return null;
-    if (parts[0] == 'inspection') return '/inspections?highlight=${parts[1]}';
-    if (parts[0] == 'lab') return '/lab?tab=0&highlight=${parts[1]}';
-    return null;
+    unawaited(() async {
+      try {
+        final target = await getIt<NotificationsPort>().resolvePayload(payload);
+        if (target != null && mounted) context.go(target);
+      } on Object {
+        // A stale/offline notification must not break navigation.
+      }
+    }());
   }
 
   @override
@@ -143,6 +146,9 @@ class _AppShellState extends State<AppShell> {
   List<ShellNavEntry> _entries(User user) => shellNavEntries(
     canSeeSettings: user.canSeeSettings,
     canReadQc: widget.gate.session.permissions.contains(Permission.qcRead),
+    canReadFormulations: widget.gate.session.permissions.contains(
+      Permission.formulationsRead,
+    ),
   );
 
   Future<void> _logout() async {

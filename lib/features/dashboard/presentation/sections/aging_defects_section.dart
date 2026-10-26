@@ -6,6 +6,7 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../cubit/dashboard_kpis_state.dart';
 import '../widgets/dashboard_section_title.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class AgingDefectsSection extends StatelessWidget {
   final DashboardKpisState kpi;
@@ -28,7 +29,9 @@ class AgingDefectsSection extends StatelessWidget {
           color: AppColors.warning,
           title: AppText.t('المشاكل المفتوحة حسب قدمها', 'Open issues by age'),
         ),
-        Card(
+        AppCard(
+          padding: EdgeInsets.zero,
+          enableHover: false,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(
@@ -80,7 +83,9 @@ class AgingDefectsSection extends StatelessWidget {
         ),
         if (n.topDefects.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.sm),
-          Card(
+          AppCard(
+            padding: EdgeInsets.zero,
+            enableHover: false,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(

@@ -41,9 +41,7 @@ class DashboardBentoBand extends StatelessWidget {
     );
     final decisions = AppEntrance(
       delay: const Duration(milliseconds: 120),
-      child: RepaintBoundary(
-        child: DecisionsOverviewCard(summary: summary),
-      ),
+      child: RepaintBoundary(child: DecisionsOverviewCard(summary: summary)),
     );
 
     return LayoutBuilder(
@@ -67,7 +65,10 @@ class DashboardBentoBand extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               spacing: AppSpacing.md,
-              children: [Expanded(child: qc), Expanded(child: decisions)],
+              children: [
+                Expanded(child: qc),
+                Expanded(child: decisions),
+              ],
             ),
           );
         }
@@ -80,7 +81,10 @@ class DashboardBentoBand extends StatelessWidget {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     spacing: AppSpacing.md,
-                    children: [Expanded(child: qc), Expanded(child: daily)],
+                    children: [
+                      Expanded(child: qc),
+                      Expanded(child: daily),
+                    ],
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -92,7 +96,10 @@ class DashboardBentoBand extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               spacing: AppSpacing.md,
-              children: [Expanded(child: qc), Expanded(child: decisions)],
+              children: [
+                Expanded(child: qc),
+                Expanded(child: decisions),
+              ],
             ),
           );
         }
@@ -100,10 +107,7 @@ class DashboardBentoBand extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             qc,
-            if (showDaily) ...[
-              const SizedBox(height: AppSpacing.md),
-              daily,
-            ],
+            if (showDaily) ...[const SizedBox(height: AppSpacing.md), daily],
             const SizedBox(height: AppSpacing.md),
             decisions,
           ],

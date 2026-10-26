@@ -18,11 +18,10 @@ class AppPreferences {
     AppThemeMode? theme,
     String? defaultExportDir,
     String? reportLogoPath,
-  }) =>
-      AppPreferences(
-        localeCode: localeCode ?? this.localeCode,
-        theme: theme ?? this.theme,
-        defaultExportDir: defaultExportDir ?? this.defaultExportDir,
-        reportLogoPath: reportLogoPath ?? this.reportLogoPath,
-      );
+  }) => AppPreferences(
+    localeCode: localeCode ?? this.localeCode,
+    theme: theme ?? this.theme,
+    defaultExportDir: defaultExportDir ?? this.defaultExportDir,
+    reportLogoPath: reportLogoPath ?? this.reportLogoPath,
+  );
 }

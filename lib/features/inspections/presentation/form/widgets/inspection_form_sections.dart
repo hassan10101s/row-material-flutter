@@ -22,6 +22,7 @@ import '../../../../../design_system/widgets/app_quantity_field.dart';
 import '../../../../../design_system/widgets/app_required_toggle.dart';
 import '../../../../lab/core/formula_engine.dart';
 import '../../cubit/inspection_form_cubit.dart';
+import '../../../../../design_system/widgets/app_text_field.dart';
 
 /// Parsed chemical reference range shown in the results grid.
 class ChemCell {
@@ -240,21 +241,7 @@ String _chemPlaceholder(ChemCell cell) {
 }
 
 InputDecoration _inputDec(bool out, {required String hint}) {
-  return InputDecoration(
-    isDense: true,
-    hintText: hint,
-    filled: true,
-    fillColor: out
-        ? AppColors.danger.withValues(alpha: 0.10)
-        : AppColors.surface,
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(AppRadii.sm),
-      borderSide: BorderSide(
-        color: out ? AppColors.danger : AppColors.border,
-        width: out ? 1.4 : 1,
-      ),
-    ),
-  );
+  return InputDecoration(hintText: hint);
 }
 
 String _addMonths(String iso, int months) {
@@ -911,10 +898,7 @@ class InspectionFormSections {
           const SizedBox(height: AppSpacing.xs),
           Text(
             error,
-            style: TextStyle(
-              color: AppColors.danger,
-              fontSize: 12.spMax,
-            ),
+            style: TextStyle(color: AppColors.danger, fontSize: 12.spMax),
           ),
         ],
       ],
@@ -1138,7 +1122,7 @@ class InspectionFormSections {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                child: TextField(
+                child: AppTextField(
                   controller: ctrl,
                   onSubmitted: (_) => normalize(),
                   decoration: _inputDec(
@@ -1381,23 +1365,12 @@ class InspectionFormSections {
       child: Row(
         children: [
           Expanded(
-            child: TextField(
+            child: AppTextField(
               controller: sampleNames[index],
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13.spMax, fontWeight: FontWeight.w600),
               decoration: InputDecoration(
-                isDense: true,
                 hintText: AppText.t('اسم العينة', 'Sample name'),
-                filled: true,
-                fillColor: AppColors.surface,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm,
-                  vertical: AppSpacing.sm,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.sm),
-                  borderSide: BorderSide(color: AppColors.border),
-                ),
               ),
             ),
           ),
@@ -1425,7 +1398,7 @@ class InspectionFormSections {
             Expanded(
               child: Padding(
                 padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                child: TextField(
+                child: AppTextField(
                   controller: ctrl,
                   onChanged: (_) {},
                   keyboardType: const TextInputType.numberWithOptions(

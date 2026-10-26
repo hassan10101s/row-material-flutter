@@ -14,11 +14,9 @@ import 'package:flutter/foundation.dart';
 /// `MissingPluginException`.
 abstract final class PlatformCapability {
   static bool get isDesktop =>
-      !kIsWeb &&
-      (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+      !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
-  static bool get isMobile =>
-      !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  static bool get isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
   static bool get isWindowsNoWeb => !kIsWeb && Platform.isWindows;
 

@@ -44,7 +44,8 @@ double _safeQty(Object? value, double fallback) {
 }
 
 Map<String, List<Map<String, dynamic>>> groupByMaterial(
-    List<Map<String, dynamic>> inspections) {
+  List<Map<String, dynamic>> inspections,
+) {
   final materials = <String, List<Map<String, dynamic>>>{};
   final unknown = AppText.t('غير معروف', 'Unknown');
   for (final insp in inspections) {
@@ -55,8 +56,10 @@ Map<String, List<Map<String, dynamic>>> groupByMaterial(
   return materials;
 }
 
-int uniqueSuppliersCount(List<Map<String, dynamic>> inspections,
-    {bool allowBlankSuppliers = false}) {
+int uniqueSuppliersCount(
+  List<Map<String, dynamic>> inspections, {
+  bool allowBlankSuppliers = false,
+}) {
   final suppliers = <String>{};
   for (final i in inspections) {
     final s = '${i['supplier'] ?? ''}'.trim();
@@ -66,8 +69,10 @@ int uniqueSuppliersCount(List<Map<String, dynamic>> inspections,
 }
 
 /// Port of aggregate_totals.
-Map<String, dynamic> aggregateTotals(List<Map<String, dynamic>> inspections,
-    {bool allowBlankSuppliers = false}) {
+Map<String, dynamic> aggregateTotals(
+  List<Map<String, dynamic>> inspections, {
+  bool allowBlankSuppliers = false,
+}) {
   var approved = 0, conditional = 0, partial = 0, rejected = 0;
   var totalQty = 0.0, totalRejectedQty = 0.0;
 
@@ -112,7 +117,9 @@ Map<String, dynamic> aggregateTotals(List<Map<String, dynamic>> inspections,
     'total_accepted_qty': totalAcceptedQty,
     'approval_rate': approvalRate,
     'unique_suppliers': uniqueSuppliersCount(
-        inspections, allowBlankSuppliers: allowBlankSuppliers),
+      inspections,
+      allowBlankSuppliers: allowBlankSuppliers,
+    ),
     'unique_materials': groupByMaterial(inspections).length,
   };
 }
@@ -128,28 +135,31 @@ String decisionTime(Map<String, dynamic> item) {
   return raw;
 }
 
-Map<String, dynamic> detailRow(int index, Map<String, dynamic> item, String? status) =>
-    {
-      'index': index,
-      'entry_code': item['entry_code'] ?? '-',
-      'decision_time': decisionTime(item),
-      'supplier': item['supplier'] ?? '-',
-      'quantity': formatQuantity(item['quantity']),
-      'decision_status': decisionLabel(status),
-      'decision_status_raw': status ?? 'UNKNOWN',
-      'decision_reason': item['decision_reason'] ?? '-',
-      'follow_up_note': item['follow_up_note'] ?? '-',
-      'rejected_quantity': status == 'PARTIAL_REJECTION'
-          ? formatQuantity(item['rejected_quantity'])
-          : '-',
-      'specialist_name':
-          item['specialist_name'] ?? item['created_by_name'] ?? '-',
-      'expiry_date': item['expiry_date'] ?? '-',
-    };
+Map<String, dynamic> detailRow(
+  int index,
+  Map<String, dynamic> item,
+  String? status,
+) => {
+  'index': index,
+  'entry_code': item['entry_code'] ?? '-',
+  'decision_time': decisionTime(item),
+  'supplier': item['supplier'] ?? '-',
+  'quantity': formatQuantity(item['quantity']),
+  'decision_status': decisionLabel(status),
+  'decision_status_raw': status ?? 'UNKNOWN',
+  'decision_reason': item['decision_reason'] ?? '-',
+  'follow_up_note': item['follow_up_note'] ?? '-',
+  'rejected_quantity': status == 'PARTIAL_REJECTION'
+      ? formatQuantity(item['rejected_quantity'])
+      : '-',
+  'specialist_name': item['specialist_name'] ?? item['created_by_name'] ?? '-',
+  'expiry_date': item['expiry_date'] ?? '-',
+};
 
 /// Port of build_material_sections — per-material summary + detail rows.
 List<Map<String, dynamic>> buildMaterialSections(
-    List<Map<String, dynamic>> inspections) {
+  List<Map<String, dynamic>> inspections,
+) {
   final sections = <Map<String, dynamic>>[];
   groupByMaterial(inspections).forEach((materialName, matItems) {
     var mQty = 0.0, mRejQty = 0.0;

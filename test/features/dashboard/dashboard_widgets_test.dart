@@ -13,9 +13,7 @@ Widget _pump(Widget child) {
   return ScreenUtilInit(
     designSize: const Size(1280, 800),
     minTextAdapt: true,
-    builder: (_, __) => MaterialApp(
-      home: Scaffold(body: child),
-    ),
+    builder: (_, _) => MaterialApp(home: Scaffold(body: child)),
   );
 }
 
@@ -24,19 +22,22 @@ void main() {
   setUp(() => AppText.useLanguage('en'));
 
   group('DashboardResultLine', () {
-    testWidgets('zero results with active filters offer a clear CTA',
-        (tester) async {
+    testWidgets('zero results with active filters offer a clear CTA', (
+      tester,
+    ) async {
       var cleared = 0;
-      await tester.pumpWidget(_pump(
-        DashboardResultLine(
-          summary: const {
-            'filtered_count': 0,
-            'latest': {'label': 'Wheat', 'date': '2026-10-01'},
-          },
-          filtersActive: true,
-          onClearFilters: () => cleared++,
+      await tester.pumpWidget(
+        _pump(
+          DashboardResultLine(
+            summary: const {
+              'filtered_count': 0,
+              'latest': {'label': 'Wheat', 'date': '2026-10-01'},
+            },
+            filtersActive: true,
+            onClearFilters: () => cleared++,
+          ),
         ),
-      ));
+      );
 
       expect(find.text('No matches with the current filters'), findsOneWidget);
       expect(find.text('Clear filters'), findsOneWidget);
@@ -45,24 +46,27 @@ void main() {
     });
 
     testWidgets(
-        'zero results without filters keep the count line (no clear CTA)',
-        (tester) async {
-      await tester.pumpWidget(_pump(
-        DashboardResultLine(summary: const {'filtered_count': 0}),
-      ));
+      'zero results without filters keep the count line (no clear CTA)',
+      (tester) async {
+        await tester.pumpWidget(
+          _pump(DashboardResultLine(summary: const {'filtered_count': 0})),
+        );
 
-      expect(find.text('0 inspections in period'), findsOneWidget);
-      expect(find.text('Clear filters'), findsNothing);
-    });
+        expect(find.text('0 inspections in period'), findsOneWidget);
+        expect(find.text('Clear filters'), findsNothing);
+      },
+    );
 
     testWidgets('non-empty period shows the result line only', (tester) async {
-      await tester.pumpWidget(_pump(
-        DashboardResultLine(
-          summary: const {'filtered_count': 12},
-          filtersActive: true,
-          onClearFilters: () {},
+      await tester.pumpWidget(
+        _pump(
+          DashboardResultLine(
+            summary: const {'filtered_count': 12},
+            filtersActive: true,
+            onClearFilters: () {},
+          ),
         ),
-      ));
+      );
 
       expect(find.text('12 inspections in period'), findsOneWidget);
       expect(find.text('No matches with the current filters'), findsNothing);
@@ -72,20 +76,22 @@ void main() {
   group('SupplierRow drill-down', () {
     testWidgets('tapping the row fires the supplied callback', (tester) async {
       var opened = 0;
-      await tester.pumpWidget(_pump(
-        SupplierRow(
-          score: const SupplierScore(
-            name: 'Acme',
-            total: 10,
-            approvalRate: 90,
-            tier: 'A',
-            score: 92,
+      await tester.pumpWidget(
+        _pump(
+          SupplierRow(
+            score: const SupplierScore(
+              name: 'Acme',
+              total: 10,
+              approvalRate: 90,
+              tier: 'A',
+              score: 92,
+            ),
+            maxScore: 100,
+            rank: 1,
+            onTap: () => opened++,
           ),
-          maxScore: 100,
-          rank: 1,
-          onTap: () => opened++,
         ),
-      ));
+      );
 
       await tester.tap(find.text('Acme').last);
       await tester.pump();
@@ -93,18 +99,20 @@ void main() {
     });
 
     testWidgets('without a callback the row stays inert', (tester) async {
-      await tester.pumpWidget(_pump(
-        SupplierRow(
-          score: const SupplierScore(
-            name: 'Bloor',
-            total: 5,
-            tier: 'B',
-            score: 60,
+      await tester.pumpWidget(
+        _pump(
+          SupplierRow(
+            score: const SupplierScore(
+              name: 'Bloor',
+              total: 5,
+              tier: 'B',
+              score: 60,
+            ),
+            maxScore: 100,
+            rank: 2,
           ),
-          maxScore: 100,
-          rank: 2,
         ),
-      ));
+      );
 
       await tester.tap(find.text('Bloor').last);
       await tester.pump();
@@ -122,8 +130,9 @@ void main() {
       expect(find.text('Issues & fixes'), findsNothing);
     });
 
-    testWidgets('Open and Overdue cards render for a non-empty bundle',
-        (tester) async {
+    testWidgets('Open and Overdue cards render for a non-empty bundle', (
+      tester,
+    ) async {
       await tester.pumpWidget(
         _pump(
           NcrSection(

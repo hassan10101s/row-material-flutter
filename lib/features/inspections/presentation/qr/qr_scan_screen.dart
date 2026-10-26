@@ -28,6 +28,7 @@ import '../../../lab/presentation/equipment/equipment_tab.dart';
 import '../../domain/inspection_repository.dart';
 import '../cubit/inspection_detail_cubit.dart';
 import '../detail/inspection_detail_screen.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 /// Camera availability on this device.
 enum _CameraState { checking, ready, denied, unavailable }
@@ -129,7 +130,10 @@ class _QrScanScreenState extends State<QrScanScreen> {
     final code = _manual.text.trim();
     if (code.isEmpty) {
       setState(() {
-        _error = AppText.t('اكتب رقم القيد أولاً', 'Enter the entry code first');
+        _error = AppText.t(
+          'اكتب رقم القيد أولاً',
+          'Enter the entry code first',
+        );
       });
       return;
     }
@@ -322,6 +326,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
       _rearm();
     }
   }
+
   /// Re-arms the camera for the next code without clearing the current
   /// message, so a miss stays visible while scanning continues.
   void _rearm() {
@@ -377,9 +382,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppTopAppBar(
-        title: AppText.t('مسح رمز QR', 'Scan QR code'),
-      ),
+      appBar: AppTopAppBar(title: AppText.t('مسح رمز QR', 'Scan QR code')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(AppSpacing.page),
         child: Column(
@@ -411,10 +414,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
           borderRadius: BorderRadius.circular(16.r),
           child: SizedBox(
             height: 320.h,
-            child: MobileScanner(
-              controller: controller,
-              onDetect: _onDetect,
-            ),
+            child: MobileScanner(controller: controller, onDetect: _onDetect),
           ),
         );
       case _CameraState.denied:
@@ -436,10 +436,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
               ),
               const SizedBox(height: AppSpacing.sm),
               AppButton(
-                label: AppText.t(
-                  'فتح إعدادات التطبيق',
-                  'Open app settings',
-                ),
+                label: AppText.t('فتح إعدادات التطبيق', 'Open app settings'),
                 style: AppButtonStyle.secondary,
                 icon: Icon(Icons.settings_outlined, size: 18.r),
                 onPressed: QrCameraPermission.openSettings,
@@ -459,7 +456,9 @@ class _QrScanScreenState extends State<QrScanScreen> {
   }
 
   Widget _manualSection() {
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),
@@ -499,7 +498,9 @@ class _QrScanScreenState extends State<QrScanScreen> {
   }
 
   Widget _messageCard(String message, Color color, {Widget? action}) {
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.md),

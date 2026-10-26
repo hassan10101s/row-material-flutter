@@ -6,6 +6,7 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../cubit/dashboard_kpis_state.dart';
 import '../../domain/dashboard_analytics.dart' as analytics;
+import '../../../../design_system/widgets/app_card.dart';
 
 class ExecutiveSummarySection extends StatelessWidget {
   final DashboardKpisState kpi;
@@ -42,7 +43,9 @@ class ExecutiveSummarySection extends StatelessWidget {
         : direction == 'flat'
         ? AppText.t('مثل الشهر السابق', 'Same as last month')
         : AppText.t('لا يوجد اتجاه واضح بعد', 'No clear trend yet');
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(
@@ -110,7 +113,8 @@ class SummaryChip extends StatelessWidget {
   final IconData icon;
   final Color color;
   final String text;
-  const SummaryChip({super.key, 
+  const SummaryChip({
+    super.key,
     required this.icon,
     required this.color,
     required this.text,

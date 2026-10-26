@@ -4,6 +4,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/network/connectivity_service.dart';
+import 'package:material_lab/core/auth/session_source.dart';
+import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
+import 'sync_test_fixture.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/pull_worker.dart';
 import 'package:material_lab/core/sync/push_worker.dart';
@@ -32,6 +35,7 @@ class _MockConnectivity extends Mock implements ConnectivityService {}
 void main() {
   setUpAll(() {
     registerFallbackValue(<String>[]);
+    registerFallbackValue(() {});
   });
 
   group('SyncStatusController.refresh', () {
@@ -44,7 +48,8 @@ void main() {
       metadata = _MockMetadata();
       gate = Completer<Map<String, String>>();
       when(() => queue.countBadge()).thenAnswer(
-        (_) async => const SyncQueueCounts(pending: 1, blocked: 0, conflicts: 0),
+        (_) async =>
+            const SyncQueueCounts(pending: 1, blocked: 0, conflicts: 0),
       );
       when(() => metadata.readAll(any())).thenAnswer((_) => gate.future);
     });
@@ -73,6 +78,8 @@ void main() {
   });
 
   group('SyncEngine status reads', () {
+    late SyncFixture fixture;
+    tearDown(() async => fixture.dispose());
     late _MockQueue queue;
     late _MockMetadata metadata;
     late _MockPush push;
@@ -81,7 +88,8 @@ void main() {
     late _MockConnectivity connectivity;
     late Completer<Map<String, String>> gate;
 
-    setUp(() {
+    setUp(() async {
+      fixture = await openSyncFixture();
       queue = _MockQueue();
       metadata = _MockMetadata();
       push = _MockPush();
@@ -89,24 +97,37 @@ void main() {
       audit = _MockAudit();
       connectivity = _MockConnectivity();
       gate = Completer<Map<String, String>>();
+      when(() => queue.dbHelper).thenReturn(fixture.helper);
+      when(() => push.source).thenReturn(SessionSource.empty());
+      when(() => push.remote).thenReturn(InMemoryDataSource());
+      when(() => metadata.bind(fixture.db)).thenReturn(metadata);
       when(() => connectivity.isOnline).thenReturn(true);
       when(() => push.runOnce()).thenAnswer((_) async => PushReport.empty);
       when(() => pull.runOnce()).thenAnswer((_) async => PullReport.empty);
-      when(() => queue.recoverStalled()).thenAnswer((_) async => 0);
+      when(
+        () => queue.recoverStalled(checkCurrent: any(named: 'checkCurrent')),
+      ).thenAnswer((_) async => 0);
+      when(
+        () => queue.recoverEnvelopeUpgrade(
+          checkCurrent: any(named: 'checkCurrent'),
+        ),
+      ).thenAnswer((_) async => 0);
+      when(() => metadata.markError(any())).thenAnswer((_) async {});
       when(() => queue.countBadge()).thenAnswer(
-        (_) async => const SyncQueueCounts(pending: 0, blocked: 0, conflicts: 0),
+        (_) async =>
+            const SyncQueueCounts(pending: 0, blocked: 0, conflicts: 0),
       );
       when(() => metadata.readAll(any())).thenAnswer((_) => gate.future);
     });
 
     SyncEngine engine() => SyncEngine(
-          pushWorker: push,
-          pullWorker: pull,
-          queue: queue,
-          metadata: metadata,
-          audit: audit,
-          connectivity: connectivity,
-        );
+      pushWorker: push,
+      pullWorker: pull,
+      queue: queue,
+      metadata: metadata,
+      audit: audit,
+      connectivity: connectivity,
+    );
 
     test('concurrent cycles share one status read', () async {
       final e = engine();

@@ -68,7 +68,8 @@ class QcTableRecordsScreen extends StatelessWidget {
             builder: (windowContext) {
               final state = windowContext.watch<QcTableRowsCubit>().state;
               return AppWindow(
-                title: state.table?.title ??
+                title:
+                    state.table?.title ??
                     AppText.t('سجل جدول', 'Table register'),
                 icon: Icons.table_chart_outlined,
                 subtitle: state.table?.description,
@@ -165,9 +166,8 @@ class QcTableRecordsScreen extends StatelessWidget {
     QcTableRowsState state,
   ) async {
     final cubit = context.read<QcTableRowsCubit>();
-    final applied = await showModalBottomSheet<QcCustomRowFilters>(
-      context: context,
-      isScrollControlled: true,
+    final applied = await showAppDialog<QcCustomRowFilters>(
+      context,
       builder: (_) =>
           _FiltersSheet(fields: state.fields, filters: state.filters),
     );
@@ -239,8 +239,7 @@ class _ActionBar extends StatelessWidget {
           label: count > 0
               ? AppText.t('تصدير ($count)', 'Export ($count)')
               : AppText.t('تصدير الجدول', 'Export table'),
-          onPressed:
-              state.rows.isEmpty ? null : () => exportRowsTable(context),
+          onPressed: state.rows.isEmpty ? null : () => exportRowsTable(context),
         ),
         AppButton(
           label: state.filters.activeCount == 0
@@ -267,7 +266,8 @@ Future<void> exportRowsTable(BuildContext context) async {
   final table = state.table;
   final visible = state.visibleRows();
   final picked = [
-    for (final r in visible) if (state.selectedIds.contains(r.rowId)) r,
+    for (final r in visible)
+      if (state.selectedIds.contains(r.rowId)) r,
   ];
   final rows = picked.isNotEmpty ? picked : visible;
   if (rows.isEmpty) return;
@@ -292,12 +292,13 @@ Future<void> exportRowsTable(BuildContext context) async {
         AppText.t('ملاحظة', 'Note'),
       ],
       rows: [
-        for (final r in rows) [
-          parseIsoToDisplay(r.recordedAt) ?? r.recordedAt,
-          r.recordedByName,
-          ...[for (final f in fields) cell(f, r)],
-          r.note,
-        ],
+        for (final r in rows)
+          [
+            parseIsoToDisplay(r.recordedAt) ?? r.recordedAt,
+            r.recordedByName,
+            ...[for (final f in fields) cell(f, r)],
+            r.note,
+          ],
       ],
     );
   } on AppError catch (e) {
@@ -442,16 +443,14 @@ class _RowsTable extends StatelessWidget {
     final cubit = context.read<QcTableRowsCubit>();
     final fields = state.fields;
     final ids = [for (final r in visible) r.rowId!];
-    final selectedOnRows = ids
-        .where(state.selectedIds.contains)
-        .length;
+    final selectedOnRows = ids.where(state.selectedIds.contains).length;
     final bool? selectAllValue = ids.isEmpty
         ? false
         : selectedOnRows == 0
-            ? false
-            : selectedOnRows == ids.length
-                ? true
-                : null;
+        ? false
+        : selectedOnRows == ids.length
+        ? true
+        : null;
     final selectedIndices = <int>{
       for (var i = 0; i < ids.length; i++)
         if (state.selectedIds.contains(ids[i])) i,
@@ -515,10 +514,7 @@ class _RowsTable extends StatelessWidget {
               r.recordedByName,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12.5,
-                color: AppColors.textMuted,
-              ),
+              style: TextStyle(fontSize: 12.5, color: AppColors.textMuted),
             ),
             for (final f in fields)
               Text(
@@ -545,8 +541,7 @@ class _RowsTable extends StatelessWidget {
       selectHidden: true,
       onToggleIndex: (index) => cubit.toggleSelect(ids[index]),
       selectAllValue: selectAllValue,
-      onToggleAll: (select) =>
-          cubit.setAllSelection(ids, select ?? false),
+      onToggleAll: (select) => cubit.setAllSelection(ids, select ?? false),
       totalLabel: AppText.t(
         '${visible.length} تسجيل',
         '${visible.length} records',
@@ -806,97 +801,87 @@ class _FiltersSheetState extends State<_FiltersSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.pageMobile),
-        // One scroll sheet: every column of the table gets its row(s), so a
-        // filter pass covers the whole definition in one gesture.
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                AppText.t('عوامل التصفية', 'Filters'),
-                style: Theme.of(context).textTheme.titleMedium,
+    return AppDialog(
+      title: AppText.t('عوامل التصفية', 'Filters'),
+      icon: Icons.filter_list,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final f in widget.fields) ...[
+            Text(
+              f.label,
+              style: TextStyle(
+                fontSize: 13.spMax,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textMuted,
               ),
-              const SizedBox(height: AppSpacing.md),
-              for (final f in widget.fields) ...[
-                Text(
-                  f.label,
-                  style: TextStyle(
-                    fontSize: 13.spMax,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textMuted,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                if (f.colType == QcCustomColType.number)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: AppField(
-                          label: AppText.t('من (رقم)', 'Min'),
-                          controller: _numberMin[f.remoteId]!,
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: AppField(
-                          label: AppText.t('إلى (رقم)', 'Max'),
-                          controller: _numberMax[f.remoteId]!,
-                          keyboardType: TextInputType.number,
-                        ),
-                      ),
-                    ],
-                  )
-                else if (f.colType == QcCustomColType.date)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: AppDateField(
-                          label: AppText.t('من تاريخ', 'From date'),
-                          controller: _controllers[f.fieldId]!,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: AppDateField(
-                          label: AppText.t('إلى تاريخ', 'To date'),
-                          controller: _dateTo[f.remoteId]!,
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  AppField(
-                    label: AppText.t('يحتوي على', 'Contains'),
-                    controller: _controllers[f.fieldId]!,
-                  ),
-                const SizedBox(height: AppSpacing.md),
-              ],
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            if (f.colType == QcCustomColType.number)
               Row(
                 children: [
                   Expanded(
-                    child: AppButton(
-                      style: AppButtonStyle.secondary,
-                      label: AppText.t('تصفير', 'Clear'),
-                      onPressed: () =>
-                          Navigator.of(context).pop(const QcCustomRowFilters()),
+                    child: AppField(
+                      label: AppText.t('من (رقم)', 'Min'),
+                      controller: _numberMin[f.remoteId]!,
+                      keyboardType: TextInputType.number,
                     ),
                   ),
-                  const SizedBox(width: AppSpacing.md),
+                  const SizedBox(width: AppSpacing.sm),
                   Expanded(
-                    child: AppButton(
-                      label: AppText.t('تطبيق', 'Apply'),
-                      onPressed: _apply,
+                    child: AppField(
+                      label: AppText.t('إلى (رقم)', 'Max'),
+                      controller: _numberMax[f.remoteId]!,
+                      keyboardType: TextInputType.number,
                     ),
                   ),
                 ],
+              )
+            else if (f.colType == QcCustomColType.date)
+              Row(
+                children: [
+                  Expanded(
+                    child: AppDateField(
+                      label: AppText.t('من تاريخ', 'From date'),
+                      controller: _controllers[f.fieldId]!,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: AppDateField(
+                      label: AppText.t('إلى تاريخ', 'To date'),
+                      controller: _dateTo[f.remoteId]!,
+                    ),
+                  ),
+                ],
+              )
+            else
+              AppField(
+                label: AppText.t('يحتوي على', 'Contains'),
+                controller: _controllers[f.fieldId]!,
+              ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: AppButton(
+                  style: AppButtonStyle.secondary,
+                  label: AppText.t('تصفير', 'Clear'),
+                  onPressed: () =>
+                      Navigator.of(context).pop(const QcCustomRowFilters()),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: AppButton(
+                  label: AppText.t('تطبيق', 'Apply'),
+                  onPressed: _apply,
+                ),
               ),
             ],
           ),
-        ),
+        ],
       ),
     );
   }
@@ -959,11 +944,7 @@ Future<bool?> showRecordForm(
 }
 
 class _RecordForm extends StatefulWidget {
-  const _RecordForm({
-    required this.state,
-    required this.cubit,
-    this.editing,
-  });
+  const _RecordForm({required this.state, required this.cubit, this.editing});
 
   final QcTableRowsState state;
   final QcTableRowsCubit cubit;
@@ -1045,7 +1026,8 @@ class _RecordFormState extends State<_RecordForm> {
       final text = _valueInputs[f.fieldId!]!.text.trim();
       if (text.isEmpty) continue;
       values[f.remoteId] = switch (f.colType) {
-        QcCustomColType.number => num.tryParse(text.replaceAll(',', '')) ?? text,
+        QcCustomColType.number =>
+          num.tryParse(text.replaceAll(',', '')) ?? text,
         QcCustomColType.date => text.substring(0, 10),
         _ => text,
       };
@@ -1191,10 +1173,7 @@ class _RecordFormState extends State<_RecordForm> {
       controller: controller,
       enabled: !_saving,
       keyboardType: number
-          ? const TextInputType.numberWithOptions(
-              decimal: true,
-              signed: true,
-            )
+          ? const TextInputType.numberWithOptions(decimal: true, signed: true)
           : null,
       inputFormatters: number
           ? [FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\-]'))]
@@ -1266,9 +1245,7 @@ class _FormIntro extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title.isEmpty
-                      ? AppText.t('تسجيل جديد', 'New record')
-                      : title,
+                  title.isEmpty ? AppText.t('تسجيل جديد', 'New record') : title,
                   style: theme.textTheme.titleSmall,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1344,4 +1321,3 @@ class _MetaChip extends StatelessWidget {
     );
   }
 }
-

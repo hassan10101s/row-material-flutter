@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../../core/auth/permissions.dart';
 
 /// Member entity as stored in the local `users` table (V2 roster).
@@ -14,6 +16,7 @@ class User {
     required this.email,
     this.fullName = '',
     this.role = AppRoles.viewer,
+    this.roles = const [],
     this.status = MemberStatus.invited,
     this.displayName = '',
     this.photoUrl,
@@ -33,6 +36,7 @@ class User {
   final String email;
   final String fullName;
   final String role;
+  final List<String> roles;
 
   /// `invited` | `active` | `disabled`.
   final String status;
@@ -47,61 +51,89 @@ class User {
   /// role itself is untouched, so the UI can still show what the member is.
   final bool readOnlyDevice;
 
-  Set<Permission> get permissions => rolePermissions(role);
+  List<String> get effectiveRoles => roles.isEmpty
+      ? [role]
+      : AppRoles.normalizeRoles(roles, fallbackRole: role);
+
+  Set<Permission> get permissions => rolesPermissions(effectiveRoles);
 
   bool get isActiveMember => status == MemberStatus.active;
 
-  bool get isReadOnly => roleIsReadOnly(role) || readOnlyDevice;
+  bool get isReadOnly => rolesAreReadOnly(effectiveRoles) || readOnlyDevice;
 
   /// A read-only device offers no write affordance at all. Inactive members
   /// (invited/pending/disabled) also offer none: the server and
   /// `AppSession.canDo`/`SessionWriteGuard` already refuse them, but the UI
   /// must not offer the button first.
-  bool get canWriteAnything => !readOnlyDevice && isActiveMember;
+  bool get canWriteAnything =>
+      !readOnlyDevice && isActiveMember && !rolesAreReadOnly(effectiveRoles);
 
   // ── Legacy call sites (kept so no widget/cubit had to change) ────────────
   // Read gates stay role-based, write gates also require a writable device.
   bool get canSeeSettings => permissions.contains(Permission.usersRead);
-  bool get canEditInspections => canWriteAnything && permissions.contains(Permission.samplesUpdate);
-  bool get canCreateInspection => canWriteAnything && permissions.contains(Permission.samplesCreate);
-  bool get canEditUsers => canWriteAnything && permissions.contains(Permission.usersUpdate);
-  bool get canManageSettings => canWriteAnything && permissions.contains(Permission.orgUpdate);
-  bool get canApproveQuality => canWriteAnything && permissions.contains(Permission.qcApprove);
+  bool get canEditInspections =>
+      canWriteAnything && permissions.contains(Permission.samplesUpdate);
+  bool get canCreateInspection =>
+      canWriteAnything && permissions.contains(Permission.samplesCreate);
+  bool get canEditUsers =>
+      canWriteAnything && permissions.contains(Permission.usersUpdate);
+  bool get canManageSettings =>
+      canWriteAnything && permissions.contains(Permission.orgUpdate);
+  bool get canApproveQuality =>
+      canWriteAnything && permissions.contains(Permission.qcApprove);
   bool get canReadAudit => permissions.contains(Permission.auditRead);
 
   String get label => displayName.isNotEmpty ? displayName : fullName;
 
-  String get roleLabel => AppRoles.label(role);
+  String get roleLabel => AppRoles.labelMany(effectiveRoles);
 
   /// V1 display alias. In V2 the identity is the Google account, so the two
   /// remaining `@username` call sites show the e-mail instead.
   String get username => email;
 
-  factory User.fromMap(Map<String, dynamic> map) => User(
-        id: (map['id'] as num?)?.toInt(),
-        uid: map['uid'] as String?,
-        memberId: map['member_id'] as String?,
-        email: '${map['email'] ?? map['username'] ?? ''}',
-        fullName: '${map['full_name'] ?? ''}',
-        role: normalizeRole('${map['role'] ?? AppRoles.viewer}'),
-        status: normalizeMemberStatus('${map['status'] ?? ''}'),
-        displayName: '${map['display_name'] ?? ''}',
-        photoUrl: map['photo_url'] as String?,
-        version: (map['version'] as num?)?.toInt() ?? 1,
-        createdAt: '${map['created_at'] ?? ''}',
-      );
+  factory User.fromMap(Map<String, dynamic> map) {
+    final role = normalizeRole('${map['role'] ?? AppRoles.viewer}');
+    Object? rawRoles = map.containsKey('roles')
+        ? (map['roles'] ?? const [])
+        : null;
+    if (!map.containsKey('roles') && map['roles_json'] is String) {
+      try {
+        rawRoles =
+            jsonDecode(map['roles_json'] as String) ?? const [AppRoles.viewer];
+        // The SQLite migration gives legacy single-role rows an empty array.
+        if (rawRoles is List && rawRoles.isEmpty) rawRoles = null;
+      } on FormatException {
+        rawRoles = const [AppRoles.viewer];
+      }
+    }
+    return User(
+      id: (map['id'] as num?)?.toInt(),
+      uid: map['uid'] as String?,
+      memberId: map['member_id'] as String?,
+      email: '${map['email'] ?? map['username'] ?? ''}',
+      fullName: '${map['full_name'] ?? ''}',
+      role: role,
+      roles: AppRoles.normalizeRoles(rawRoles, fallbackRole: role),
+      status: normalizeMemberStatus('${map['status'] ?? ''}'),
+      displayName: '${map['display_name'] ?? ''}',
+      photoUrl: map['photo_url'] as String?,
+      version: (map['version'] as num?)?.toInt() ?? 1,
+      createdAt: '${map['created_at'] ?? ''}',
+    );
+  }
 
   Map<String, dynamic> toMap({bool withId = true}) => {
-        if (withId && id != null) 'id': id,
-        if (uid != null) 'uid': uid,
-        if (memberId != null) 'member_id': memberId,
-        'email': email,
-        'full_name': fullName,
-        'role': role,
-        'status': status,
-        'display_name': displayName,
-        if (photoUrl != null) 'photo_url': photoUrl,
-        'version': version,
-        'created_at': createdAt,
-      };
+    if (withId && id != null) 'id': id,
+    if (uid != null) 'uid': uid,
+    if (memberId != null) 'member_id': memberId,
+    'email': email,
+    'full_name': fullName,
+    'role': role,
+    'roles_json': jsonEncode(effectiveRoles),
+    'status': status,
+    'display_name': displayName,
+    if (photoUrl != null) 'photo_url': photoUrl,
+    'version': version,
+    'created_at': createdAt,
+  };
 }

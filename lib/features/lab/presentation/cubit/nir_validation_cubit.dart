@@ -1,11 +1,14 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
+import '../../../../core/commands/central_authoring_gateway.dart';
 import '../../domain/nir_validation_repository.dart';
 import 'nir_validation_state.dart';
 
 /// Loads the NIR فلديشن report and performs the reset (new horizon).
 class NirValidationCubit extends AppCubit<NirValidationState> {
-  NirValidationCubit({required this.repo}) : super(const NirValidationState());
+  NirValidationCubit({required this.repo}) : super(const NirValidationState()) {
+    refreshOnSync(load);
+  }
 
   final NirValidationRepository repo;
 
@@ -44,7 +47,9 @@ class NirValidationCubit extends AppCubit<NirValidationState> {
     String entityName = '',
     String parameter = '',
   }) async {
-    safeEmit(state.copyWith(saving: true, clearError: true));
+    safeEmit(
+      state.copyWith(saving: true, clearError: true, pendingApproval: false),
+    );
     try {
       await repo.resetValidation(
         startDate,
@@ -56,6 +61,11 @@ class NirValidationCubit extends AppCubit<NirValidationState> {
       );
       await load();
       safeEmit(state.copyWith(saving: false));
+      return true;
+    } on CentralDraftPending {
+      safeEmit(
+        state.copyWith(saving: false, clearError: true, pendingApproval: true),
+      );
       return true;
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));

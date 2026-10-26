@@ -249,9 +249,7 @@ class TestHistoryScopeState extends State<TestHistoryScope> {
 
   /// Rows (from the current filtered list) behind the selection, in list
   /// order. Stale keys (row filtered out since) are ignored.
-  List<Map<String, dynamic>> selectedRows(
-    List<Map<String, dynamic>> rows,
-  ) => [
+  List<Map<String, dynamic>> selectedRows(List<Map<String, dynamic>> rows) => [
     for (final r in rows)
       if (selectedIds.contains(thRowKey(r))) r,
   ];

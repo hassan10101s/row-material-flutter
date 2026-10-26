@@ -4,7 +4,6 @@ import '../../../core/sync/audit_logger.dart';
 import '../../../core/sync/entity_registry.dart';
 import '../../../core/sync/sync_queue.dart';
 import '../../../core/sync/sync_write.dart' as sync_write;
-import '../../../core/utils/app_dates.dart';
 import '../../organizations/data/member_write_guard.dart';
 
 /// One static parent-identity stamp of a QC child table (see
@@ -48,18 +47,15 @@ class ParentLinkRef {
 /// Sync is **guarded by default**: [enabled] requires a bound organization
 /// and a signed-in uid (the same `WriteGuard` the facades authorise with).
 class QcSyncWriter {
-  QcSyncWriter({
-    required this.queue,
-    required this.guard,
-    this.syncAudit,
-  });
+  QcSyncWriter({required this.queue, required this.guard, this.syncAudit});
 
   final SyncQueue queue;
   final WriteGuard guard;
   final AuditLogger? syncAudit;
 
   static SyncEntity _entity(String type) =>
-      SyncEntity.byType(type) ?? (throw StateError('Unknown sync entity: $type'));
+      SyncEntity.byType(type) ??
+      (throw StateError('Unknown sync entity: $type'));
 
   // ── Shared parent-stamp specs (write side of `_qcChildFks`) ───────────
   static const ParentLinkRef _templateLink = ParentLinkRef(
@@ -120,8 +116,7 @@ class QcSyncWriter {
   /// True when the row may be queued: organization bound + signed in. On a
   /// false return the facades skip synchronisation entirely (the backfill
   /// service re-queues the rows once an account binds).
-  bool get enabled =>
-      guard.organizationId.isNotEmpty && guard.uid.isNotEmpty;
+  bool get enabled => guard.organizationId.isNotEmpty && guard.uid.isNotEmpty;
 
   /// Sentinel key [stampedRow] sets on the returned row when it had to mint
   /// the `remote_id` itself — proof the row was never pushed (a push back,
@@ -285,30 +280,17 @@ class QcSyncWriter {
     final entity = _entity(entityType);
     final op = operation ?? operationFor(row);
     if (op == null) return;
-    try {
-      await sync_write.enqueueLocalChange(
-        executor: txn,
-        entity: entity,
-        row: row,
-        operation: op,
-        queue: queue,
-        audit: syncAudit,
-        auditAction: auditAction,
-        organizationId: guard.organizationId,
-        uid: guard.uid,
-        deviceId: guard.deviceId,
-      );
-    } on Object {
-      try {
-        await txn.update(
-          entity.localTable,
-          {'sync_state': 'queued', 'updated_at': nowIso()},
-          where: '${entity.pkColumn} = ?',
-          whereArgs: [(row[entity.pkColumn] as num?)?.toInt()],
-        );
-      } on Object {
-        // Best-effort stamp; the next open repairs the bookkeeping.
-      }
-    }
+    await sync_write.enqueueLocalChange(
+      executor: txn,
+      entity: entity,
+      row: row,
+      operation: op,
+      queue: queue,
+      audit: syncAudit,
+      auditAction: auditAction,
+      organizationId: guard.organizationId,
+      uid: guard.uid,
+      deviceId: guard.deviceId,
+    );
   }
 }

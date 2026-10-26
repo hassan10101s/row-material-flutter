@@ -27,14 +27,16 @@ void main() {
     test('an offline create produces one pending row', () async {
       final id = await insertSample('QC-1');
 
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-1',
-            localRef: id,
-            operation: 'create',
-            payload: const {'entryCode': 'QC-1'},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-1',
+          localRef: id,
+          operation: 'create',
+          payload: const {'entryCode': 'QC-1'},
+        ),
+      );
 
       expect(await queue.countPending(), 1);
       final rows = await queue.listQueue();
@@ -47,15 +49,17 @@ void main() {
       final id = await insertSample('QC-2');
 
       for (var i = 0; i < 3; i++) {
-        await fixture.transaction((txn) => queue.enqueue(
-              txn,
-              entityType: 'sample',
-              entityId: 'QC-2',
-              localRef: id,
-              operation: 'update',
-              payload: {'attempt': i},
-              baseVersion: 0,
-            ));
+        await fixture.transaction(
+          (txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: 'QC-2',
+            localRef: id,
+            operation: 'update',
+            payload: {'attempt': i},
+            baseVersion: 0,
+          ),
+        );
       }
 
       final rows = await queue.listQueue();
@@ -64,85 +68,102 @@ void main() {
       expect('${rows.single['payload']}', contains('"attempt":2'));
     });
 
-    test('a tombstone wins over a pending create and over an update', () async {      final id = await insertSample('QC-3');
+    test('a tombstone wins over a pending create and over an update', () async {
+      final id = await insertSample('QC-3');
 
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-3',
-            localRef: id,
-            operation: 'create',
-            payload: const {},
-          ));
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-3',
-            localRef: id,
-            operation: 'tombstone',
-            payload: const {},
-          ));
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-3',
-            localRef: id,
-            operation: 'update',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-3',
+          localRef: id,
+          operation: 'create',
+          payload: const {},
+        ),
+      );
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-3',
+          localRef: id,
+          operation: 'tombstone',
+          payload: const {},
+        ),
+      );
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-3',
+          localRef: id,
+          operation: 'update',
+          payload: const {},
+        ),
+      );
 
       final rows = await queue.listQueue();
       expect(rows, hasLength(1));
       expect(rows.single['operation'], 'tombstone');
     });
 
-    test('onEnqueued fires on insert and on merge, never breaks the write',
-        () async {
-      var calls = 0;
-      queue.onEnqueued = () => calls++;
-      final id = await insertSample('QC-HOOK');
-      await fixture.transaction((txn) => queue.enqueue(
+    test(
+      'onEnqueued fires on insert and on merge, never breaks the write',
+      () async {
+        var calls = 0;
+        queue.onEnqueued = () => calls++;
+        final id = await insertSample('QC-HOOK');
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-HOOK',
             localRef: id,
             operation: 'create',
             payload: const {},
-          ));
-      expect(calls, 1);
-      await fixture.transaction((txn) => queue.enqueue(
+          ),
+        );
+        expect(calls, 1);
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-HOOK',
             localRef: id,
             operation: 'update',
             payload: const {},
-          ));
-      expect(calls, 2);
+          ),
+        );
+        expect(calls, 2);
 
-      // A throwing listener must not break the business write it observes.
-      queue.onEnqueued = () => throw StateError('listener blew up');
-      await fixture.transaction((txn) => queue.enqueue(
+        // A throwing listener must not break the business write it observes.
+        queue.onEnqueued = () => throw StateError('listener blew up');
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-HOOK2',
             localRef: id,
             operation: 'create',
             payload: const {},
-          ));
-      expect(await queue.countPending(), 2);
-    });
+          ),
+        );
+        expect(await queue.countPending(), 2);
+      },
+    );
 
     test('a fresh edit clears the backoff and the error', () async {
       final id = await insertSample('QC-4');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-4',
-            localRef: id,
-            operation: 'create',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-4',
+          localRef: id,
+          operation: 'create',
+          payload: const {},
+        ),
+      );
       final claimed = (await queue.claim()).single;
       await queue.markRetry(claimed, 'offline');
 
@@ -152,14 +173,16 @@ void main() {
       expect(row['last_error'], 'offline');
       expect(row['next_attempt_at'], isNotNull, reason: 'backoff is armed');
 
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-4',
-            localRef: id,
-            operation: 'update',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-4',
+          localRef: id,
+          operation: 'update',
+          payload: const {},
+        ),
+      );
 
       row = (await queue.listQueue()).single;
       expect(row['retry_count'], 0);
@@ -171,14 +194,16 @@ void main() {
   group('claim', () {
     test('claims each row once and marks it in_flight', () async {
       final id = await insertSample('QC-5');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-5',
-            localRef: id,
-            operation: 'create',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-5',
+          localRef: id,
+          operation: 'create',
+          payload: const {},
+        ),
+      );
 
       final first = await queue.claim();
       expect(first, hasLength(1));
@@ -191,14 +216,16 @@ void main() {
 
     test('a row still inside its backoff window is not claimed', () async {
       final id = await insertSample('QC-6');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-6',
-            localRef: id,
-            operation: 'create',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-6',
+          localRef: id,
+          operation: 'create',
+          payload: const {},
+        ),
+      );
       await queue.markRetry((await queue.claim()).single, 'offline');
 
       expect(await queue.claim(), isEmpty);
@@ -208,19 +235,25 @@ void main() {
   group('markDone', () {
     test('deletes the row and marks the local row synced', () async {
       final id = await insertSample('QC-7');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-7',
-            localRef: id,
-            operation: 'create',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-7',
+          localRef: id,
+          operation: 'create',
+          payload: const {},
+        ),
+      );
 
       await queue.markDone((await queue.claim()).single, remoteVersion: 4);
 
       expect(await queue.listQueue(), isEmpty);
-      final row = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
+      final row = (await fixture.db.query(
+        'inspections',
+        where: 'id = ?',
+        whereArgs: [id],
+      )).single;
       expect(row['remote_version'], 4);
       expect(row['sync_state'], 'synced');
       expect(row['remote_synced_at'], isNotNull);
@@ -228,82 +261,102 @@ void main() {
   });
 
   group('markRetry', () {
-    test('grows exponentially inside the ±20% jitter band and caps at 15min',
-        () {
-      // 5s * 2^n with a deterministic ±20% jitter, hard-capped at 900s.
-      for (var attempt = 0; attempt < 8; attempt++) {
-        final base = 5 * (1 << attempt);
-        final delay = SyncQueue.backoffDelay(attempt).inSeconds;
-        expect(delay, inInclusiveRange((base * 0.8).floor(), (base * 1.2).ceil()),
-            reason: 'attempt $attempt must stay within the jitter band');
-      }
-      // From attempt 8 on, 5s * 2^n is above the cap, so the wait stays in
-      // [12min, 18min] - the jitter pattern repeats with `attempt % 5`.
-      for (final attempt in [8, 10, 20, 40]) {
-        final delay = SyncQueue.backoffDelay(attempt).inSeconds;
-        expect(delay, inInclusiveRange(720, 1080), reason: 'attempt $attempt');
-      }
-      // Strictly increasing until the cap, so a retry storm cannot tighten.
-      var previous = 0;
-      for (var attempt = 0; attempt < 8; attempt++) {
-        final delay = SyncQueue.backoffDelay(attempt).inSeconds;
-        expect(delay, greaterThan(previous));
-        previous = delay;
-      }
-    });
+    test(
+      'grows exponentially inside the ±20% jitter band and caps at 15min',
+      () {
+        // 5s * 2^n with a deterministic ±20% jitter, hard-capped at 900s.
+        for (var attempt = 0; attempt < 8; attempt++) {
+          final base = 5 * (1 << attempt);
+          final delay = SyncQueue.backoffDelay(attempt).inSeconds;
+          expect(
+            delay,
+            inInclusiveRange((base * 0.8).floor(), (base * 1.2).ceil()),
+            reason: 'attempt $attempt must stay within the jitter band',
+          );
+        }
+        // From attempt 8 on, 5s * 2^n is above the cap, so the wait stays in
+        // [12min, 18min] - the jitter pattern repeats with `attempt % 5`.
+        for (final attempt in [8, 10, 20, 40]) {
+          final delay = SyncQueue.backoffDelay(attempt).inSeconds;
+          expect(
+            delay,
+            inInclusiveRange(720, 1080),
+            reason: 'attempt $attempt',
+          );
+        }
+        // Strictly increasing until the cap, so a retry storm cannot tighten.
+        var previous = 0;
+        for (var attempt = 0; attempt < 8; attempt++) {
+          final delay = SyncQueue.backoffDelay(attempt).inSeconds;
+          expect(delay, greaterThan(previous));
+          previous = delay;
+        }
+      },
+    );
 
-    test('transient failures retry forever with capped backoff, never park', () async {
-      final id = await insertSample('QC-8');
-      await fixture.transaction((txn) => queue.enqueue(
+    test(
+      'transient failures retry forever with capped backoff, never park',
+      () async {
+        final id = await insertSample('QC-8');
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-8',
             localRef: id,
             operation: 'create',
             payload: const {},
-          ));
-
-      QueueEntry entry = (await queue.claim()).single;
-      // Far past the old retry budget: the row must still be pending with a
-      // capped backoff, never parked for a manual tap.
-      for (var i = 0; i < 25; i++) {
-        await queue.markRetry(entry, 'offline $i');
-        // Clear the backoff so the next claim picks the row up again.
-        await fixture.db.update(
-          'sync_queue',
-          {'next_attempt_at': null},
-          where: 'id = ?',
-          whereArgs: [entry.id],
+          ),
         );
-        final claimed = await queue.claim();
-        if (claimed.isEmpty) break;
-        entry = claimed.single;
-      }
-      // The loop ends on a claim (in_flight in the db): one last retry
-      // settles it back without re-claiming.
-      await queue.markRetry(entry, 'offline final');
 
-      final row = (await queue.listQueue()).single;
-      expect(row['status'], 'pending');
-      expect(row['retry_count'], 26);
-      expect(await queue.countBlocked(), 0);
-      final local = (await fixture.db.query('inspections', where: 'id = ?', whereArgs: [id])).single;
-      expect(local['sync_state'], 'queued');
-    });
+        QueueEntry entry = (await queue.claim()).single;
+        // Far past the old retry budget: the row must still be pending with a
+        // capped backoff, never parked for a manual tap.
+        for (var i = 0; i < 25; i++) {
+          await queue.markRetry(entry, 'offline $i');
+          // Clear the backoff so the next claim picks the row up again.
+          await fixture.db.update(
+            'sync_queue',
+            {'next_attempt_at': null},
+            where: 'id = ?',
+            whereArgs: [entry.id],
+          );
+          final claimed = await queue.claim();
+          if (claimed.isEmpty) break;
+          entry = claimed.single;
+        }
+        // The loop ends on a claim (in_flight in the db): one last retry
+        // settles it back without re-claiming.
+        await queue.markRetry(entry, 'offline final');
+
+        final row = (await queue.listQueue()).single;
+        expect(row['status'], 'pending');
+        expect(row['retry_count'], 26);
+        expect(await queue.countBlocked(), 0);
+        final local = (await fixture.db.query(
+          'inspections',
+          where: 'id = ?',
+          whereArgs: [id],
+        )).single;
+        expect(local['sync_state'], 'queued');
+      },
+    );
   });
 
   group('conflicts', () {
     test('a conflict parks the row and records both payloads', () async {
       final id = await insertSample('QC-9');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-9',
-            localRef: id,
-            operation: 'update',
-            payload: const {'decisionStatus': 'APPROVED'},
-            baseVersion: 3,
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-9',
+          localRef: id,
+          operation: 'update',
+          payload: const {'decisionStatus': 'APPROVED'},
+          baseVersion: 3,
+        ),
+      );
 
       await queue.markConflict(
         (await queue.claim()).single,
@@ -322,147 +375,123 @@ void main() {
       expect('${conflicts.single['remote_payload']}', contains('5'));
     });
 
-    test('dismissAllConflicts ignores stale rows and clears the badge', () async {
-      for (final code in ['QC-D1', 'QC-D2']) {
-        final id = await insertSample(code);
-        await fixture.transaction((txn) => queue.enqueue(
-              txn,
-              entityType: 'sample',
-              entityId: code,
-              localRef: id,
-              operation: 'update',
-              payload: const {},
-            ));
-      }
-      for (final entry in await queue.claim(limit: 10)) {
-        await queue.markConflict(entry, direction: 'push_rejected');
-      }
-      expect(await queue.listConflicts(), hasLength(2));
-      expect((await queue.countBadge()).conflicts, 2);
-
-      expect(await queue.dismissAllConflicts(), 2);
-
-      expect(await queue.listConflicts(), isEmpty);
-      expect(await queue.countConflicts(), 0);
-      expect((await queue.countBadge()).conflicts, 0);
-      // Parked rows are dropped, history is kept as ignored.
-      expect(
-        await queue.listQueue(),
-        isEmpty,
-        reason: 'stale parked payloads must not linger',
-      );
-      final history = await fixture.db
-          .query('sync_conflicts', where: 'resolution = ?', whereArgs: ['ignored']);
-      expect(history, hasLength(2));
-      expect(history.every((r) => r['resolved_at'] != null), isTrue);
-    });
-
-    test('dismissAllConflicts is a no-op when nothing is unresolved', () async {
-      expect(await queue.dismissAllConflicts(), 0);
-      expect((await queue.countBadge()).conflicts, 0);
-    });
-
-    test('resolveConflict applies the choice and closes the conflict', () async {
-      final id = await insertSample('QC-10');
-      await fixture.transaction((txn) => queue.enqueue(
+    test(
+      'resolveConflict applies the choice and closes the conflict',
+      () async {
+        final id = await insertSample('QC-10');
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-10',
             localRef: id,
             operation: 'update',
             payload: const {},
-          ));
-      await queue.markConflict(
-        (await queue.claim()).single,
-        direction: 'push',
-        remotePayload: '{"decisionStatus":"REJECTED"}',
-      );
-      final conflict = (await queue.listConflicts()).single;
-      var keptLocal = false;
+          ),
+        );
+        await queue.markConflict(
+          (await queue.claim()).single,
+          direction: 'push',
+          remotePayload: '{"decisionStatus":"REJECTED"}',
+        );
+        final conflict = (await queue.listConflicts()).single;
+        var keptLocal = false;
 
-      await queue.resolveConflict(
-        (conflict['id'] as num).toInt(),
-        resolution: 'keep_local',
-        onKeepLocal: (row) async => keptLocal = '${row['entity_id']}' == 'QC-10',
-        onKeepRemote: (_, _) async => fail('keep_remote must not run'),
-      );
+        await queue.resolveConflict(
+          (conflict['id'] as num).toInt(),
+          resolution: 'keep_local',
+          onKeepLocal: (row) async =>
+              keptLocal = '${row['entity_id']}' == 'QC-10',
+          onKeepRemote: (_, _) async => fail('keep_remote must not run'),
+        );
 
-      expect(keptLocal, isTrue);
-      expect(await queue.listConflicts(), isEmpty, reason: 'no longer unresolved');
-      final resolved =
-          (await fixture.db.query('sync_conflicts', where: 'resolution IS NOT NULL')).single;
-      expect(resolved['resolution'], 'keep_local');
-      expect(resolved['resolved_at'], isNotNull);
-    });
+        expect(keptLocal, isTrue);
+        expect(
+          await queue.listConflicts(),
+          isEmpty,
+          reason: 'no longer unresolved',
+        );
+        final resolved = (await fixture.db.query(
+          'sync_conflicts',
+          where: 'resolution IS NOT NULL',
+        )).single;
+        expect(resolved['resolution'], 'keep_local');
+        expect(resolved['resolved_at'], isNotNull);
+      },
+    );
 
-    test('countBadge matches the individual counts, including resolved ones',
-        () async {
-      // The badge collapsed three queries into one statement, which means the
-      // "unresolved" predicate is now spelled a second time in SQL instead of
-      // reusing `listConflicts`. It has to agree with the stored resolution
-      // values - `keep_local`/`keep_remote`, not `local`/`remote` - or a settled
-      // conflict stays on the badge forever.
-      final id = await insertSample('QC-BADGE');
-      await fixture.transaction((txn) => queue.enqueue(
+    test(
+      'countBadge matches the individual counts, including resolved ones',
+      () async {
+        // The badge collapsed three queries into one statement, which means the
+        // "unresolved" predicate is now spelled a second time in SQL instead of
+        // reusing `listConflicts`. It has to agree with the stored resolution
+        // values - `keep_local`/`keep_remote`, not `local`/`remote` - or a settled
+        // conflict stays on the badge forever.
+        final id = await insertSample('QC-BADGE');
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-BADGE',
             localRef: id,
             operation: 'update',
             payload: const {},
-          ));
-      await queue.markConflict(
-        (await queue.claim()).single,
-        direction: 'push',
-        remotePayload: '{"decisionStatus":"REJECTED"}',
-      );
-      expect((await queue.listConflicts()), hasLength(1));
-      expect(await queue.countConflicts(), 1);
-      expect(
-        (await queue.countBadge()).conflicts,
-        1,
-        reason: 'an unresolved conflict must be counted',
-      );
+          ),
+        );
+        await queue.markConflict(
+          (await queue.claim()).single,
+          direction: 'push',
+          remotePayload: '{"decisionStatus":"REJECTED"}',
+        );
+        expect((await queue.listConflicts()), hasLength(1));
+        expect(await queue.countConflicts(), 1);
+        expect(
+          (await queue.countBadge()).conflicts,
+          1,
+          reason: 'an unresolved conflict must be counted',
+        );
 
-      await queue.resolveConflict(
-        (await queue.listConflicts()).single['id'] as int,
-        resolution: 'keep_remote',
-        onKeepLocal: (_) async => fail('keep_local must not run'),
-        onKeepRemote: (_, _) async {},
-      );
-      expect(await queue.listConflicts(), isEmpty);
-      expect(
-        await queue.countConflicts(),
-        0,
-        reason: 'a resolved conflict must not stay on the badge',
-      );
-      expect((await queue.countBadge()).conflicts, 0);
-    });
+        await queue.resolveConflict(
+          (await queue.listConflicts()).single['id'] as int,
+          resolution: 'keep_remote',
+          onKeepLocal: (_) async => fail('keep_local must not run'),
+          onKeepRemote: (_, _) async {},
+        );
+        expect(await queue.listConflicts(), isEmpty);
+        expect(
+          await queue.countConflicts(),
+          0,
+          reason: 'a resolved conflict must not stay on the badge',
+        );
+        expect((await queue.countBadge()).conflicts, 0);
+      },
+    );
 
     test('countBadge agrees with countPending and countBlocked', () async {
       for (final code in ['QC-A', 'QC-B', 'QC-C']) {
         final id = await insertSample(code);
-        await fixture.transaction((txn) => queue.enqueue(
-              txn,
-              entityType: 'sample',
-              entityId: code,
-              localRef: id,
-              operation: 'update',
-              payload: const {},
-            ));
+        await fixture.transaction(
+          (txn) => queue.enqueue(
+            txn,
+            entityType: 'sample',
+            entityId: code,
+            localRef: id,
+            operation: 'update',
+            payload: const {},
+          ),
+        );
       }
       // One pending, one claimed (in_flight), one failed.
       expect((await queue.claim(limit: 1)), hasLength(1));
       final remaining = await queue.listQueue();
       final failed = remaining.firstWhere((r) => r['status'] == 'pending');
-      await queue.markRetry(
-        QueueEntry.fromRow(failed),
-        'boom',
-      );
+      await queue.markRetry(QueueEntry.fromRow(failed), 'boom');
       await queue.markRetry(
         QueueEntry.fromRow(
-          (await queue.listQueue())
-              .firstWhere((r) => r['id'] != failed['id'] && r['status'] == 'pending'),
+          (await queue.listQueue()).firstWhere(
+            (r) => r['id'] != failed['id'] && r['status'] == 'pending',
+          ),
         ),
         'boom',
       );
@@ -475,14 +504,16 @@ void main() {
 
     test('resolveConflict rejects an unknown resolution', () async {
       final id = await insertSample('QC-10b');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-10b',
-            localRef: id,
-            operation: 'update',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-10b',
+          localRef: id,
+          operation: 'update',
+          payload: const {},
+        ),
+      );
       await queue.markConflict((await queue.claim()).single, direction: 'pull');
       final conflict = (await queue.listConflicts()).single;
 
@@ -498,14 +529,16 @@ void main() {
 
     test('retryBlocked drains legacy failed rows and live conflicts', () async {
       final id = await insertSample('QC-11');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-11',
-            localRef: id,
-            operation: 'create',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-11',
+          localRef: id,
+          operation: 'create',
+          payload: const {},
+        ),
+      );
       // `failed` is only ever written by older versions now; simulate one.
       await fixture.db.update(
         'sync_queue',
@@ -528,15 +561,17 @@ void main() {
       // dies before `markDone`/`markRetry` the row was never claimable again.
       // The user's edits were stranded until they reinstalled the app.
       final id = await insertSample('QC-STALL');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-STALL',
-            localRef: id,
-            operation: 'update',
-            payload: const {'decisionStatus': 'APPROVED'},
-            baseVersion: 2,
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-STALL',
+          localRef: id,
+          operation: 'update',
+          payload: const {'decisionStatus': 'APPROVED'},
+          baseVersion: 2,
+        ),
+      );
       final claimed = await queue.claim();
       expect(claimed, hasLength(1));
       expect((await queue.listQueue()).single['status'], 'in_flight');
@@ -551,10 +586,12 @@ void main() {
       expect(row['next_attempt_at'], isNotNull, reason: 'backoff is re-armed');
     });
 
-    test('a recovered row is claimable again and still carries its payload',
-        () async {
-      final id = await insertSample('QC-STALL2');
-      await fixture.transaction((txn) => queue.enqueue(
+    test(
+      'a recovered row is claimable again and still carries its payload',
+      () async {
+        final id = await insertSample('QC-STALL2');
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-STALL2',
@@ -562,60 +599,72 @@ void main() {
             operation: 'update',
             payload: const {'decisionStatus': 'REJECTED'},
             baseVersion: 7,
-          ));
-      await queue.claim();
-      await queue.recoverStalled();
+          ),
+        );
+        await queue.claim();
+        await queue.recoverStalled();
 
-      // Backoff is armed, so clear it the way a real sync cycle would.
-      await fixture.db.update(
-        'sync_queue',
-        {'next_attempt_at': null},
-        where: "status = 'pending'",
-      );
-      final reclaimed = await queue.claim();
-      expect(reclaimed, hasLength(1));
-      expect(reclaimed.single.payload['decisionStatus'], 'REJECTED');
-      expect(reclaimed.single.baseVersion, 7);
-    });
+        // Backoff is armed, so clear it the way a real sync cycle would.
+        await fixture.db.update('sync_queue', {
+          'next_attempt_at': null,
+        }, where: "status = 'pending'");
+        final reclaimed = await queue.claim();
+        expect(reclaimed, hasLength(1));
+        expect(reclaimed.single.payload['decisionStatus'], 'REJECTED');
+        expect(reclaimed.single.baseVersion, 7);
+      },
+    );
 
-    test('a stranded row with a high retry count still returns to pending',
-        () async {
-      final id = await insertSample('QC-STALL3');
-      await fixture.transaction((txn) => queue.enqueue(
+    test(
+      'a stranded row with a high retry count still returns to pending',
+      () async {
+        final id = await insertSample('QC-STALL3');
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-STALL3',
             localRef: id,
             operation: 'create',
             payload: const {},
-          ));
-      await queue.claim();
-      // Simulate the row having burned a big budget before it stranded.
-      await fixture.db.update(
-        'sync_queue',
-        {'retry_count': 19},
-        where: '1 = 1',
-      );
+          ),
+        );
+        await queue.claim();
+        // Simulate the row having burned a big budget before it stranded.
+        await fixture.db.update('sync_queue', {
+          'retry_count': 19,
+        }, where: '1 = 1');
 
-      expect(await queue.recoverStalled(), 1);
+        expect(await queue.recoverStalled(), 1);
 
-      final row = (await queue.listQueue()).single;
-      expect(row['status'], 'pending');
-      expect(row['next_attempt_at'], isNotNull, reason: 'backoff is re-armed');
-      expect(row['last_error'], contains('interrupted mid-push'));
-      expect(await queue.countBlocked(), 0, reason: 'nothing waits for a tap');
-    });
+        final row = (await queue.listQueue()).single;
+        expect(row['status'], 'pending');
+        expect(
+          row['next_attempt_at'],
+          isNotNull,
+          reason: 'backoff is re-armed',
+        );
+        expect(row['last_error'], contains('interrupted mid-push'));
+        expect(
+          await queue.countBlocked(),
+          0,
+          reason: 'nothing waits for a tap',
+        );
+      },
+    );
 
     test('recovery leaves pending, failed and conflict rows alone', () async {
       final id = await insertSample('QC-STALL4');
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: 'QC-STALL4',
-            localRef: id,
-            operation: 'create',
-            payload: const {},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: 'QC-STALL4',
+          localRef: id,
+          operation: 'create',
+          payload: const {},
+        ),
+      );
       final pendingBefore = (await queue.listQueue()).single;
 
       // Nothing is in_flight: recovery must be a no-op, not a requeue of work.
@@ -627,23 +676,27 @@ void main() {
       expect(pendingAfter['updated_at'], pendingBefore['updated_at']);
     });
 
-    test('recovery is idempotent: a second pass finds nothing left to fix',
-        () async {
-      final id = await insertSample('QC-STALL5');
-      await fixture.transaction((txn) => queue.enqueue(
+    test(
+      'recovery is idempotent: a second pass finds nothing left to fix',
+      () async {
+        final id = await insertSample('QC-STALL5');
+        await fixture.transaction(
+          (txn) => queue.enqueue(
             txn,
             entityType: 'sample',
             entityId: 'QC-STALL5',
             localRef: id,
             operation: 'update',
             payload: const {},
-          ));
-      await queue.claim();
+          ),
+        );
+        await queue.claim();
 
-      expect(await queue.recoverStalled(), 1);
-      // Must not touch the row again - `syncNow()` calls this on every run.
-      expect(await queue.recoverStalled(), 0);
-    });
+        expect(await queue.recoverStalled(), 1);
+        // Must not touch the row again - `syncNow()` calls this on every run.
+        expect(await queue.recoverStalled(), 0);
+      },
+    );
   });
 
   group('revision guard (lost-update race)', () {
@@ -652,49 +705,68 @@ void main() {
     // index) and resets it to `pending`. When the older push then settles by
     // id it used to delete that row, silently discarding the newer edit.
     Future<QueueEntry> enqueueAndClaim(String code, int id) async {
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: code,
-            localRef: id,
-            operation: 'create',
-            payload: const {'v': 1},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: code,
+          localRef: id,
+          operation: 'create',
+          payload: const {'v': 1},
+        ),
+      );
       return (await queue.claim()).single;
     }
 
     Future<void> editWhileInFlight(String code, int id) async {
-      await fixture.transaction((txn) => queue.enqueue(
-            txn,
-            entityType: 'sample',
-            entityId: code,
-            localRef: id,
-            operation: 'update',
-            payload: const {'v': 2},
-          ));
+      await fixture.transaction(
+        (txn) => queue.enqueue(
+          txn,
+          entityType: 'sample',
+          entityId: code,
+          localRef: id,
+          operation: 'update',
+          payload: const {'v': 2},
+        ),
+      );
     }
 
-    test('a push that finishes after a newer edit does not delete that edit',
-        () async {
-      final id = await insertSample('QC-RACE1');
-      final claimed = await enqueueAndClaim('QC-RACE1', id);
-      await editWhileInFlight('QC-RACE1', id);
+    test(
+      'a push that finishes after a newer edit does not delete that edit',
+      () async {
+        final id = await insertSample('QC-RACE1');
+        final claimed = await enqueueAndClaim('QC-RACE1', id);
+        await editWhileInFlight('QC-RACE1', id);
 
-      await queue.markDone(claimed, remoteVersion: 9);
+        await queue.markDone(claimed, remoteVersion: 9);
 
-      final rows = await queue.listQueue();
-      expect(rows, hasLength(1),
-          reason: 'the older push must not delete the newer edit');
-      expect(rows.single['status'], 'pending');
-      expect('${rows.single['payload']}', contains('"v":2'));
-      final local = (await fixture.db
-              .query('inspections', where: 'id = ?', whereArgs: [id]))
-          .single;
-      expect(local['sync_state'], isNot('synced'),
-          reason: 'the local row still carries an unsynced edit');
-      expect(local['remote_version'], 0,
-          reason: 'the stale push must not stamp its remote version');
-    });
+        final rows = await queue.listQueue();
+        expect(
+          rows,
+          hasLength(1),
+          reason: 'the older push must not delete the newer edit',
+        );
+        expect(rows.single['status'], 'pending');
+        expect('${rows.single['payload']}', contains('"v":2'));
+        final local = (await fixture.db.query(
+          'inspections',
+          where: 'id = ?',
+          whereArgs: [id],
+        )).single;
+        expect(
+          local['sync_state'],
+          isNot('synced'),
+          reason: 'the local row still carries an unsynced edit',
+        );
+        expect(
+          local['remote_version'],
+          9,
+          reason:
+              'the predecessor is acknowledged, but the newer edit stays queued',
+        );
+        expect(rows.single['base_version'], 9);
+      },
+    );
 
     test('a stale retry does not reset the newer edit\'s backoff', () async {
       final id = await insertSample('QC-RACE2');
@@ -705,7 +777,11 @@ void main() {
 
       final row = (await queue.listQueue()).single;
       expect(row['status'], 'pending');
-      expect(row['retry_count'], 0, reason: 'the newer edit is a fresh attempt');
+      expect(
+        row['retry_count'],
+        0,
+        reason: 'the newer edit is a fresh attempt',
+      );
       expect(row['last_error'], isNull);
       expect(row['next_attempt_at'], isNull, reason: 'no stale backoff');
     });
@@ -717,8 +793,11 @@ void main() {
 
       await queue.markConflict(claimed, direction: 'push_rejected');
 
-      expect(await queue.listConflicts(), isEmpty,
-          reason: 'the user must not resolve a conflict for a superseded payload');
+      expect(
+        await queue.listConflicts(),
+        isEmpty,
+        reason: 'the user must not resolve a conflict for a superseded payload',
+      );
       expect((await queue.listQueue()).single['status'], 'pending');
     });
 
@@ -730,40 +809,57 @@ void main() {
       await queue.markDone(claimed, remoteVersion: 5);
 
       final row = (await queue.listQueue()).single;
-      expect(row['status'], 'pending',
-          reason: 'the recovered row must not be deleted by the dead claim');
+      expect(
+        row['status'],
+        'pending',
+        reason: 'the recovered row must not be deleted by the dead claim',
+      );
     });
   });
 
-  test('purgeSolved drops rows whose local row disappeared, keeps tombstones',
-      () async {
-    final goneId = await insertSample('QC-12');
-    final tombstoneId = await insertSample('QC-13');
-    await fixture.transaction((txn) => queue.enqueue(
+  test(
+    'purgeSolved drops rows whose local row disappeared, keeps tombstones',
+    () async {
+      final goneId = await insertSample('QC-12');
+      final tombstoneId = await insertSample('QC-13');
+      await fixture.transaction(
+        (txn) => queue.enqueue(
           txn,
           entityType: 'sample',
           entityId: 'QC-12',
           localRef: goneId,
           operation: 'create',
           payload: const {},
-        ));
-    await fixture.transaction((txn) => queue.enqueue(
+        ),
+      );
+      await fixture.transaction(
+        (txn) => queue.enqueue(
           txn,
           entityType: 'sample',
           entityId: 'QC-13',
           localRef: tombstoneId,
           operation: 'tombstone',
           payload: const {},
-        ));
+        ),
+      );
 
-    // A restore that did not contain the first row: its queue row is dead.
-    await fixture.db.delete('inspections', where: 'id = ?', whereArgs: [goneId]);
-    await fixture.db.delete('inspections', where: 'id = ?', whereArgs: [tombstoneId]);
+      // A restore that did not contain the first row: its queue row is dead.
+      await fixture.db.delete(
+        'inspections',
+        where: 'id = ?',
+        whereArgs: [goneId],
+      );
+      await fixture.db.delete(
+        'inspections',
+        where: 'id = ?',
+        whereArgs: [tombstoneId],
+      );
 
-    final purged = await queue.purgeSolved();
-    expect(purged, 1, reason: 'the tombstone has to reach the server');
-    final left = await queue.listQueue();
-    expect(left, hasLength(1));
-    expect(left.single['operation'], 'tombstone');
-  });
+      final purged = await queue.purgeSolved();
+      expect(purged, 1, reason: 'the tombstone has to reach the server');
+      final left = await queue.listQueue();
+      expect(left, hasLength(1));
+      expect(left.single['operation'], 'tombstone');
+    },
+  );
 }

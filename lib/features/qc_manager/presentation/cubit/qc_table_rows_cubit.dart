@@ -235,7 +235,9 @@ const _unset = Object();
 /// cubit per open table (see the DI `registerFactoryParam` for its keying).
 class QcTableRowsCubit extends AppCubit<QcTableRowsState> {
   QcTableRowsCubit({required this.repo, required this.tableId})
-    : super(const QcTableRowsState(loading: true));
+    : super(const QcTableRowsState(loading: true)) {
+    refreshOnSync(load);
+  }
 
   final QcCustomTablesRepository repo;
   final int tableId;
@@ -337,8 +339,7 @@ class QcTableRowsCubit extends AppCubit<QcTableRowsState> {
     safeEmit(state.copyWith(selectedIds: diff));
   }
 
-  void clearSelection() =>
-      safeEmit(state.copyWith(selectedIds: const <int>{}));
+  void clearSelection() => safeEmit(state.copyWith(selectedIds: const <int>{}));
 
   /// Drops picked ids the reload no longer knows (deleted on another
   /// device / filtered page refresh), so a stale pick cannot export.

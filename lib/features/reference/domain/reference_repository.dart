@@ -63,10 +63,7 @@ abstract interface class ReferenceRepository {
 
   /// The enriched material (parsed and unit-annotated reference values) plus the
   /// next free entry code for [inspectionDate]. Throws when the id is unknown.
-  Future<Map<String, dynamic>> getMaterial(
-    int id, {
-    String? inspectionDate,
-  });
+  Future<Map<String, dynamic>> getMaterial(int id, {String? inspectionDate});
 
   Future<int> createMaterial({
     required String materialName,

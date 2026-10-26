@@ -1,6 +1,8 @@
 import 'package:flutter/widgets.dart';
 
 import '../../core/responsive/form_factor.dart';
+import '../../core/responsive/responsive_scope.dart';
+import '../tokens/app_spacing.dart';
 
 /// Picks the authored variant for the resolved form factor.
 ///
@@ -37,24 +39,28 @@ Widget appAdaptiveVariant(
   required WidgetBuilder desktop,
   required WidgetBuilder mobile,
 }) {
-  return FormFactor.current.isMobile ? mobile(context) : desktop(context);
+  return appUsesDesktopChrome(context) ? desktop(context) : mobile(context);
 }
+
+/// Overlay policy follows the authored platform experience even on a narrow
+/// desktop window or a landscape phone. The scope also supports previews.
+bool appUsesDesktopChrome(BuildContext context) =>
+    ResponsiveScope.maybeOf(context)?.isDesktop ?? FormFactor.current.isDesktop;
+
+/// One density policy for shared controls; window width never shrinks targets.
+double appControlHeight(BuildContext context, {bool compact = false}) =>
+    appUsesDesktopChrome(context)
+    ? (compact ? AppControlSizes.compact : AppControlSizes.regular)
+    : AppControlSizes.touch;
 
 /// Widget form of [appAdaptiveVariant], for call sites that prefer a child.
 class AppAdaptive extends StatelessWidget {
-  const AppAdaptive({
-    super.key,
-    required this.desktop,
-    required this.mobile,
-  });
+  const AppAdaptive({super.key, required this.desktop, required this.mobile});
 
   final WidgetBuilder desktop;
   final WidgetBuilder mobile;
 
   @override
-  Widget build(BuildContext context) => appAdaptiveVariant(
-        context,
-        desktop: desktop,
-        mobile: mobile,
-      );
+  Widget build(BuildContext context) =>
+      appAdaptiveVariant(context, desktop: desktop, mobile: mobile);
 }

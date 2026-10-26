@@ -1,4 +1,5 @@
 import 'dart:async';
+import '../sync/shared_settings.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:sqflite_common/utils/utils.dart' as utils;
@@ -6,21 +7,41 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../app_paths.dart';
 import 'db_trace.dart';
+import 'business_transaction.dart';
 
 /// SQLite access layer (port of core/infrastructure/sqlite_db.py schema).
 ///
 /// On desktop (Windows/macOS/Linux) the FFI factory is used; on mobile the
 /// native sqflite factory works out of the box — the same code path applies.
 class DatabaseHelper {
-  DatabaseHelper(this.paths);
+  DatabaseHelper(this.paths, {this.protocolOnly = false});
 
   final AppPaths paths;
+  final bool protocolOnly;
+
+  BusinessTransactionGateway? businessGateway;
+
+  /// Business writes use this boundary. Download, schema and protocol-store
+  /// transactions continue using the raw database transaction API.
+  Future<T> businessTransaction<T>(
+    Future<T> Function(DatabaseExecutor executor) operation,
+  ) async {
+    final db = await database;
+    final gateway = businessGateway;
+    if (gateway != null) return gateway.run<T>(db, operation);
+    return db.transaction<T>((txn) => operation(txn));
+  }
 
   /// The one live connection. There is deliberately no second read-only
   /// handle: sqflite's single-instance cache is keyed by path only, so an extra
   /// `openDatabase(readOnly: true)` returns this same object and `close()` would
   /// shut it down twice. See [readDatabase].
   Database? _db;
+
+  /// Changes before a connection is closed. Async sync work must not resume
+  /// against a replacement file, even when its organization id is unchanged.
+  int get connectionGeneration => _connectionGeneration;
+  int _connectionGeneration = 0;
 
   /// Initialize the FFI database factory for desktop platforms.
   ///
@@ -196,6 +217,8 @@ class DatabaseHelper {
     final pending = _closing;
     if (pending != null) return pending;
 
+    _connectionGeneration++;
+
     final completer = Completer<void>();
     _closing = completer.future;
     try {
@@ -260,7 +283,11 @@ class DatabaseHelper {
         version: 1,
         onConfigure: (db) async {
           await db.rawQuery('PRAGMA journal_mode=WAL');
-          await db.rawQuery('PRAGMA synchronous=NORMAL');
+          // The live database contains business state and (in central mode)
+          // the only durable copy of staged commands. FULL is required for
+          // both; tying it to protocolOnly left the actual application DB at
+          // NORMAL because it is intentionally shared with the read model.
+          await db.rawQuery('PRAGMA synchronous=FULL');
           await db.rawQuery('PRAGMA busy_timeout=5000');
           await db.rawQuery('PRAGMA temp_store=MEMORY');
           await db.rawQuery('PRAGMA cache_size=-20000');
@@ -283,7 +310,10 @@ class DatabaseHelper {
         onConfigure: (db) async {
           await db.rawQuery('PRAGMA foreign_keys=ON');
           await db.rawQuery('PRAGMA journal_mode=WAL');
-          await db.rawQuery('PRAGMA synchronous=NORMAL');
+          // Protocol requests are the durable source of truth while the
+          // rebuildable cache is disposable. FULL sync closes the crash window
+          // between the outbox transaction and an OS power loss.
+          await db.rawQuery('PRAGMA synchronous=FULL');
           await db.rawQuery('PRAGMA busy_timeout=5000');
           await db.rawQuery('PRAGMA temp_store=MEMORY');
           await db.rawQuery('PRAGMA cache_size=-20000');
@@ -293,7 +323,11 @@ class DatabaseHelper {
           await _createSchema(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
-          await _runLegacyGuarantees(db);
+          if (protocolOnly) {
+            await _createCommandTables(db);
+          } else {
+            await _runLegacyGuarantees(db);
+          }
         },
       ),
     );
@@ -302,7 +336,10 @@ class DatabaseHelper {
     // Labelled: ~350 statements on the raw handle before the TracedDatabase
     // wrap, otherwise a slow open (index builds on a large table) is an
     // invisible holder that stall reports blame on the first badge read.
-    await DbTrace.run('db.openGuarantees', () => _runLegacyGuarantees(db));
+    await DbTrace.run(
+      'db.openGuarantees',
+      () => protocolOnly ? _createCommandTables(db) : _runLegacyGuarantees(db),
+    );
     // Every call through the handle is timed and, if it overruns, reported with
     // its caller's stack. Wrapping the handle rather than individual call sites
     // is what makes the set of suspects complete: a stall report has to list
@@ -314,6 +351,10 @@ class DatabaseHelper {
   /// Create the full schema. Idempotent (IF NOT EXISTS) so it can also be
   /// used to fill any missing tables after a restore.
   Future<void> _createSchema(Database db) async {
+    if (protocolOnly) {
+      await _createCommandTables(db);
+      return;
+    }
     await db.execute(_usersTableV2);
     await db.execute('''
       CREATE TABLE IF NOT EXISTS reference_materials (
@@ -604,7 +645,129 @@ class DatabaseHelper {
     // (Perf indexes too: they must run after the column guarantees, so they
     // live at the end of `_runLegacyGuarantees`, not here.)
     await _createSyncTables(db);
+    await _createCommandTables(db);
     await _runLegacyGuarantees(db);
+  }
+
+  /// Central command protocol stores (plan SYNC_ARCHITECTURE_PLAN_2026-10-25
+  /// §5): user drafts, the send outbox and the per-organization applied
+  /// change-sequence checkpoint. `CREATE TABLE IF NOT EXISTS` on every open,
+  /// same guarantee as the sync tables above.
+  Future<void> _createCommandTables(Database db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS central_entity_identities (
+      entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+      local_ref INTEGER NOT NULL, approved_version INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY(entity_type, entity_id), UNIQUE(entity_type, local_ref)
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS central_approved_records (
+      entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+      version INTEGER NOT NULL, payload TEXT NOT NULL, payload_hash TEXT NOT NULL,
+      PRIMARY KEY(entity_type, entity_id)
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS central_command_entities (
+      entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+      operation_id TEXT NOT NULL,
+      PRIMARY KEY(entity_type, entity_id)
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS central_sync_state (
+      organization_id TEXT NOT NULL, uid TEXT NOT NULL, role TEXT NOT NULL,
+      applied_sequence INTEGER NOT NULL DEFAULT 0,
+      bootstrap_state TEXT NOT NULL DEFAULT 'required',
+      snapshot_watermark INTEGER, snapshot_entity TEXT, snapshot_after TEXT,
+      updated_at TEXT,
+      PRIMARY KEY(organization_id, uid)
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS central_bootstrap_staging (
+      organization_id TEXT NOT NULL, uid TEXT NOT NULL,
+      entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      payload TEXT NOT NULL, payload_hash TEXT NOT NULL,
+      PRIMARY KEY(organization_id, uid, entity_type, entity_id)
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS central_bootstrap_state (
+      organization_id TEXT NOT NULL, uid TEXT NOT NULL,
+      role TEXT NOT NULL, manifest_version INTEGER NOT NULL,
+      h0 INTEGER NOT NULL, h1 INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT,
+      PRIMARY KEY(organization_id, uid)
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS legacy_sync_archive (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_table TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      row_json TEXT NOT NULL,
+      archived_at TEXT NOT NULL
+    )''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS drafts (
+        id TEXT PRIMARY KEY,
+        organization_id TEXT NOT NULL,
+        uid TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        entity_id TEXT NOT NULL DEFAULT '',
+        parent_entity_type TEXT NOT NULL DEFAULT '',
+        parent_entity_id TEXT NOT NULL DEFAULT '',
+        base_version INTEGER NOT NULL DEFAULT 0,
+        payload TEXT NOT NULL DEFAULT '{}',
+        state TEXT NOT NULL DEFAULT 'local_draft',
+        failure_code TEXT,
+        failure_message TEXT,
+        created_at TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL DEFAULT ''
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_drafts_owner_state
+        ON drafts(organization_id, uid, entity_type, state, updated_at)
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS command_outbox (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        draft_id TEXT NOT NULL,
+        operation_id TEXT NOT NULL UNIQUE,
+        organization_id TEXT NOT NULL,
+        uid TEXT NOT NULL,
+        device_id TEXT NOT NULL DEFAULT '',
+        command_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        expected_version INTEGER NOT NULL DEFAULT 0,
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        payload TEXT NOT NULL DEFAULT '{}',
+        payload_hash TEXT NOT NULL,
+        dependencies TEXT NOT NULL DEFAULT '{}',
+        state TEXT NOT NULL DEFAULT 'pending',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        next_attempt_at TEXT,
+        last_error_code TEXT,
+        last_error TEXT,
+        result_json TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    ''');
+    // `operation_id UNIQUE` is the client-side half of "one effect": a replay
+    // path that would mint a second operationId for the same logical send is
+    // a bug, and this index makes it loud.
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_command_outbox_ready
+        ON command_outbox(state, next_attempt_at, id)
+    ''');
+    await db.execute(
+      '''CREATE TABLE IF NOT EXISTS command_worker_leases (
+      lease_key TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at INTEGER NOT NULL)''',
+    );
+    await db.execute(
+      '''CREATE TABLE IF NOT EXISTS sync_runtime_leases (
+      lease_key TEXT PRIMARY KEY, owner TEXT NOT NULL, expires_at INTEGER NOT NULL)''',
+    );
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS sync_checkpoint (
+        organization_id TEXT PRIMARY KEY,
+        applied_sequence INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT
+      )
+    ''');
   }
 
   /// V2 `users` = organization roster (identity lives in Firebase, never a
@@ -617,6 +780,7 @@ class DatabaseHelper {
       email TEXT NOT NULL,
       full_name TEXT NOT NULL DEFAULT '',
       role TEXT NOT NULL DEFAULT 'viewer',
+      roles_json TEXT NOT NULL DEFAULT '[]',
       status TEXT NOT NULL DEFAULT 'invited',
       permissions_json TEXT NOT NULL DEFAULT '[]',
       display_name TEXT,
@@ -649,9 +813,18 @@ class DatabaseHelper {
         next_attempt_at TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
         last_error TEXT,
-        revision INTEGER NOT NULL DEFAULT 0
+        revision INTEGER NOT NULL DEFAULT 0,
+        owner_uid TEXT DEFAULT ''
       )
     ''');
+    await _ensureColumn(
+      db,
+      'sync_queue',
+      'owner_uid',
+      "owner_uid TEXT DEFAULT ''",
+    );
+    await db.execute('''CREATE INDEX IF NOT EXISTS idx_sync_queue_owner
+      ON sync_queue(owner_uid, status, next_attempt_at, id)''');
     await db.execute('''
       CREATE UNIQUE INDEX IF NOT EXISTS idx_sync_queue_entity
         ON sync_queue(entity_type, entity_id)
@@ -708,7 +881,7 @@ class DatabaseHelper {
       CREATE INDEX IF NOT EXISTS idx_sync_conflicts_unresolved
         ON sync_conflicts(id)
         WHERE resolution IS NULL
-           OR resolution NOT IN ('keep_local','keep_remote','ignored')
+           OR resolution NOT IN ('keep_local','keep_remote','ignored','synced')
     ''');
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_sync_conflicts_detected
@@ -791,10 +964,13 @@ class DatabaseHelper {
     'lab_units',
     'lab_material_analyses',
     'reference_materials',
-    // `parameters` is intentionally device-local (master data seeded from
-    // assets/units.xlsx): it was listed here before but has no SyncEntity,
-    // no collection and is never enqueued/pulled. Keeping it here only added
-    // sync bookkeeping columns + backfill/index work for nothing.
+    'nutrition_formulations',
+    'parameters',
+    'material_parameter_bounds',
+    'organization_settings',
+    'qc_sops',
+    'qc_sop_revisions',
+    'qc_sop_reads',
     'lab_inventory',
     'inventory_lots',
     'inventory_transactions',
@@ -835,6 +1011,8 @@ class DatabaseHelper {
   /// `_backfillRemoteIds` — and every other helper that addresses a local
   /// row — would write `WHERE id = ?` on a table that has no such column.
   static const Map<String, String> _syncedTablePk = {
+    'qc_sops': 'sop_id',
+    'qc_sop_revisions': 'rev_id',
     'qc_templates': 'template_id',
     'qc_sections': 'section_id',
     'qc_items': 'item_id',
@@ -853,6 +1031,15 @@ class DatabaseHelper {
   /// parent's cross-device `remote_id`, stamped by the write path and
   /// remapped on pull (see `resolveRemoteRowRefs` in `entity_registry.dart`).
   static const List<(String, String)> _qcParentStamps = [
+    ('product_batch_samples', 'batch_entry_code'),
+    ('qc_sop_revisions', 'sop_remote_id'),
+    ('qc_sop_reads', 'sop_remote_id'),
+    ('material_parameter_bounds', 'material_remote_id'),
+    ('material_parameter_bounds', 'parameter_remote_id'),
+    ('lab_analyses', 'parameter_remote_id'),
+    ('lab_analysis_items', 'inventory_remote_id'),
+    ('lab_field_chemical_links', 'inventory_remote_id'),
+    ('lab_material_analyses', 'material_remote_id'),
     ('qc_sections', 'template_remote_id'),
     ('qc_items', 'template_remote_id'),
     ('qc_items', 'section_remote_id'),
@@ -1275,6 +1462,12 @@ class DatabaseHelper {
   /// Idempotent legacy-guard migrations matching sqlite_db.py pragmas/rules.
   Future<void> _runLegacyGuarantees(Database db) async {
     await _rebuildFieldChemicalLinks(db);
+    await _ensureColumn(
+      db,
+      'users',
+      'roles_json',
+      "roles_json TEXT NOT NULL DEFAULT '[]'",
+    );
 
     // NOTE: perf indexes are created at the END of this method, not here.
     // SQLite resolves an index's columns when the index is created, so an
@@ -1634,6 +1827,13 @@ class DatabaseHelper {
     // V2: identity + sync bookkeeping.
     await _migrateUsersTable(db);
     await _createSyncTables(db);
+    // Command-protocol stores (`command_outbox`, the lease tables and the
+    // applied-sequence checkpoint) ship with the same every-open guarantee:
+    // without it an install that predates them never gains them, and every
+    // outbox/lease query dies with "no such table" (seen on Android).
+    // Idempotent `CREATE TABLE IF NOT EXISTS`; its index resolves columns
+    // declared in its own CREATE, so placement is safe.
+    await _createCommandTables(db);
     // Optimistic-concurrency token for queue settlement (plan §9.6): a claim
     // stamps the revision it read, and the settlement only applies when the
     // row still carries it - so an edit that landed while the push was in
@@ -1644,7 +1844,65 @@ class DatabaseHelper {
       'revision',
       'revision INTEGER NOT NULL DEFAULT 0',
     );
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS organization_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        key TEXT NOT NULL UNIQUE,
+        value TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS nutrition_formulations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        remote_id TEXT,
+        name TEXT NOT NULL,
+        product_id INTEGER,
+        items_json TEXT NOT NULL DEFAULT '[]',
+        parameters_json TEXT NOT NULL DEFAULT '{}',
+        graph_parameters_json TEXT NOT NULL DEFAULT '["protein","fat"]',
+        calculation_json TEXT NOT NULL DEFAULT '{}',
+        source_snapshot_json TEXT NOT NULL DEFAULT '[]',
+        copied_from_id INTEGER,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_by TEXT,
+        updated_at TEXT,
+        deleted_at TEXT,
+        device_id TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_nutrition_formulations_active
+      ON nutrition_formulations(is_archived, updated_at DESC)
+    ''');
+    final sharedKeysSql = sharedSettingKeys.map((key) => "'$key'").join(',');
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS settings '
+      '(key TEXT PRIMARY KEY, value TEXT NOT NULL)',
+    );
+    // The mirror's numeric key works with the shared outbox. Triggers make
+    // every remote-apply path (pull, keep-remote, rebase) update settings too.
+    for (final event in ['INSERT', 'UPDATE']) {
+      await db.execute('''
+        CREATE TRIGGER IF NOT EXISTS organization_settings_${event.toLowerCase()}
+        AFTER $event ON organization_settings
+        WHEN NEW.key IN ($sharedKeysSql)
+        BEGIN
+          INSERT INTO settings(key, value) VALUES(NEW.key, NEW.value)
+          ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+        END
+      ''');
+    }
+    await db.execute('''
+      INSERT OR IGNORE INTO organization_settings(key, value)
+      SELECT key, value FROM settings WHERE key IN ($sharedKeysSql)
+    ''');
     for (final table in syncedTables) {
+      // Reuse this table's schema snapshot for the guarantees below instead
+      // of paying an Android platform-channel PRAGMA round trip per column.
+      final info = await db.rawQuery('PRAGMA table_info($table)');
+      final columns = {for (final column in info) '${column['name']}'};
       // The per-row sync version mirrored from the Firestore envelope
       // (`remoteToLocalRow` writes it on every pull). `users` and
       // `inspection_status_history` already declared it; `decision_version`
@@ -1655,37 +1913,71 @@ class DatabaseHelper {
         table,
         'version',
         'version INTEGER NOT NULL DEFAULT 1',
+        knownColumns: columns,
       );
       await _ensureColumn(
         db,
         table,
         'remote_version',
         'remote_version INTEGER NOT NULL DEFAULT 0',
+        knownColumns: columns,
       );
       await _ensureColumn(
         db,
         table,
         'remote_synced_at',
         'remote_synced_at TEXT',
+        knownColumns: columns,
       );
       await _ensureColumn(
         db,
         table,
         'sync_state',
         "sync_state TEXT NOT NULL DEFAULT 'local'",
+        knownColumns: columns,
       );
-      await _ensureColumn(db, table, 'deleted_at', 'deleted_at TEXT');
+      await _ensureColumn(
+        db,
+        table,
+        'deleted_at',
+        'deleted_at TEXT',
+        knownColumns: columns,
+      );
       // Comprehensive sync plan §1+§2: global cross-device identity +
       // write attribution. `remote_id` is the Firestore document id for new
       // entities (UUID for new rows, `legacy_<table>_<id>` backfill for old).
-      await _ensureColumn(db, table, 'remote_id', 'remote_id TEXT');
-      await _ensureColumn(db, table, 'updated_at', 'updated_at TEXT');
+      await _ensureColumn(
+        db,
+        table,
+        'remote_id',
+        'remote_id TEXT',
+        knownColumns: columns,
+      );
+      await _ensureColumn(
+        db,
+        table,
+        'updated_at',
+        'updated_at TEXT',
+        knownColumns: columns,
+      );
       // Person columns hold Firebase uids (TEXT). Older installs created this
       // as INTEGER; SQLite type affinity still stores TEXT fine, and all
       // readers must tolerate both (see LabRepo user-id parsing + entity
       // registry remap). New columns are TEXT.
-      await _ensureColumn(db, table, 'updated_by', 'updated_by TEXT');
-      await _ensureColumn(db, table, 'device_id', 'device_id TEXT');
+      await _ensureColumn(
+        db,
+        table,
+        'updated_by',
+        'updated_by TEXT',
+        knownColumns: columns,
+      );
+      await _ensureColumn(
+        db,
+        table,
+        'device_id',
+        'device_id TEXT',
+        knownColumns: columns,
+      );
       await _backfillRemoteIds(db, table, pkColumn: _syncedTablePk[table]);
     }
     // QC parent-identity stamps (plan P8): the QC child tables are remapped on
@@ -1696,12 +1988,33 @@ class DatabaseHelper {
     // names this loop's backfill stamped onto the parents above. Empty-string
     // defaults so new writes always know the column exists.
     for (final (table, column) in _qcParentStamps) {
+      final referenceConfig = const {
+        'product_batch_samples',
+        'lab_analyses',
+        'lab_analysis_items',
+        'lab_field_chemical_links',
+        'lab_material_analyses',
+      }.contains(table);
+      final before = referenceConfig
+          ? await db.rawQuery('PRAGMA table_info($table)')
+          : const <Map<String, Object?>>[];
+      final needsIdentityReplay =
+          before.isNotEmpty && !before.any((info) => info['name'] == column);
       await _ensureColumn(
         db,
         table,
         column,
         '$column TEXT NOT NULL DEFAULT \'\'',
       );
+      if (needsIdentityReplay) {
+        // Old cloud recipes carry only origin-device numeric foreign keys.
+        // The writer backfills their new parent identities once after upgrade;
+        // viewers still cannot enqueue writes because backfill checks the role.
+        await db.rawUpdate(
+          "UPDATE $table SET sync_state = 'local' "
+          "WHERE sync_state = 'synced' AND remote_version > 0",
+        );
+      }
     }
     // Legacy lot repair runs AFTER the `syncedTables` loop above, not after
     // `_createInventoryLotsTable`: on a file old enough that `lab_inventory`
@@ -1731,6 +2044,28 @@ class DatabaseHelper {
     );
     await _backfillEquipmentRemoteIds(db);
     await _healBatchSampleParentIds(db);
+    // A previous app could acknowledge a sample while attaching it to a
+    // coincidentally equal local id. Re-read old cloud samples once so their
+    // origin-device parent identity can repair those links, including viewers.
+    const batchRescan = 'product_batch_parent_rescan_v1';
+    final rescan = await db.query(
+      'sync_metadata',
+      columns: const ['value'],
+      where: 'key = ?',
+      whereArgs: [batchRescan],
+      limit: 1,
+    );
+    if (rescan.isEmpty) {
+      await db.delete(
+        'sync_metadata',
+        where: 'key = ?',
+        whereArgs: ['pull_cursor_productBatchSample'],
+      );
+      await db.rawInsert(
+        'INSERT OR IGNORE INTO sync_metadata(key,value) VALUES(?,?)',
+        [batchRescan, '1'],
+      );
+    }
     // Product inspections (same `inspections` table, `inspection_kind='product'`):
     // the kind/product/formula/batch columns for existing installs. The
     // sentinel material row that product rows point at (`material_id` is
@@ -2048,9 +2383,7 @@ class DatabaseHelper {
         const legacy = 'qc_findings_nc_legacy_v1';
         await txn.execute('ALTER TABLE qc_findings_nc RENAME TO $legacy');
         final cols = await txn.rawQuery('PRAGMA table_info($legacy)');
-        final names = [
-          for (final col in cols) '${col['name']}',
-        ].join(', ');
+        final names = [for (final col in cols) '${col['name']}'].join(', ');
         await txn.execute('''
           CREATE TABLE qc_findings_nc (
             finding_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2356,8 +2689,10 @@ class DatabaseHelper {
   Future<void> _healLegacyLotParentIds(Database db) async {
     try {
       final names = {
-        for (final c in (await db.rawQuery('PRAGMA table_info(inventory_lots)')))
-          '${c['name']}'
+        for (final c in (await db.rawQuery(
+          'PRAGMA table_info(inventory_lots)',
+        )))
+          '${c['name']}',
       };
       if (!names.contains('inventory_remote_id')) return;
       await db.execute('''
@@ -2416,6 +2751,7 @@ class DatabaseHelper {
         updated_at TEXT,
         updated_by INTEGER,
         batch_remote_id TEXT NOT NULL DEFAULT '',
+        batch_entry_code TEXT NOT NULL DEFAULT '',
         remote_id TEXT UNIQUE,
         device_id TEXT,
         version INTEGER NOT NULL DEFAULT 1,
@@ -2520,10 +2856,16 @@ class DatabaseHelper {
     Database db,
     String table,
     String column,
-    String spec,
-  ) async {
-    final cols = await db.rawQuery('PRAGMA table_info($table)');
-    if (cols.isEmpty) {
+    String spec, {
+    Set<String>? knownColumns,
+  }) async {
+    final columns =
+        knownColumns ??
+        {
+          for (final info in await db.rawQuery('PRAGMA table_info($table)'))
+            '${info['name']}',
+        };
+    if (columns.isEmpty) {
       // A table that is not there cannot gain a column, and `ALTER TABLE` on a
       // missing table throws - which would abort the open and leave the user
       // with no way into their data at all. Report it and move on: an absent
@@ -2533,9 +2875,17 @@ class DatabaseHelper {
       );
       return;
     }
-    final has = cols.any((c) => c['name'] == column);
+    final has = columns.contains(column);
     if (!has) {
-      await db.execute('ALTER TABLE $table ADD COLUMN $spec');
+      try {
+        await db.execute('ALTER TABLE $table ADD COLUMN $spec');
+      } on Object {
+        // Separate foreground/Workmanager engines can both observe the old
+        // schema. Accept a concurrent ALTER only if the column now exists.
+        final latest = await db.rawQuery('PRAGMA table_info($table)');
+        if (!latest.any((info) => info['name'] == column)) rethrow;
+      }
+      columns.add(column);
     }
   }
 
@@ -2590,9 +2940,7 @@ class DatabaseHelper {
   /// row for events written before the column existed. Idempotent.
   Future<void> _backfillEquipmentRemoteIds(Database db) async {
     try {
-      final cols = await db.rawQuery(
-        'PRAGMA table_info(lab_equipment_events)',
-      );
+      final cols = await db.rawQuery('PRAGMA table_info(lab_equipment_events)');
       if (cols.isEmpty) return;
       final names = cols.map((c) => '${c['name']}').toSet();
       if (!names.contains('equipment_remote_id')) return;
@@ -2605,9 +2953,7 @@ class DatabaseHelper {
         WHERE (equipment_remote_id IS NULL OR equipment_remote_id = '')
       ''');
     } on Object catch (e) {
-      debugPrint(
-        '[DatabaseHelper] equipment_remote_id backfill skipped: $e',
-      );
+      debugPrint('[DatabaseHelper] equipment_remote_id backfill skipped: $e');
     }
   }
 
@@ -2630,11 +2976,28 @@ class DatabaseHelper {
           WHERE i.id = product_batch_samples.batch_id
         )
         WHERE (batch_remote_id IS NULL OR batch_remote_id = '')
+          AND EXISTS (
+            SELECT 1 FROM inspections i
+            WHERE i.id = product_batch_samples.batch_id
+              AND i.remote_id IS NOT NULL AND i.remote_id <> ''
+          )
       ''');
+      if (names.contains('batch_entry_code')) {
+        await db.execute('''
+          UPDATE product_batch_samples
+          SET batch_entry_code = (
+            SELECT i.entry_code FROM inspections i
+            WHERE i.id = product_batch_samples.batch_id
+          )
+          WHERE batch_entry_code = '' AND EXISTS (
+            SELECT 1 FROM inspections i
+            WHERE i.id = product_batch_samples.batch_id
+              AND i.entry_code IS NOT NULL AND i.entry_code <> ''
+          )
+        ''');
+      }
     } on Object catch (e) {
-      debugPrint(
-        '[DatabaseHelper] batch-sample parent-id heal skipped: $e',
-      );
+      debugPrint('[DatabaseHelper] batch-sample parent-id heal skipped: $e');
     }
   }
 

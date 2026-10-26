@@ -25,16 +25,18 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
     String initialDateFrom = '',
     String initialDateTo = '',
   }) : super(
-          InspectionsState(
-            pageSize: initialPageSize,
-            status: initialStatus,
-            supplier: initialSupplier,
-            materialId: initialMaterialId,
-            materialName: initialMaterialName,
-            dateFrom: initialDateFrom,
-            dateTo: initialDateTo,
-          ),
-        );
+         InspectionsState(
+           pageSize: initialPageSize,
+           status: initialStatus,
+           supplier: initialSupplier,
+           materialId: initialMaterialId,
+           materialName: initialMaterialName,
+           dateFrom: initialDateFrom,
+           dateTo: initialDateTo,
+         ),
+       ) {
+    refreshOnSync(() => load(page: state.page));
+  }
 
   final InspectionRepository repo;
   final ReportRepository reports;

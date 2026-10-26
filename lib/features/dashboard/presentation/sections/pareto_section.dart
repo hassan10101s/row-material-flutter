@@ -8,6 +8,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../cubit/dashboard_kpis_state.dart';
 import '../widgets/dashboard_section_title.dart';
 import '../../domain/dashboard_kpis.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class ParetoSection extends StatelessWidget {
   final DashboardKpisState kpi;
@@ -76,7 +77,9 @@ class ParetoCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final maxCount = entries.fold<int>(0, (m, e) => e.count > m ? e.count : m);
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

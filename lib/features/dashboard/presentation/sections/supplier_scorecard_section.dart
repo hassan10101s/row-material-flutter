@@ -6,6 +6,7 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../cubit/dashboard_kpis_state.dart';
 import '../widgets/dashboard_section_title.dart';
 import '../../domain/dashboard_kpis.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 String dashboardTierWord(String tier) {
   return switch (tier) {
@@ -82,7 +83,9 @@ class SupplierScorecardSection extends StatelessWidget {
             'Sorted by acceptance % and volume',
           ),
         ),
-        Card(
+        AppCard(
+          padding: EdgeInsets.zero,
+          enableHover: false,
           child: Padding(
             padding: const EdgeInsets.all(16),
             child: Column(

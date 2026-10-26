@@ -17,12 +17,13 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
-import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/locale/locale_service.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../design_system/tokens/app_colors.dart';
+import '../../../design_system/tokens/app_motion.dart';
 import '../../../design_system/tokens/app_spacing.dart';
+import '../../../design_system/widgets/app_window.dart';
 import '../../../design_system/widgets/app_support.dart';
 import '../../../design_system/widgets/app_user_avatar.dart';
 import '../../auth/domain/user.dart';
@@ -47,6 +48,7 @@ class ShellTopBar extends StatelessWidget {
     this.title,
     this.onMenu,
     this.showRoleChip = true,
+    this.compact = false,
   });
 
   final User user;
@@ -61,6 +63,7 @@ class ShellTopBar extends StatelessWidget {
   final VoidCallback? onMenu;
 
   final bool showRoleChip;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -71,6 +74,66 @@ class ShellTopBar extends StatelessWidget {
   }
 
   Widget _bar(BuildContext context) {
+    if (compact) {
+      return SizedBox(
+        height: 56,
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: AppText.t('القائمة', 'Menu'),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              onPressed: onMenu,
+              icon: const Icon(Icons.menu),
+            ),
+            Expanded(
+              child: Text(
+                title ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+            ),
+            SizedBox(
+              width: 48,
+              height: 48,
+              child: SyncBadge(
+                status: syncStatus.status,
+                onTap: onOpenSync,
+                compact: true,
+              ),
+            ),
+            const SizedBox(width: 48, height: 48, child: NotificationBell()),
+            PopupMenuButton<String>(
+              tooltip: AppText.t('المزيد', 'More'),
+              onSelected: (value) {
+                switch (value) {
+                  case 'language':
+                    locale.toggle();
+                  case 'theme':
+                    theme.toggle();
+                  case 'support':
+                    openSupportSheet(context);
+                }
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'language',
+                  child: Text(AppStrings.toggleLanguage),
+                ),
+                PopupMenuItem(
+                  value: 'theme',
+                  child: Text(AppStrings.toggleTheme),
+                ),
+                PopupMenuItem(
+                  value: 'support',
+                  child: Text(AppText.t('الدعم والتواصل', 'Support & contact')),
+                ),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
     // Transparent chrome: no solid strip, no divider — the page background
     // shows through and the round buttons (language, theme, support) plus
     // the bell and sync badge read as floating pills.
@@ -78,7 +141,7 @@ class ShellTopBar extends StatelessWidget {
       color: Colors.transparent,
       elevation: 0,
       child: Container(
-        height: 60.h,
+        constraints: const BoxConstraints(minHeight: 56),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: const BoxDecoration(color: Colors.transparent),
         child: Row(
@@ -158,7 +221,7 @@ class ShellTopBar extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  AppRoles.label(user.role),
+                  user.roleLabel,
                   style: TextStyle(
                     fontSize: 12.spMax,
                     color: AppColors.warning,
@@ -261,7 +324,9 @@ class ShellNavItem extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    Container(
+                    AnimatedContainer(
+                      duration: AppMotion.of(context, AppMotion.fast),
+                      curve: Curves.easeOutCubic,
                       width: 34.r,
                       height: 34.r,
                       decoration: BoxDecoration(
@@ -310,19 +375,28 @@ class ShellNavItem extends StatelessWidget {
               ),
             ),
           ),
-          if (active)
-            PositionedDirectional(
-              start: 0,
-              top: 8,
-              bottom: 8,
-              child: Container(
-                width: 3.5,
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(4),
+          // The active-edge pill is always in the stack and cross-fades with
+          // the active state, so moving between destinations animates the
+          // indicator instead of popping it (drawer and desktop sidebar both).
+          PositionedDirectional(
+            start: 0,
+            top: 8,
+            bottom: 8,
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                duration: AppMotion.of(context, AppMotion.fast),
+                curve: Curves.easeOutCubic,
+                opacity: active ? 1 : 0,
+                child: Container(
+                  width: 3.5,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
@@ -358,81 +432,79 @@ class ShellIdentityCard extends StatelessWidget {
   /// gear button beside the name jumps straight to Settings.
   Future<void> _openAccountSheet(BuildContext context) {
     final label = user.label.isNotEmpty ? user.label : user.email;
-    return showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              child: Row(
-                children: [
-                  AppUserAvatar(
-                    name: label,
-                    photoUrl: user.photoUrl,
-                    radius: 22,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          label,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15.spMax,
-                          ),
+    return showAppOverlay<void>(
+      context,
+      title: AppText.t('الحساب', 'Account'),
+      icon: Icons.person_outline,
+      builder: (sheetContext, close) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Row(
+              children: [
+                AppUserAvatar(name: label, photoUrl: user.photoUrl, radius: 22),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15.spMax,
                         ),
-                        Text(
-                          '${user.username} — ${AppRoles.label(user.role)}',
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 12.spMax,
-                          ),
+                      ),
+                      Text(
+                        '${user.username} — ${user.roleLabel}',
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 12.spMax,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
+              ],
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.settings_outlined),
+            title: Text(AppText.t('الإعدادات', 'Settings')),
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              onOpenSettings();
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.phone_iphone),
+            title: Text(
+              AppText.t(
+                'تسجيل الخروج من هذا الجهاز فقط',
+                'Sign out of this device only',
               ),
             ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: Text(AppText.t('الإعدادات', 'Settings')),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                onOpenSettings();
-              },
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              onLogoutThisDevice();
+            },
+          ),
+          ListTile(
+            leading: Icon(Icons.logout, color: AppColors.danger),
+            title: Text(
+              AppText.t('تسجيل الخروج', 'Logout'),
+              style: TextStyle(color: AppColors.danger),
             ),
-            ListTile(
-              leading: const Icon(Icons.phone_iphone),
-              title: Text(
-                AppText.t('تسجيل الخروج من هذا الجهاز فقط', 'Sign out of this device only'),
-              ),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                onLogoutThisDevice();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.logout, color: AppColors.danger),
-              title: Text(
-                AppText.t('تسجيل الخروج', 'Logout'),
-                style: TextStyle(color: AppColors.danger),
-              ),
-              onTap: () {
-                Navigator.of(sheetContext).pop();
-                onLogout();
-              },
-            ),
-          ],
-        ),
+            onTap: () {
+              Navigator.of(sheetContext).pop();
+              onLogout();
+            },
+          ),
+        ],
       ),
     );
   }
@@ -559,7 +631,7 @@ class ShellIdentityCard extends StatelessWidget {
                                       ),
                                     ),
                                     Text(
-                                      '${user.username} — ${user.role}',
+                                      '${user.username} — ${user.roleLabel}',
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         color: AppColors.textMuted,
@@ -570,16 +642,10 @@ class ShellIdentityCard extends StatelessWidget {
                                 ),
                               ),
                               IconButton(
-                                tooltip: AppText.t(
-                                  'الإعدادات',
-                                  'Settings',
-                                ),
+                                tooltip: AppText.t('الإعدادات', 'Settings'),
                                 visualDensity: VisualDensity.compact,
                                 onPressed: onOpenSettings,
-                                icon: Icon(
-                                  Icons.settings_outlined,
-                                  size: 18.r,
-                                ),
+                                icon: Icon(Icons.settings_outlined, size: 18.r),
                               ),
                               Icon(
                                 Icons.keyboard_arrow_down,

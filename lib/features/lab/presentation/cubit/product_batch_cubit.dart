@@ -16,7 +16,9 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
     required this.batchId,
     required this.repo,
     required this.currentUser,
-  }) : super(const ProductBatchState());
+  }) : super(const ProductBatchState()) {
+    refreshOnSync(load);
+  }
 
   final int batchId;
   final ProductBatchRepository repo;
@@ -59,6 +61,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
             : {'id': user.id, 'uid': user.uid, 'fullName': user.fullName},
       );
       await load();
+      safeEmit(state.copyWith(saving: false));
       return sample;
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
@@ -87,6 +90,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
         chemicalResults: chemicalResults,
       );
       await load();
+      safeEmit(state.copyWith(saving: false));
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
@@ -107,6 +111,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
         reason: reason,
       );
       await load();
+      safeEmit(state.copyWith(saving: false));
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {
@@ -119,6 +124,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
     try {
       await repo.deleteBatchSample(sampleId);
       await load();
+      safeEmit(state.copyWith(saving: false));
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: e.message));
     } catch (e) {

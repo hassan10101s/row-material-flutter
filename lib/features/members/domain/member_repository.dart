@@ -1,4 +1,5 @@
 import '../../../core/sync/remote/remote_data_source.dart';
+import '../../../core/auth/permissions.dart';
 
 /// Member entity as stored in Firestore `organizations/{orgId}/members` and
 /// mirrored into the local `users` table (plan §6.2, §8.3).
@@ -7,6 +8,7 @@ class Member {
     required this.id,
     required this.email,
     required this.role,
+    this.roles = const [],
     required this.status,
     this.uid = '',
     this.displayName = '',
@@ -17,9 +19,14 @@ class Member {
   final String uid;
   final String email;
   final String role;
+  final List<String> roles;
   final String status;
   final String displayName;
   final int version;
+
+  List<String> get effectiveRoles => roles.isEmpty
+      ? [role]
+      : AppRoles.normalizeRoles(roles, fallbackRole: role);
 
   bool get isActive => status == 'active';
   bool get isInvited => status == 'invited';
@@ -41,6 +48,10 @@ class Member {
       uid: '${data['uid'] ?? ''}',
       email: '${data['email'] ?? ''}',
       role: '${data['role'] ?? 'viewer'}',
+      roles: AppRoles.normalizeRoles(
+        data.containsKey('roles') ? (data['roles'] ?? const []) : null,
+        fallbackRole: '${data['role'] ?? 'viewer'}',
+      ),
       status: '${data['status'] ?? 'invited'}',
       displayName: '${data['displayName'] ?? ''}',
       version: document.version,
@@ -62,14 +73,22 @@ abstract interface class MemberRepository {
   /// Re-inviting an `invited`/`pending_activation` address is a resend (the
   /// remote bumps the version); re-inviting an `active` address fails with
   /// `member_exists`.
-  Future<void> invite({required String email, required String role});
+  Future<void> invite({
+    required String email,
+    required String role,
+    List<String>? roles,
+  });
 
   /// Resends the invite for an existing roster entry without retyping the
   /// e-mail. Looks the member up by [memberId] and re-invites with its stored
   /// e-mail/role.
   Future<void> resendInvite({required String memberId});
 
-  Future<void> changeRole({required String memberId, required String role});
+  Future<void> changeRole({
+    required String memberId,
+    required String role,
+    List<String>? roles,
+  });
 
   /// `active` | `disabled`. Activating also flips `users/{uid}` remotely, so
   /// the employee device picks the permissions up on its next pull.

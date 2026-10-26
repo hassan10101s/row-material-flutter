@@ -44,16 +44,12 @@ import 'qc_custom_tables_repo.dart';
 /// the fact runs here, where no caller can skip it.
 class OfflineFirstQcCustomTablesRepository implements QcCustomTablesRepository {
   OfflineFirstQcCustomTablesRepository({
-    required QcCustomTablesRepo local,
-    required WriteGuard guard,
-    required DatabaseHelper dbHelper,
-    required SyncQueue queue,
-    AuditLogger? syncAudit,
-  }) : _local = local,
-       _guard = guard,
-       _dbHelper = dbHelper,
-       _queue = queue,
-       _syncAudit = syncAudit;
+    required this._local,
+    required this._guard,
+    required this._dbHelper,
+    required this._queue,
+    this._syncAudit,
+  });
 
   static SyncEntity _entity(String type) =>
       SyncEntity.byType(type) ??
@@ -81,8 +77,7 @@ class OfflineFirstQcCustomTablesRepository implements QcCustomTablesRepository {
   Future<T> _transaction<T>(
     Future<T> Function(DatabaseExecutor txn) body,
   ) async {
-    final db = await _dbHelper.database;
-    return db.transaction<T>(body);
+    return _dbHelper.businessTransaction<T>(body);
   }
 
   /// Enqueues one local change **inside [txn]**. On a transient enqueue
@@ -96,31 +91,18 @@ class OfflineFirstQcCustomTablesRepository implements QcCustomTablesRepository {
     bool withAudit = true,
     String? auditAction,
   }) async {
-    try {
-      await sync_write.enqueueLocalChange(
-        executor: txn,
-        entity: _entity(entityType),
-        row: row,
-        operation: operation,
-        queue: _queue,
-        audit: withAudit && auditAction != null ? _syncAudit : null,
-        auditAction: auditAction,
-        organizationId: _guard.organizationId,
-        uid: _guard.uid,
-        deviceId: _guard.deviceId,
-      );
-    } on Object {
-      try {
-        await txn.update(
-          _entity(entityType).localTable,
-          {'sync_state': 'queued'},
-          where: 'id = ?',
-          whereArgs: [(row['id'] as num?)?.toInt()],
-        );
-      } on Object {
-        // Best-effort stamp; the next open repairs bookkeeping columns.
-      }
-    }
+    await sync_write.enqueueLocalChange(
+      executor: txn,
+      entity: _entity(entityType),
+      row: row,
+      operation: operation,
+      queue: _queue,
+      audit: withAudit && auditAction != null ? _syncAudit : null,
+      auditAction: auditAction,
+      organizationId: _guard.organizationId,
+      uid: _guard.uid,
+      deviceId: _guard.deviceId,
+    );
   }
 
   /// Returns the just-inserted row as a writable map with `id` +

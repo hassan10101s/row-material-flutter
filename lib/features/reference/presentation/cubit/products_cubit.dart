@@ -11,7 +11,9 @@ import 'products_state.dart';
 /// Mobile infinite-scroll model: DB-side search + `LIMIT/OFFSET`.
 class ProductsCubit extends AppCubit<ProductsState> {
   ProductsCubit({required this.repo, this.pageSize = kMobilePageSize})
-    : super(const ProductsState());
+    : super(const ProductsState()) {
+    refreshOnSync(load);
+  }
 
   final LabConfigurationRepository repo;
   final int pageSize;

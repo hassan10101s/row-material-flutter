@@ -59,20 +59,22 @@ class DashboardRepo implements DashboardRepository {
     );
     _filteredFlightKey = key;
     _filteredFlight = next;
-    unawaited(next.then<void>(
-      (_) {
-        if (identical(_filteredFlight, next)) {
-          _filteredFlight = null;
-          _filteredFlightKey = null;
-        }
-      },
-      onError: (_) {
-        if (identical(_filteredFlight, next)) {
-          _filteredFlight = null;
-          _filteredFlightKey = null;
-        }
-      },
-    ));
+    unawaited(
+      next.then<void>(
+        (_) {
+          if (identical(_filteredFlight, next)) {
+            _filteredFlight = null;
+            _filteredFlightKey = null;
+          }
+        },
+        onError: (_) {
+          if (identical(_filteredFlight, next)) {
+            _filteredFlight = null;
+            _filteredFlightKey = null;
+          }
+        },
+      ),
+    );
     return next;
   }
 
@@ -90,25 +92,45 @@ class DashboardRepo implements DashboardRepository {
     // or totals stay wrong after a delete.
     final conditions = <String>[
       "inspection_kind = 'raw'",
-      'deleted_at IS NULL'
+      'deleted_at IS NULL',
     ];
     final args = <Object?>[];
     switch (period) {
       case '7d':
         conditions.add('inspection_date >= ?');
-        args.add(DateTime.now().subtract(const Duration(days: 7)).toIso8601String().substring(0, 10));
+        args.add(
+          DateTime.now()
+              .subtract(const Duration(days: 7))
+              .toIso8601String()
+              .substring(0, 10),
+        );
         break;
       case '30d':
         conditions.add('inspection_date >= ?');
-        args.add(DateTime.now().subtract(const Duration(days: 30)).toIso8601String().substring(0, 10));
+        args.add(
+          DateTime.now()
+              .subtract(const Duration(days: 30))
+              .toIso8601String()
+              .substring(0, 10),
+        );
         break;
       case '90d':
         conditions.add('inspection_date >= ?');
-        args.add(DateTime.now().subtract(const Duration(days: 90)).toIso8601String().substring(0, 10));
+        args.add(
+          DateTime.now()
+              .subtract(const Duration(days: 90))
+              .toIso8601String()
+              .substring(0, 10),
+        );
         break;
       case '365d':
         conditions.add('inspection_date >= ?');
-        args.add(DateTime.now().subtract(const Duration(days: 365)).toIso8601String().substring(0, 10));
+        args.add(
+          DateTime.now()
+              .subtract(const Duration(days: 365))
+              .toIso8601String()
+              .substring(0, 10),
+        );
         break;
     }
     if (materialId != null && materialId.isNotEmpty && materialId != 'ALL') {
@@ -125,24 +147,26 @@ class DashboardRepo implements DashboardRepository {
       args.add(normStatus);
     }
     final where = conditions.isEmpty ? null : conditions.join(' AND ');
-    final rows = await db.query('inspections',
-        columns: [
-          'id',
-          'entry_code',
-          'material_id',
-          'material_name',
-          'inspection_date',
-          'supplier',
-          'quantity',
-          'rejected_quantity',
-          'follow_up_note',
-          'expiry_date',
-          'decision_version',
-          'decision_status'
-        ],
-        where: where,
-        whereArgs: where == null ? null : args,
-        orderBy: 'inspection_date DESC, id DESC');
+    final rows = await db.query(
+      'inspections',
+      columns: [
+        'id',
+        'entry_code',
+        'material_id',
+        'material_name',
+        'inspection_date',
+        'supplier',
+        'quantity',
+        'rejected_quantity',
+        'follow_up_note',
+        'expiry_date',
+        'decision_version',
+        'decision_status',
+      ],
+      where: where,
+      whereArgs: where == null ? null : args,
+      orderBy: 'inspection_date DESC, id DESC',
+    );
     return [for (final r in rows) Map<String, dynamic>.from(r)];
   }
 
@@ -155,7 +179,11 @@ class DashboardRepo implements DashboardRepository {
     String? status,
   }) async {
     final filtered = await _filtered(
-        period: period, materialId: materialId, supplier: supplier, status: status);
+      period: period,
+      materialId: materialId,
+      supplier: supplier,
+      status: status,
+    );
 
     var approved = 0, conditional = 0, partial = 0, rejected = 0;
     for (final i in filtered) {
@@ -188,18 +216,34 @@ class DashboardRepo implements DashboardRepository {
     Map<String, dynamic>? latest;
     for (final i in filtered) {
       final rawMat = '${i['material_name'] ?? ''}'.trim();
-      final matName =
-          rawMat.isEmpty ? AppText.t('غير محدد', 'Unspecified') : rawMat;
+      final matName = rawMat.isEmpty
+          ? AppText.t('غير محدد', 'Unspecified')
+          : rawMat;
       final mat = materialStats.putIfAbsent(
-          matName,
-          () => {'name': matName, 'total': 0, 'approved': 0, 'conditional': 0, 'rejected': 0});
+        matName,
+        () => {
+          'name': matName,
+          'total': 0,
+          'approved': 0,
+          'conditional': 0,
+          'rejected': 0,
+        },
+      );
       mat['total'] = (mat['total'] as int) + 1;
       final rawSup = '${i['supplier'] ?? ''}'.trim();
-      final supName =
-          rawSup.isEmpty ? AppText.t('بدون مورد', 'No supplier') : rawSup;
+      final supName = rawSup.isEmpty
+          ? AppText.t('بدون مورد', 'No supplier')
+          : rawSup;
       final sup = supplierStats.putIfAbsent(
-          supName,
-          () => {'name': supName, 'total': 0, 'approved': 0, 'conditional': 0, 'rejected': 0});
+        supName,
+        () => {
+          'name': supName,
+          'total': 0,
+          'approved': 0,
+          'conditional': 0,
+          'rejected': 0,
+        },
+      );
       sup['total'] = (sup['total'] as int) + 1;
 
       final date = '${i['inspection_date'] ?? ''}';
@@ -208,9 +252,16 @@ class DashboardRepo implements DashboardRepository {
       if (d != null) {
         final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
         final buck = monthlyBuckets.putIfAbsent(
-            key,
-            () =>
-                {'year': d.year, 'month': d.month, 'total': 0, 'approved': 0, 'conditional': 0, 'rejected': 0});
+          key,
+          () => {
+            'year': d.year,
+            'month': d.month,
+            'total': 0,
+            'approved': 0,
+            'conditional': 0,
+            'rejected': 0,
+          },
+        );
         buck['total'] = (buck['total'] as int) + 1;
         // FIX (was BUG PINNED in tests): monthly buckets previously counted
         // rows but never the per-status splits, so every bucket rendered
@@ -235,48 +286,63 @@ class DashboardRepo implements DashboardRepository {
         sup['rejected'] = (sup['rejected'] as int) + 1;
       }
 
-      if (latest == null || (date.compareTo('${latest['inspection_date'] ?? ''}') > 0)) {
+      if (latest == null ||
+          (date.compareTo('${latest['inspection_date'] ?? ''}') > 0)) {
         latest = i;
       }
     }
 
-    final topMaterials = materialStats.values
-        .map((m) => {
-              ...m,
-              'rate': (m['total'] as int) > 0
-                  ? (((m['approved'] as int) / (m['total'] as int)) * 100).toStringAsFixed(1)
-                  : '0.0',
-            })
-        .toList()
-      ..sort((a, b) => (b['total'] as int).compareTo(a['total'] as int));
-    if (topMaterials.length > 6) topMaterials.removeRange(6, topMaterials.length);
+    final topMaterials =
+        materialStats.values
+            .map(
+              (m) => {
+                ...m,
+                'rate': (m['total'] as int) > 0
+                    ? (((m['approved'] as int) / (m['total'] as int)) * 100)
+                          .toStringAsFixed(1)
+                    : '0.0',
+              },
+            )
+            .toList()
+          ..sort((a, b) => (b['total'] as int).compareTo(a['total'] as int));
+    if (topMaterials.length > 6) {
+      topMaterials.removeRange(6, topMaterials.length);
+    }
 
-    final topSuppliers = supplierStats.values
-        .map((s) => {
-              ...s,
-              'approvalRate': (s['total'] as int) > 0
-                  ? (((s['approved'] as int) / (s['total'] as int)) * 100).toStringAsFixed(1)
-                  : '0.0',
-            })
-        .toList()
-      ..sort((a, b) => (b['total'] as int).compareTo(a['total'] as int));
-    if (topSuppliers.length > 6) topSuppliers.removeRange(6, topSuppliers.length);
+    final topSuppliers =
+        supplierStats.values
+            .map(
+              (s) => {
+                ...s,
+                'approvalRate': (s['total'] as int) > 0
+                    ? (((s['approved'] as int) / (s['total'] as int)) * 100)
+                          .toStringAsFixed(1)
+                    : '0.0',
+              },
+            )
+            .toList()
+          ..sort((a, b) => (b['total'] as int).compareTo(a['total'] as int));
+    if (topSuppliers.length > 6) {
+      topSuppliers.removeRange(6, topSuppliers.length);
+    }
 
     final monthlyTrend = _monthlyTrend(monthlyBuckets);
 
     final comparison = _comparison(monthlyTrend);
     final recommendations = _recommendations(
-        total: total,
-        rejectionRate: rejectionRate,
-        conditional: conditional,
-        topMaterials: topMaterials,
-        topSuppliers: topSuppliers,
-        approvalRate: approvalRate);
+      total: total,
+      rejectionRate: rejectionRate,
+      conditional: conditional,
+      topMaterials: topMaterials,
+      topSuppliers: topSuppliers,
+      approvalRate: approvalRate,
+    );
     final insightCards = _insightCards(
-        total: total,
-        approvalRate: approvalRate,
-        rejectionRate: rejectionRate,
-        monthlyTrend: monthlyTrend);
+      total: total,
+      approvalRate: approvalRate,
+      rejectionRate: rejectionRate,
+      monthlyTrend: monthlyTrend,
+    );
 
     return {
       'filtered_count': total,
@@ -319,13 +385,15 @@ class DashboardRepo implements DashboardRepository {
     final today = todayIso();
     final settled = await Future.wait([
       db.rawQuery(
-          'SELECT COUNT(*) AS t, '
-          "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
-          "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
-          "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date = ?",
-          [today]),
+        'SELECT COUNT(*) AS t, '
+        "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
+        "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
+        "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date = ?",
+        [today],
+      ),
       db.rawQuery(
-          "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL"),
+        "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL",
+      ),
     ]);
     final day = settled[0].first;
     final totalCount = Sqflite.firstIntValue(settled[1]) ?? 0;
@@ -338,7 +406,8 @@ class DashboardRepo implements DashboardRepository {
   }
 
   List<Map<String, dynamic>> _monthlyTrend(
-      Map<String, dynamic> monthlyBuckets) {
+    Map<String, dynamic> monthlyBuckets,
+  ) {
     final monthNames = {
       '01': AppText.t('يناير', 'Jan'),
       '02': AppText.t('فبراير', 'Feb'),
@@ -365,18 +434,26 @@ class DashboardRepo implements DashboardRepository {
     }
     return [
       for (final key in monthKeys)
-        _buildMonthlyBucket(key, monthNames, monthlyBuckets[key] as Map<String, dynamic>?)
+        _buildMonthlyBucket(
+          key,
+          monthNames,
+          monthlyBuckets[key] as Map<String, dynamic>?,
+        ),
     ];
   }
 
-  Map<String, dynamic> _buildMonthlyBucket(String key,
-      Map<String, String> names, Map<String, dynamic>? b) {
+  Map<String, dynamic> _buildMonthlyBucket(
+    String key,
+    Map<String, String> names,
+    Map<String, dynamic>? b,
+  ) {
     final total = (b?['total'] as int?) ?? 0;
     final approved = (b?['approved'] as int?) ?? 0;
     final conditional = (b?['conditional'] as int?) ?? 0;
     final rejected = (b?['rejected'] as int?) ?? 0;
-    final approvalRate =
-        total > 0 ? ((approved / total) * 100).toStringAsFixed(1) : '0.0';
+    final approvalRate = total > 0
+        ? ((approved / total) * 100).toStringAsFixed(1)
+        : '0.0';
     final rejectionRate = total > 0
         ? (((rejected + conditional) / total) * 100).toStringAsFixed(1)
         : '0.0';
@@ -388,21 +465,28 @@ class DashboardRepo implements DashboardRepository {
       'rejected': rejected,
       'approvalRate': approvalRate,
       'rejectionRate': rejectionRate,
-      'approvedWidth':
-          total > 0 ? ((approved / total) * 100).toStringAsFixed(2) : '0',
-      'conditionalWidth':
-          total > 0 ? ((conditional / total) * 100).toStringAsFixed(2) : '0',
-      'rejectedWidth':
-          total > 0 ? ((rejected / total) * 100).toStringAsFixed(2) : '0',
+      'approvedWidth': total > 0
+          ? ((approved / total) * 100).toStringAsFixed(2)
+          : '0',
+      'conditionalWidth': total > 0
+          ? ((conditional / total) * 100).toStringAsFixed(2)
+          : '0',
+      'rejectedWidth': total > 0
+          ? ((rejected / total) * 100).toStringAsFixed(2)
+          : '0',
     };
   }
 
   Map<String, dynamic> _comparison(List<Map<String, dynamic>> trend) {
-    final sorted = [for (final m in trend) if ((m['total'] as int) > 0) m];
+    final sorted = [
+      for (final m in trend)
+        if ((m['total'] as int) > 0) m,
+    ];
     if (sorted.length >= 2) {
       final latest = sorted.last;
       final prev = sorted[sorted.length - 2];
-      final delta = double.parse('${latest['approvalRate']}') -
+      final delta =
+          double.parse('${latest['approvalRate']}') -
           double.parse('${prev['approvalRate']}');
       return {
         'approvalDeltaSign': delta >= 0 ? '+' : '',
@@ -410,10 +494,12 @@ class DashboardRepo implements DashboardRepository {
         'label': delta >= 0
             ? AppText.t(
                 'أفضل من الشهر السابق (+${delta.abs().toStringAsFixed(1)}%)',
-                'Better than last month (+${delta.abs().toStringAsFixed(1)}%)')
+                'Better than last month (+${delta.abs().toStringAsFixed(1)}%)',
+              )
             : AppText.t(
                 'أقل من الشهر السابق (${delta.toStringAsFixed(1)}%)',
-                'Lower than last month (${delta.toStringAsFixed(1)}%)'),
+                'Lower than last month (${delta.toStringAsFixed(1)}%)',
+              ),
       };
     } else if (sorted.length == 1) {
       return {
@@ -425,7 +511,7 @@ class DashboardRepo implements DashboardRepository {
     return {
       'approvalDeltaSign': '+',
       'approvalDelta': '0.0',
-      'label': AppText.t('لا يوجد اتجاه بعد', 'No trend yet')
+      'label': AppText.t('لا يوجد اتجاه بعد', 'No trend yet'),
     };
   }
 
@@ -438,34 +524,51 @@ class DashboardRepo implements DashboardRepository {
     required String approvalRate,
   }) {
     final recommendations = <String>[];
-    final worstMat =
-        topMaterials.where((m) => double.parse('${m['rate']}') < 80).firstOrNull;
+    final worstMat = topMaterials
+        .where((m) => double.parse('${m['rate']}') < 80)
+        .firstOrNull;
     if (worstMat != null) {
-      recommendations.add(AppText.t(
+      recommendations.add(
+        AppText.t(
           'الخامة "${worstMat['name']}" قبولها ضعيف (${worstMat['rate']}%) — راجع المورد أو شروط القبول.',
-          'Material "${worstMat['name']}" has low acceptance (${worstMat['rate']}%) — check the supplier or acceptance rules.'));
+          'Material "${worstMat['name']}" has low acceptance (${worstMat['rate']}%) — check the supplier or acceptance rules.',
+        ),
+      );
     }
     if (rejectionRate != '0.0' && double.parse(rejectionRate) > 15) {
-      recommendations.add(AppText.t(
+      recommendations.add(
+        AppText.t(
           'الرفض العام $rejectionRate% عالي (فوق 15%) — زوّد الفحص أو راجع الموردين.',
-          'Overall rejection $rejectionRate% is high (above 15%) — inspect more or review suppliers.'));
+          'Overall rejection $rejectionRate% is high (above 15%) — inspect more or review suppliers.',
+        ),
+      );
     }
     if (conditional > 0) {
-      recommendations.add(AppText.t(
+      recommendations.add(
+        AppText.t(
           'عندك $conditional فحص مقبول بشرط — تابع الشروط المعلقة.',
-          'You have $conditional conditionally accepted inspections — follow up the pending conditions.'));
+          'You have $conditional conditionally accepted inspections — follow up the pending conditions.',
+        ),
+      );
     }
     final worstSup = topSuppliers
         .where((s) => double.parse('${s['approvalRate']}') < 70)
         .firstOrNull;
     if (worstSup != null) {
-      recommendations.add(AppText.t(
+      recommendations.add(
+        AppText.t(
           'المورد "${worstSup['name']}" قبوله ${worstSup['approvalRate']}% — اتكلم معاه في الجودة.',
-          'Supplier "${worstSup['name']}" acceptance is ${worstSup['approvalRate']}% — talk quality with them.'));
+          'Supplier "${worstSup['name']}" acceptance is ${worstSup['approvalRate']}% — talk quality with them.',
+        ),
+      );
     }
     if (recommendations.isEmpty && total > 0) {
-      recommendations.add(AppText.t('الوضع كويس — كمل بنفس الجودة.',
-          'Things look good — keep the same quality.'));
+      recommendations.add(
+        AppText.t(
+          'الوضع كويس — كمل بنفس الجودة.',
+          'Things look good — keep the same quality.',
+        ),
+      );
     }
     return recommendations;
   }
@@ -483,24 +586,27 @@ class DashboardRepo implements DashboardRepository {
       cards.add({
         'title': AppText.t('قبول ممتاز', 'Excellent acceptance'),
         'description': AppText.t(
-            'القبول $approvalRate% — أداء ممتاز، حافظ عليه.',
-            'Acceptance is $approvalRate% — great work, keep it up.'),
+          'القبول $approvalRate% — أداء ممتاز، حافظ عليه.',
+          'Acceptance is $approvalRate% — great work, keep it up.',
+        ),
         'tone': 'success',
       });
     } else if (approvalPct >= 70) {
       cards.add({
         'title': AppText.t('قبول معقول', 'Fair acceptance'),
         'description': AppText.t(
-            'القبول $approvalRate% — راجع حالات الرفض وحسّنها.',
-            'Acceptance is $approvalRate% — look at rejections and improve.'),
+          'القبول $approvalRate% — راجع حالات الرفض وحسّنها.',
+          'Acceptance is $approvalRate% — look at rejections and improve.',
+        ),
         'tone': 'warning',
       });
     } else {
       cards.add({
         'title': AppText.t('قبول ضعيف', 'Weak acceptance'),
         'description': AppText.t(
-            'القبول $approvalRate% فقط — يلزم تدخّل سريع ومراجعة الموردين.',
-            'Acceptance is only $approvalRate% — act fast and review suppliers.'),
+          'القبول $approvalRate% فقط — يلزم تدخّل سريع ومراجعة الموردين.',
+          'Acceptance is only $approvalRate% — act fast and review suppliers.',
+        ),
         'tone': 'danger',
       });
     }
@@ -509,36 +615,42 @@ class DashboardRepo implements DashboardRepository {
       cards.add({
         'title': AppText.t('رفض عالي', 'High rejection'),
         'description': AppText.t(
-            'الرفض $rejectionRate% — راجع الأسباب الأساسية.',
-            'Rejection is $rejectionRate% — find the main causes.'),
+          'الرفض $rejectionRate% — راجع الأسباب الأساسية.',
+          'Rejection is $rejectionRate% — find the main causes.',
+        ),
         'tone': 'danger',
       });
     } else if (rejectPct > 5) {
       cards.add({
         'title': AppText.t('رفض تحت السيطرة', 'Rejection under control'),
-        'description': AppText.t('الرفض $rejectionRate% — مقبول، لكن تابع باستمرار.',
-            'Rejection is $rejectionRate% — okay but keep watching.'),
+        'description': AppText.t(
+          'الرفض $rejectionRate% — مقبول، لكن تابع باستمرار.',
+          'Rejection is $rejectionRate% — okay but keep watching.',
+        ),
         'tone': 'warning',
       });
     }
     final lastTwo = monthlyTrend.where((m) => (m['total'] as int) > 0).toList();
     if (lastTwo.length >= 2) {
-      final trend = double.parse('${lastTwo[1]['approvalRate']}') -
+      final trend =
+          double.parse('${lastTwo[1]['approvalRate']}') -
           double.parse('${lastTwo[0]['approvalRate']}');
       if (trend > 5) {
         cards.add({
           'title': AppText.t('الأداء يتحسن', 'Getting better'),
           'description': AppText.t(
-              'ارتفع القبول ${trend.abs().toStringAsFixed(1)}% مقارنة بالشهر السابق.',
-              'Acceptance rose ${trend.abs().toStringAsFixed(1)}% vs last month.'),
+            'ارتفع القبول ${trend.abs().toStringAsFixed(1)}% مقارنة بالشهر السابق.',
+            'Acceptance rose ${trend.abs().toStringAsFixed(1)}% vs last month.',
+          ),
           'tone': 'success',
         });
       } else if (trend < -5) {
         cards.add({
           'title': AppText.t('الأداء يتراجع', 'Going down'),
           'description': AppText.t(
-              'انخفض القبول ${trend.abs().toStringAsFixed(1)}% مقارنة بالشهر السابق.',
-              'Acceptance dropped ${trend.abs().toStringAsFixed(1)}% vs last month.'),
+            'انخفض القبول ${trend.abs().toStringAsFixed(1)}% مقارنة بالشهر السابق.',
+            'Acceptance dropped ${trend.abs().toStringAsFixed(1)}% vs last month.',
+          ),
           'tone': 'danger',
         });
       }
@@ -552,12 +664,15 @@ class DashboardRepo implements DashboardRepository {
     final db = await _db;
     // Parallel: two independent lookups (was sequential).
     final results = await Future.wait([
-      db.query('reference_materials',
-          columns: ['id', 'material_name', 'material_code'],
-          where: 'active = 1',
-          orderBy: 'material_name ASC'),
+      db.query(
+        'reference_materials',
+        columns: ['id', 'material_name', 'material_code'],
+        where: 'active = 1',
+        orderBy: 'material_name ASC',
+      ),
       db.rawQuery(
-          "SELECT DISTINCT supplier FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC"),
+        "SELECT DISTINCT supplier FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND supplier IS NOT NULL AND supplier != '' ORDER BY supplier ASC",
+      ),
     ]);
     final matRows = results[0];
     final supRows = results[1];
@@ -565,12 +680,15 @@ class DashboardRepo implements DashboardRepository {
       materials: [
         {'id': 'ALL', 'name': AppText.t('جميع الخامات', 'All materials')},
         for (final r in matRows)
-          {'id': '${r['id']}', 'name': '${r['material_name']} (${r['material_code']})'}
+          {
+            'id': '${r['id']}',
+            'name': '${r['material_name']} (${r['material_code']})',
+          },
       ],
       suppliers: [
         {'id': 'ALL', 'name': AppText.t('جميع الموردين', 'All suppliers')},
         for (final r in supRows)
-          {'id': '${r['supplier']}', 'name': '${r['supplier']}'}
+          {'id': '${r['supplier']}', 'name': '${r['supplier']}'},
       ],
       statuses: const [
         'ALL',
@@ -597,7 +715,11 @@ class DashboardRepo implements DashboardRepository {
   }) async {
     final db = await _db;
     final filtered = await _filtered(
-        period: period, materialId: materialId, supplier: supplier, status: status);
+      period: period,
+      materialId: materialId,
+      supplier: supplier,
+      status: status,
+    );
     final quality = _qualityKpis(filtered);
     // Parallelize the independent KPI sections (was 7 sequential awaits).
     // _volumeKpis needs `filtered` (in-memory) + db; the rest are db-only.
@@ -694,7 +816,9 @@ class DashboardRepo implements DashboardRepository {
     if (cached != null) return cached;
     try {
       final rows = await db.rawQuery(
-          "SELECT name FROM sqlite_master WHERE type='table' AND name=?", [table]);
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+        [table],
+      );
       final exists = rows.isNotEmpty;
       _tableExistsCache[table] = exists;
       return exists;
@@ -728,7 +852,9 @@ class DashboardRepo implements DashboardRepository {
   String _today() => _day(DateTime.now());
 
   Future<VolumeKpis> _volumeKpis(
-      Database db, List<Map<String, dynamic>> filtered) async {
+    Database db,
+    List<Map<String, dynamic>> filtered,
+  ) async {
     var pending = 0, followUps = 0;
     for (final i in filtered) {
       final s = '${i['decision_status'] ?? ''}'.trim();
@@ -748,19 +874,22 @@ class DashboardRepo implements DashboardRepository {
     final settled = await Future.wait([
       db
           .rawQuery(
-              "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND decision_status IN ('CONDITIONAL_APPROVAL','CONDITIONAL') AND COALESCE(follow_up_note,'') <> ''")
+            "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND decision_status IN ('CONDITIONAL_APPROVAL','CONDITIONAL') AND COALESCE(follow_up_note,'') <> ''",
+          )
           .then<Object?>((rows) => rows)
           .catchError((_) => null),
       db
           .rawQuery(
-              'SELECT substr(inspection_date,1,10) AS d, COUNT(*) AS c FROM inspections '
-              "WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY d",
-              [weekCutoff])
+            'SELECT substr(inspection_date,1,10) AS d, COUNT(*) AS c FROM inspections '
+            "WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY d",
+            [weekCutoff],
+          )
           .then<Object?>((rows) => rows)
           .catchError((_) => null),
       db
           .rawQuery(
-              "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL")
+            "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL",
+          )
           .then<Object?>((rows) => rows)
           .catchError((_) => null),
       _todayRows(db),
@@ -801,15 +930,15 @@ class DashboardRepo implements DashboardRepository {
       // Day range on the plain column instead of `substr(...)=?`: sargable, so
       // `idx_inspections_kind*` applies, and it matches both `YYYY-MM-DD` and
       // `YYYY-MM-DDTHH:MM:SS` storage (lexicographic ISO comparison).
-      final tomorrow = _day(
-          DateTime.now().add(const Duration(days: 1)));
+      final tomorrow = _day(DateTime.now().add(const Duration(days: 1)));
       // Single aggregation instead of fetching every row + Dart loop.
       final row = (await db.rawQuery(
-          'SELECT COUNT(*) AS t, '
-          "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
-          "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
-          "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? AND inspection_date < ?",
-          [today, tomorrow])).first;
+        'SELECT COUNT(*) AS t, '
+        "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
+        "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
+        "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? AND inspection_date < ?",
+        [today, tomorrow],
+      )).first;
       return [_int(row['t']), _int(row['a']), _int(row['r'])];
     } catch (_) {
       return [0, 0, 0];
@@ -821,8 +950,7 @@ class DashboardRepo implements DashboardRepository {
     var totalQty = 0.0, rejectedQty = 0.0, partialRejSum = 0.0;
     var versionSum = 0, reopened = 0, expiryRisk = 0, expired = 0;
     final today = _today();
-    final soon =
-        _day(DateTime.now().add(const Duration(days: 30)));
+    final soon = _day(DateTime.now().add(const Duration(days: 30)));
     for (final i in filtered) {
       final s = _normalizeStatus('${i['decision_status'] ?? ''}');
       final q = _num(i['quantity']);
@@ -862,7 +990,9 @@ class DashboardRepo implements DashboardRepository {
     }
     final n = filtered.length;
     double pct(int c) => n == 0 ? 0.0 : _round1(c / n * 100);
-    final acceptance = n == 0 ? 0.0 : _round1((approved + conditional) / n * 100);
+    final acceptance = n == 0
+        ? 0.0
+        : _round1((approved + conditional) / n * 100);
     return QualityKpis(
       total: n,
       approved: approved,
@@ -877,10 +1007,12 @@ class DashboardRepo implements DashboardRepository {
       rejectionRate: n == 0 ? 0.0 : _round1((partial + rejected) / n * 100),
       totalQty: totalQty,
       rejectedQty: rejectedQty,
-      rejectedQtyRatio:
-          totalQty <= 0 ? 0.0 : _round1(rejectedQty / totalQty * 100),
-      avgRejectedPerPartial:
-          partial == 0 ? 0.0 : _round1(partialRejSum / partial),
+      rejectedQtyRatio: totalQty <= 0
+          ? 0.0
+          : _round1(rejectedQty / totalQty * 100),
+      avgRejectedPerPartial: partial == 0
+          ? 0.0
+          : _round1(partialRejSum / partial),
       churnAvg: n == 0 ? 0.0 : _round1(versionSum / n),
       reopened: reopened,
       expiryRisk: expiryRisk,
@@ -900,25 +1032,33 @@ class DashboardRepo implements DashboardRepository {
       final hasInventory = await _hasTable(db, 'lab_inventory');
       final futures = <Future<Object?>>[
         db.rawQuery(
-            'SELECT COUNT(*) AS c FROM lab_sample_tests${where == null ? '' : ' WHERE $where'}',
-            args),
+          'SELECT COUNT(*) AS c FROM lab_sample_tests${where == null ? '' : ' WHERE $where'}',
+          args,
+        ),
         db.rawQuery(
-            "SELECT COUNT(*) AS c FROM lab_sample_tests WHERE COALESCE(result_text,'') <> ''${where == null ? '' : ' AND $where'}",
-            args),
+          "SELECT COUNT(*) AS c FROM lab_sample_tests WHERE COALESCE(result_text,'') <> ''${where == null ? '' : ' AND $where'}",
+          args,
+        ),
         if (hasInventory)
           db.rawQuery(
-              'SELECT COUNT(*) AS c FROM lab_inventory WHERE current_qty < min_qty'),
+            'SELECT COUNT(*) AS c FROM lab_inventory WHERE current_qty < min_qty',
+          ),
       ];
       final settled = await Future.wait(futures);
-      final total = Sqflite.firstIntValue(settled[0] as List<Map<String, Object?>>) ?? 0;
+      final total =
+          Sqflite.firstIntValue(settled[0] as List<Map<String, Object?>>) ?? 0;
       var evaluated = 0;
       try {
-        evaluated = Sqflite.firstIntValue(settled[1] as List<Map<String, Object?>>) ?? 0;
+        evaluated =
+            Sqflite.firstIntValue(settled[1] as List<Map<String, Object?>>) ??
+            0;
       } catch (_) {}
       var low = 0;
       try {
         if (hasInventory && settled.length > 2) {
-          low = Sqflite.firstIntValue(settled[2] as List<Map<String, Object?>>) ?? 0;
+          low =
+              Sqflite.firstIntValue(settled[2] as List<Map<String, Object?>>) ??
+              0;
         }
       } catch (_) {}
       return LabKpis(
@@ -947,8 +1087,9 @@ class DashboardRepo implements DashboardRepository {
           : "deleted_at IS NULL AND (inspection_date >= ? OR created_at >= ?)";
       if (cutoff != null) qcArgs = [cutoff, cutoff];
       final rows = await db.rawQuery(
-          'SELECT result_overall, score_pct, has_nc, critical_nc_count, major_nc_count, minor_nc_count FROM qc_inspections WHERE $where',
-          qcArgs);
+        'SELECT result_overall, score_pct, has_nc, critical_nc_count, major_nc_count, minor_nc_count FROM qc_inspections WHERE $where',
+        qcArgs,
+      );
       var pass = 0, cond = 0, fail = 0, pending = 0, hasNc = 0;
       var crit = 0, maj = 0, min = 0, scoreSum = 0.0, scored = 0;
       for (final r in rows) {
@@ -998,7 +1139,8 @@ class DashboardRepo implements DashboardRepository {
     if (!await _hasTable(db, 'qc_findings_nc')) return const NcrKpisSummary();
     try {
       final today = _today();
-      final row = (await db.rawQuery('''
+      final row = (await db.rawQuery(
+        '''
 SELECT COUNT(*) AS total,
  SUM(CASE WHEN fn.status NOT IN ('Closed','Rejected') THEN 1 ELSE 0 END) AS open_c,
  SUM(CASE WHEN fn.status NOT IN ('Closed','Rejected') AND COALESCE(fn.due_date,'') <> '' AND substr(fn.due_date,1,10) < ? THEN 1 ELSE 0 END) AS overdue_c,
@@ -1010,17 +1152,22 @@ SELECT COUNT(*) AS total,
  AVG(CASE WHEN fn.status='Closed' AND COALESCE(fn.closed_at,'') <> '' THEN julianday(substr(fn.closed_at,1,10)) - julianday(substr(fn.created_at,1,10)) ELSE NULL END) AS mttc,
  AVG(CASE WHEN COALESCE(fn.verified_at,'') <> '' THEN julianday(substr(fn.verified_at,1,10)) - julianday(substr(fn.created_at,1,10)) ELSE NULL END) AS mttv
 FROM qc_findings_nc fn WHERE fn.deleted_at IS NULL
-''', [today])).first;
+''',
+        [today],
+      )).first;
       final hasCapa = await _hasTable(db, 'qc_capa');
       var linked = 0, capaOver = 0;
       final total = _int(row['total']);
       if (hasCapa && total > 0) {
         try {
-          final c = (await db.rawQuery('''
+          final c = (await db.rawQuery(
+            '''
 SELECT SUM(CASE WHEN c.capa_id IS NOT NULL AND c.status <> 'Rejected' THEN 1 ELSE 0 END) AS linked_c,
  SUM(CASE WHEN c.due_at IS NOT NULL AND c.due_at <> '' AND substr(c.due_at,1,10) < ? AND c.status NOT IN ('Closed','Rejected','VerifiedEffective') THEN 1 ELSE 0 END) AS over_c
 FROM qc_findings_nc fn LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
-WHERE fn.deleted_at IS NULL''', [today])).first;
+WHERE fn.deleted_at IS NULL''',
+            [today],
+          )).first;
           linked = _int(c['linked_c']);
           capaOver = _int(c['over_c']);
         } catch (_) {}
@@ -1047,14 +1194,11 @@ WHERE fn.deleted_at IS NULL''', [today])).first;
         minor: _int(row['min_c']),
         closed: closed,
         closedOnTime: ontime,
-        onTimePct: closed == 0
-            ? null
-            : _round1(ontime / closed * 100),
+        onTimePct: closed == 0 ? null : _round1(ontime / closed * 100),
         mttcDays: mttc == null ? null : _round1(mttc),
         mttvDays: mttv == null ? null : _round1(mttv),
         capaLinked: linked,
-        capaCoveragePct:
-            total == 0 ? 0.0 : _round1(linked / total * 100),
+        capaCoveragePct: total == 0 ? 0.0 : _round1(linked / total * 100),
         capaOverdue: capaOver,
         aging: aging,
         topDefects: defects,
@@ -1066,7 +1210,8 @@ WHERE fn.deleted_at IS NULL''', [today])).first;
 
   Future<List<int>> _ncrAging(Database db, String today) async {
     try {
-      final rows = await db.rawQuery('''
+      final rows = await db.rawQuery(
+        '''
 SELECT
  SUM(CASE WHEN age BETWEEN 0 AND 7 THEN 1 ELSE 0 END) AS b0,
  SUM(CASE WHEN age BETWEEN 8 AND 14 THEN 1 ELSE 0 END) AS b1,
@@ -1074,10 +1219,16 @@ SELECT
  SUM(CASE WHEN age BETWEEN 31 AND 60 THEN 1 ELSE 0 END) AS b3,
  SUM(CASE WHEN age > 60 THEN 1 ELSE 0 END) AS b4
 FROM (SELECT CAST(julianday(?) - julianday(substr(COALESCE(created_at,''),1,10)) AS INTEGER) AS age
- FROM qc_findings_nc WHERE deleted_at IS NULL AND status NOT IN ('Closed','Rejected'))''', [today]);
+ FROM qc_findings_nc WHERE deleted_at IS NULL AND status NOT IN ('Closed','Rejected'))''',
+        [today],
+      );
       final r = rows.first;
       return [
-        _int(r['b0']), _int(r['b1']), _int(r['b2']), _int(r['b3']), _int(r['b4']),
+        _int(r['b0']),
+        _int(r['b1']),
+        _int(r['b2']),
+        _int(r['b3']),
+        _int(r['b4']),
       ];
     } catch (_) {
       return [0, 0, 0, 0, 0];
@@ -1098,7 +1249,7 @@ GROUP BY label ORDER BY cnt DESC LIMIT 8''');
             'label': '${r['label']}',
             'count': _int(r['cnt']),
             'critical': _int(r['crit']),
-          }
+          },
       ];
     } catch (_) {
       return [];
@@ -1111,13 +1262,16 @@ GROUP BY label ORDER BY cnt DESC LIMIT 8''');
       if (await _hasTable(db, 'qc_sops')) {
         final today = _today();
         final soon = _day(DateTime.now().add(const Duration(days: 30)));
-        final r = (await db.rawQuery('''
+        final r = (await db.rawQuery(
+          '''
 SELECT COUNT(*) AS t,
  SUM(CASE WHEN status='Published' THEN 1 ELSE 0 END) AS p,
  SUM(CASE WHEN status='Published' AND COALESCE(expiry_date,'') <> '' AND substr(expiry_date,1,10) < ? THEN 1 ELSE 0 END) AS e,
  SUM(CASE WHEN status='Published' AND COALESCE(expiry_date,'') <> '' AND substr(expiry_date,1,10) >= ? AND substr(expiry_date,1,10) <= ? THEN 1 ELSE 0 END) AS s,
  SUM(CASE WHEN status='Pending' THEN 1 ELSE 0 END) AS q
-FROM qc_sops WHERE COALESCE(deleted_at,'') = '' ''', [today, today, soon])).first;
+FROM qc_sops WHERE COALESCE(deleted_at,'') = '' ''',
+          [today, today, soon],
+        )).first;
         sopTotal = _int(r['t']);
         pub = _int(r['p']);
         exp = _int(r['e']);
@@ -1148,11 +1302,17 @@ FROM lab_inventory''')).first;
       var items = <Map<String, dynamic>>[];
       try {
         final rows = await db.rawQuery(
-            'SELECT name, current_qty, min_qty, unit FROM lab_inventory WHERE current_qty < min_qty ORDER BY (min_qty - current_qty) DESC LIMIT 6');
+          'SELECT name, current_qty, min_qty, unit FROM lab_inventory WHERE current_qty < min_qty ORDER BY (min_qty - current_qty) DESC LIMIT 6',
+        );
         items = [for (final r in rows) Map<String, dynamic>.from(r)];
       } catch (_) {}
       return InventoryKpis(
-          skus: t, low: l, empty: e, ok: (t - l - e).clamp(0, t), lowItems: items);
+        skus: t,
+        low: l,
+        empty: e,
+        ok: (t - l - e).clamp(0, t),
+        lowItems: items,
+      );
     } catch (_) {
       return const InventoryKpis();
     }
@@ -1180,31 +1340,30 @@ FROM lab_inventory''')).first;
       final firstKey =
           '${first.year}-${first.month.toString().padLeft(2, '0')}';
       final grouped = await db.rawQuery(
-          "SELECT substr(inspection_date,1,7) AS m, COUNT(*) AS t, "
-          "SUM(CASE WHEN decision_status='APPROVED' THEN 1 ELSE 0 END) AS a "
-          "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY m",
-          ['$firstKey-01']);
+        "SELECT substr(inspection_date,1,7) AS m, COUNT(*) AS t, "
+        "SUM(CASE WHEN decision_status='APPROVED' THEN 1 ELSE 0 END) AS a "
+        "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY m",
+        ['$firstKey-01'],
+      );
       final byMonth = <String, Map<String, int>>{
         for (final r in grouped)
-          '${r['m']}': {
-            't': _int(r['t']),
-            'a': _int(r['a']),
-          },
+          '${r['m']}': {'t': _int(r['t']), 'a': _int(r['a'])},
       };
       final out = <TrendPoint>[];
       for (var back = 5; back >= 0; back--) {
         final d = DateTime(now.year, now.month - back, 1);
-        final key =
-            '${d.year}-${d.month.toString().padLeft(2, '0')}';
+        final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
         final total = byMonth[key]?['t'] ?? 0;
         final approved = byMonth[key]?['a'] ?? 0;
         final rate = total == 0 ? 0.0 : _round1(approved / total * 100);
-        out.add(TrendPoint(
-          label: '${names[key.substring(5)] ?? key} ${key.substring(0, 4)}',
-          total: total,
-          approvalRate: rate,
-          passRate: rate,
-        ));
+        out.add(
+          TrendPoint(
+            label: '${names[key.substring(5)] ?? key} ${key.substring(0, 4)}',
+            total: total,
+            approvalRate: rate,
+            passRate: rate,
+          ),
+        );
       }
       return out;
     } catch (_) {

@@ -1,9 +1,9 @@
+import 'app_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../core/constants/app_strings.dart';
 import '../tokens/app_colors.dart';
-import '../tokens/app_spacing.dart';
 import 'app_autocomplete_overlay.dart';
 
 /// A type-to-search picker over an in-memory list, used everywhere the app
@@ -231,7 +231,7 @@ class _AppAutocompleteState<T extends Object>
                     .toList(growable: false);
               },
               fieldViewBuilder: (context, controller, focusNode, _) {
-                return TextField(
+                return AppTextField(
                   controller: controller,
                   focusNode: focusNode,
                   readOnly: committed,
@@ -250,23 +250,6 @@ class _AppAutocompleteState<T extends Object>
                         Icons.arrow_drop_down,
                         size: 24.r,
                         color: AppColors.primary,
-                      ),
-                    ),
-                    filled: true,
-                    fillColor: AppColors.surface,
-                    contentPadding: EdgeInsets.symmetric(
-                      horizontal: 12.w,
-                      vertical: 10.h,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppRadii.sm),
-                      borderSide: BorderSide(color: AppColors.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppRadii.sm),
-                      borderSide: BorderSide(
-                        color: AppColors.primary,
-                        width: 1.6,
                       ),
                     ),
                   ),

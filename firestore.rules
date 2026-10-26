@@ -42,6 +42,31 @@ service cloud.firestore {
       return hasProfile() ? userDoc(request.auth.uid).data.role : '';
     }
 
+    // `role` is retained as the primary role for old app versions; new member
+    // profiles carry the complete additive grant set in `roles`.
+    function rolesOf(data) {
+      return data.keys().hasAll(['roles']) ? data.roles : [data.role];
+    }
+
+    function myRoles() {
+      return hasProfile() ? rolesOf(userDoc(request.auth.uid).data) : [];
+    }
+
+    function validRoleSet(roles, primaryRole) {
+      return roles is list
+        && roles.size() > 0
+        && roles.size() <= 5
+        && roles[0] == primaryRole
+        && roles.hasOnly(['admin','quality_manager','lab','nutritionist','viewer','trial_owner'])
+        && roles.toSet().size() == roles.size()
+        && (roles.size() == 1 || !roles.hasAny(['admin','viewer','trial_owner']));
+    }
+
+    function rolesMatch(a, b) {
+      return rolesOf(a).hasAll(rolesOf(b))
+        && rolesOf(b).hasAll(rolesOf(a));
+    }
+
     function myStatus() {
       return hasProfile() ? userDoc(request.auth.uid).data.status : '';
     }
@@ -54,26 +79,33 @@ service cloud.firestore {
         'lab_results.read','lab_results.create','lab_results.update',
         'qc.read','qc.write','qc.approve','qc.reject',
         'reports.read','reports.create','reports.export',
-        'devices.read','devices.register','devices.update','audit.read'
+        'devices.read','devices.register','devices.update','audit.read',
+        'formulations.read','formulations.create','formulations.update'
       ] : role == 'trial_owner' ? [
         'org.read',
         'samples.read','samples.create','samples.update',
         'lab_results.read','lab_results.create','lab_results.update',
         'qc.read','qc.write',
-        'reports.read','reports.create','devices.register'
+        'reports.read','reports.create','devices.register',
+        'formulations.read','formulations.create','formulations.update'
       ] : role == 'quality_manager' ? [
         'org.read','users.read',
         'samples.read','samples.create','samples.update',
         'lab_results.read','lab_results.create','lab_results.update',
         'qc.read','qc.write','qc.approve','qc.reject',
-        'reports.read','reports.create','reports.export','devices.register','audit.read'
+        'reports.read','reports.create','reports.export','devices.register','audit.read',
+        'formulations.read'
       ] : role == 'lab' ? [
         'org.read',
         'samples.read','samples.create','samples.update',
         'lab_results.read','lab_results.create','lab_results.update',
-        'reports.read','devices.register'
+        'reports.read','devices.register','formulations.read'
       ] : role == 'viewer' ? [
-        'org.read','samples.read','lab_results.read','qc.read','reports.read','devices.register'
+        'org.read','samples.read','lab_results.read','qc.read','reports.read','devices.register',
+        'formulations.read'
+      ] : role == 'nutritionist' ? [
+        'org.read','samples.read','lab_results.read','reports.read','devices.register',
+        'formulations.read','formulations.create','formulations.update'
       ] : [];
     }
 
@@ -102,17 +134,21 @@ service cloud.firestore {
     }
 
     function can(orgId, perm) {
-      return activeInOrg(orgId) && perm in rolePermissions(myRole());
+      let roles = myRoles();
+      return activeInOrg(orgId)
+        && validRoleSet(roles, myRole())
+        && (
+        ('admin' in roles && perm in rolePermissions('admin'))
+        || ('trial_owner' in roles && perm in rolePermissions('trial_owner'))
+        || ('quality_manager' in roles && perm in rolePermissions('quality_manager'))
+        || ('lab' in roles && perm in rolePermissions('lab'))
+        || ('nutritionist' in roles && perm in rolePermissions('nutritionist'))
+        || ('viewer' in roles && perm in rolePermissions('viewer')));
     }
 
     function canManage(uid) {
       return userDoc(uid) != null
         && can(userDoc(uid).data.organizationId, 'users.update');
-    }
-
-    function hasNoCompany(uid) {
-      return userDoc(uid) == null
-        || !userDoc(uid).data.keys().hasAll(['organizationId']);
     }
 
     function blocksNewCompany(uid) {
@@ -134,7 +170,8 @@ service cloud.firestore {
         'SAMPLE_CREATED','SAMPLE_UPDATED','SAMPLE_DELETED',
         'QC_APPROVED','QC_REJECTED',
         'LAB_RESULT_SAVED','SYNC_CONFLICT','BACKUP_RESTORED',
-        'SETTINGS_UPDATED','DEVICE_REGISTERED'];
+        'SETTINGS_UPDATED','DEVICE_REGISTERED',
+        'CUSTOM_TABLE_SAVED','CUSTOM_TABLE_DELETED','CUSTOM_ROW_RECORDED','CUSTOM_ROW_DELETED'];
     }
 
     // ── sync envelope invariants (plan §6.1) ─────────────────────────────
@@ -157,8 +194,26 @@ service cloud.firestore {
     //    `reportHtml` on a sample. Closing it requires making `mutableFields`
     //    authoritative first, or the allow-lists will reject legitimate
     //    pushes. Tracked as a follow-up, not a rules tweak.
+    function activeOwnedDevice(orgId, deviceId) {
+      let device = get(/databases/$(database)/documents/organizations/$(orgId)/devices/$(deviceId));
+      return deviceId is string && deviceId != '' && device != null
+        && device.data.uid == request.auth.uid
+        && device.data.get('status', 'active') == 'active';
+    }
+
+    function writerDevice(orgId) {
+      let id = request.resource.data.get('deviceId', '');
+      let device = get(/databases/$(database)/documents/organizations/$(orgId)/devices/$(id));
+      return activeOwnedDevice(orgId, id) && device.data.get('readOnly', true) == false;
+    }
+
+    function legacyDomainWritesAllowed(orgId) {
+      let org = get(/databases/$(database)/documents/organizations/$(orgId));
+      return org != null && org.data.get('commandProtocol', {}).get('enabled', false) != true;
+    }
+
     function hasEnvelope(orgId) {
-      return request.resource.data.organizationId == orgId
+      return legacyDomainWritesAllowed(orgId) && writerDevice(orgId) && request.resource.data.organizationId == orgId
         && request.resource.data.keys().hasAll([
              'organizationId','version','createdAt','updatedAt',
              'updatedBy','createdBy','deviceId','localId'])
@@ -169,19 +224,14 @@ service cloud.firestore {
     }
 
     function bumped(orgId) {
-      return request.resource.data.version == resource.data.version + 1
+      return legacyDomainWritesAllowed(orgId) && writerDevice(orgId) && request.resource.data.version == resource.data.version + 1
         && request.resource.data.organizationId == orgId
         && request.resource.data.organizationId == resource.data.organizationId
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.localId == resource.data.localId
-        && request.resource.data.updatedBy == request.auth.uid;
-    }
-
-    // The organization id stays bound to the organization: a member can never
-    // move a document into another organization.
-    function sameOrgKey(orgId) {
-      return request.resource.data.organizationId == orgId;
+        && request.resource.data.updatedBy == request.auth.uid
+        && (resource.data.get('deletedAt', null) == null || request.resource.data.get('deletedAt', null) != null);
     }
 
     // ── users/{uid} - the authorization source (plan §6) ─────────────────
@@ -189,16 +239,27 @@ service cloud.firestore {
 
       function userPayloadOk() {
         return request.resource.data.keys().hasOnly([
-                 'email','organizationId','role','status','memberId','inviteKey',
+                 'email','organizationId','role','roles','status','memberId','inviteKey',
                  'displayName','photoUrl','lastSeenAt','lastDeviceId',
                  'createdAt','updatedAt','version','updatedBy'])
             && request.resource.data.email is string
             && request.resource.data.email.lower() == request.auth.token.email.lower()
             && request.resource.data.organizationId is string
             && request.resource.data.organizationId.size() > 3
-            && request.resource.data.role in ['admin','quality_manager','lab','viewer','trial_owner']
+            && request.resource.data.role in ['admin','quality_manager','lab','nutritionist','viewer','trial_owner']
+            && validRoleSet(rolesOf(request.resource.data), request.resource.data.role)
             && request.resource.data.status in ['invited','pending_activation','active']
             && request.resource.data.version == 1;
+      }
+
+      function memberAfterMatchesProfile() {
+        let member = getAfter(/databases/$(database)/documents/organizations/
+          $(resource.data.organizationId)/members/$(resource.data.memberId));
+        return member != null
+          && member.data.uid == uid
+          && member.data.role == request.resource.data.role
+          && rolesMatch(member.data, request.resource.data)
+          && member.data.status == request.resource.data.status;
       }
 
       // (a) claimed invitation: the invite document decides the organization,
@@ -213,6 +274,7 @@ service cloud.firestore {
           && invite != null
           && invite.data.email.lower() == request.auth.token.email.lower()
           && invite.data.role == request.resource.data.role
+          && rolesMatch(invite.data, request.resource.data)
           && invite.data.memberId == request.resource.data.memberId;
       }
 
@@ -228,10 +290,12 @@ service cloud.firestore {
         return request.resource.data.status == 'active'
           && org != null
           && org.data.ownerUid == request.auth.uid
-          && ((org.data.status == 'trial'
-                && request.resource.data.role == 'trial_owner')
+              && ((org.data.status == 'trial'
+                && request.resource.data.role == 'trial_owner'
+                && rolesOf(request.resource.data) == ['trial_owner'])
               || (org.data.status == 'active'
-                && request.resource.data.role == 'admin'));
+                && request.resource.data.role == 'admin'
+                && rolesOf(request.resource.data) == ['admin']));
       }
 
       allow get: if signedIn() && request.auth.uid == uid;
@@ -248,15 +312,18 @@ service cloud.firestore {
                    .hasAny(['displayName','photoUrl','lastSeenAt','lastDeviceId'])
               && request.resource.data.organizationId == resource.data.organizationId
               && request.resource.data.role == resource.data.role
+              && rolesMatch(request.resource.data, resource.data)
               && request.resource.data.status == resource.data.status
               && request.resource.data.memberId == resource.data.memberId
               && request.resource.data.email == resource.data.email)
           || (canManage(uid)
                && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                    'role','status','displayName','activatedAt','activatedBy',
+                    'role','roles','status','displayName','activatedAt','activatedBy',
                     'organizationId','updatedBy','updatedAt','version'])
                && request.resource.data.email == resource.data.email
                && request.resource.data.memberId == resource.data.memberId
+               && validRoleSet(rolesOf(request.resource.data), request.resource.data.role)
+               && memberAfterMatchesProfile()
                && request.resource.data.version == resource.data.version + 1
                // Activation only moves invited/pending_activation → active, and
                // only the manager path (users.update) may do it: the self
@@ -277,10 +344,11 @@ service cloud.firestore {
                && resource.data.status in ['invited','pending_activation','active']
                && request.resource.data.status == 'disabled'
                && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                    'role','status','displayName','activatedAt','activatedBy',
+                    'role','roles','status','displayName','activatedAt','activatedBy',
                     'organizationId','memberId','updatedBy','updatedAt','version'])
                && request.resource.data.email == resource.data.email
                && request.resource.data.role == resource.data.role
+               && rolesMatch(request.resource.data, resource.data)
                && !request.resource.data.keys().hasAll(['organizationId'])
                && !request.resource.data.keys().hasAll(['memberId'])
                && request.resource.data.version == resource.data.version + 1)
@@ -294,6 +362,7 @@ service cloud.firestore {
                && !request.resource.data.keys().hasAll(['organizationId'])
                && !request.resource.data.keys().hasAll(['memberId'])
                && request.resource.data.role == resource.data.role
+               && rolesMatch(request.resource.data, resource.data)
                && request.resource.data.email == resource.data.email
                && request.resource.data.updatedBy == request.auth.uid
                && request.resource.data.version == resource.data.version + 1));
@@ -393,12 +462,14 @@ service cloud.firestore {
         allow list: if can(orgId, 'users.read');
         allow create: if can(orgId, 'users.create')
           && request.resource.data.keys().hasOnly([
-               'email','role','memberId','status','invitedBy','invitedByName',
+               'email','role','roles','memberId','status','invitedBy','invitedByName',
                'createdAt','updatedAt','version'])
           && request.resource.data.email is string
           && request.resource.data.email.size() > 3
           && request.resource.data.email == request.resource.data.email.lower()
-          && request.resource.data.role in ['admin','quality_manager','lab','viewer','trial_owner']
+          && request.resource.data.role in ['admin','quality_manager','lab','nutritionist','viewer','trial_owner']
+          && request.resource.data.role != 'trial_owner'
+          && validRoleSet(rolesOf(request.resource.data), request.resource.data.role)
           && request.resource.data.status == 'invited'
           && request.resource.data.memberId is string
           && request.resource.data.memberId.size() > 6
@@ -413,9 +484,10 @@ service cloud.firestore {
                            && request.resource.data.memberId == resource.data.memberId)
                        || (can(orgId, 'users.create')
                            && request.resource.data.diff(resource.data).affectedKeys()
-                                .hasOnly(['role','status','version','updatedBy','updatedAt'])
+                                .hasOnly(['role','roles','status','version','updatedBy','updatedAt'])
                            && request.resource.data.email == resource.data.email
-                           && request.resource.data.memberId == resource.data.memberId);
+                           && request.resource.data.memberId == resource.data.memberId
+                           && validRoleSet(rolesOf(request.resource.data), request.resource.data.role));
         allow delete: if can(orgId, 'users.update');
       }
 
@@ -425,15 +497,32 @@ service cloud.firestore {
           return request.resource.data.keys().hasAll([
                    'uid','email','role','status','version','updatedBy','updatedAt','createdAt'])
               && request.resource.data.email is string
-              && request.resource.data.role in ['admin','quality_manager','lab','viewer','trial_owner']
+              && request.resource.data.role in ['admin','quality_manager','lab','nutritionist','viewer','trial_owner']
+              && validRoleSet(rolesOf(request.resource.data), request.resource.data.role)
               && request.resource.data.status in ['invited','pending_activation','active','disabled']
               && request.resource.data.version == 1;
+        }
+
+        function profileDocumentMatchesMember(memberUid) {
+          let profile = getAfter(/databases/$(database)/documents/users/$(memberUid));
+          return profile != null
+            && profile.data.memberId == memberId
+            && profile.data.role == request.resource.data.role
+            && rolesMatch(profile.data, request.resource.data)
+            && profile.data.status == request.resource.data.status;
+        }
+
+        function profileAfterMatchesMember() {
+          let memberUid = resource.data.uid;
+          return memberUid == '' || memberUid == null
+            || profileDocumentMatchesMember(memberUid);
         }
 
         // Admin inviting a member: the member document may only be created in
         // the `invited` state - an admin cannot mint an active member.
         function invitedByAdmin() {
           return can(orgId, 'users.create') && memberKeysOk()
+            && request.resource.data.role != 'trial_owner'
             && request.resource.data.status == 'invited';
         }
 
@@ -445,10 +534,12 @@ service cloud.firestore {
             && request.resource.data.status == 'active'
             && org != null
             && org.data.ownerUid == request.auth.uid
-            && ((org.data.status == 'trial'
-                  && request.resource.data.role == 'trial_owner')
+                  && ((org.data.status == 'trial'
+                  && request.resource.data.role == 'trial_owner'
+                  && rolesOf(request.resource.data) == ['trial_owner'])
                 || (org.data.status == 'active'
-                  && request.resource.data.role == 'admin'));
+                  && request.resource.data.role == 'admin'
+                  && rolesOf(request.resource.data) == ['admin']));
         }
 
         allow get, list: if activeInOrg(orgId);
@@ -462,10 +553,12 @@ service cloud.firestore {
               // (resend: version/updated bump while `invited`) is also here.
               can(orgId, 'users.update')
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-                   'role','status','displayName','activatedAt','activatedBy',
+                   'role','roles','status','displayName','activatedAt','activatedBy',
                    'updatedBy','updatedAt','version','deletedAt',
                    'invitedBy','invitedByName','invitedAt'])
               && request.resource.data.email == resource.data.email
+              && validRoleSet(rolesOf(request.resource.data), request.resource.data.role)
+              && profileAfterMatchesMember()
               && request.resource.data.version == resource.data.version + 1
               && (request.resource.data.status == resource.data.status
                   || (resource.data.status in ['invited','pending_activation']
@@ -482,6 +575,7 @@ service cloud.firestore {
                    .hasOnly(['status','deletedAt','updatedBy','updatedAt','version'])
               && request.resource.data.uid == resource.data.uid
               && request.resource.data.role == resource.data.role
+              && rolesMatch(request.resource.data, resource.data)
               && request.resource.data.email == resource.data.email
               && request.resource.data.updatedBy == request.auth.uid
               && request.resource.data.version == resource.data.version + 1)
@@ -494,9 +588,11 @@ service cloud.firestore {
               && resource.data.email is string
               && resource.data.email.lower() == request.auth.token.email.lower()
               && request.resource.data.diff(resource.data).affectedKeys()
-                   .hasOnly(['uid','status','updatedBy','updatedAt','version'])
+                   .hasOnly(['uid','roles','status','updatedBy','updatedAt','version'])
               && request.resource.data.status == 'pending_activation'
               && request.resource.data.role == resource.data.role
+              && validRoleSet(rolesOf(request.resource.data), request.resource.data.role)
+              && rolesMatch(request.resource.data, resource.data)
               && request.resource.data.uid == request.auth.uid
               && request.resource.data.updatedBy == request.auth.uid
               // Same envelope invariant as every other write: exactly one step.
@@ -515,6 +611,7 @@ service cloud.firestore {
                    .hasOnly(['status','deletedAt','updatedBy','updatedAt','version'])
               && request.resource.data.uid == resource.data.uid
               && request.resource.data.role == resource.data.role
+              && rolesMatch(request.resource.data, resource.data)
               && request.resource.data.email == resource.data.email
               && request.resource.data.updatedBy == request.auth.uid
               && request.resource.data.version == resource.data.version + 1);
@@ -523,6 +620,58 @@ service cloud.firestore {
       }
 
       // ── synced domain documents (plan §6.1) ───────────────────────────
+      match /parameters/{docId} {
+        allow read: if can(orgId, 'samples.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+      match /materialBounds/{docId} {
+        allow read: if can(orgId, 'samples.read');
+        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow delete: if false;
+      }
+      match /organizationSettings/{docId} {
+        function sharedKey() {
+          return request.resource.data.key in [
+            'department_label','report_logo_data_uri','qa_form_no',
+            'inspection_report_form_no','inspection_label_form_no',
+            'equipment_label_form_no','daily_report_form_no','monthly_report_form_no',
+            'yearly_report_form_no','followup_report_form_no','lab_daily_report_form_no',
+            'lab_monthly_report_form_no','lab_yearly_report_form_no','ncr_report_form_no'];
+        }
+        allow read: if can(orgId, 'reports.read');
+        allow create: if can(orgId, 'reports.create') && hasEnvelope(orgId)
+          && sharedKey() && request.resource.data.value is string;
+        allow update: if can(orgId, 'reports.create') && bumped(orgId)
+          && sharedKey() && request.resource.data.key == resource.data.key
+          && request.resource.data.value is string;
+        allow delete: if false;
+      }
+      match /qcSops/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId)
+          && (!(request.resource.data.status in ['Approved','Published']) || can(orgId, 'qc.approve'));
+        allow update: if can(orgId, 'qc.write') && bumped(orgId)
+          && (request.resource.data.status == resource.data.status
+              || !(request.resource.data.status in ['Approved','Published'])
+              || can(orgId, 'qc.approve'));
+        allow delete: if false;
+      }
+      match /qcSopRevisions/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.approve') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.approve') && bumped(orgId);
+        allow delete: if false;
+      }
+      match /qcSopReads/{docId} {
+        allow read: if can(orgId, 'qc.read');
+        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
+        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow delete: if false;
+      }
+
       match /samples/{docId} {
         allow read: if can(orgId, 'samples.read');
         allow create: if can(orgId, 'samples.create') && hasEnvelope(orgId);
@@ -558,9 +707,15 @@ service cloud.firestore {
       }
 
       match /labConfig/{docId} {
-        allow read: if can(orgId, 'samples.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow read: if resource.data.configType.matches('nutrition_.*')
+          ? can(orgId, 'formulations.read') : can(orgId, 'samples.read');
+        allow create: if (request.resource.data.configType.matches('nutrition_.*')
+          ? can(orgId, 'formulations.create') : can(orgId, 'lab_results.create'))
+          && hasEnvelope(orgId);
+        allow update: if (request.resource.data.configType.matches('nutrition_.*')
+          ? can(orgId, 'formulations.update') : can(orgId, 'lab_results.update'))
+          && request.resource.data.configType == resource.data.configType
+          && bumped(orgId);
         allow delete: if false;
       }
 
@@ -728,6 +883,33 @@ service cloud.firestore {
         allow delete: if false;
       }
 
+      // Push tokens are private per-device infrastructure. Read-only viewers
+      // may register their own token; tokens never grant domain permissions.
+      match /pushTokens/{tokenId} {
+        function tokenShapeOk() {
+          return request.resource.data.keys().hasOnly([
+            'uid','deviceId','token','platform','updatedAt'])
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.token is string
+            && request.resource.data.token.size() > 0
+            && request.resource.data.token.size() <= 4096
+            && request.resource.data.deviceId is string
+            && request.resource.data.platform in ['android','ios']
+            && request.resource.data.updatedAt is string;
+        }
+        function ownsPushDevice() {
+          let device = get(/databases/$(database)/documents/organizations/$(orgId)/devices/$(request.resource.data.deviceId));
+          return device != null && device.data.uid == request.auth.uid
+            && device.data.get('status', 'active') != 'revoked';
+        }
+        allow read: if false;
+        allow create: if activeInOrg(orgId) && tokenShapeOk() && ownsPushDevice();
+        allow update: if activeInOrg(orgId) && tokenShapeOk() && ownsPushDevice()
+          && resource.data.uid == request.auth.uid
+          && request.resource.data.deviceId == resource.data.deviceId;
+        allow delete: if signedIn() && resource.data.uid == request.auth.uid;
+      }
+
       // Device inventory: a member may only write its own document, admins may
       // refresh or revoke any of them.
       match /devices/{deviceId} {
@@ -762,9 +944,10 @@ service cloud.firestore {
         // The admin branch additionally may not re-assign ownership: `revoke()`
         // blanks the uid (it acts on a device it did not create), and nothing
         // legitimately changes it.
-        allow update: if (resource.data.uid == request.auth.uid
+        allow update: if activeInOrg(orgId) && ((resource.data.uid == request.auth.uid
                           && request.resource.data.uid == resource.data.uid
                           && deviceKeysOk()
+                          && request.resource.data.get('readOnly', true) == resource.data.get('readOnly', true)
                           // Owner heartbeat/register must never change the
                           // revocation state: self sign-out goes through the
                           // same branch but only `active → revoked`, never
@@ -780,13 +963,35 @@ service cloud.firestore {
                           && (request.resource.data.get('status', 'active')
                                 == resource.data.get('status', 'active')
                               || (resource.data.get('status', 'active') != 'revoked'
-                                  && request.resource.data.get('status', 'active') == 'revoked')));
+                                  && request.resource.data.get('status', 'active') == 'revoked'))));
         allow delete: if false;
+      }
+
+      // A private append acknowledgement is part of the same transaction as
+      // its business record. It exposes hashes, never laboratory values.
+      match /syncReceipts/{uid}/entries/{receiptId} {
+        allow get: if activeInOrg(orgId) && request.auth.uid == uid;
+        allow list: if false;
+        allow create: if activeInOrg(orgId) && request.auth.uid == uid
+          && activeOwnedDevice(orgId, request.resource.data.get('deviceId', ''))
+          && request.resource.data.keys().hasOnly([
+            'fingerprint','deviceId','collectionId','documentId','version','createdAt'])
+          && receiptId.matches('^[a-f0-9]{64}$')
+          && request.resource.data.fingerprint is string
+          && request.resource.data.fingerprint.matches('^[a-f0-9]{64}$')
+          && request.resource.data.collectionId in [
+            'qualityChecks','inventoryTransactions','consumption','stockAdjustments','qcTaskLogs','auditLogs']
+          && request.resource.data.documentId is string
+          && request.resource.data.documentId.size() > 0
+          && request.resource.data.version == 1
+          && request.resource.data.createdAt is timestamp;
+        allow update, delete: if false;
       }
 
       match /auditLogs/{docId} {
         allow read: if can(orgId, 'audit.read');
         allow create: if activeInOrg(orgId)
+          && activeOwnedDevice(orgId, request.resource.data.get('deviceId', ''))
           && request.resource.data.keys().hasOnly([
                'userId','userName','organizationId','action','entityType','entityId',
                'detailsJson','deviceId','occurredAt','version'])
@@ -796,6 +1001,40 @@ service cloud.firestore {
           && validAuditAction(request.resource.data.action)
           && request.resource.data.version == 1;
         allow update, delete: if false; // append-only
+      }
+
+      // ── Central command protocol (plan 2026-10-25 §6/§9) ────────────────
+      // After cutover, clients NEVER write business records directly: the
+      // command service writes them. These store collections are written
+      // only by the Admin SDK (bypassing rules); clients read only what
+      // review/accounting requires.
+      //
+      // Note (§11, stage 9): this does not yet CLOSE the old direct-write
+      // path above — the migration order is "block the old writes first" at
+      // cutover. The rules below are the new stores' contract.
+      match /commandReceipts/{operationId} {
+        // Receipt recovery after "resend the same request": the same actor
+        // may read its own receipts; hashes live here, no lab data.
+        allow get: if activeInOrg(orgId)
+          && resource.data.uid == request.auth.uid;
+        allow list: if activeInOrg(orgId) && can(orgId, 'audit.read');
+        allow create, update, delete: if false;
+      }
+      match /changeEvents/{eventId} {
+        // Unified reading (§8): members read the change feed for their own
+        // organization; every write belongs to the command service.
+        allow read: if can(orgId, 'samples.read') && resource.data.entityType == 'sample';
+        allow create, update, delete: if false;
+      }
+      match /counters/{counterId} {
+        // Server-shared sequence counters — this is THE identity data
+        // (official numbers); clients read nothing, write nothing.
+        allow read, write: if false;
+      }
+      match /notifyRequests/{requestId} {
+        // Notification fan-out requests, consumed by the push delivery
+        // function after the commit. Not client-readable at all.
+        allow read, write: if false;
       }
 
       // Nothing else inside an organization is writable.

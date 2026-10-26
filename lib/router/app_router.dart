@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../app/auth_gate.dart';
 import '../core/auth/app_session.dart';
 import '../core/auth/permissions.dart';
+import '../core/commands/command_outbox.dart';
 import '../core/locale/locale_service.dart';
 import '../core/network/connectivity_service.dart';
 import '../core/responsive/form_factor.dart';
@@ -25,6 +26,7 @@ import '../features/auth/presentation/login/login_screen.dart';
 import '../features/auth/presentation/waiting_activation/waiting_activation_screen.dart';
 
 import '../features/dashboard/domain/dashboard_repository.dart';
+import '../features/formulations/presentation/formulations_screen.dart';
 import '../features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import '../features/dashboard/presentation/cubit/daily_tasks_cubit.dart';
 import '../features/dashboard/presentation/cubit/dashboard_kpis_cubit.dart';
@@ -69,6 +71,7 @@ abstract final class AppRoutes {
   static const String inspectionNew = '/inspection-new';
   static const String reports = '/reports';
   static const String lab = '/lab';
+  static const String formulations = '/formulations';
   static const String reference = '/reference';
   static const String settings = '/settings';
   static const String members = '/members';
@@ -159,6 +162,7 @@ class AppRouter {
           theme: getIt<ThemeService>(),
           syncQueue: getIt<SyncQueue>(),
           syncMetadata: getIt<SyncMetadata>(),
+          commandOutbox: getIt<CommandOutbox>(),
           connectivity: getIt<ConnectivityService>(),
           exportRoot: getIt<ExportRootService>(),
           fileDelivery: fileDelivery(),
@@ -221,8 +225,8 @@ class AppRouter {
                       // (id) `&materialName&from&to`. Bad values are inert.
                       initialStatus: (s.uri.queryParameters['status'] ?? '')
                           .trim(),
-                      initialSupplier:
-                          (s.uri.queryParameters['supplier'] ?? '').trim(),
+                      initialSupplier: (s.uri.queryParameters['supplier'] ?? '')
+                          .trim(),
                       initialMaterialId: () {
                         final v = int.tryParse(
                           s.uri.queryParameters['material'] ?? '',
@@ -230,12 +234,10 @@ class AppRouter {
                         return (v == null || v <= 0) ? null : v;
                       }(),
                       initialMaterialName:
-                          (s.uri.queryParameters['materialName'] ?? '')
-                              .trim(),
-                      initialDateFrom:
-                          (s.uri.queryParameters['from'] ?? '').trim(),
-                      initialDateTo:
-                          (s.uri.queryParameters['to'] ?? '').trim(),
+                          (s.uri.queryParameters['materialName'] ?? '').trim(),
+                      initialDateFrom: (s.uri.queryParameters['from'] ?? '')
+                          .trim(),
+                      initialDateTo: (s.uri.queryParameters['to'] ?? '').trim(),
                     )..load(),
                   ),
                   BlocProvider(
@@ -246,6 +248,12 @@ class AppRouter {
                 // `?highlight=<localId>` from a notification tap.
                 child: InspectionCenterScreen(
                   highlightId: s.uri.queryParameters['highlight'],
+                  initialProductTab: s.uri.queryParameters['products'] == '1',
+                  initialProductId: int.tryParse(
+                    s.uri.queryParameters['product'] ?? '',
+                  ),
+                  initialProductDateFrom: s.uri.queryParameters['from'] ?? '',
+                  initialProductDateTo: s.uri.queryParameters['to'] ?? '',
                 ),
               ),
             ),
@@ -279,20 +287,34 @@ class AppRouter {
             path: AppRoutes.lab,
             pageBuilder: (c, s) => AppPage<LabScreen>(
               name: s.uri.path,
-            // `?tab=0&highlight=<localId>` from a notification tap:
-            // test-history tab + banner. Unknown tab values fall back to 0.
-            // The LabScreen clamps against its real tab count so a stale
-            // notification can never index an `IndexedStack` out of range.
-            builder: (c) {
-              final tab =
-                  int.tryParse(s.uri.queryParameters['tab'] ?? '0') ?? 0;
-              return BlocProvider(
-                create: (c) => LabCubit()..setTab(tab),
-                child: LabScreen(
+              // `?tab=0&highlight=<localId>` from a notification tap:
+              // test-history tab + banner. Unknown tab values fall back to 0.
+              // The LabScreen clamps against its real tab count so a stale
+              // notification can never index an `IndexedStack` out of range.
+              builder: (c) {
+                final tab =
+                    int.tryParse(s.uri.queryParameters['tab'] ?? '0') ?? 0;
+                return BlocProvider(
+                  create: (c) => LabCubit()..setTab(tab),
+                  child: LabScreen(
                     highlightId: s.uri.queryParameters['highlight'],
                   ),
                 );
               },
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.formulations,
+            pageBuilder: (c, s) => AppPage<FormulationsScreen>(
+              name: s.uri.path,
+              builder: (c) => FormulationsScreen(
+                initialId: int.tryParse(s.uri.queryParameters['id'] ?? ''),
+                initialProductId: int.tryParse(
+                  s.uri.queryParameters['product'] ?? '',
+                ),
+                initialFrom: s.uri.queryParameters['from'],
+                initialTo: s.uri.queryParameters['to'],
+              ),
             ),
           ),
           GoRoute(
@@ -347,6 +369,8 @@ class AppRouter {
                   ..load(),
                 child: QcNcrDashboardScreen(
                   onOpenList: () => context.push(AppRoutes.qcNcrList),
+                  onOpenFinding: (id) =>
+                      context.push('${AppRoutes.qcNcrDetail}?findingId=$id'),
                 ),
               ),
             ),
@@ -366,7 +390,9 @@ class AppRouter {
                   final overdue = (q['overdue'] ?? '').trim() == '1';
                   final from = (q['from'] ?? '').trim();
                   final to = (q['to'] ?? '').trim();
-                  if (status.isNotEmpty || overdue || from.isNotEmpty ||
+                  if (status.isNotEmpty ||
+                      overdue ||
+                      from.isNotEmpty ||
                       to.isNotEmpty) {
                     cubit.seedFilters(
                       NcrFilters(
@@ -428,8 +454,7 @@ class AppRouter {
                   return const SizedBox.shrink();
                 }
                 return BlocProvider(
-                  create: (_) =>
-                      getIt<RoutineSheetCubit>(param1: id)..load(),
+                  create: (_) => getIt<RoutineSheetCubit>(param1: id)..load(),
                   child: RoutineSheetScreen(inspectionId: id),
                 );
               },
@@ -506,6 +531,10 @@ class AppRouter {
       case AppRoutes.inspectionNew:
         // A write form is never opened by a read-only device.
         if (!session.canWrite) return AppRoutes.dashboard;
+      case AppRoutes.formulations:
+        if (!session.permissions.contains(Permission.formulationsRead)) {
+          return AppRoutes.dashboard;
+        }
       case AppRoutes.qcNcr:
       case AppRoutes.qcManagement:
       case AppRoutes.qcNcrList:

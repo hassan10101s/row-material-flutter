@@ -1,3 +1,4 @@
+import '../../../../design_system/widgets/app_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -13,7 +14,6 @@ import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_adaptive.dart';
-import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
@@ -31,6 +31,7 @@ import '../../domain/lab_result_repository.dart';
 import '../../domain/product_batch_repository.dart';
 import '../cubit/product_batch_cubit.dart';
 import '../cubit/product_batch_state.dart';
+import '../../../../design_system/widgets/app_data_table.dart';
 
 const _batchDecisions = [
   'APPROVED',
@@ -41,13 +42,14 @@ const _batchDecisions = [
 
 /// Chemical result fields accept numbers only (no letters): digits with at
 /// most one decimal point, matching the raw-material form's normalization.
-final _decimalOnlyFormatter = TextInputFormatter.withFunction(
-  (oldValue, newValue) {
-    final t = newValue.text;
-    if (t.isEmpty || RegExp(r'^\d*\.?\d*$').hasMatch(t)) return newValue;
-    return oldValue;
-  },
-);
+final _decimalOnlyFormatter = TextInputFormatter.withFunction((
+  oldValue,
+  newValue,
+) {
+  final t = newValue.text;
+  if (t.isEmpty || RegExp(r'^\d*\.?\d*$').hasMatch(t)) return newValue;
+  return oldValue;
+});
 
 /// Physical-value suggestions for one sample row: the محضر's own reference
 /// values (raw numbers + separated options) plus the standard qualitative
@@ -67,8 +69,9 @@ List<String> _physicalValueSuggestions(Object? reference) {
       add(p);
     }
   }
-  for (final m in RegExp(r'-?\d+(?:\.\d+)?')
-      .allMatches(formatReferenceRange(reference).display)) {
+  for (final m in RegExp(
+    r'-?\d+(?:\.\d+)?',
+  ).allMatches(formatReferenceRange(reference).display)) {
     add(m.group(0)!);
   }
   for (final k in const [
@@ -243,10 +246,8 @@ class _BatchSectionBodyState extends State<_BatchSectionBody> {
       context,
       title: AppText.t('عينة جديدة', 'New sample'),
       icon: Icons.science_outlined,
-      builder: (sheetContext, close) => _SampleForm(
-        template: template,
-        onSave: (d) => close(d),
-      ),
+      builder: (sheetContext, close) =>
+          _SampleForm(template: template, onSave: (d) => close(d)),
     );
     if (data == null || !context.mounted) return;
     HapticFeedback.selectionClick();
@@ -560,18 +561,26 @@ class _SamplesSequentialTable extends StatelessWidget {
       buffer.writeln('${AppText.t('التاريخ والساعة', 'Date & time')}: $date');
     }
 
-    buffer.writeln('\n📋 ${AppText.t('النتائج الظاهرية / الفيزيائية:', 'Physical results:')}');
+    buffer.writeln(
+      '\n📋 ${AppText.t('النتائج الظاهرية / الفيزيائية:', 'Physical results:')}',
+    );
     if (physical.isEmpty) {
-      buffer.writeln('  ${AppText.t('(لا توجد نتائج مسجلة)', '(No results recorded)')}');
+      buffer.writeln(
+        '  ${AppText.t('(لا توجد نتائج مسجلة)', '(No results recorded)')}',
+      );
     } else {
       for (final e in physical.entries) {
         buffer.writeln('  • ${e.key}: ${e.value.isEmpty ? '-' : e.value}');
       }
     }
 
-    buffer.writeln('\n🔬 ${AppText.t('النتائج الكيميائية:', 'Chemical results:')}');
+    buffer.writeln(
+      '\n🔬 ${AppText.t('النتائج الكيميائية:', 'Chemical results:')}',
+    );
     if (chemical.isEmpty) {
-      buffer.writeln('  ${AppText.t('(لا توجد نتائج مسجلة)', '(No results recorded)')}');
+      buffer.writeln(
+        '  ${AppText.t('(لا توجد نتائج مسجلة)', '(No results recorded)')}',
+      );
     } else {
       for (final r in chemical) {
         final unit = (r['unit'] ?? '').isEmpty ? '' : ' ${r['unit']}';
@@ -584,7 +593,9 @@ class _SamplesSequentialTable extends StatelessWidget {
       buffer.writeln('\n⚖️ ${AppText.t('القرار', 'Decision')}: $decision');
     }
 
-    buffer.writeln('\n💡 ${AppText.t('انقر بالماوس لتثبيت وعرض التفاصيل بالأسفل', 'Click row to pin & view details below')}');
+    buffer.writeln(
+      '\n💡 ${AppText.t('انقر بالماوس لتثبيت وعرض التفاصيل بالأسفل', 'Click row to pin & view details below')}',
+    );
     return buffer.toString().trim();
   }
 
@@ -645,64 +656,22 @@ class _SamplesSequentialTable extends StatelessWidget {
         children: [
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
-            child: DataTable(
+            child: AppDataTable(
               showCheckboxColumn: false,
-              headingRowColor: WidgetStatePropertyAll(
-                AppColors.primary.withValues(alpha: 0.08),
-              ),
-              dataRowColor: WidgetStateProperty.resolveWith((states) {
-                if (states.contains(WidgetState.selected)) {
-                  return AppColors.primary.withValues(alpha: 0.12);
-                }
-                if (states.contains(WidgetState.hovered)) {
-                  return AppColors.primary.withValues(alpha: 0.05);
-                }
-                return Colors.transparent;
-              }),
+
               columns: [
+                DataColumn(label: Text(AppText.t('#', '#'))),
+                DataColumn(label: Text(AppText.t('العينة', 'Sample'))),
                 DataColumn(
-                  label: Text(
-                    AppText.t('#', '#'),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  label: Text(AppText.t('التاريخ والساعة', 'Date & time')),
                 ),
+                DataColumn(label: Text(AppText.t('أخذها', 'Taken by'))),
                 DataColumn(
-                  label: Text(
-                    AppText.t('العينة', 'Sample'),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                DataColumn(
-                  label: Text(
-                    AppText.t('التاريخ والساعة', 'Date & time'),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                DataColumn(
-                  label: Text(
-                    AppText.t('أخذها', 'Taken by'),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                DataColumn(
-                  label: Text(
-                    AppText.t('النتائج', 'Results'),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  label: Text(AppText.t('النتائج', 'Results')),
                   numeric: true,
                 ),
-                DataColumn(
-                  label: Text(
-                    AppText.t('القرار', 'Decision'),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-                DataColumn(
-                  label: Text(
-                    AppText.t('', ''),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
+                DataColumn(label: Text(AppText.t('القرار', 'Decision'))),
+                DataColumn(label: Text(AppText.t('', ''))),
               ],
               rows: [
                 for (final s in ordered) ...[
@@ -711,8 +680,11 @@ class _SamplesSequentialTable extends StatelessWidget {
                     return DataRow(
                       key: ValueKey('batch-sample-${s['id']}'),
                       selected: isExpanded,
-                      onSelectChanged: (_) => onToggle((s['id'] as num).toInt()),
-                      mouseCursor: const WidgetStatePropertyAll(SystemMouseCursors.click),
+                      onSelectChanged: (_) =>
+                          onToggle((s['id'] as num).toInt()),
+                      mouseCursor: const WidgetStatePropertyAll(
+                        SystemMouseCursors.click,
+                      ),
                       cells: [
                         DataCell(
                           _cellWithTooltip(
@@ -724,8 +696,8 @@ class _SamplesSequentialTable extends StatelessWidget {
                                   isExpanded
                                       ? Icons.keyboard_arrow_down
                                       : (isRtl
-                                          ? Icons.keyboard_arrow_left
-                                          : Icons.keyboard_arrow_right),
+                                            ? Icons.keyboard_arrow_left
+                                            : Icons.keyboard_arrow_right),
                                   size: 18.r,
                                   color: isExpanded
                                       ? AppColors.primary
@@ -764,7 +736,9 @@ class _SamplesSequentialTable extends StatelessWidget {
                         DataCell(
                           _cellWithTooltip(
                             sample: s,
-                            child: Text(_fmtSampleDateTime('${s['tested_at'] ?? ''}')),
+                            child: Text(
+                              _fmtSampleDateTime('${s['tested_at'] ?? ''}'),
+                            ),
                           ),
                         ),
                         DataCell(
@@ -781,10 +755,15 @@ class _SamplesSequentialTable extends StatelessWidget {
                           _cellWithTooltip(
                             sample: s,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
                               decoration: BoxDecoration(
                                 color: AppColors.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(AppRadii.pill),
+                                borderRadius: BorderRadius.circular(
+                                  AppRadii.pill,
+                                ),
                               ),
                               child: Text(
                                 '${_resultCount(s)}',
@@ -807,7 +786,9 @@ class _SamplesSequentialTable extends StatelessWidget {
                                       color: AppColors.textMuted,
                                     ),
                                   )
-                                : AppStatusBadge('${s['decision_status'] ?? ''}'),
+                                : AppStatusBadge(
+                                    '${s['decision_status'] ?? ''}',
+                                  ),
                           ),
                         ),
                         DataCell(
@@ -815,7 +796,10 @@ class _SamplesSequentialTable extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                tooltip: AppText.t('تعديل العينة', 'Edit sample'),
+                                tooltip: AppText.t(
+                                  'تعديل العينة',
+                                  'Edit sample',
+                                ),
                                 constraints: const BoxConstraints(
                                   minWidth: 36,
                                   minHeight: 36,
@@ -830,7 +814,10 @@ class _SamplesSequentialTable extends StatelessWidget {
                                   minHeight: 36,
                                 ),
                                 onPressed: () => onDecision(s),
-                                icon: Icon(Icons.fact_check_outlined, size: 18.r),
+                                icon: Icon(
+                                  Icons.fact_check_outlined,
+                                  size: 18.r,
+                                ),
                               ),
                               IconButton(
                                 tooltip: AppText.t('حذف', 'Delete'),
@@ -888,14 +875,15 @@ class _SamplesMobileList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ordered = [...samples]..sort((a, b) {
-      final na = (a['sample_no'] as num?)?.toInt() ?? 0;
-      final nb = (b['sample_no'] as num?)?.toInt() ?? 0;
-      if (na != nb) return na.compareTo(nb);
-      return ((a['id'] as num?)?.toInt() ?? 0).compareTo(
-        (b['id'] as num?)?.toInt() ?? 0,
-      );
-    });
+    final ordered = [...samples]
+      ..sort((a, b) {
+        final na = (a['sample_no'] as num?)?.toInt() ?? 0;
+        final nb = (b['sample_no'] as num?)?.toInt() ?? 0;
+        if (na != nb) return na.compareTo(nb);
+        return ((a['id'] as num?)?.toInt() ?? 0).compareTo(
+          (b['id'] as num?)?.toInt() ?? 0,
+        );
+      });
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -997,8 +985,8 @@ class _SampleMobileCard extends StatelessWidget {
                     expanded
                         ? Icons.keyboard_arrow_down
                         : (isRtl
-                            ? Icons.keyboard_arrow_left
-                            : Icons.keyboard_arrow_right),
+                              ? Icons.keyboard_arrow_left
+                              : Icons.keyboard_arrow_right),
                     size: 18.r,
                     color: expanded ? AppColors.primary : AppColors.textMuted,
                   ),
@@ -1008,7 +996,9 @@ class _SampleMobileCard extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 13.spMax,
-                      color: expanded ? AppColors.primary : AppColors.textStrong,
+                      color: expanded
+                          ? AppColors.primary
+                          : AppColors.textStrong,
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
@@ -1020,7 +1010,9 @@ class _SampleMobileCard extends StatelessWidget {
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
                         fontSize: 14.spMax,
-                        color: expanded ? AppColors.primary : AppColors.textStrong,
+                        color: expanded
+                            ? AppColors.primary
+                            : AppColors.textStrong,
                       ),
                     ),
                   ),
@@ -1170,7 +1162,10 @@ class _SampleResultsTable extends StatelessWidget {
                       ' • ${_fmtSampleDateTime('${sample['tested_at'] ?? ''}')}',
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
+                      style: TextStyle(
+                        fontSize: 12.spMax,
+                        color: AppColors.textMuted,
+                      ),
                     ),
                   ],
                 ),
@@ -1184,7 +1179,11 @@ class _SampleResultsTable extends StatelessWidget {
           // Physical results section
           Row(
             children: [
-              Icon(Icons.visibility_outlined, size: 18.r, color: AppColors.primary),
+              Icon(
+                Icons.visibility_outlined,
+                size: 18.r,
+                color: AppColors.primary,
+              ),
               const SizedBox(width: AppSpacing.xs),
               Text(
                 AppText.t('النتائج الظاهرية والفيزيائية', 'Physical results'),
@@ -1201,8 +1200,14 @@ class _SampleResultsTable extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
               child: Text(
-                AppText.t('لا توجد نتائج ظاهرية مسجلة لهذه العينة.', 'No physical results.'),
-                style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
+                AppText.t(
+                  'لا توجد نتائج ظاهرية مسجلة لهذه العينة.',
+                  'No physical results.',
+                ),
+                style: TextStyle(
+                  fontSize: 12.spMax,
+                  color: AppColors.textMuted,
+                ),
               ),
             )
           else
@@ -1214,29 +1219,23 @@ class _SampleResultsTable extends StatelessWidget {
                 border: Border.all(color: AppColors.borderMuted),
               ),
               clipBehavior: Clip.antiAlias,
-              child: DataTable(
-                headingRowColor: WidgetStatePropertyAll(
-                  AppColors.primary.withValues(alpha: 0.05),
-                ),
+              child: AppDataTable(
                 columns: [
                   DataColumn(
-                    label: Text(
-                      AppText.t('البيان / الفحص', 'Item / Test'),
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
+                    label: Text(AppText.t('البيان / الفحص', 'Item / Test')),
                   ),
-                  DataColumn(
-                    label: Text(
-                      AppText.t('النتيجة', 'Result'),
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
+                  DataColumn(label: Text(AppText.t('النتيجة', 'Result'))),
                 ],
                 rows: [
                   for (final e in physical.entries)
                     DataRow(
                       cells: [
-                        DataCell(Text(e.key, style: const TextStyle(fontWeight: FontWeight.w600))),
+                        DataCell(
+                          Text(
+                            e.key,
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
                         DataCell(
                           Text(
                             e.value.isEmpty ? '-' : e.value,
@@ -1257,7 +1256,11 @@ class _SampleResultsTable extends StatelessWidget {
           // Chemical results section
           Row(
             children: [
-              Icon(Icons.biotech_outlined, size: 18.r, color: AppColors.primary),
+              Icon(
+                Icons.biotech_outlined,
+                size: 18.r,
+                color: AppColors.primary,
+              ),
               const SizedBox(width: AppSpacing.xs),
               Text(
                 AppText.t('النتائج الكيميائية والمعملية', 'Chemical results'),
@@ -1274,8 +1277,14 @@ class _SampleResultsTable extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
               child: Text(
-                AppText.t('لا توجد نتائج كيميائية مسجلة لهذه العينة.', 'No chemical results.'),
-                style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
+                AppText.t(
+                  'لا توجد نتائج كيميائية مسجلة لهذه العينة.',
+                  'No chemical results.',
+                ),
+                style: TextStyle(
+                  fontSize: 12.spMax,
+                  color: AppColors.textMuted,
+                ),
               ),
             )
           else
@@ -1287,35 +1296,22 @@ class _SampleResultsTable extends StatelessWidget {
                 border: Border.all(color: AppColors.borderMuted),
               ),
               clipBehavior: Clip.antiAlias,
-              child: DataTable(
-                headingRowColor: WidgetStatePropertyAll(
-                  AppColors.primary.withValues(alpha: 0.05),
-                ),
+              child: AppDataTable(
                 columns: [
-                  DataColumn(
-                    label: Text(
-                      AppText.t('التحليل', 'Analysis'),
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      AppText.t('النتيجة', 'Result'),
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
-                  DataColumn(
-                    label: Text(
-                      AppText.t('الوحدة', 'Unit'),
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                  ),
+                  DataColumn(label: Text(AppText.t('التحليل', 'Analysis'))),
+                  DataColumn(label: Text(AppText.t('النتيجة', 'Result'))),
+                  DataColumn(label: Text(AppText.t('الوحدة', 'Unit'))),
                 ],
                 rows: [
                   for (final r in chemical)
                     DataRow(
                       cells: [
-                        DataCell(Text(r['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.w600))),
+                        DataCell(
+                          Text(
+                            r['name'] ?? '',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
                         DataCell(
                           Text(
                             (r['result'] ?? '').isEmpty ? '-' : r['result']!,
@@ -1400,10 +1396,10 @@ class _PhysRow {
   }
 
   _PhysRow.free({String nameText = '', String valueText = ''})
-      : item = '',
-        refHint = '',
-        reference = null,
-        freeName = TextEditingController(text: nameText) {
+    : item = '',
+      refHint = '',
+      reference = null,
+      freeName = TextEditingController(text: nameText) {
     value.text = valueText;
   }
 
@@ -1432,17 +1428,20 @@ class _ChemRow {
     required this.unit,
     required this.refHint,
     String resultText = '',
-  })  : freeName = null,
-        freeUnit = null {
+  }) : freeName = null,
+       freeUnit = null {
     result.text = resultText;
   }
 
-  _ChemRow.free({String nameText = '', String resultText = '', String unitText = ''})
-      : name = '',
-        unit = '',
-        refHint = '',
-        freeName = TextEditingController(text: nameText),
-        freeUnit = TextEditingController(text: unitText) {
+  _ChemRow.free({
+    String nameText = '',
+    String resultText = '',
+    String unitText = '',
+  }) : name = '',
+       unit = '',
+       refHint = '',
+       freeName = TextEditingController(text: nameText),
+       freeUnit = TextEditingController(text: unitText) {
     result.text = resultText;
   }
 
@@ -1466,7 +1465,11 @@ class _ChemRow {
 /// pipeline is never involved. Empty values are allowed: a sample may be
 /// filed first and completed later through the edit action.
 class _SampleForm extends StatefulWidget {
-  const _SampleForm({required this.template, this.initial, required this.onSave});
+  const _SampleForm({
+    required this.template,
+    this.initial,
+    required this.onSave,
+  });
 
   final _BatchSampleTemplate template;
   final Map<String, dynamic>? initial;
@@ -1499,9 +1502,7 @@ class _SampleFormState extends State<_SampleForm> {
     final chemStored = init == null
         ? const <Map<String, String>>[]
         : decodeBatchChemical(init['chemical_results_json']);
-    final chemByName = {
-      for (final r in chemStored) r['name'] ?? '': r,
-    };
+    final chemByName = {for (final r in chemStored) r['name'] ?? '': r};
     if (_physFixed) {
       _physRows = [
         for (final e in widget.template.physicalRef.entries)
@@ -1777,10 +1778,12 @@ class _SampleFormState extends State<_SampleForm> {
           if (!_physFixed)
             Align(
               alignment: AlignmentDirectional.centerStart,
-              child: TextButton.icon(
+              child: AppButton(
                 onPressed: () => setState(() => _physRows.add(_PhysRow.free())),
+                label: AppText.t('صف ظاهري', 'Physical row'),
                 icon: Icon(Icons.add, size: 18.r),
-                label: Text(AppText.t('صف ظاهري', 'Physical row')),
+                style: AppButtonStyle.ghost,
+                small: true,
               ),
             ),
           const SizedBox(height: AppSpacing.sm),
@@ -1890,8 +1893,7 @@ class _SampleFormState extends State<_SampleForm> {
                                 onPressed: _chemRows.length <= 1
                                     ? null
                                     : () => setState(
-                                        () =>
-                                            _chemRows.removeAt(i).dispose(),
+                                        () => _chemRows.removeAt(i).dispose(),
                                       ),
                                 icon: Icon(
                                   Icons.remove_circle_outline,
@@ -1927,10 +1929,12 @@ class _SampleFormState extends State<_SampleForm> {
           if (!_chemFixed)
             Align(
               alignment: AlignmentDirectional.centerStart,
-              child: TextButton.icon(
+              child: AppButton(
                 onPressed: () => setState(() => _chemRows.add(_ChemRow.free())),
+                label: AppText.t('تحليل كيميائي', 'Chemical analysis'),
                 icon: Icon(Icons.add, size: 18.r),
-                label: Text(AppText.t('تحليل كيميائي', 'Chemical analysis')),
+                style: AppButtonStyle.ghost,
+                small: true,
               ),
             ),
           const SizedBox(height: AppSpacing.md),

@@ -28,7 +28,8 @@ Uint8List secureRandomBytes(int length) {
   return out;
 }
 
-Uint8List sha256Bytes(List<int> data) => Uint8List.fromList(sha256.convert(data).bytes);
+Uint8List sha256Bytes(List<int> data) =>
+    Uint8List.fromList(sha256.convert(data).bytes);
 
 List<int> _hmacBytes(List<int> key, List<int> message) =>
     Hmac(sha256, key).convert(message).bytes;

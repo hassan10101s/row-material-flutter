@@ -3,8 +3,6 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
-import '../../../../../core/responsive/form_factor.dart';
-import '../../../../../core/responsive/layout_spec.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -14,6 +12,7 @@ import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
 import '../../domain/routine_repository.dart';
 import 'routine_sheet_cubit.dart';
@@ -246,19 +245,23 @@ class _CheckRow extends StatelessWidget {
     final repo = context.read<RoutineSheetCubit>().repo;
     final logs = await repo.taskLogs(sheetId, itemId: itemId);
     if (logs.isEmpty || !context.mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          AppText.t(
-            'سجل إنجاز: ${row.item.label}',
-            'Done log: ${row.item.label}',
-          ),
+    await showAppDialog<void>(
+      context,
+      builder: (ctx) => AppDialog(
+        icon: Icons.task_alt,
+        title: AppText.t(
+          'سجل إنجاز: ${row.item.label}',
+          'Done log: ${row.item.label}',
         ),
-        content: SizedBox(
-          // Fixed pixel dimensions are a desktop affordance only; a phone
-          // dialog runs its own intrinsic width (LayoutSpec contract).
-          width: LayoutSpec.of(FormFactor.current).allowsFixedDialog ? 360 : null,
+        actions: [
+          AppButton(
+            style: AppButtonStyle.secondary,
+            small: true,
+            label: AppText.t('إغلاق', 'Close'),
+            onPressed: () => Navigator.of(ctx).pop(),
+          ),
+        ],
+        child: SizedBox(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 420),
             child: SingleChildScrollView(
@@ -304,14 +307,6 @@ class _CheckRow extends StatelessWidget {
             ),
           ),
         ),
-        actions: [
-          AppButton(
-            style: AppButtonStyle.secondary,
-            small: true,
-            label: AppText.t('إغلاق', 'Close'),
-            onPressed: () => Navigator.of(ctx).pop(),
-          ),
-        ],
       ),
     );
   }
@@ -449,16 +444,11 @@ Future<String?> showRoutineNoteDialog(
   String initial = '',
 }) async {
   final controller = TextEditingController(text: initial);
-  final result = await showDialog<String>(
-    context: context,
-    builder: (context) => AlertDialog(
-      title: Text(AppText.t('ملاحظة على البند', 'Item note')),
-      content: AppField(
-        label: AppText.t('ملاحظة (اختياري)', 'Note (optional)'),
-        controller: controller,
-        maxLines: 3,
-        autofocus: true,
-      ),
+  final result = await showAppDialog<String>(
+    context,
+    builder: (context) => AppDialog(
+      icon: Icons.note_alt_outlined,
+      title: AppText.t('ملاحظة على البند', 'Item note'),
       actions: [
         AppButton(
           style: AppButtonStyle.secondary,
@@ -472,6 +462,12 @@ Future<String?> showRoutineNoteDialog(
           onPressed: () => Navigator.of(context).pop(controller.text.trim()),
         ),
       ],
+      child: AppField(
+        label: AppText.t('ملاحظة (اختياري)', 'Note (optional)'),
+        controller: controller,
+        maxLines: 3,
+        autofocus: true,
+      ),
     ),
   );
   controller.dispose();

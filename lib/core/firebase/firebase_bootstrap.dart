@@ -32,7 +32,9 @@ class FirebaseBootstrap {
 
   static bool _initialized = false;
 
-  static Future<FirebaseBootstrapResult> initialize({AssetBundle? bundle}) async {
+  static Future<FirebaseBootstrapResult> initialize({
+    AssetBundle? bundle,
+  }) async {
     try {
       final config = await FirebaseConfig.load(bundle: bundle);
       if (!config.isConfigured) {
@@ -42,16 +44,25 @@ class FirebaseBootstrap {
         );
       }
       if (_initialized) {
-        return FirebaseBootstrapResult(status: FirebaseStatus.ready, config: config);
+        return FirebaseBootstrapResult(
+          status: FirebaseStatus.ready,
+          config: config,
+        );
       }
       await Firebase.initializeApp(options: config.toOptions());
       _initialized = true;
-      return FirebaseBootstrapResult(status: FirebaseStatus.ready, config: config);
+      return FirebaseBootstrapResult(
+        status: FirebaseStatus.ready,
+        config: config,
+      );
     } catch (error, stack) {
       if (kDebugMode) {
         debugPrint('[firebase] initialize failed: $error\n$stack');
       }
-      return FirebaseBootstrapResult(status: FirebaseStatus.failed, error: error);
+      return FirebaseBootstrapResult(
+        status: FirebaseStatus.failed,
+        error: error,
+      );
     }
   }
 

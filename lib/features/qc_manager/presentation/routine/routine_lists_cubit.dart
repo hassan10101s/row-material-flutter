@@ -33,7 +33,9 @@ const Object _unset = Object();
 
 /// The routine-lists hub: every list with its progress in the current period.
 class RoutineListsCubit extends AppCubit<RoutineListsState> {
-  RoutineListsCubit({required this.repo}) : super(const RoutineListsState());
+  RoutineListsCubit({required this.repo}) : super(const RoutineListsState()) {
+    refreshOnSync(load);
+  }
 
   final RoutineListsRepository repo;
 

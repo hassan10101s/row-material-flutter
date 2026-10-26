@@ -71,6 +71,7 @@ const shellRoutes = <String>[
   '/dashboard',
   '/inspections',
   '/lab',
+  '/formulations',
   '/quality-management',
   '/reference',
   '/settings',
@@ -842,9 +843,55 @@ void main() {
           ),
         ),
       );
-      expect(find.byTooltip(AppStrings.toggleLanguage), findsOneWidget);
-      expect(find.byTooltip(AppStrings.toggleTheme), findsOneWidget);
       expect(find.byKey(const Key('sync-badge')), findsOneWidget);
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      expect(find.text(AppStrings.toggleLanguage), findsOneWidget);
+      expect(find.text(AppStrings.toggleTheme), findsOneWidget);
+    });
+
+    testWidgets('phone chrome fits a 320dp screen with reachable preferences', (
+      tester,
+    ) async {
+      await pumpOn(
+        tester,
+        routerWith(
+          (child) => mobileShell(
+            user: _userFor(AppRoles.admin),
+            entries: entriesFor(AppRoles.admin),
+            onNavigate: (_) {},
+            child: child,
+          ),
+        ),
+        grid: const Size(320, 740),
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byType(NavigationBar), findsOneWidget);
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      expect(find.text(AppStrings.toggleLanguage), findsOneWidget);
+      expect(find.text(AppStrings.toggleTheme), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('a snapped desktop window keeps desktop navigation', (
+      tester,
+    ) async {
+      await pumpOn(
+        tester,
+        routerWith(
+          (child) => desktopShell(
+            user: _userFor(AppRoles.admin),
+            entries: entriesFor(AppRoles.admin),
+            onNavigate: (_) {},
+            child: child,
+          ),
+        ),
+        grid: const Size(800, 720),
+      );
+      expect(find.byType(DesktopAppShell), findsOneWidget);
+      expect(find.byType(NavigationBar), findsNothing);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('the exports-folder button follows FileDelivery.canReveal', (
@@ -1021,7 +1068,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byType(Drawer),
-          matching: find.textContaining(AppRoles.viewer),
+          matching: find.textContaining(AppRoles.label(AppRoles.viewer)),
         ),
         findsOneWidget,
         reason:

@@ -1,3 +1,4 @@
+import '../../../../design_system/widgets/app_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -52,12 +53,11 @@ class DashboardResultLine extends StatelessWidget {
                 ),
               ),
             ),
-            TextButton(
+            AppButton(
               onPressed: onClearFilters,
-              child: Text(
-                AppText.t('مسح الفلاتر', 'Clear filters'),
-                style: TextStyle(fontSize: 12.spMax),
-              ),
+              label: AppText.t('مسح الفلاتر', 'Clear filters'),
+              style: AppButtonStyle.ghost,
+              small: true,
             ),
           ] else ...[
             Icon(

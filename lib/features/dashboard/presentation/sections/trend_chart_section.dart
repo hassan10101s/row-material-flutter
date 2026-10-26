@@ -41,7 +41,9 @@ class TrendChartSection extends StatelessWidget {
           ],
           child: !hasData
               ? AppChartEmpty(
-                  message: context.l10n.monthly_trend_empty, height: 180)
+                  message: context.l10n.monthly_trend_empty,
+                  height: 180,
+                )
               : AppCountBarChart(
                   height: 220,
                   unit: AppText.t('فحص', 'inspections'),
@@ -50,7 +52,8 @@ class TrendChartSection extends StatelessWidget {
                       AppChartPoint(
                         label: t.label,
                         value: t.total.toDouble(),
-                        tooltip: '${AppText.t('القبول', 'approval')}: ${t.approvalRate}%',
+                        tooltip:
+                            '${AppText.t('القبول', 'approval')}: ${t.approvalRate}%',
                       ),
                   ],
                 ),
@@ -74,9 +77,7 @@ class TrendChartSection extends StatelessWidget {
                 for (final t in trend)
                   AppChartPoint(label: t.label, value: t.approvalRate),
               ],
-              movingAvg: [
-                for (final f in forecast) f.movingAvg,
-              ],
+              movingAvg: [for (final f in forecast) f.movingAvg],
             ),
           ),
       ],

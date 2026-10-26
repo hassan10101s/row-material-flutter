@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
+import '../tokens/app_motion.dart';
 
 class AppCard extends StatefulWidget {
   final Widget child;
@@ -12,6 +13,10 @@ class AppCard extends StatefulWidget {
   final VoidCallback? onLongPress;
   final bool enableHover;
 
+  /// Quietest shadow tier for dense scrollable lists (mobile registers).
+  /// Hover lift is unaffected; defaults to the standard [AppShadows.card].
+  final bool flat;
+
   const AppCard({
     super.key,
     required this.child,
@@ -21,6 +26,7 @@ class AppCard extends StatefulWidget {
     this.onTap,
     this.onLongPress,
     this.enableHover = true,
+    this.flat = false,
   });
 
   @override
@@ -39,7 +45,8 @@ class _AppCardState extends State<AppCard> {
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(AppRadii.md);
     final isInteractive = widget.onTap != null || widget.onLongPress != null;
-    final activeHover = widget.enableHover && (isInteractive || _isHovered);
+    final activeHover = widget.enableHover && isInteractive;
+    final paddedChild = Padding(padding: widget.padding, child: widget.child);
 
     final content = Material(
       color: Colors.transparent,
@@ -51,22 +58,24 @@ class _AppCardState extends State<AppCard> {
               onLongPress: widget.onLongPress,
               borderRadius: radius,
               mouseCursor: SystemMouseCursors.click,
-              child: widget.child,
+              child: paddedChild,
             )
-          : widget.child,
+          : paddedChild,
     );
 
     return MouseRegion(
-      onEnter: widget.enableHover ? (_) => _setHovered(true) : null,
-      onExit: widget.enableHover ? (_) => _setHovered(false) : null,
+      onEnter: activeHover ? (_) => _setHovered(true) : null,
+      onExit: activeHover ? (_) => _setHovered(false) : null,
       cursor: isInteractive ? SystemMouseCursors.click : MouseCursor.defer,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
+        duration: AppMotion.of(context, AppMotion.fast),
         curve: Curves.easeOutCubic,
-        padding: widget.padding,
         margin: widget.margin,
         transform: Matrix4.translationValues(
-            0, _isHovered && activeHover && isInteractive ? -1 : 0, 0),
+          0,
+          _isHovered && activeHover && isInteractive ? -1 : 0,
+          0,
+        ),
         decoration: BoxDecoration(
           color: widget.color ?? AppColors.surface,
           borderRadius: radius,
@@ -78,6 +87,8 @@ class _AppCardState extends State<AppCard> {
           ),
           boxShadow: _isHovered && activeHover
               ? AppShadows.elevated(Theme.of(context).brightness)
+              : widget.flat
+              ? AppShadows.flat(Theme.of(context).brightness)
               : AppShadows.card(Theme.of(context).brightness),
         ),
         child: content,
@@ -85,4 +96,3 @@ class _AppCardState extends State<AppCard> {
     );
   }
 }
-

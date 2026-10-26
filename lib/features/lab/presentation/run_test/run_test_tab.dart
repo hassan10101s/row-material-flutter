@@ -19,6 +19,8 @@ import '../../core/formula_engine.dart';
 import '../../core/lab_result_format.dart';
 import '../cubit/run_test_cubit.dart';
 import '../cubit/run_test_state.dart';
+import '../../../../design_system/widgets/app_select_field.dart';
+import '../../../../design_system/widgets/app_text_field.dart';
 
 /// Run a sample test against an analysis (raw material or product).
 ///
@@ -319,8 +321,7 @@ class _RunTestTabState extends State<RunTestTab> {
   bool? _compFormulaAuto;
   Map<String, Object?>? _compValues;
 
-  static bool _flatMapEquals(
-      Map<String, Object?> a, Map<String, Object?> b) {
+  static bool _flatMapEquals(Map<String, Object?> a, Map<String, Object?> b) {
     if (a.length != b.length) return false;
     for (final k in a.keys) {
       if (!b.containsKey(k) || a[k] != b[k]) return false;
@@ -501,10 +502,7 @@ class _RunTestTabState extends State<RunTestTab> {
               'Fixed value = ${labNumber(v)} used automatically in the formula.',
             );
       input = InputDecorator(
-        decoration: const InputDecoration(
-          isDense: true,
-          border: OutlineInputBorder(),
-        ),
+        decoration: const InputDecoration(),
         child: Align(
           alignment: AlignmentDirectional.centerStart,
           child: Text(
@@ -530,14 +528,13 @@ class _RunTestTabState extends State<RunTestTab> {
                     'القيمة المختارة ستُستخدم في المعادلة.',
                     'The chosen value will be used in the formula.',
                   ));
-      input = DropdownButtonFormField<String>(
+      input = AppSelectField<String>(
         key: ValueKey('list-${state.analysisId}-$field'),
         initialValue: selected,
         isExpanded: true,
         menuMaxHeight: 320,
         decoration: InputDecoration(
           labelText: AppText.t('اختر من القائمة', 'Choose from list'),
-          isDense: true,
         ),
         items: [
           for (final o in options)
@@ -557,7 +554,7 @@ class _RunTestTabState extends State<RunTestTab> {
               'Linked to «$name» — consumed from stock by this value.',
             )
           : AppText.t('أدخل القيمة يدوياً.', 'Enter the value manually.');
-      input = TextField(
+      input = AppTextField(
         controller: _controllerFor(field),
         onChanged: (_) => setState(() {}),
         keyboardType: const TextInputType.numberWithOptions(
@@ -567,7 +564,6 @@ class _RunTestTabState extends State<RunTestTab> {
         textInputAction: TextInputAction.next,
         decoration: InputDecoration(
           labelText: AppText.t(field, 'Dynamic value: $field'),
-          isDense: true,
         ),
       );
     }
@@ -690,11 +686,11 @@ class _RunTestTabState extends State<RunTestTab> {
           else
             SizedBox(
               width: 280.w,
-              child: TextField(
+              child: AppTextField(
                 controller: _standaloneSample,
                 decoration: InputDecoration(
                   labelText: AppText.t('اسم العينة', 'Sample name'),
-                  isDense: true,
+
                   prefixIcon: const Icon(Icons.science_outlined),
                 ),
               ),
@@ -741,8 +737,9 @@ class _RunTestTabState extends State<RunTestTab> {
   Widget _inspectionSamplePicker(RunTestCubit cubit, RunTestState state) {
     final names = _sampleNamesOf(state.selectedInspection);
     final current = state.selectedSampleName.trim();
-    if (current.isNotEmpty && !names.contains(current))
+    if (current.isNotEmpty && !names.contains(current)) {
       names.insert(0, current);
+    }
     return SizedBox(
       width: 220.w,
       child: AppEntityAutocomplete(
@@ -979,13 +976,12 @@ class _RunTestTabState extends State<RunTestTab> {
                       children: [
                         SizedBox(
                           width: 220.w,
-                          child: DropdownButtonFormField<String>(
+                          child: AppSelectField<String>(
                             initialValue: state.sourceType,
                             isExpanded: true,
                             menuMaxHeight: 320,
                             decoration: InputDecoration(
                               labelText: AppText.t('المصدر', 'Source'),
-                              isDense: true,
                             ),
                             items: [
                               DropdownMenuItem(
@@ -1035,7 +1031,7 @@ class _RunTestTabState extends State<RunTestTab> {
                         if (state.selectedInspection.isEmpty)
                           SizedBox(
                             width: 280.w,
-                            child: TextField(
+                            child: AppTextField(
                               controller: _standaloneSample,
                               decoration: InputDecoration(
                                 labelText: AppText.t(
@@ -1329,7 +1325,7 @@ class _RunTestTabState extends State<RunTestTab> {
                       ),
                     )
                   else ...[
-                    TextField(
+                    AppTextField(
                       controller: _resultText,
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
@@ -1342,7 +1338,6 @@ class _RunTestTabState extends State<RunTestTab> {
                             : AppText.t('النتيجة', 'Result'),
                         helperText: missingHint,
                         helperMaxLines: 3,
-                        isDense: true,
                       ),
                     ),
                   ],

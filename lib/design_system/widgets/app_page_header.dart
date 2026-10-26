@@ -125,11 +125,20 @@ class AppPageHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           titleBlock,
-          const SizedBox(height: AppSpacing.md),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: actions,
+          const SizedBox(height: AppSpacing.xs),
+          SizedBox(
+            height: 56,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final action in actions) ...[
+                    action,
+                    const SizedBox(width: AppSpacing.sm),
+                  ],
+                ],
+              ),
+            ),
           ),
           if (bottom != null) ...[
             const SizedBox(height: AppSpacing.md),
@@ -212,12 +221,21 @@ class AppFilterBar extends StatelessWidget {
               ),
             ),
           if (filters.isNotEmpty || trailing != null) ...[
-            if (onSearch != null) const SizedBox(height: AppSpacing.sm),
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [...filters, ?trailing],
+            if (onSearch != null) const SizedBox(height: AppSpacing.xs),
+            SizedBox(
+            height: 56,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: Row(
+                  children: [
+                    for (final filter in [...filters, ?trailing]) ...[
+                      filter,
+                      const SizedBox(width: AppSpacing.sm),
+                    ],
+                  ],
+                ),
+              ),
             ),
           ],
         ],

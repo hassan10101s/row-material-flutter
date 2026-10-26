@@ -27,12 +27,11 @@ class LoginState extends Equatable {
     LoginStatus? status,
     String? error,
     List<String>? missingConfiguration,
-  }) =>
-      LoginState(
-        status: status ?? this.status,
-        error: error,
-        missingConfiguration: missingConfiguration ?? this.missingConfiguration,
-      );
+  }) => LoginState(
+    status: status ?? this.status,
+    error: error,
+    missingConfiguration: missingConfiguration ?? this.missingConfiguration,
+  );
 
   @override
   List<Object?> get props => [status, error, missingConfiguration];

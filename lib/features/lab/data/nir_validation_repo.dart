@@ -93,7 +93,6 @@ class NirValidationRepo implements NirValidationRepository {
         ? ''
         : NirValidationSettings.scopeValue(scope);
     final entity = scope == null ? null : entityId;
-    final db = await dbHelper.database;
     final now = nowIso();
     final row = <String, dynamic>{
       'start_date': cleanDate,
@@ -107,7 +106,7 @@ class NirValidationRepo implements NirValidationRepository {
       'created_at': now,
       'updated_at': now,
     };
-    final id = await db.transaction((txn) async {
+    final id = await dbHelper.businessTransaction((txn) async {
       final localId = await txn.insert('nir_validation_settings', row);
       await enqueueLocalChange(
         executor: txn,
@@ -238,10 +237,7 @@ class NirValidationRepo implements NirValidationRepository {
   /// The newest per-item horizon matching [key] (خامة/منتج × parameter), or
   /// null when the group has no scoped reset (it then uses the global one).
   /// Rows are loaded newest-first; entity id wins, then normalized name.
-  String? _scopedHorizon(
-    List<NirValidationSettings> rows,
-    _GroupKey key,
-  ) {
+  String? _scopedHorizon(List<NirValidationSettings> rows, _GroupKey key) {
     final scopeValue = NirValidationSettings.scopeValue(key.scope);
     final paramNorm = _normKey(key.parameter);
     final entityNorm = _normKey(key.entityName);
@@ -265,7 +261,7 @@ class NirValidationRepo implements NirValidationRepository {
     required List<Map<String, Object?>> labTests,
     required Map<String, String> units,
     required Map<_GroupKey, List<({NirValidationPoint point, String unit})>>
-        groups,
+    groups,
   }) {
     final testsByEntry = <String, List<Map<String, Object?>>>{};
     for (final t in labTests) {
@@ -322,7 +318,7 @@ class NirValidationRepo implements NirValidationRepository {
     required List<Map<String, Object?>> labTests,
     required Map<String, String> units,
     required Map<_GroupKey, List<({NirValidationPoint point, String unit})>>
-        groups,
+    groups,
   }) {
     final testsByEntry = <String, List<Map<String, Object?>>>{};
     for (final t in labTests) {
@@ -359,8 +355,8 @@ class NirValidationRepo implements NirValidationRepository {
         // Batch rows are per sample; accept the test when the sample names
         // agree, or when the lab test has no sample name of its own.
         final testName = '${t['sample_name'] ?? ''}'.trim();
-        final agrees = testName.isEmpty ||
-            _normKey(testName) == _normKey(expectedSample);
+        final agrees =
+            testName.isEmpty || _normKey(testName) == _normKey(expectedSample);
         if (!agrees) continue;
         final key = _GroupKey(
           scope: NirScope.product,
@@ -425,8 +421,7 @@ class NirValidationRepo implements NirValidationRepository {
       where += ' AND substr(i.inspection_date, 1, 10) >= ?';
       args.add(substr10(horizon));
     }
-    return db.rawQuery(
-      '''
+    return db.rawQuery('''
       SELECT b.id AS batch_sample_id, b.sample_no, b.sample_name AS batch_sample_name,
              b.physical_results_json, b.chemical_results_json,
              i.id AS inspection_id, i.entry_code, i.inspection_date,
@@ -436,9 +431,7 @@ class NirValidationRepo implements NirValidationRepository {
       LEFT JOIN lab_products p ON p.id = i.product_id
       WHERE $where
       ORDER BY i.inspection_date ASC, b.id ASC
-      ''',
-      args,
-    );
+      ''', args);
   }
 
   /// Resolves each lab result's canonical parameter name and its unit: the
@@ -483,10 +476,7 @@ class NirValidationRepo implements NirValidationRepository {
   static String _paramName(Map<String, Object?> test) =>
       '${test['param_name'] ?? test['analysis_name'] ?? ''}'.trim();
 
-  static String _unitOf(
-    Map<String, Object?> test,
-    Map<String, String> units,
-  ) {
+  static String _unitOf(Map<String, Object?> test, Map<String, String> units) {
     final unit = '${test['param_unit'] ?? ''}'.trim();
     if (unit.isNotEmpty) return unit;
     final analysisUnit = '${test['analysis_unit'] ?? ''}'.trim();
@@ -509,17 +499,17 @@ class NirValidationRepo implements NirValidationRepository {
     Map<String, dynamic> physical,
     Map<String, dynamic> chemical,
   ) => {
-        for (final e in {...physical, ...chemical}.entries)
-          _normKey(e.key): e.value,
-      };
+    for (final e in {...physical, ...chemical}.entries)
+      _normKey(e.key): e.value,
+  };
 
   /// `chemical_results_json` of a batch sample is a list of
   /// `{name, result, unit}` — flatten it back into a name→result map.
   static Map<String, dynamic> _flattenChemical(List<dynamic> items) => {
-        for (final e in items)
-          if (e is Map && '${e['name'] ?? ''}'.trim().isNotEmpty)
-            '${e['name'] ?? ''}': e['result'],
-      };
+    for (final e in items)
+      if (e is Map && '${e['name'] ?? ''}'.trim().isNotEmpty)
+        '${e['name'] ?? ''}': e['result'],
+  };
 
   /// Picks the NIR number for this test inside a results value.
   ///

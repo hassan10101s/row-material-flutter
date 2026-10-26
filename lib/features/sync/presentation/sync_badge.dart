@@ -11,10 +11,16 @@ import 'sync_status_controller.dart';
 /// It reports, it does not act: tapping it opens the sync screen, which is
 /// where the real controls live.
 class SyncBadge extends StatelessWidget {
-  const SyncBadge({super.key, required this.status, this.onTap});
+  const SyncBadge({
+    super.key,
+    required this.status,
+    this.onTap,
+    this.compact = false,
+  });
 
   final SyncBadgeStatus status;
   final VoidCallback? onTap;
+  final bool compact;
 
   static const Key badgeKey = Key('sync-badge');
   static const Key pendingKey = Key('sync-badge-pending');
@@ -22,14 +28,17 @@ class SyncBadge extends StatelessWidget {
 
   Color get _color {
     if (!status.online) return AppColors.warning;
-    if (status.blocked > 0) return AppColors.danger;
+    if (status.blocked > 0 || status.hasError) return AppColors.danger;
+    if (status.pullIncomplete) return AppColors.info;
     if (status.pending > 0) return AppColors.info;
     return AppColors.success;
   }
 
   IconData get _icon {
     if (!status.online) return Icons.cloud_off_outlined;
+    if (status.hasError) return Icons.sync_problem_outlined;
     if (status.blocked > 0) return Icons.cloud_queue_outlined;
+    if (status.pullIncomplete) return Icons.cloud_sync_outlined;
     if (status.pending > 0) return Icons.cloud_sync_outlined;
     return Icons.cloud_done_outlined;
   }
@@ -45,7 +54,12 @@ class SyncBadge extends StatelessWidget {
     final last = status.lastSync == null
         ? AppText.t('لم تتم بعد', 'never')
         : _stamp(status.lastSync!);
-    return '$connection • $pending: ${status.pending} • $blocked: ${status.blocked} • '
+    final progress = status.hasError
+        ? AppText.t('تعذر إكمال المزامنة', 'Sync could not complete')
+        : status.pullIncomplete
+        ? AppText.t('تنزيل البيانات غير مكتمل', 'Download incomplete')
+        : '';
+    return '${progress.isEmpty ? '' : '$progress • '}$connection • $pending: ${status.pending} • $blocked: ${status.blocked} • '
         '${AppText.t('آخر مزامنة', 'last sync')}: $last';
   }
 
@@ -69,7 +83,7 @@ class SyncBadge extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(_icon, size: 18.r, color: color),
-              if (status.pending > 0) ...[
+              if (!compact && status.pending > 0) ...[
                 const SizedBox(width: 4),
                 _CountBubble(
                   bubbleKey: pendingKey,
@@ -77,7 +91,7 @@ class SyncBadge extends StatelessWidget {
                   color: AppColors.info,
                 ),
               ],
-              if (status.blocked > 0) ...[
+              if (!compact && status.blocked > 0) ...[
                 const SizedBox(width: 4),
                 _CountBubble(
                   bubbleKey: blockedKey,
@@ -94,7 +108,11 @@ class SyncBadge extends StatelessWidget {
 }
 
 class _CountBubble extends StatelessWidget {
-  const _CountBubble({required this.bubbleKey, required this.count, required this.color});
+  const _CountBubble({
+    required this.bubbleKey,
+    required this.count,
+    required this.color,
+  });
 
   final Key bubbleKey;
   final int count;
@@ -106,7 +124,10 @@ class _CountBubble extends StatelessWidget {
       key: bubbleKey,
       padding: EdgeInsets.symmetric(horizontal: 6.w, vertical: 1.h),
       constraints: BoxConstraints(minWidth: 18.w),
-      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Text(
         count > 99 ? '99+' : '$count',
         textAlign: TextAlign.center,
@@ -135,8 +156,14 @@ class SyncStateLabel extends StatelessWidget {
         Icon(online ? Icons.wifi : Icons.wifi_off, size: 14.r, color: color),
         const SizedBox(width: 4),
         Text(
-          online ? AppText.t('متصل', 'Online') : AppText.t('غير متصل', 'Offline'),
-          style: TextStyle(fontSize: 12.spMax, color: color, fontWeight: FontWeight.w600),
+          online
+              ? AppText.t('متصل', 'Online')
+              : AppText.t('غير متصل', 'Offline'),
+          style: TextStyle(
+            fontSize: 12.spMax,
+            color: color,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ],
     );

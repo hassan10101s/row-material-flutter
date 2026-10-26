@@ -22,6 +22,7 @@ import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
@@ -42,6 +43,7 @@ import '../cubit/general_settings_cubit.dart';
 import '../cubit/general_settings_state.dart';
 import 'migration_panel.dart';
 import '../../domain/settings_repository.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 /// Deep-linkable Settings sections, reachable as `/settings?tab=<key>`.
 enum SettingsTab {
@@ -143,7 +145,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
             onChange: (tab) => setState(() => _tab = tab),
           ),
           const SizedBox(height: AppSpacing.md),
-          Expanded(child: _body()),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragEnd: appUsesDesktopChrome(context)
+                  ? null
+                  : (details) {
+                      final velocity = details.primaryVelocity ?? 0;
+                      if (velocity.abs() < 350) return;
+                      final next = (_tab.index + (velocity < 0 ? 1 : -1))
+                          .clamp(0, SettingsTab.values.length - 1)
+                          .toInt();
+                      setState(() => _tab = SettingsTab.values[next]);
+                    },
+              child: _body(),
+            ),
+          ),
         ],
       ),
     );
@@ -184,27 +201,43 @@ class _SettingsTabs extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final tab in SettingsTab.values)
-          Tooltip(
-            message: tab.subtitle,
-            child: ChoiceChip(
-              selected: current == tab,
-              label: Text(tab.label),
-              onSelected: (_) => onChange(tab),
-              selectedColor: AppColors.primary,
-              backgroundColor: AppColors.surface,
-              labelStyle: TextStyle(
-                color: current == tab
-                    ? Theme.of(context).colorScheme.onPrimary
-                    : AppColors.textStrong,
-              ),
+    final tabs = [
+      for (final tab in SettingsTab.values)
+        Tooltip(
+          message: tab.subtitle,
+          child: ChoiceChip(
+            selected: current == tab,
+            label: Text(tab.label),
+            onSelected: (_) => onChange(tab),
+            materialTapTargetSize: appUsesDesktopChrome(context)
+                ? MaterialTapTargetSize.shrinkWrap
+                : MaterialTapTargetSize.padded,
+            selectedColor: AppColors.primary,
+            backgroundColor: AppColors.surface,
+            labelStyle: TextStyle(
+              color: current == tab
+                  ? Theme.of(context).colorScheme.onPrimary
+                  : AppColors.textStrong,
             ),
           ),
-      ],
+        ),
+    ];
+    if (appUsesDesktopChrome(context)) {
+      return Wrap(spacing: 8, runSpacing: 8, children: tabs);
+    }
+    return SizedBox(
+      height: 54,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final tab in tabs) ...[
+              tab,
+              const SizedBox(width: 8),
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -596,7 +629,9 @@ class _AppearanceSection extends StatelessWidget {
     final themeService = getIt<ThemeService>();
     final localeService = getIt<LocaleService>();
 
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
@@ -1006,7 +1041,9 @@ class _DatabasePanel extends StatelessWidget {
                   ),
                 ],
               ),
-              Card(
+              AppCard(
+                padding: EdgeInsets.zero,
+                enableHover: false,
                 margin: EdgeInsets.zero,
                 child: const Padding(
                   padding: EdgeInsets.all(AppSpacing.lg),
@@ -1104,7 +1141,9 @@ class _Panel extends StatelessWidget {
     // sits above the save button, so without the inset the button ends up
     // underneath the keyboard with no way to scroll it clear.
     final keyboard = MediaQuery.of(context).viewInsets.bottom;
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       child: SingleChildScrollView(
         padding: EdgeInsets.fromLTRB(
           20,
@@ -1129,7 +1168,9 @@ class _SettingsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),

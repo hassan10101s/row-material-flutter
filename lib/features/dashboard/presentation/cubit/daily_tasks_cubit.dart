@@ -34,8 +34,9 @@ class DailyTasksCubit extends AppCubit<DailyTasksState> {
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true));
     try {
-      final templates =
-          await getIt<QcTemplateRepository>().listTemplates(publishedOnly: true);
+      final templates = await getIt<QcTemplateRepository>().listTemplates(
+        publishedOnly: true,
+      );
       final ids = <int>{};
       for (final t in templates) {
         final id = t.templateId;

@@ -172,8 +172,14 @@ class TestHistoryDetailScreen extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppSpacing.sm),
-              _info(AppText.t('المصدر', 'Source'), '${row['source_name'] ?? '-'}'),
-              _info(AppText.t('العينة', 'Sample'), '${row['sample_name'] ?? '-'}'),
+              _info(
+                AppText.t('المصدر', 'Source'),
+                '${row['source_name'] ?? '-'}',
+              ),
+              _info(
+                AppText.t('العينة', 'Sample'),
+                '${row['sample_name'] ?? '-'}',
+              ),
               _info(
                 AppText.t('النتيجة', 'Result'),
                 formatLabResult(row['result_text']),

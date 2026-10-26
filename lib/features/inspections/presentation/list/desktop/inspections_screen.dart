@@ -367,171 +367,190 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
                 searchLabel: AppText.t('بحث', 'Search'),
                 onSearch: (v) => cubit.setQuery(v),
                 searchFocusNode: _searchFocus,
-              trailing: canCreate
-                  ? AppButton(
-                      icon: Icon(Icons.add, size: 18.r),
-                      label: isProduct
-                          ? AppText.t('فحص منتج جديد', 'New product inspection')
-                          : AppStrings.newInspection,
-                      onPressed: () => _newInspection(context),
-                    )
-                  : null,
-              filters: [
-                // زر «فلترة» أُزيل (2026-10-17): الفلترة تظل متاحة من
-                // قائمة «الحالة» + أيقونة الفترة (النطاق المخصص يفتح
-                // نافذة الفلاتر كاملة).
-                ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    minWidth: 200,
-                    maxWidth: 260,
-                  ),
-                  child: AppDropdown<String>(
-                    value: state.status,
-                    labelText: AppText.t('الحالة', 'Status'),
-                    items: [
-                      AppDropdownItem(
-                        value: '',
-                        label: AppText.t('الكل', 'All'),
-                      ),
-                      for (final s in _allStatuses)
-                        AppDropdownItem(value: s, label: statusLabel(s)),
-                    ],
-                    onChanged: (v) => cubit.setStatus(v ?? ''),
-                  ),
-                ),
-                // Quick period access beside the follow-up action: اليوم /
-                // آخر ٧ / آخر ٣٠ / الكل without opening the filter dialog.
-                InspectionPeriodButton(
-                  dateFrom: state.dateFrom,
-                  dateTo: state.dateTo,
-                  onPreset: (from, to) => cubit.setDateRange(from, to),
-                  onCustom: () => _openFilterDialog(context),
-                ),
-                AppButton(
-                  icon: Icon(Icons.description_outlined, size: 18.r),
-                  label: AppText.t('تقرير متابعة', 'Follow-up'),
-                  style: AppButtonStyle.secondary,
-                  loading: state.exporting,
-                  onPressed: state.exporting
-                      ? null
-                      : () => _exportFollowUp(context),
-                ),
-                if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
-                  AppButton(
-                    icon: Icon(Icons.qr_code_scanner_outlined, size: 18.r),
-                    label: AppText.t('مسح رمز', 'Scan QR'),
-                    style: AppButtonStyle.secondary,
-                    onPressed: () => Navigator.of(
-                      context,
-                    ).push(AppPageRoute(builder: (_) => const QrScanScreen())),
-                  ),
-              ],
-            ),
-            InspectionFilterChips(
-              chips: inspectionFilterChips(state, isProduct: isProduct),
-              onClearChip: (key) => cubit.clearChip(key),
-              onClearAll: () => cubit.clearFilters(),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            if (state.loading && state.visible.isNotEmpty)
-              const AppRefreshBar(),
-            if (state.loading && state.visible.isEmpty) ...[
-              const AppSkeletonList(rows: 8, lines: 5, height: 460),
-            ] else if (state.visible.isEmpty) ...[
-              AppEmptyState(
-                icon: isProduct
-                    ? Icons.factory_outlined
-                    : Icons.inventory_2_outlined,
-                title: isProduct
-                    ? AppText.t(
-                        'لا توجد فحوصات منتجات',
-                        'No product inspections',
+                trailing: canCreate
+                    ? AppButton(
+                        icon: Icon(Icons.add, size: 18.r),
+                        label: isProduct
+                            ? AppText.t(
+                                'فحص منتج جديد',
+                                'New product inspection',
+                              )
+                            : AppStrings.newInspection,
+                        onPressed: () => _newInspection(context),
                       )
-                    : AppText.t('لا توجد فحوصات', 'No inspections'),
-                subtitle: AppText.t(
-                  'ابدأ بفحص جديد أو عدّل معايير البحث.',
-                  'Start a new inspection or adjust the search.',
-                ),
-              ),
-            ] else ...[
-              if (selectedCount > 0) ...[
-                SelectionActionBar(
-                  selectedCount: selectedCount,
-                  onExportReports: () => exportSelectedReports(context),
-                  onExportLabels: () => exportSelectedLabels(context),
-                  onExportTable: () => exportSelectedTable(context),
-                  onClear: cubit.clearSelection,
-                ),
-                const SizedBox(height: AppSpacing.md),
-              ],
-              AppPaginatedTable(
-                // Products carry no header decision: no decision column.
-                columnFlex: isProduct
-                    ? const [1.0, 1.15, 2.6, 1.8, 0.95, 1.4]
-                    : const [1.0, 1.15, 2.6, 1.8, 0.95, 1.25, 1.4],
-                rowsPerPage: state.pageSize,
-                total: state.total,
-                page: state.page,
-                onPageChanged: cubit.setPage,
-                onPageSizeChanged: cubit.setPageSize,
-                selectedIndices: selectedIndices,
-                selectHidden: true,
-                onToggleIndex: (index) => cubit.toggleSelect(pageIds[index]),
-                selectAllValue: selectAllValue,
-                onToggleAll: (select) =>
-                    cubit.setPageSelection(pageIds, select ?? false),
-                headers: [
-                  AppText.t('رقم القيد', 'Entry'),
-                  AppText.t('التاريخ', 'Date'),
-                  isProduct
-                      ? AppText.t('المنتج', 'Product')
-                      : AppText.t('المادة', 'Material'),
-                  isProduct
-                      ? AppText.t('التشغيلة', 'Batch')
-                      : AppText.t('المورد', 'Supplier'),
-                  AppText.t('الكمية', 'Qty'),
-                  if (!isProduct) AppText.t('القرار', 'Decision'),
-                  '',
+                    : null,
+                filters: [
+                  // زر «فلترة» أُزيل (2026-10-17): الفلترة تظل متاحة من
+                  // قائمة «الحالة» + أيقونة الفترة (النطاق المخصص يفتح
+                  // نافذة الفلاتر كاملة).
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 200,
+                      maxWidth: 260,
+                    ),
+                    child: AppDropdown<String>(
+                      value: state.status,
+                      labelText: AppText.t('الحالة', 'Status'),
+                      items: [
+                        AppDropdownItem(
+                          value: '',
+                          label: AppText.t('الكل', 'All'),
+                        ),
+                        for (final s in _allStatuses)
+                          AppDropdownItem(value: s, label: statusLabel(s)),
+                      ],
+                      onChanged: (v) => cubit.setStatus(v ?? ''),
+                    ),
+                  ),
+                  // Quick period access beside the follow-up action: اليوم /
+                  // آخر ٧ / آخر ٣٠ / الكل without opening the filter dialog.
+                  InspectionPeriodButton(
+                    dateFrom: state.dateFrom,
+                    dateTo: state.dateTo,
+                    onPreset: (from, to) => cubit.setDateRange(from, to),
+                    onCustom: () => _openFilterDialog(context),
+                  ),
+                  AppButton(
+                    icon: Icon(Icons.description_outlined, size: 18.r),
+                    label: AppText.t('تقرير متابعة', 'Follow-up'),
+                    style: AppButtonStyle.secondary,
+                    loading: state.exporting,
+                    onPressed: state.exporting
+                        ? null
+                        : () => _exportFollowUp(context),
+                  ),
+                  if (!kIsWeb &&
+                      defaultTargetPlatform == TargetPlatform.android)
+                    AppButton(
+                      icon: Icon(Icons.qr_code_scanner_outlined, size: 18.r),
+                      label: AppText.t('مسح رمز', 'Scan QR'),
+                      style: AppButtonStyle.secondary,
+                      onPressed: () => Navigator.of(context).push(
+                        AppPageRoute(builder: (_) => const QrScanScreen()),
+                      ),
+                    ),
                 ],
-                rows: [
-                  for (final r in state.visible)
-                    [
-                      Text(
-                        '${r['entry_code']}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        parseIsoToDisplay('${r['inspection_date']}') ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        '${r['material_name']}',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        isProduct
-                            ? '${r['formula_number'] ?? ''} • ${r['batch_number'] ?? ''}'
-                            : '${r['supplier']}',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        '${r['quantity']}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      // Products carry no header decision (per-sample only).
-                      if (!isProduct) AppStatusBadge('${r['decision_status']}'),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Decision editing is raw-only.
-                          if (!isProduct)
+              ),
+              InspectionFilterChips(
+                chips: inspectionFilterChips(state, isProduct: isProduct),
+                onClearChip: (key) => cubit.clearChip(key),
+                onClearAll: () => cubit.clearFilters(),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              if (state.loading && state.visible.isNotEmpty)
+                const AppRefreshBar(),
+              if (state.loading && state.visible.isEmpty) ...[
+                const AppSkeletonList(rows: 8, lines: 5, height: 460),
+              ] else if (state.visible.isEmpty) ...[
+                AppEmptyState(
+                  icon: isProduct
+                      ? Icons.factory_outlined
+                      : Icons.inventory_2_outlined,
+                  title: isProduct
+                      ? AppText.t(
+                          'لا توجد فحوصات منتجات',
+                          'No product inspections',
+                        )
+                      : AppText.t('لا توجد فحوصات', 'No inspections'),
+                  subtitle: AppText.t(
+                    'ابدأ بفحص جديد أو عدّل معايير البحث.',
+                    'Start a new inspection or adjust the search.',
+                  ),
+                ),
+              ] else ...[
+                if (selectedCount > 0) ...[
+                  SelectionActionBar(
+                    selectedCount: selectedCount,
+                    onExportReports: () => exportSelectedReports(context),
+                    onExportLabels: () => exportSelectedLabels(context),
+                    onExportTable: () => exportSelectedTable(context),
+                    onClear: cubit.clearSelection,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+                AppPaginatedTable(
+                  // Products carry no header decision: no decision column.
+                  columnFlex: isProduct
+                      ? const [1.0, 1.15, 2.6, 1.8, 0.95, 1.4]
+                      : const [1.0, 1.15, 2.6, 1.8, 0.95, 1.25, 1.4],
+                  rowsPerPage: state.pageSize,
+                  total: state.total,
+                  page: state.page,
+                  onPageChanged: cubit.setPage,
+                  onPageSizeChanged: cubit.setPageSize,
+                  selectedIndices: selectedIndices,
+                  selectHidden: true,
+                  onToggleIndex: (index) => cubit.toggleSelect(pageIds[index]),
+                  selectAllValue: selectAllValue,
+                  onToggleAll: (select) =>
+                      cubit.setPageSelection(pageIds, select ?? false),
+                  headers: [
+                    AppText.t('رقم القيد', 'Entry'),
+                    AppText.t('التاريخ', 'Date'),
+                    isProduct
+                        ? AppText.t('المنتج', 'Product')
+                        : AppText.t('المادة', 'Material'),
+                    isProduct
+                        ? AppText.t('التشغيلة', 'Batch')
+                        : AppText.t('المورد', 'Supplier'),
+                    AppText.t('الكمية', 'Qty'),
+                    if (!isProduct) AppText.t('القرار', 'Decision'),
+                    '',
+                  ],
+                  rows: [
+                    for (final r in state.visible)
+                      [
+                        Text(
+                          '${r['entry_code']}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          parseIsoToDisplay('${r['inspection_date']}') ?? '',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '${r['material_name']}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          isProduct
+                              ? '${r['formula_number'] ?? ''} • ${r['batch_number'] ?? ''}'
+                              : '${r['supplier']}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          '${r['quantity']}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        // Products carry no header decision (per-sample only).
+                        if (!isProduct)
+                          AppStatusBadge('${r['decision_status']}'),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Decision editing is raw-only.
+                            if (!isProduct)
+                              IconButton(
+                                tooltip: AppText.t('تحديث القرار', 'Decision'),
+                                icon: Icon(Icons.gavel_outlined, size: 18.r),
+                                onPressed: () => _openDecision(context, r),
+                                visualDensity: VisualDensity.compact,
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(
+                                  minWidth: 36,
+                                  minHeight: 36,
+                                ),
+                              ),
                             IconButton(
-                              tooltip: AppText.t('تحديث القرار', 'Decision'),
-                              icon: Icon(Icons.gavel_outlined, size: 18.r),
-                              onPressed: () => _openDecision(context, r),
+                              tooltip: AppText.t('تصدير PDF', 'PDF'),
+                              icon: Icon(
+                                Icons.picture_as_pdf_outlined,
+                                size: 18.r,
+                              ),
+                              onPressed: () => _exportOne(context, r, 'report'),
                               visualDensity: VisualDensity.compact,
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(
@@ -539,43 +558,30 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
                                 minHeight: 36,
                               ),
                             ),
-                          IconButton(
-                            tooltip: AppText.t('تصدير PDF', 'PDF'),
-                            icon: Icon(
-                              Icons.picture_as_pdf_outlined,
-                              size: 18.r,
+                            IconButton(
+                              tooltip: AppText.t('QR', 'QR'),
+                              icon: Icon(Icons.label_outline, size: 18.r),
+                              onPressed: () => _exportOne(context, r, 'label'),
+                              visualDensity: VisualDensity.compact,
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(
+                                minWidth: 36,
+                                minHeight: 36,
+                              ),
                             ),
-                            onPressed: () => _exportOne(context, r, 'report'),
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 36,
-                              minHeight: 36,
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: AppText.t('QR', 'QR'),
-                            icon: Icon(Icons.label_outline, size: 18.r),
-                            onPressed: () => _exportOne(context, r, 'label'),
-                            visualDensity: VisualDensity.compact,
-                            padding: EdgeInsets.zero,
-                            constraints: const BoxConstraints(
-                              minWidth: 36,
-                              minHeight: 36,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                ],
-                onRowTap: (index) => _openDetail(context, state.visible[index]),
-                totalLabel: isProduct
-                    ? '${state.total} ${AppText.t('فحص منتج', 'product inspections')}'
-                    : '${state.total} ${AppText.t('فحص', 'inspections')}',
-              ),
+                          ],
+                        ),
+                      ],
+                  ],
+                  onRowTap: (index) =>
+                      _openDetail(context, state.visible[index]),
+                  totalLabel: isProduct
+                      ? '${state.total} ${AppText.t('فحص منتج', 'product inspections')}'
+                      : '${state.total} ${AppText.t('فحص', 'inspections')}',
+                ),
+              ],
             ],
-          ],
-        ),
+          ),
         ),
       ),
     );

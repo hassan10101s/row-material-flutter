@@ -5,6 +5,7 @@ import 'package:material_lab/core/l10n/app_localizations_x.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../widgets/decision_badge.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class DecisionsOverviewCard extends StatelessWidget {
   final Map<String, dynamic> summary;
@@ -15,7 +16,9 @@ class DecisionsOverviewCard extends StatelessWidget {
     final total = totals['total'] ?? 0;
     final approvalRate = '${totals['approvalRate'] ?? '0.0'}';
     final rejectionRate = '${totals['rejectionRate'] ?? '0.0'}';
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       child: Padding(
         padding: const EdgeInsets.all(18),
         child: Column(

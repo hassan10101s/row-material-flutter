@@ -11,7 +11,9 @@ import 'units_state.dart';
 /// Mobile infinite-scroll model: DB-side search + `LIMIT/OFFSET`.
 class UnitsCubit extends AppCubit<UnitsState> {
   UnitsCubit({required this.repo, this.pageSize = kMobilePageSize})
-    : super(const UnitsState());
+    : super(const UnitsState()) {
+    refreshOnSync(load);
+  }
 
   final ReferenceRepository repo;
   final int pageSize;

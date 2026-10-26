@@ -174,32 +174,28 @@ class _StartupErrorView extends StatelessWidget {
 }
 
 /// Dependency-free launch splash: paints before Firebase, the database and
-/// the theme service are ready, so a slow cold start shows a spinner instead
-/// of a black screen. Replaced by [MaterialLabApp] once bootstrap finishes.
+/// the theme service are ready, so a slow cold start keeps the same field and
+/// logo as the native Android launch theme instead of a black screen. No
+/// spinner — the launch screen simply lasts until the first real frame.
+/// Replaced by [MaterialLabApp] once bootstrap finishes.
 class _BootstrapSplash extends StatelessWidget {
   const _BootstrapSplash();
 
   @override
   Widget build(BuildContext context) {
+    // Matches the native splash exactly (F3F6FB field, launch_image at ~48%
+    // screen width, centered). Deliberately dependency-free — no theme
+    // service, no ScreenUtil, no localization; Image.asset only needs the
+    // binding, which is already initialized before runApp.
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: Scaffold(
-        backgroundColor: Color(0xFFF3F6FB),
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CircularProgressIndicator(),
-              SizedBox(height: 16),
-              Text(
-                'MaterialLab',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: Color(0xFF0F172A),
-                ),
-              ),
-            ],
+      home: ColoredBox(
+        color: Color(0xFFF3F6FB),
+        child: Center(
+          child: Image(
+            image: AssetImage('assets/images/Material-Lab.png'),
+            width: 200,
+            fit: BoxFit.contain,
           ),
         ),
       ),

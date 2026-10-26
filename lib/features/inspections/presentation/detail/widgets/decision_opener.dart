@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -26,19 +27,20 @@ Future<void> openEditForm(
 ) async {
   final detail = context.read<InspectionDetailCubit>();
   Widget form() => BlocProvider(
-        create: (_) => InspectionFormCubit(
-          repo: getIt<InspectionRepository>(),
-          reference: getIt<ReferenceRepository>(),
-        )
+    create: (_) =>
+        InspectionFormCubit(
+            repo: getIt<InspectionRepository>(),
+            reference: getIt<ReferenceRepository>(),
+          )
           // Edit mode: `loadForEdit` loads the right catalog itself
           // (materials vs products by the row's kind) and marks the cubit
           // as editing, so save updates instead of creating.
           ..loadForEdit(inspection),
-        child: InspectionFormScreen(
-          inspection: inspection,
-          wizard: FormFactor.current.isMobile,
-        ),
-      );
+    child: InspectionFormScreen(
+      inspection: inspection,
+      wizard: FormFactor.current.isMobile,
+    ),
+  );
   final saved = FormFactor.current.isDesktop
       ? await showAppWindow<bool>(
           context,
@@ -48,9 +50,9 @@ Future<void> openEditForm(
           scrollBody: false,
           child: form(),
         )
-      : await Navigator.of(context).push<bool>(
-          appMaterialPageRoute<bool>(builder: (_) => form()),
-        );
+      : await Navigator.of(
+          context,
+        ).push<bool>(appMaterialPageRoute<bool>(builder: (_) => form()));
   if (saved == true && context.mounted) {
     await detail.load();
   }
@@ -84,8 +86,8 @@ Future<void> openDecisionDialog(
             builder: (_) => BlocProvider.value(
               value: cubit,
               child: Scaffold(
-                appBar: AppBar(
-                  title: Text(AppText.t('تحديث القرار', 'Update decision')),
+                appBar: AppTopAppBar(
+                  title: AppText.t('تحديث القرار', 'Update decision'),
                 ),
                 body: SafeArea(
                   child: SingleChildScrollView(

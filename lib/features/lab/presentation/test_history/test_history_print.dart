@@ -44,7 +44,7 @@ class TestHistoryPrinter {
       final range = r['min'] == null && r['max'] == null
           ? '-'
           : '${r['min'] ?? ''} – ${r['max'] ?? ''} '
-              '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
+                '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}';
       trs.write(
         '<tr><td>${i + 1}</td>'
         '<td>${esc(thFmtDateTime(r['tested_at']))}</td>'
@@ -60,9 +60,7 @@ class TestHistoryPrinter {
       );
     }
 
-    final title = esc(
-      AppText.t('سجل تحاليل المعمل', 'Lab test history'),
-    );
+    final title = esc(AppText.t('سجل تحاليل المعمل', 'Lab test history'));
     final meta = esc(
       AppText.t(
         'عدد السجلات: ${rows.length} — بتاريخ ${DateTime.now().toString().substring(0, 16)}',
@@ -108,7 +106,10 @@ class TestHistoryPrinter {
     if (rows.isEmpty) {
       AppFeedback.info(
         context,
-        AppText.t('لا توجد سجلات محددة للطباعة.', 'No selected records to print.'),
+        AppText.t(
+          'لا توجد سجلات محددة للطباعة.',
+          'No selected records to print.',
+        ),
       );
       return;
     }

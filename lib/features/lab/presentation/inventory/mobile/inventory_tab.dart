@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -271,12 +272,10 @@ class _InventoryEditorRouteState extends State<_InventoryEditorRoute> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(
-          widget.item == null
-              ? AppText.t('إضافة مادة', 'Add item')
-              : AppText.t('تعديل مادة', 'Edit item'),
-        ),
+      appBar: AppTopAppBar(
+        title: widget.item == null
+            ? AppText.t('إضافة مادة', 'Add item')
+            : AppText.t('تعديل مادة', 'Edit item'),
       ),
       body: SafeArea(
         child: Column(
@@ -331,7 +330,7 @@ class _AdjustEditorRoute extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(AppText.t('تسوية الكمية', 'Adjust quantity'))),
+      appBar: AppTopAppBar(title: AppText.t('تسوية الكمية', 'Adjust quantity')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.pageMobile),
@@ -350,7 +349,7 @@ class _ReceiveEditorRoute extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(AppText.t('استلام كمية', 'Receive stock'))),
+      appBar: AppTopAppBar(title: AppText.t('استلام كمية', 'Receive stock')),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.pageMobile),

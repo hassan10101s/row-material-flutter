@@ -3,6 +3,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 
 import '../entity_registry.dart';
 import '../sync_codec.dart';
+import '../sync_cursor_time.dart';
+import '../remote_write_policy.dart';
+import '../append_delivery_identity.dart';
 import 'remote_data_source.dart';
 
 /// Firestore implementation of the remote seam (plan §5/P6).
@@ -47,8 +50,10 @@ class FirestoreDataSource implements RemoteDataSource {
   CollectionReference<Map<String, dynamic>> _orgCollection(
     String organizationId,
     SyncCollection collection,
-  ) =>
-      _db.collection('organizations').doc(organizationId).collection(collection.path);
+  ) => _db
+      .collection('organizations')
+      .doc(organizationId)
+      .collection(collection.path);
 
   @override
   Future<PushResult> setDocument({
@@ -63,45 +68,46 @@ class FirestoreDataSource implements RemoteDataSource {
     final safeData = SyncCodec.sanitizeMap(data);
     final bytes = SyncCodec.byteSize(safeData);
     if (bytes > maxPayloadBytes) {
-      return PushResult.oversized('Document exceeds $maxPayloadBytes bytes ($bytes)');
-    }
-    final ref = _orgCollection(organizationId, collection).doc(documentId);
-    final snapshot = await ref.get();
-    final exists = snapshot.exists;
-    final rawCurrent =
-        exists ? snapshot.data() ?? const <String, dynamic>{} : const <String, dynamic>{};
-    // The raw snapshot carries Firestore Timestamp objects; the conflict row
-    // is JSON, so hand out the sanitized copy. This was the exact
-    // `Converting object ... Instance of 'Timestamp'` crash:
-    // PushWorker did jsonEncode(result.remote) on the raw map.
-    final current = exists
-        ? SyncCodec.sanitizeMap(Map<String, dynamic>.from(rawCurrent))
-        : const <String, dynamic>{};
-    final currentVersion = (current['version'] as num?)?.toInt() ?? 0;
-
-    // The Rules enforce this too; checking client-side turns a rejected write
-    // into a clean `sync_conflicts` row instead of a retry loop.
-    if (exists && currentVersion != baseVersion) {
-      return PushResult.rejected(
-        'Version conflict: remote=$currentVersion local=$baseVersion',
-        remote: current,
-        kind: PushResultKind.permissionDenied,
+      return PushResult.oversized(
+        'Document exceeds $maxPayloadBytes bytes ($bytes)',
       );
     }
-
-    final payload = _materialize(safeData, version: baseVersion + 1);
+    final ref = _orgCollection(organizationId, collection).doc(documentId);
+    Map<String, dynamic>? current;
     try {
-      if (!exists) {
-        await ref.set(payload);
-      } else {
-        await ref.update(payload);
-      }
-      // Never encode the materialized map: it holds FieldValue.serverTimestamp()
-      // instances which jsonEncode cannot represent. Log the sanitized
-      // pre-materialized form + version instead (same bytes the size guard saw).
-      final logged = Map<String, dynamic>.from(safeData)
-        ..['version'] = baseVersion + 1;
-      return PushResult.success(baseVersion + 1, payload: SyncCodec.encodeMap(logged));
+      return await _db.runTransaction<PushResult>((transaction) async {
+        final snapshot = await transaction.get(ref);
+        current = snapshot.exists
+            ? SyncCodec.sanitizeMap(
+                Map<String, dynamic>.from(snapshot.data() ?? {}),
+              )
+            : null;
+        final plan = RemoteWritePolicy.plan(
+          organizationId: organizationId,
+          data: safeData,
+          baseVersion: baseVersion,
+          current: current,
+        );
+        if (plan.refusal != null) return plan.refusal!;
+        if (!plan.alreadyApplied) {
+          final size = SyncCodec.byteSize(plan.payload);
+          if (size > maxPayloadBytes) {
+            return PushResult.oversized(
+              'Document exceeds $maxPayloadBytes bytes ($size)',
+            );
+          }
+          final payload = _materialize(plan.payload, version: plan.version);
+          if (snapshot.exists) {
+            transaction.update(ref, payload);
+          } else {
+            transaction.set(ref, payload);
+          }
+        }
+        return PushResult.success(
+          plan.version,
+          payload: SyncCodec.encodeMap(plan.payload),
+        );
+      });
     } on FirebaseException catch (e) {
       return _classify(e, current);
     } on Object catch (e) {
@@ -117,15 +123,72 @@ class FirestoreDataSource implements RemoteDataSource {
     required Map<String, dynamic> data,
   }) async {
     final safeData = SyncCodec.sanitizeMap(data);
-    final payload = _materialize(safeData, version: 1);
+    final size = SyncCodec.byteSize(safeData);
+    if (size > maxPayloadBytes) {
+      return PushResult.oversized(
+        'Document exceeds $maxPayloadBytes bytes ($size)',
+      );
+    }
+    final uid = auth?.currentUser?.uid;
+    if (uid == null) return PushResult.retryable('unauthenticated');
+    final ref = _orgCollection(organizationId, collection).doc(documentId);
+    final receipt = _orgCollection(organizationId, SyncCollection.syncReceipts)
+        .doc(uid)
+        .collection('entries')
+        .doc(AppendDeliveryIdentity.id(collection.path, documentId));
+    final fingerprint = AppendDeliveryIdentity.fingerprint(safeData);
+    final receiptData = <String, dynamic>{
+      'fingerprint': fingerprint,
+      'deviceId': safeData['deviceId'],
+      'collectionId': collection.path,
+      'documentId': documentId,
+      'version': 1,
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+    PushResult acknowledged() => PushResult.success(
+      1,
+      payload: SyncCodec.encodeMap({...safeData, 'version': 1}),
+    );
     try {
-      await _orgCollection(organizationId, collection).doc(documentId).set(payload);
-      final logged = Map<String, dynamic>.from(safeData)..['version'] = 1;
-      return PushResult.success(1, payload: SyncCodec.encodeMap(logged));
-    } on FirebaseException catch (e) {
-      return _classify(e, null);
-    } on Object catch (e) {
-      return PushResult.retryable('$e');
+      return await _db.runTransaction<PushResult>((transaction) async {
+        final saved = await transaction.get(receipt);
+        if (saved.exists) {
+          return saved.data()?['fingerprint'] == fingerprint
+              ? acknowledged()
+              : PushResult.rejected('Append-only identity collision');
+        }
+        transaction.set(ref, _materialize(safeData, version: 1));
+        transaction.set(receipt, receiptData);
+        return acknowledged();
+      });
+    } on FirebaseException catch (error) {
+      // Legacy writes predate receipts. A member who can read the existing
+      // record can prove an identical retry without changing that record.
+      if (error.code == 'permission-denied' || error.code == 'already-exists') {
+        try {
+          final saved = await ref.get();
+          if (saved.exists &&
+              AppendDeliveryIdentity.fingerprint(
+                    SyncCodec.sanitizeMap(saved.data() ?? {}),
+                  ) ==
+                  fingerprint) {
+            return await _db.runTransaction<PushResult>((transaction) async {
+              final existing = await transaction.get(receipt);
+              if (existing.exists &&
+                  existing.data()?['fingerprint'] != fingerprint) {
+                return PushResult.rejected('Append-only identity collision');
+              }
+              if (!existing.exists) transaction.set(receipt, receiptData);
+              return acknowledged();
+            });
+          }
+        } on Object {
+          /* A real denial stays visible; never weaken access. */
+        }
+      }
+      return _classify(error, null);
+    } on Object catch (error) {
+      return PushResult.retryable('$error');
     }
   }
 
@@ -136,13 +199,36 @@ class FirestoreDataSource implements RemoteDataSource {
     required String documentId,
   }) async {
     try {
-      final snapshot =
-          await _orgCollection(organizationId, collection).doc(documentId).get();
+      final snapshot = await _orgCollection(
+        organizationId,
+        collection,
+      ).doc(documentId).get(const GetOptions(source: Source.server));
       if (!snapshot.exists) return RemoteDocument.missing;
       return _toRemote(snapshot);
     } on Object {
+      // Enrollment must distinguish a denied lookup (e.g. revoked ownership)
+      // from a genuinely missing device. Other sync callers retain their
+      // existing missing-document fallback.
+      if (collection == SyncCollection.devices) rethrow;
       return RemoteDocument.missing;
     }
+  }
+
+  @override
+  Future<RemoteDocument> findProductBatchHeader({
+    required String organizationId,
+    required String deviceId,
+    required int localId,
+  }) async {
+    if (deviceId.isEmpty || localId <= 0) return RemoteDocument.missing;
+    final matches = await _orgCollection(organizationId, SyncCollection.samples)
+        .where('deviceId', isEqualTo: deviceId)
+        .where('localId', isEqualTo: localId)
+        .where('inspectionKind', isEqualTo: 'product')
+        .limit(2)
+        .get(const GetOptions(source: Source.server));
+    if (matches.docs.length != 1) return RemoteDocument.missing;
+    return _toRemote(matches.docs.single);
   }
 
   @override
@@ -154,14 +240,20 @@ class FirestoreDataSource implements RemoteDataSource {
     int limit = 300,
   }) async {
     try {
-      Query<Map<String, dynamic>> query = _orgCollection(organizationId, collection)
-          .orderBy('updatedAt', descending: false)
-          .orderBy(FieldPath.documentId, descending: false);
+      Query<Map<String, dynamic>> query =
+          _orgCollection(organizationId, collection)
+              .orderBy('updatedAt', descending: false)
+              .orderBy(FieldPath.documentId, descending: false);
       if (startAtTs.isNotEmpty && startAtId.isNotEmpty) {
-        final anchorTs = DateTime.tryParse(startAtTs) ?? DateTime.now();
-        query = query.startAt([anchorTs, startAtId]);
+        final anchor = SyncCursorTime.parse(startAtTs);
+        query = query.startAfter([
+          Timestamp(anchor.seconds, anchor.nanoseconds),
+          startAtId,
+        ]);
       }
-      final snapshot = await query.limit(limit + 1).get();
+      final snapshot = await query
+          .limit(limit + 1)
+          .get(const GetOptions(source: Source.server));
       final docs = snapshot.docs.take(limit).toList();
       return RemotePage(
         docs.map(_toRemote).toList(),
@@ -182,30 +274,29 @@ class FirestoreDataSource implements RemoteDataSource {
     required SyncCollection collection,
     required String documentId,
   }) async {
-    // Remote deletes are refused by the Rules on purpose: the tombstone is
-    // stored in the document itself (`deletedAt`) so the deletion can be
-    // replicated and audited.
-    //
-    // The Rules require a tombstone to satisfy `bumped()` like any other update:
-    // `version` must increase by exactly one and `updatedBy` must be the caller.
-    // A merge of just `deletedAt`/`updatedAt` is rejected, which sent every
-    // delete into `sync_conflicts` as a permanent permission failure.
     final ref = _orgCollection(organizationId, collection).doc(documentId);
-    final current = await ref.get();
-    final baseVersion = (current.data()?['version'] as num?)?.toInt() ?? 0;
-    await ref.set(<String, dynamic>{
-      'deletedAt': FieldValue.serverTimestamp(),
-      'updatedAt': FieldValue.serverTimestamp(),
-      'version': baseVersion + 1,
-      'updatedBy': auth?.currentUser?.uid,
-    }, SetOptions(merge: true));
+    await _db.runTransaction<void>((transaction) async {
+      final current = await transaction.get(ref);
+      if (!current.exists || current.data()?['deletedAt'] != null) return;
+      transaction.update(ref, <String, dynamic>{
+        'deletedAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+        'version': ((current.data()?['version'] as num?)?.toInt() ?? 0) + 1,
+        'deviceId': current.data()?['deviceId'],
+        'updatedBy': auth?.currentUser?.uid,
+      });
+    });
   }
 
   @override
   Future<RemoteDocument> readHeartbeat(String organizationId) async {
     try {
-      final snapshot =
-          await _db.collection('organizations').doc(organizationId).collection('meta').doc('state').get();
+      final snapshot = await _db
+          .collection('organizations')
+          .doc(organizationId)
+          .collection('meta')
+          .doc('state')
+          .get(const GetOptions(source: Source.server));
       if (!snapshot.exists) return RemoteDocument.missing;
       return _toRemote(snapshot);
     } on Object {
@@ -241,7 +332,9 @@ class FirestoreDataSource implements RemoteDataSource {
     required String deviceId,
     required Map<String, dynamic> data,
   }) async {
-    await _orgCollection(organizationId, SyncCollection.devices).doc(deviceId).set(
+    await _orgCollection(organizationId, SyncCollection.devices)
+        .doc(deviceId)
+        .set(
           _materialize(SyncCodec.sanitizeMap(data), version: 1),
           SetOptions(merge: true),
         );
@@ -253,7 +346,10 @@ class FirestoreDataSource implements RemoteDataSource {
     required String deviceId,
   }) async {
     try {
-      await _orgCollection(organizationId, SyncCollection.devices).doc(deviceId).delete();
+      await _orgCollection(
+        organizationId,
+        SyncCollection.devices,
+      ).doc(deviceId).delete();
     } on FirebaseException catch (e) {
       if (!_isPermissionDenied(e)) rethrow;
     }
@@ -262,7 +358,10 @@ class FirestoreDataSource implements RemoteDataSource {
   @override
   Future<List<RemoteDocument>> listDevices(String organizationId) async {
     try {
-      final snapshot = await _orgCollection(organizationId, SyncCollection.devices).get();
+      final snapshot = await _orgCollection(
+        organizationId,
+        SyncCollection.devices,
+      ).get();
       return snapshot.docs.map(_toRemote).toList();
     } on Object {
       return const [];
@@ -270,34 +369,49 @@ class FirestoreDataSource implements RemoteDataSource {
   }
 
   /// `users/{uid}` is a top-level collection (see `firestore.rules`).
-  DocumentReference<Map<String, dynamic>> userDoc(String uid) => _db.collection('users').doc(uid);
+  DocumentReference<Map<String, dynamic>> userDoc(String uid) =>
+      _db.collection('users').doc(uid);
 
   // ── References used by the auth/organization flows (plan §8.3, §8.5) ──────
-  DocumentReference<Map<String, dynamic>> organizationRef(String organizationId) =>
-      _db.collection('organizations').doc(organizationId);
+  DocumentReference<Map<String, dynamic>> organizationRef(
+    String organizationId,
+  ) => _db.collection('organizations').doc(organizationId);
 
-  DocumentReference<Map<String, dynamic>> organizationMetaRef(String organizationId) =>
-      _db.collection('organizations').doc(organizationId).collection('meta').doc('state');
+  DocumentReference<Map<String, dynamic>> organizationMetaRef(
+    String organizationId,
+  ) => _db
+      .collection('organizations')
+      .doc(organizationId)
+      .collection('meta')
+      .doc('state');
 
-  DocumentReference<Map<String, dynamic>> memberRef(String organizationId, String memberId) =>
-      _orgCollection(organizationId, SyncCollection.members).doc(memberId);
+  DocumentReference<Map<String, dynamic>> memberRef(
+    String organizationId,
+    String memberId,
+  ) => _orgCollection(organizationId, SyncCollection.members).doc(memberId);
 
-  DocumentReference<Map<String, dynamic>> inviteRef(String organizationId, String inviteKey) =>
-      _orgCollection(organizationId, SyncCollection.invites).doc(inviteKey);
+  DocumentReference<Map<String, dynamic>> inviteRef(
+    String organizationId,
+    String inviteKey,
+  ) => _orgCollection(organizationId, SyncCollection.invites).doc(inviteKey);
 
   /// Members are read straight (ordered by e-mail) by the members screen.
-  CollectionReference<Map<String, dynamic>> membersCollection(String organizationId) =>
-      _orgCollection(organizationId, SyncCollection.members);
+  CollectionReference<Map<String, dynamic>> membersCollection(
+    String organizationId,
+  ) => _orgCollection(organizationId, SyncCollection.members);
 
-  DocumentReference<Map<String, dynamic>> auditLogRef(String organizationId, String logId) =>
-      _orgCollection(organizationId, SyncCollection.auditLogs).doc(logId);
+  DocumentReference<Map<String, dynamic>> auditLogRef(
+    String organizationId,
+    String logId,
+  ) => _orgCollection(organizationId, SyncCollection.auditLogs).doc(logId);
 
   WriteBatch newBatch() => _db.batch();
 
   FieldValue serverTimestamp() => FieldValue.serverTimestamp();
 
-
-  static RemoteDocument _toRemote(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+  static RemoteDocument _toRemote(
+    DocumentSnapshot<Map<String, dynamic>> snapshot,
+  ) {
     final data = snapshot.data() ?? const <String, dynamic>{};
     final updatedAt = data['updatedAt'];
     return RemoteDocument(
@@ -306,6 +420,9 @@ class FirestoreDataSource implements RemoteDataSource {
       // to ISO strings: the sqflite layer only accepts num / String / Uint8List.
       data: _sqliteSafe(Map<String, dynamic>.from(data)),
       version: (data['version'] as num?)?.toInt() ?? 1,
+      cursorTimestamp: updatedAt is Timestamp
+          ? SyncCursorTime(updatedAt.seconds, updatedAt.nanoseconds).iso
+          : null,
       updatedAt: updatedAt is Timestamp
           ? updatedAt.toDate().toIso8601String()
           : (updatedAt == null ? null : '$updatedAt'),
@@ -315,8 +432,8 @@ class FirestoreDataSource implements RemoteDataSource {
 
   /// Recursively replace every value the local SQLite store cannot persist.
   static Map<String, dynamic> _sqliteSafe(Map<String, dynamic> data) => {
-        for (final entry in data.entries) entry.key: _sqliteSafeValue(entry.value),
-      };
+    for (final entry in data.entries) entry.key: _sqliteSafeValue(entry.value),
+  };
 
   static Object? _sqliteSafeValue(Object? value) {
     if (value is Timestamp) return value.toDate().toIso8601String();
@@ -336,7 +453,10 @@ class FirestoreDataSource implements RemoteDataSource {
   }
 
   /// Replace the sentinel with real server timestamps.
-  static Map<String, dynamic> _materialize(Map<String, dynamic> data, {required int version}) {
+  static Map<String, dynamic> _materialize(
+    Map<String, dynamic> data, {
+    required int version,
+  }) {
     final out = Map<String, dynamic>.from(data);
     for (final entry in out.entries.toList()) {
       if (entry.value == FieldTimestampSentinel.value) {
@@ -347,7 +467,10 @@ class FirestoreDataSource implements RemoteDataSource {
     return out;
   }
 
-  static PushResult _classify(FirebaseException e, Map<String, dynamic>? current) {
+  static PushResult _classify(
+    FirebaseException e,
+    Map<String, dynamic>? current,
+  ) {
     // Belt-and-braces: callers already sanitize, but a raw snapshot must never
     // become JSON-encodable `remote` downstream in PushWorker.
     Map<String, dynamic>? safeRemote;

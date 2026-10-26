@@ -32,22 +32,20 @@ class DashboardKpisState extends Equatable {
     int? todayRejected,
     int? totalCount,
     DashboardBundle? bundle,
-  }) =>
-      DashboardKpisState(
-        todayInspections: todayInspections ?? this.todayInspections,
-        todayApproved: todayApproved ?? this.todayApproved,
-        todayRejected: todayRejected ?? this.todayRejected,
-        totalCount: totalCount ?? this.totalCount,
-        bundle: bundle ?? this.bundle,
-      );
+  }) => DashboardKpisState(
+    todayInspections: todayInspections ?? this.todayInspections,
+    todayApproved: todayApproved ?? this.todayApproved,
+    todayRejected: todayRejected ?? this.todayRejected,
+    totalCount: totalCount ?? this.totalCount,
+    bundle: bundle ?? this.bundle,
+  );
 
   @override
   List<Object?> get props => [
-        todayInspections,
-        todayApproved,
-        todayRejected,
-        totalCount,
-        bundle,
-      ];
+    todayInspections,
+    todayApproved,
+    todayRejected,
+    totalCount,
+    bundle,
+  ];
 }
-

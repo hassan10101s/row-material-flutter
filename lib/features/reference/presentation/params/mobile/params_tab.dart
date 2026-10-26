@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -151,7 +152,10 @@ class _MobileParamsTabState extends State<MobileParamsTab> {
                                     'التحليل الكيميائي',
                                     'Parameter Chemical Analysis',
                                   )
-                                : AppText.t('الفحص الظاهري', 'Physical Aspects'),
+                                : AppText.t(
+                                    'الفحص الظاهري',
+                                    'Physical Aspects',
+                                  ),
                             headers: DesktopParamsTab.exportHeaders(),
                             rows: DesktopParamsTab.exportRows(state.rows),
                           ),
@@ -280,6 +284,8 @@ class _ParamCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return AppCard(
       enableHover: false,
+      // Flat shadow tier: a page of stacked cards reads lighter.
+      flat: true,
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
         children: [
@@ -351,8 +357,8 @@ class _ParamEditorRoute extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(paramEditorTitle(parameterType, param == null)),
+      appBar: AppTopAppBar(
+        title: paramEditorTitle(parameterType, param == null),
       ),
       body: SafeArea(
         child: SingleChildScrollView(

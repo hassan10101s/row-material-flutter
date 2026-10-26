@@ -1,15 +1,20 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
-import '../../../../core/responsive/form_factor.dart';
+import '../../../../design_system/feedback/app_feedback.dart';
+import '../../../../design_system/widgets/app_adaptive.dart';
+import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_window.dart';
 import '../../domain/nir_validation_repository.dart';
 import '../cubit/nir_validation_state.dart';
+import 'nir_validation_components.dart';
 
 /// Opens the full details window of one (خامة/منتج × تحليل) item: the
 /// NIR-vs-lab scatter with both fitted lines, every accuracy metric, the
@@ -17,16 +22,37 @@ import '../cubit/nir_validation_state.dart';
 /// reasoning, and the matched-pair table.
 Future<void> showNirItemDetails(
   BuildContext context,
-  NirParameterStats stats,
-) {
-  return showAppWindow<void>(
+  NirParameterStats stats, {
+  Future<void> Function()? onReset,
+}) async {
+  final reset = await showAppDialog<bool>(
     context,
-    title: '${stats.entityName} · ${stats.parameter}',
-    subtitle: _detailsSubtitle(stats),
-    icon: Icons.insights_outlined,
-    size: AppWindowSize.lg,
-    child: _NirItemDetails(stats: stats),
+    builder: (overlay) => AppDialog(
+      title: '${stats.entityName} · ${stats.parameter}',
+      subtitle: _detailsSubtitle(stats),
+      icon: Icons.insights_outlined,
+      size: AppWindowSize.lg,
+      actions: [
+        if (onReset != null)
+          AppButton(
+            label: AppText.t(
+              'بدء فترة جديدة لهذا التحليل',
+              'New period for this analysis',
+            ),
+            icon: const Icon(Icons.restart_alt_outlined, size: 18),
+            style: AppButtonStyle.ghost,
+            onPressed: () => Navigator.pop(overlay, true),
+          ),
+        AppButton(
+          label: AppText.t('إغلاق', 'Close'),
+          style: AppButtonStyle.secondary,
+          onPressed: () => Navigator.pop(overlay, false),
+        ),
+      ],
+      child: _NirItemDetails(stats: stats),
+    ),
   );
+  if (reset == true && context.mounted) await onReset?.call();
 }
 
 String _detailsSubtitle(NirParameterStats stats) {
@@ -37,7 +63,7 @@ String _detailsSubtitle(NirParameterStats stats) {
   final horizonLabel = horizon.isEmpty
       ? AppText.t('بلا تصفير', 'No reset')
       : '${AppText.t('التصفير', 'Reset')}: ${_displayDate(horizon)}'
-          '${stats.scopedHorizon ? '' : ' (${AppText.t('عام', 'global')})'}';
+            '${stats.scopedHorizon ? '' : ' (${AppText.t('عام', 'global')})'}';
   return unit.isEmpty
       ? '$count · $scope · $horizonLabel'
       : '$count · $scope ($unit) · $horizonLabel';
@@ -68,10 +94,62 @@ class _NirItemDetailsState extends State<_NirItemDetails> {
 
   @override
   Widget build(BuildContext context) {
+    final chart = AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          NirSectionTitle(
+            title: AppText.t('NIR مقابل المعمل', 'NIR versus laboratory'),
+            icon: Icons.scatter_plot_outlined,
+            subtitle: AppText.t(
+              'كل نقطة تمثل قراءتين لنفس الفحص.',
+              'Each point is a paired reading from the same inspection.',
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          _FitScatterChart(stats: _stats),
+        ],
+      ),
+    );
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _FitScatterChart(stats: _stats),
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: AppSpacing.md,
+                runSpacing: AppSpacing.sm,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  NirReliabilityBadge(reliability: _stats.reliability),
+                  Text(
+                    '${_stats.count} ${AppText.t('نقطة مطابقة', 'matched pairs')}',
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                _stats.reliability == NirReliability.insufficientData
+                    ? AppText.t(
+                        'اجمع 5 نقاط على الأقل لتقييم موثوقية هذا التحليل. التوصية الحالية مبنية على البيانات المتاحة.',
+                        'Collect at least 5 pairs to assess reliability. The current recommendation uses the available data.',
+                      )
+                    : _stats.reliability == NirReliability.needsReview
+                    ? AppText.t(
+                        'راجع النقاط المرجعية وتشتت القراءات قبل الاعتماد على التصحيح المقترح.',
+                        'Review the reference pairs and reading scatter before relying on the proposed correction.',
+                      )
+                    : AppText.t(
+                        'يحقق هذا التحليل شروط الموثوقية الحالية: 5 نقاط على الأقل ومعامل تحديد لا يقل عن 0.90.',
+                        'This analysis meets the current reliability criteria: at least 5 pairs and R² ≥ 0.90.',
+                      ),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: AppSpacing.md),
         _AdjustmentCard(
           stats: _stats,
@@ -79,15 +157,46 @@ class _NirItemDetailsState extends State<_NirItemDetails> {
           onMode: (m) => setState(() => _mode = m),
         ),
         const SizedBox(height: AppSpacing.md),
-        _AdviceCard(stats: _stats),
+        appAdaptiveVariant(
+          context,
+          desktop: (_) => LayoutBuilder(
+            builder: (_, constraints) => constraints.maxWidth < 700
+                ? Column(
+                    children: [
+                      chart,
+                      const SizedBox(height: AppSpacing.md),
+                      _AdviceCard(stats: _stats),
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(flex: 3, child: chart),
+                      const SizedBox(width: AppSpacing.md),
+                      Expanded(flex: 2, child: _AdviceCard(stats: _stats)),
+                    ],
+                  ),
+          ),
+          mobile: (_) => Column(
+            children: [
+              chart,
+              const SizedBox(height: AppSpacing.md),
+              _AdviceCard(stats: _stats),
+            ],
+          ),
+        ),
         const SizedBox(height: AppSpacing.md),
         _AllMetricsCard(stats: _stats),
         const SizedBox(height: AppSpacing.md),
-        Text(
-          AppText.t('جدول النقاط المطابقة', 'Matched-pair table'),
-          style: Theme.of(context).textTheme.titleSmall,
+        NirSectionTitle(
+          title: AppText.t('القراءات المطابقة', 'Matched readings'),
+          icon: Icons.table_rows_outlined,
+          subtitle: AppText.t(
+            'الانحراف = NIR − المعمل. الإشارة تحدد اتجاه الفرق فقط.',
+            'Deviation = NIR − lab. The sign indicates direction only.',
+          ),
         ),
-        const SizedBox(height: AppSpacing.xs),
+        const SizedBox(height: AppSpacing.sm),
         NirPointsTable(points: _stats.points, unit: _stats.unit),
       ],
     );
@@ -118,12 +227,8 @@ class _FitScatterChart extends StatelessWidget {
     final b = stats.intercept;
     final a0 = stats.slopeOnly;
 
-    double minX = pts.map((p) => p.nirValue).reduce(
-          (m, x) => x < m ? x : m,
-        );
-    double maxX = pts.map((p) => p.nirValue).reduce(
-          (m, x) => x > m ? x : m,
-        );
+    double minX = pts.map((p) => p.nirValue).reduce((m, x) => x < m ? x : m);
+    double maxX = pts.map((p) => p.nirValue).reduce((m, x) => x > m ? x : m);
     // The slope-only line passes through the origin — keep it inside the view.
     minX = minX > 0 ? 0 : minX;
     maxX = maxX < 0 ? 0 : maxX;
@@ -150,9 +255,7 @@ class _FitScatterChart extends StatelessWidget {
     yMin -= yPad;
     yMax += yPad;
 
-    final dataSpots = [
-      for (final p in pts) FlSpot(p.nirValue, p.labValue),
-    ];
+    final dataSpots = [for (final p in pts) FlSpot(p.nirValue, p.labValue)];
 
     final headerStyle = TextStyle(
       fontSize: 10.spMin,
@@ -161,10 +264,8 @@ class _FitScatterChart extends StatelessWidget {
 
     final dotsPainter = FlDotData(
       show: true,
-      getDotPainter: (s, p, bar, i) => FlDotCirclePainter(
-        radius: 4,
-        color: AppColors.primary,
-      ),
+      getDotPainter: (s, p, bar, i) =>
+          FlDotCirclePainter(radius: 4, color: AppColors.primary),
     );
     final touchedDotsPainter = FlDotData(
       show: true,
@@ -185,19 +286,13 @@ class _FitScatterChart extends StatelessWidget {
       dotData: dotsPainter,
     );
     final fullFitBar = LineChartBarData(
-      spots: [
-        FlSpot(minX, a * minX + b),
-        FlSpot(maxX, a * maxX + b),
-      ],
+      spots: [FlSpot(minX, a * minX + b), FlSpot(maxX, a * maxX + b)],
       color: AppColors.success,
       barWidth: 2,
       dotData: const FlDotData(show: false),
     );
     final slopeOnlyBar = LineChartBarData(
-      spots: [
-        FlSpot(minX, a0 * minX),
-        FlSpot(maxX, a0 * maxX),
-      ],
+      spots: [FlSpot(minX, a0 * minX), FlSpot(maxX, a0 * maxX)],
       color: AppColors.info,
       barWidth: 2,
       dashArray: const [6, 4],
@@ -208,7 +303,7 @@ class _FitScatterChart extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-          height: FormFactor.current.isMobile ? 220 : 300,
+          height: appUsesDesktopChrome(context) ? 300 : 220,
           width: double.infinity,
           child: LineChart(
             LineChartData(
@@ -251,11 +346,7 @@ class _FitScatterChart extends StatelessWidget {
                   ],
                 ),
               ),
-              lineBarsData: [
-                dataBar,
-                fullFitBar,
-                slopeOnlyBar,
-              ],
+              lineBarsData: [dataBar, fullFitBar, slopeOnlyBar],
               titlesData: FlTitlesData(
                 topTitles: const AxisTitles(
                   sideTitles: SideTitles(showTitles: false),
@@ -273,10 +364,7 @@ class _FitScatterChart extends StatelessWidget {
                     reservedSize: 44,
                     getTitlesWidget: (v, _) => Padding(
                       padding: const EdgeInsets.only(right: 4),
-                      child: Text(
-                        v.toStringAsFixed(1),
-                        style: headerStyle,
-                      ),
+                      child: Text(v.toStringAsFixed(1), style: headerStyle),
                     ),
                   ),
                 ),
@@ -290,10 +378,7 @@ class _FitScatterChart extends StatelessWidget {
                     reservedSize: 26,
                     getTitlesWidget: (v, _) => Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        v.toStringAsFixed(1),
-                        style: headerStyle,
-                      ),
+                      child: Text(v.toStringAsFixed(1), style: headerStyle),
                     ),
                   ),
                 ),
@@ -364,15 +449,11 @@ class _LegendDot extends StatelessWidget {
             : Container(
                 width: 10,
                 height: 10,
-                decoration: BoxDecoration(
-                  color: color,
-                  shape: BoxShape.circle,
-                ),
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
               ),
         const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(fontSize: 11.spMin),
+        Flexible(
+          child: Text(label, style: TextStyle(fontSize: 11.spMin)),
         ),
       ],
     );
@@ -416,87 +497,143 @@ class _AdjustmentCard extends StatelessWidget {
     required this.mode,
     required this.onMode,
   });
-
   final NirParameterStats stats;
   final NirAdjustmentMode mode;
   final ValueChanged<NirAdjustmentMode> onMode;
 
   @override
   Widget build(BuildContext context) {
-    final n = stats.count;
-    final (formulaAr, formulaEn) = switch (mode) {
-      NirAdjustmentMode.slopeOnly => (
-          'المصحح = a₀ × NIR (a₀ = ${stats.slopeOnly.toStringAsFixed(4)})',
-          'Adjusted = a₀ × NIR (a₀ = ${stats.slopeOnly.toStringAsFixed(4)})',
-        ),
-      NirAdjustmentMode.slopeAndIntercept => (
-          'المصحح = a × NIR + b (a = ${stats.slope.toStringAsFixed(4)}, b = ${stats.intercept.toStringAsFixed(4)})',
-          'Adjusted = a × NIR + b (a = ${stats.slope.toStringAsFixed(4)}, b = ${stats.intercept.toStringAsFixed(4)})',
-        ),
-    };
+    final recommended = stats.adjustmentAdvice.recommended;
+    final formula = mode == NirAdjustmentMode.slopeOnly
+        ? 'Lab = ${stats.slopeOnly.toStringAsFixed(4)} × NIR'
+        : 'Lab = ${stats.slope.toStringAsFixed(4)} × NIR ${stats.intercept < 0 ? '−' : '+'} ${stats.intercept.abs().toStringAsFixed(4)}';
     return AppCard(
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text(
-            AppText.t(
-              'اختر طريقة تصحيح قراءة الجهاز',
-              'Choose how the raw device reading is adjusted',
+          NirSectionTitle(
+            title: AppText.t(
+              'معاينة التصحيح المقترح',
+              'Preview the proposed correction',
             ),
-            style: Theme.of(context).textTheme.titleSmall,
+            icon: Icons.tune_rounded,
+            subtitle: AppText.t(
+              'اختيار الطريقة يغيّر المعاينة فقط؛ لا يغيّر معايرة الجهاز أو النتائج المحفوظة.',
+              'Changing the method updates this preview only. It does not change device calibration or saved results.',
+            ),
           ),
-          const SizedBox(height: AppSpacing.sm),
+          const SizedBox(height: AppSpacing.md),
           Wrap(
             spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.xs,
+            runSpacing: AppSpacing.sm,
             children: [
-              ChoiceChip(
-                label: Text(
-                  AppText.t('الميل فقط', 'Slope only'),
+              for (final candidate in NirAdjustmentMode.values)
+                ChoiceChip(
+                  selected: mode == candidate,
+                  onSelected: (_) => onMode(candidate),
+                  label: Text(
+                    '${candidate == NirAdjustmentMode.slopeOnly ? AppText.t('الميل فقط', 'Slope only') : AppText.t('الميل + القاطع', 'Slope + intercept')}${candidate == recommended ? AppText.t(' · المقترح', ' · Suggested') : ''}',
+                  ),
                 ),
-                selected: mode == NirAdjustmentMode.slopeOnly,
-                onSelected: (_) => onMode(NirAdjustmentMode.slopeOnly),
-              ),
-              ChoiceChip(
-                label: Text(
-                  AppText.t('الميل + القاطع', 'Slope + intercept'),
-                ),
-                selected: mode == NirAdjustmentMode.slopeAndIntercept,
-                onSelected: (_) => onMode(NirAdjustmentMode.slopeAndIntercept),
-              ),
             ],
           ),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            AppText.t(formulaAr, formulaEn),
-            style: Theme.of(context).textTheme.bodyMedium!.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.primary,
+          const SizedBox(height: AppSpacing.md),
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: .06),
+              borderRadius: BorderRadius.circular(AppRadii.sm),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: .15),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  AppText.t(
+                    'المعادلة: القيمة المعملية المتوقعة',
+                    'Formula: predicted laboratory value',
+                  ),
+                  style: Theme.of(context).textTheme.bodySmall,
                 ),
+                const SizedBox(height: AppSpacing.sm),
+                SelectableText(
+                  stats.count == 0 ? '—' : formula,
+                  textDirection: TextDirection.ltr,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  label: AppText.t('نسخ المعادلة', 'Copy formula'),
+                  icon: const Icon(Icons.copy_outlined, size: 16),
+                  style: AppButtonStyle.ghost,
+                  small: true,
+                  onPressed: stats.count == 0
+                      ? null
+                      : () async {
+                          try {
+                            await Clipboard.setData(
+                              ClipboardData(text: formula),
+                            );
+                            if (context.mounted) {
+                              AppFeedback.show(
+                                context,
+                                AppText.t('تم نسخ المعادلة', 'Formula copied'),
+                                type: AppFeedbackType.success,
+                              );
+                            }
+                          } on Object catch (error) {
+                            if (context.mounted) {
+                              AppFeedback.errorFrom(context, error);
+                            }
+                          }
+                        },
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: AppSpacing.sm),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: 4,
-            children: [
-              _DetailChip(
-                label: AppText.t('الانحراف بعد التصحيح', 'Bias after'),
-                value: n == 0
-                    ? '-'
-                    : stats.biasOf(mode).toStringAsFixed(3),
-                color: stats.biasOf(mode) > 0
-                    ? AppColors.danger
-                    : AppColors.success,
-              ),
-              _DetailChip(
-                label: 'RMSE',
-                value: n < 2 ? '-' : stats.rmseOf(mode).toStringAsFixed(3),
-              ),
-              _DetailChip(
-                label: 'R²',
-                value: n < 2 ? '-' : stats.r2Of(mode).toStringAsFixed(3),
-              ),
-            ],
+          const SizedBox(height: AppSpacing.md),
+          Semantics(
+            liveRegion: true,
+            child: NirMetricGrid(
+              children: [
+                NirMetricTile(
+                  label: AppText.t(
+                    'متوسط الباقي بعد التصحيح',
+                    'Mean residual after correction',
+                  ),
+                  value: stats.count == 0 ? '—' : nirFixed(stats.biasOf(mode)),
+                  hint: AppText.t(
+                    'المعمل − القيمة المصححة',
+                    'Lab − corrected reading',
+                  ),
+                ),
+                NirMetricTile(
+                  label: 'RMSE',
+                  value: stats.count < 2
+                      ? '—'
+                      : stats.rmseOf(mode).toStringAsFixed(3),
+                  hint: AppText.t(
+                    'خطأ التصحيح على هذه النقاط',
+                    'Correction error on these pairs',
+                  ),
+                ),
+                NirMetricTile(
+                  label: 'R²',
+                  value: stats.count < 2
+                      ? '—'
+                      : stats.r2Of(mode).toStringAsFixed(3),
+                  hint: AppText.t(
+                    'معامل التحديد بعد التصحيح',
+                    'Determination after correction',
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -504,14 +641,9 @@ class _AdjustmentCard extends StatelessWidget {
   }
 }
 
-/// The auto-recommendation card ("deep thinking"): the suggested mode with
-/// every reason behind it — slope distance from 1, intercept significance
-/// (t-test) and the RMSE gain the intercept buys.
 class _AdviceCard extends StatelessWidget {
   const _AdviceCard({required this.stats});
-
   final NirParameterStats stats;
-
   @override
   Widget build(BuildContext context) {
     final advice = stats.adjustmentAdvice;
@@ -519,364 +651,297 @@ class _AdviceCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                Icons.psychology_outlined,
-                size: 20.r,
-                color: AppColors.primary,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  AppText.t('القرار المقترح', 'Suggested decision'),
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ),
-              _DetailChip(
-                label: '',
-                value: advice.recommended == NirAdjustmentMode.slopeOnly
-                    ? AppText.t('الميل فقط', 'Slope only')
-                    : AppText.t('الميل + القاطع', 'Slope + intercept'),
-                color: AppColors.success,
-              ),
-            ],
+          NirSectionTitle(
+            title: AppText.t('لماذا هذه التوصية؟', 'Why this recommendation?'),
+            icon: Icons.lightbulb_outline_rounded,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            advice.recommended == NirAdjustmentMode.slopeOnly
+                ? AppText.t('الميل فقط', 'Slope only')
+                : AppText.t('الميل + القاطع', 'Slope + intercept'),
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(color: AppColors.primary),
           ),
           const SizedBox(height: AppSpacing.sm),
-          for (final r in advice.reasons) ...[
+          for (var i = 0; i < advice.reasons.length; i++)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 3),
-                    child: Text('•'),
+                  Text(
+                    '${i + 1}.',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: AppColors.textMuted,
+                    ),
                   ),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Text(
-                      AppText.t(r.ar, r.en),
+                      AppText.t(advice.reasons[i].ar, advice.reasons[i].en),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                   ),
                 ],
               ),
             ),
-          ],
         ],
       ),
     );
   }
 }
 
-/// Every metric of the item in one glance: raw fit, slope-only fit, the
-/// recommendation signal (intercept |t|) and the horizon data.
 class _AllMetricsCard extends StatelessWidget {
   const _AllMetricsCard({required this.stats});
-
   final NirParameterStats stats;
-
   @override
-  Widget build(BuildContext context) {
-    final n = stats.count;
-    final horizon = stats.horizonStart.trim();
-    return AppCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            AppText.t('كل التفاصيل', 'All details'),
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: 4,
-            children: [
-              _DetailChip(label: 'N', value: '$n'),
-              _DetailChip(
-                label: AppText.t('الانحراف (خام)', 'Bias (raw)'),
-                value: n == 0 ? '-' : stats.bias.toStringAsFixed(3),
-                color:
-                    stats.bias > 0 ? AppColors.danger : AppColors.success,
-              ),
-              _DetailChip(
-                label: AppText.t('الميل a', 'Slope a'),
-                value: n < 2 ? '-' : stats.slope.toStringAsFixed(4),
-              ),
-              _DetailChip(
-                label: AppText.t('القاطع b', 'Intercept b'),
-                value: n < 2 ? '-' : stats.intercept.toStringAsFixed(4),
-              ),
-              _DetailChip(
-                label: AppText.t('الميل فقط a₀', 'Slope only a₀'),
-                value: n < 1 ? '-' : stats.slopeOnly.toStringAsFixed(4),
-              ),
-              _DetailChip(
-                label: 'R²',
-                value: n < 2 ? '-' : stats.r2.toStringAsFixed(3),
-              ),
-              _DetailChip(
-                label: 'RMSE',
-                value: n < 2 ? '-' : stats.rmse.toStringAsFixed(3),
-              ),
-              _DetailChip(
-                label: 'RMSE ${AppText.t('ميل فقط', 'slope-only')}',
-                value: n < 2 ? '-' : stats.rmseOf(NirAdjustmentMode.slopeOnly).toStringAsFixed(3),
-              ),
-              _DetailChip(
-                label: 'R² ${AppText.t('ميل فقط', 'slope-only')}',
-                value: n < 2 ? '-' : stats.r2Of(NirAdjustmentMode.slopeOnly).toStringAsFixed(3),
-              ),
-              _DetailChip(
-                label: AppText.t('أكبر انحراف', 'Max deviation'),
-                value: n == 0 ? '-' : stats.maxDeviation.toStringAsFixed(3),
-              ),
-              _DetailChip(
-                label: '|t| ${AppText.t('القاطع', 'intercept')}',
-                value: stats.adjustmentAdvice.interceptT.toStringAsFixed(2),
-                color: stats.adjustmentAdvice.interceptT >= 2
-                    ? AppColors.warning
-                    : AppColors.textMuted,
-              ),
-              if (unit.isNotEmpty)
-                _DetailChip(
-                  label: AppText.t('الوحدة', 'Unit'),
-                  value: unit,
-                ),
-              _DetailChip(
-                label: NirValidationState.scopeLabel(stats.scope),
-                value: stats.entityName,
-                color: AppColors.info,
-              ),
-              if (horizon.isNotEmpty)
-                _DetailChip(
-                  label: AppText.t(
-                    stats.scopedHorizon ? 'تصفير الخاص' : 'تصفير عام من',
-                    stats.scopedHorizon ? 'Item reset' : 'Global reset from',
-                  ),
-                  value: _displayDate(horizon),
-                  color: AppColors.primary,
-                ),
-            ],
-          ),
-        ],
+  Widget build(BuildContext context) => AppCard(
+    padding: EdgeInsets.zero,
+    child: ExpansionTile(
+      tilePadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      childrenPadding: const EdgeInsets.fromLTRB(
+        AppSpacing.md,
+        0,
+        AppSpacing.md,
+        AppSpacing.md,
       ),
-    );
-  }
-
-  String get unit => stats.unit.trim();
-}
-
-class _DetailChip extends StatelessWidget {
-  const _DetailChip({
-    required this.label,
-    required this.value,
-    this.color,
-  });
-
-  final String label;
-  final String value;
-  final Color? color;
-
-  @override
-  Widget build(BuildContext context) {
-    final resolved = color ?? Theme.of(context).colorScheme.primary;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: resolved.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
+      title: Text(
+        AppText.t(
+          'المؤشرات التفصيلية وفترة المقارنة',
+          'Detailed metrics & comparison period',
+        ),
+        style: Theme.of(context).textTheme.titleSmall,
       ),
-      child: Text.rich(
-        TextSpan(
+      children: [
+        NirMetricGrid(
           children: [
-            if (label.isNotEmpty) ...[
-              TextSpan(
-                text: '$label: ',
-                style: TextStyle(
-                  fontSize: 12.spMin,
-                  fontWeight: FontWeight.w600,
-                  color: resolved,
-                ),
+            NirMetricTile(
+              label: AppText.t('متوسط NIR', 'Mean NIR'),
+              value: stats.count == 0 ? '—' : stats.meanNir.toStringAsFixed(3),
+            ),
+            NirMetricTile(
+              label: AppText.t('متوسط المعمل', 'Mean laboratory'),
+              value: stats.count == 0 ? '—' : stats.meanLab.toStringAsFixed(3),
+            ),
+            NirMetricTile(
+              label: AppText.t(
+                'الانحراف قبل التصحيح',
+                'Bias before correction',
               ),
-            ],
-            TextSpan(
-              text: value,
-              style: TextStyle(
-                fontSize: 12.spMin,
-                fontWeight: FontWeight.w700,
-                color: resolved,
+              value: stats.count == 0 ? '—' : stats.bias.toStringAsFixed(3),
+              hint: 'NIR − Lab',
+            ),
+            NirMetricTile(
+              label: AppText.t('الميل a', 'Slope a'),
+              value: stats.count < 2 ? '—' : stats.slope.toStringAsFixed(4),
+            ),
+            NirMetricTile(
+              label: AppText.t('القاطع b', 'Intercept b'),
+              value: stats.count < 2 ? '—' : stats.intercept.toStringAsFixed(4),
+            ),
+            NirMetricTile(
+              label: AppText.t('الميل فقط a₀', 'Slope only a₀'),
+              value: stats.count == 0
+                  ? '—'
+                  : stats.slopeOnly.toStringAsFixed(4),
+            ),
+            NirMetricTile(
+              label: AppText.t(
+                'أكبر انحراف مطلق',
+                'Largest absolute deviation',
               ),
+              value: stats.count == 0
+                  ? '—'
+                  : stats.maxDeviation.toStringAsFixed(3),
+            ),
+            NirMetricTile(
+              label: AppText.t(
+                'معنوية القاطع |t|',
+                'Intercept significance |t|',
+              ),
+              value: stats.adjustmentAdvice.interceptT.toStringAsFixed(2),
+            ),
+            NirMetricTile(
+              label: AppText.t(
+                'بداية فترة المقارنة',
+                'Comparison period starts',
+              ),
+              value: stats.horizonStart.trim().isEmpty
+                  ? '—'
+                  : _displayDate(stats.horizonStart),
+              hint: stats.horizonStart.trim().isEmpty
+                  ? AppText.t('كل القراءات المسجلة', 'All recorded readings')
+                  : stats.scopedHorizon
+                  ? AppText.t(
+                      'فترة خاصة بهذا التحليل',
+                      'Period for this analysis only',
+                    )
+                  : AppText.t('فترة عامة', 'Global period'),
             ),
           ],
         ),
-      ),
-    );
-  }
+      ],
+    ),
+  );
 }
 
-/// The matched-pair table (NIR vs lab reference) — shared by the details
-/// window and the tab expansion.
-class NirPointsTable extends StatelessWidget {
+/// Desktop pagination and mobile cards keep large reference sets manageable.
+class NirPointsTable extends StatefulWidget {
   const NirPointsTable({super.key, required this.points, required this.unit});
-
   final List<NirValidationPoint> points;
   final String unit;
+  @override
+  State<NirPointsTable> createState() => _NirPointsTableState();
+}
+
+class _NirPointsTableState extends State<NirPointsTable> {
+  int _visible = 20;
+  @override
+  void didUpdateWidget(covariant NirPointsTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.points, widget.points)) _visible = 20;
+  }
 
   @override
   Widget build(BuildContext context) {
-    final u = unit.trim().isEmpty ? '' : ' $unit';
-    final headerStyle = TextStyle(
-      fontWeight: FontWeight.w700,
-      fontSize: 12.spMin,
-      color: AppColors.textMuted,
-    );
-    final cellStyle = TextStyle(fontSize: 12.spMin);
-    // Five columns in ~330dp of dialog-width track: on the phone each
-    // matched pair becomes a two-line item instead (identity on top, the
-    // three readings side by side); desktop keeps the aligned grid.
-    if (FormFactor.current.isMobile) {
-      return Column(
+    final suffix = widget.unit.trim().isEmpty ? '' : ' (${widget.unit.trim()})';
+    if (widget.points.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        child: Text(
+          AppText.t(
+            'لا توجد قراءات مطابقة في هذه الفترة.',
+            'No paired readings in this period.',
+          ),
+        ),
+      );
+    }
+    return appAdaptiveVariant(
+      context,
+      desktop: (_) => AppPaginatedTable(
+        height: 320,
+        rowsPerPage: 10,
+        rowHeight: 60,
+        minTableWidth: 640,
+        columnFlex: const [2.5, 2.5, 1.5, 1.5, 1.5],
+        headers: [
+          AppText.t('التاريخ / المحضر', 'Date / inspection'),
+          AppText.t('العينة', 'Sample'),
+          'NIR$suffix',
+          '${AppText.t('المعمل', 'Lab')}$suffix',
+          AppText.t('الانحراف', 'Deviation'),
+        ],
+        rows: [
+          for (final point in widget.points)
+            [
+              Tooltip(
+                message: '${point.inspectionDate} · ${point.entryCode}',
+                child: Text(
+                  '${point.inspectionDate}\n${point.entryCode}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Tooltip(
+                message: point.sampleName,
+                child: Text(
+                  point.sampleName,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                point.nirValue.toStringAsFixed(3),
+                textDirection: TextDirection.ltr,
+              ),
+              Text(
+                point.labValue.toStringAsFixed(3),
+                textDirection: TextDirection.ltr,
+              ),
+              Text(
+                point.deviation.toStringAsFixed(3),
+                textDirection: TextDirection.ltr,
+              ),
+            ],
+        ],
+      ),
+      mobile: (_) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          for (final p in points) ...[
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
+          for (final point in widget.points.take(_visible)) ...[
+            AppCard(
+              padding: const EdgeInsets.all(AppSpacing.md),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '${p.inspectionDate} · ${p.entryCode}',
-                    style: cellStyle.copyWith(fontWeight: FontWeight.w600),
-                    overflow: TextOverflow.ellipsis,
+                    point.entryCode,
+                    style: Theme.of(context).textTheme.titleSmall,
                   ),
+                  const SizedBox(height: 4),
                   Text(
-                    p.sampleName,
-                    style: cellStyle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    '${point.inspectionDate} · ${point.sampleName}',
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: AppSpacing.sm),
                   Wrap(
-                    spacing: 12,
-                    runSpacing: 2,
+                    spacing: AppSpacing.md,
+                    runSpacing: AppSpacing.sm,
                     children: [
-                      Text(
-                        'NIR: ${p.nirValue.toStringAsFixed(3)}$u',
-                        style: cellStyle,
+                      _PointValue(label: 'NIR$suffix', value: point.nirValue),
+                      _PointValue(
+                        label: '${AppText.t('المعمل', 'Lab')}$suffix',
+                        value: point.labValue,
                       ),
-                      Text(
-                        '${AppText.t('المعمل', 'Lab')}: ${p.labValue.toStringAsFixed(3)}$u',
-                        style: cellStyle,
-                      ),
-                      Text(
-                        '${AppText.t('انحراف', 'Dev.')}: ${p.deviation.toStringAsFixed(3)}',
-                        style: cellStyle.copyWith(
-                          color: p.deviation > 0
-                              ? AppColors.danger
-                              : p.deviation < 0
-                              ? AppColors.success
-                              : AppColors.textMuted,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      _PointValue(
+                        label: AppText.t('الانحراف', 'Deviation'),
+                        value: point.deviation,
                       ),
                     ],
                   ),
                 ],
               ),
             ),
-            const Divider(height: 6),
+            const SizedBox(height: AppSpacing.sm),
           ],
+          if (_visible < widget.points.length)
+            AppButton(
+              label: AppText.t(
+                'عرض قراءات أكثر (${widget.points.length - _visible} متبقية)',
+                'Show more readings (${widget.points.length - _visible} remaining)',
+              ),
+              style: AppButtonStyle.secondary,
+              onPressed: () => setState(() => _visible += 20),
+            ),
         ],
-      );
-    }
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              flex: 3,
-              child: Text(
-                AppText.t('التاريخ / المحضر', 'Date / محضر'),
-                style: headerStyle,
-              ),
-            ),
-            Expanded(
-              flex: 2,
-              child: Text(AppText.t('العينة', 'Sample'), style: headerStyle),
-            ),
-            Expanded(
-              flex: 2,
-              child: Text('NIR', style: headerStyle),
-            ),
-            Expanded(
-              flex: 2,
-              child: Text(
-                AppText.t('المعمل (ريفرنس)', 'Lab (reference)'),
-                style: headerStyle,
-              ),
-            ),
-            Expanded(
-              flex: 2,
-              child: Text(
-                AppText.t('الانحراف', 'Dev.'),
-                style: headerStyle,
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ],
-        ),
-        const Divider(height: 8),
-        for (final p in points) ...[
-          Row(
-            children: [
-              Expanded(
-                flex: 3,
-                child: Text(
-                  '${p.inspectionDate} · ${p.entryCode}',
-                  style: cellStyle,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(p.sampleName, style: cellStyle),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  '${p.nirValue.toStringAsFixed(3)}$u',
-                  style: cellStyle,
-                ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  '${p.labValue.toStringAsFixed(3)}$u',
-                  style: cellStyle,
-                ),
-              ),
-              Expanded(
-                flex: 2,
-                child: Text(
-                  p.deviation.toStringAsFixed(3),
-                  textAlign: TextAlign.center,
-                  style: cellStyle.copyWith(
-                    color: p.deviation > 0
-                        ? AppColors.danger
-                        : p.deviation < 0
-                        ? AppColors.success
-                        : AppColors.textMuted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const Divider(height: 6),
-        ],
-      ],
+      ),
     );
   }
+}
+
+class _PointValue extends StatelessWidget {
+  const _PointValue({required this.label, required this.value});
+  final String label;
+  final double value;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        label,
+        style: Theme.of(
+          context,
+        ).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+      ),
+      Text(
+        value.toStringAsFixed(3),
+        textDirection: TextDirection.ltr,
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+      ),
+    ],
+  );
 }

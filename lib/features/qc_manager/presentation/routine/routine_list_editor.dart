@@ -15,6 +15,7 @@ import '../../../../../di/service_locator.dart';
 import '../../domain/routine_repository.dart';
 import '../../domain/qc_enums.dart';
 import '../../domain/qc_template.dart';
+import '../../../../design_system/widgets/app_select_field.dart';
 
 /// Shows the routine-list editor: dialog window on desktop, full-screen
 /// route on phones. Name + department + daily/monthly + a flat item list.
@@ -165,13 +166,11 @@ class _RoutineListFormState extends State<_RoutineListForm> {
           enabled: !_saving,
         ),
         const SizedBox(height: AppSpacing.md),
-        DropdownButtonFormField<String>(
+        AppSelectField<String>(
           initialValue: _recurrence,
           isExpanded: true,
           decoration: InputDecoration(
             labelText: AppText.t('التكرار', 'Repeats'),
-            border: const OutlineInputBorder(),
-            isDense: true,
           ),
           items: [
             DropdownMenuItem(

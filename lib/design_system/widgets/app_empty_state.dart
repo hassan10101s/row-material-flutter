@@ -43,16 +43,20 @@ class AppEmptyState extends StatelessWidget {
               title,
               textAlign: TextAlign.center,
               style: TextStyle(
-                  color: AppColors.textStrong,
-                  fontSize: 15.spMax,
-                  fontWeight: FontWeight.w700),
+                color: AppColors.textStrong,
+                fontSize: 15.spMax,
+                fontWeight: FontWeight.w700,
+              ),
             ),
             if (subtitle != null) ...[
               const SizedBox(height: AppSpacing.xs),
               Text(
                 subtitle!,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 13.spMax,
+                ),
               ),
             ],
             if (action != null) ...[
@@ -93,9 +97,7 @@ class AppErrorState extends StatelessWidget {
           : OutlinedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh, size: 18),
-              label: Text(
-                retryLabel ?? AppText.t('إعادة المحاولة', 'Retry'),
-              ),
+              label: Text(retryLabel ?? AppText.t('إعادة المحاولة', 'Retry')),
             ),
     );
   }

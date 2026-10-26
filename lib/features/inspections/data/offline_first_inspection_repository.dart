@@ -5,6 +5,7 @@ import '../../../core/constants/app_errors.dart';
 import '../../../core/sync/audit_logger.dart';
 import '../../../core/sync/entity_registry.dart';
 import '../../../core/sync/sync_queue.dart';
+import '../../../core/sync/sync_write.dart' show newRemoteId;
 import '../../../core/utils/app_exceptions.dart';
 import '../../organizations/data/member_write_guard.dart';
 import '../domain/inspection_repository.dart';
@@ -191,8 +192,7 @@ class OfflineFirstInspectionRepository extends InspectionRepo
   Future<T> _inTransaction<T>(
     Future<T> Function(DatabaseExecutor txn) body,
   ) async {
-    final db = await dbHelper.database;
-    return db.transaction<T>(body);
+    return dbHelper.businessTransaction<T>(body);
   }
 
   /// §9.4: active member + permission + not a read-only device, and
@@ -228,6 +228,12 @@ class OfflineFirstInspectionRepository extends InspectionRepo
     );
     if (current.isEmpty) return;
     final fresh = Map<String, dynamic>.from(current.first);
+    // Children must be able to reference a newly saved inspection before
+    // another database open runs the legacy-id backfill.
+    if ('${fresh['remote_id'] ?? ''}'.isEmpty) {
+      fresh['remote_id'] = newRemoteId();
+      row['remote_id'] = fresh['remote_id'];
+    }
     // Optimistic sync version (plan §9.2): a row the remote has never seen is
     // created at v1 however many offline edits collapse into that one push,
     // and every edit after the first acknowledgement moves the local version one
@@ -240,7 +246,11 @@ class OfflineFirstInspectionRepository extends InspectionRepo
         : (localVersion > remoteVersion ? localVersion : remoteVersion) + 1;
     await txn.update(
       'inspections',
-      {'version': nextVersion, 'sync_state': 'queued'},
+      {
+        'remote_id': fresh['remote_id'],
+        'version': nextVersion,
+        'sync_state': 'queued',
+      },
       where: 'id = ?',
       whereArgs: [id],
     );

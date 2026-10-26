@@ -14,7 +14,9 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
     required this.repo,
     required this.reports,
     this.labResults,
-  }) : super(const InspectionDetailState());
+  }) : super(const InspectionDetailState()) {
+    refreshOnSync(load);
+  }
 
   final int inspectionId;
   final InspectionRepository repo;
@@ -60,6 +62,11 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
     try {
       final doc = kind == 'label'
           ? await reports.sampleLabelPdf(inspectionId)
+          : kind == 'detailed'
+          ? await reports.inspectionReport(
+              inspectionId,
+              includeAnalysisDetails: true,
+            )
           : await reports.inspectionReport(inspectionId);
       final date = parseIsoDate(
         '${state.inspection?['inspection_date'] ?? ''}',

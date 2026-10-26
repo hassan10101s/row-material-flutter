@@ -9,8 +9,9 @@ import 'background_tasks.dart'
 /// Android periodic new-item poll (mobile-only) — the OFFLINE fallback.
 ///
 /// Primary killed-app path is FCM push (see `fcm_push_service.dart` + Cloud
-/// Function `functions/index.js`): Play services deliver it even when the app
-/// is force-stopped, where no poll can run. This poll covers the offline /
+/// Function `functions/index.js`): Play services can wake the background
+/// handler after ordinary process termination. Android Settings force-stop
+/// requires reopening the app. This poll covers the offline /
 /// FCM-less gap: every 15 min (Android clamp) it pulls remote rows, then shows
 /// one OS notification per new inspection / lab result. Tapping it opens the
 /// matching screen via the payload handled in `AppShell` + `NotificationBell`.

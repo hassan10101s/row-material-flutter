@@ -47,8 +47,7 @@ abstract final class FormFactor {
   /// is still desktop. There is deliberately no "compact desktop" experience.
   static AppFormFactor resolve() {
     return _resolved ??= switch (defaultTargetPlatform) {
-      TargetPlatform.android ||
-      TargetPlatform.iOS => AppFormFactor.mobile,
+      TargetPlatform.android || TargetPlatform.iOS => AppFormFactor.mobile,
       TargetPlatform.windows ||
       TargetPlatform.macOS ||
       TargetPlatform.linux ||
@@ -59,8 +58,7 @@ abstract final class FormFactor {
   /// The resolved form factor, or [AppFormFactor.desktop] if [resolve] has not
   /// run. Defaults to desktop so that any code path that somehow builds before
   /// `main()` gets the historical behaviour rather than a phone layout.
-  static AppFormFactor get current =>
-      _resolved ?? (resolve());
+  static AppFormFactor get current => _resolved ?? (resolve());
 
   @visibleForTesting
   static void debugSet(AppFormFactor? value) => _resolved = value;

@@ -57,10 +57,10 @@ class NirValidationSettings {
   bool get isGlobal => scope.trim().isEmpty;
 
   NirScope? get scopeEnum => switch (scope.trim()) {
-        'raw_material' => NirScope.rawMaterial,
-        'product' => NirScope.product,
-        _ => null,
-      };
+    'raw_material' => NirScope.rawMaterial,
+    'product' => NirScope.product,
+    _ => null,
+  };
 
   /// Stored `scope` value for a [NirScope].
   static String scopeValue(NirScope scope) =>
@@ -240,9 +240,8 @@ class NirParameterStats {
   }
 
   /// Largest absolute single-pair deviation.
-  double get maxDeviation => points
-      .map((p) => p.deviation.abs())
-      .fold(0.0, (m, d) => d > m ? d : m);
+  double get maxDeviation =>
+      points.map((p) => p.deviation.abs()).fold(0.0, (m, d) => d > m ? d : m);
 
   /// Trust badge: needs ≥5 points and R² ≥ 0.9 to be considered trusted.
   NirReliability get reliability {
@@ -269,8 +268,8 @@ class NirParameterStats {
   /// The lab-equivalent value of a raw NIR reading under [mode].
   double adjustedOf(NirValidationPoint p, NirAdjustmentMode mode) =>
       mode == NirAdjustmentMode.slopeOnly
-          ? slopeOnly * p.nirValue
-          : slope * p.nirValue + intercept;
+      ? slopeOnly * p.nirValue
+      : slope * p.nirValue + intercept;
 
   /// Mean residual (bias) after applying [mode] to the raw readings.
   double biasOf(NirAdjustmentMode mode) {
@@ -349,10 +348,12 @@ class NirParameterStats {
     final reasons = <NirAdviceReason>[];
 
     if (count < 3) {
-      reasons.add(NirAdviceReason(
-        'نقاط غير كافية ($count) لاختبار معنوية القاطع — يفضَّل الميل + القاطع مؤقتاً مع جمع نقاط أكثر',
-        'Not enough points ($count) to test intercept significance — slope + intercept preferred for now, collect more pairs',
-      ));
+      reasons.add(
+        NirAdviceReason(
+          'نقاط غير كافية ($count) لاختبار معنوية القاطع — يفضَّل الميل + القاطع مؤقتاً مع جمع نقاط أكثر',
+          'Not enough points ($count) to test intercept significance — slope + intercept preferred for now, collect more pairs',
+        ),
+      );
       return NirAdjustmentAdvice(
         recommended: NirAdjustmentMode.slopeAndIntercept,
         reasons: reasons,
@@ -362,47 +363,58 @@ class NirParameterStats {
 
     final a = slope;
     if ((a - 1).abs() <= 0.02) {
-      reasons.add(NirAdviceReason(
-        'الميل قريب من 1 (${a.toStringAsFixed(3)}) — مقياس الجهاز متوافق مع المعمل',
-        'Slope close to 1 (${a.toStringAsFixed(3)}) — device scale matches the lab',
-      ));
+      reasons.add(
+        NirAdviceReason(
+          'الميل قريب من 1 (${a.toStringAsFixed(3)}) — مقياس الجهاز متوافق مع المعمل',
+          'Slope close to 1 (${a.toStringAsFixed(3)}) — device scale matches the lab',
+        ),
+      );
     } else {
       final pct = ((a - 1).abs() * 100).toStringAsFixed(1);
-      reasons.add(NirAdviceReason(
-        'الميل = ${a.toStringAsFixed(3)} — الجهاز يقرأ ${a > 1 ? 'أقل' : 'أعلى'} من المعمل بنحو $pct%، فيلزم تصحيح الميل',
-        'Slope = ${a.toStringAsFixed(3)} — the device reads about ${a > 1 ? 'lower' : 'higher'} than the lab by ~$pct%, slope correction is needed',
-      ));
+      reasons.add(
+        NirAdviceReason(
+          'الميل = ${a.toStringAsFixed(3)} — الجهاز يقرأ ${a > 1 ? 'أقل' : 'أعلى'} من المعمل بنحو $pct%، فيلزم تصحيح الميل',
+          'Slope = ${a.toStringAsFixed(3)} — the device reads about ${a > 1 ? 'lower' : 'higher'} than the lab by ~$pct%, slope correction is needed',
+        ),
+      );
     }
 
     final significant = t >= 2;
     if (significant) {
-      reasons.add(NirAdviceReason(
-        'القاطع (${intercept.toStringAsFixed(3)}) معنوي إحصائياً (t = ${t.toStringAsFixed(2)} ≥ 2) — تجاهله يترك انزياحاً ثابتاً غير مصحح',
-        'Intercept (${intercept.toStringAsFixed(3)}) is statistically significant (t = ${t.toStringAsFixed(2)} ≥ 2) — ignoring it leaves an uncorrected constant offset',
-      ));
+      reasons.add(
+        NirAdviceReason(
+          'القاطع (${intercept.toStringAsFixed(3)}) معنوي إحصائياً (t = ${t.toStringAsFixed(2)} ≥ 2) — تجاهله يترك انزياحاً ثابتاً غير مصحح',
+          'Intercept (${intercept.toStringAsFixed(3)}) is statistically significant (t = ${t.toStringAsFixed(2)} ≥ 2) — ignoring it leaves an uncorrected constant offset',
+        ),
+      );
     } else {
-      reasons.add(NirAdviceReason(
-        'القاطع غير معنوي إحصائياً (t = ${t.toStringAsFixed(2)} < 2) — يطمس في ضجيج النقاط، ويكفي الميل لوحده',
-        'Intercept is not statistically significant (t = ${t.toStringAsFixed(2)} < 2) — it drowns in the points noise; slope alone suffices',
-      ));
+      reasons.add(
+        NirAdviceReason(
+          'القاطع غير معنوي إحصائياً (t = ${t.toStringAsFixed(2)} < 2) — يطمس في ضجيج النقاط، ويكفي الميل لوحده',
+          'Intercept is not statistically significant (t = ${t.toStringAsFixed(2)} < 2) — it drowns in the points noise; slope alone suffices',
+        ),
+      );
     }
 
-    reasons.add(NirAdviceReason(
-      'إضافة القاطع تخفض RMSE من ${rOnly.toStringAsFixed(3)} إلى ${rFull.toStringAsFixed(3)} (${(gain * 100).toStringAsFixed(1)}%)',
-      'Adding the intercept lowers RMSE from ${rOnly.toStringAsFixed(3)} to ${rFull.toStringAsFixed(3)} (${(gain * 100).toStringAsFixed(1)}%)',
-    ));
+    reasons.add(
+      NirAdviceReason(
+        'إضافة القاطع تخفض RMSE من ${rOnly.toStringAsFixed(3)} إلى ${rFull.toStringAsFixed(3)} (${(gain * 100).toStringAsFixed(1)}%)',
+        'Adding the intercept lowers RMSE from ${rOnly.toStringAsFixed(3)} to ${rFull.toStringAsFixed(3)} (${(gain * 100).toStringAsFixed(1)}%)',
+      ),
+    );
     if (significant && gain < 0.02) {
-      reasons.add(NirAdviceReason(
-        'التحسن أقل من 2% — القاطع يضيف تعقيداً بلا فائدة عملية على هذه النقاط',
-        'The gain is under 2% — the intercept adds complexity with little practical benefit on these points',
-      ));
+      reasons.add(
+        NirAdviceReason(
+          'التحسن أقل من 2% — القاطع يضيف تعقيداً بلا فائدة عملية على هذه النقاط',
+          'The gain is under 2% — the intercept adds complexity with little practical benefit on these points',
+        ),
+      );
     }
 
     return NirAdjustmentAdvice(
-      recommended:
-          significant && gain >= 0.02
-              ? NirAdjustmentMode.slopeAndIntercept
-              : NirAdjustmentMode.slopeOnly,
+      recommended: significant && gain >= 0.02
+          ? NirAdjustmentMode.slopeAndIntercept
+          : NirAdjustmentMode.slopeOnly,
       reasons: reasons,
       interceptT: t,
     );

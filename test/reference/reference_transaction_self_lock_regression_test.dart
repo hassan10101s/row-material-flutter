@@ -51,53 +51,70 @@ void main() {
 
   tearDown(() async => fixture.dispose());
 
-  test('material writes inside the audit transaction do not self-lock',
-      () async {
-    final id = await repo
-        .createMaterial(
-          materialName: 'Silica Sand',
-          materialCode: 'M-SIL-01',
-          chemicalReference: {'SiO2': '%'},
-        )
-        .timeout(const Duration(seconds: 15));
-    expect(id, greaterThan(0));
+  test(
+    'material writes inside the audit transaction do not self-lock',
+    () async {
+      final id = await repo
+          .createMaterial(
+            materialName: 'Silica Sand',
+            materialCode: 'M-SIL-01',
+            chemicalReference: {'SiO2': '%'},
+          )
+          .timeout(const Duration(seconds: 15));
+      expect(id, greaterThan(0));
 
-    await repo
-        .updateMaterial(
-          id,
-          materialName: 'Silica Sand 99',
-          materialCode: 'M-SIL-01',
-        )
-        .timeout(const Duration(seconds: 15));
-    final rows = await fixture.db
-        .query('reference_materials', where: 'id = ?', whereArgs: [id]);
-    expect(rows.first['material_name'], 'Silica Sand 99');
+      await repo
+          .updateMaterial(
+            id,
+            materialName: 'Silica Sand 99',
+            materialCode: 'M-SIL-01',
+          )
+          .timeout(const Duration(seconds: 15));
+      final rows = await fixture.db.query(
+        'reference_materials',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      expect(rows.first['material_name'], 'Silica Sand 99');
 
-    await repo.deleteMaterial(id).timeout(const Duration(seconds: 15));
-    final after = await fixture.db
-        .query('reference_materials', where: 'id = ?', whereArgs: [id]);
-    expect(after.first['active'], 0);
-  }, timeout: const Timeout(Duration(seconds: 25)));
+      await repo.deleteMaterial(id).timeout(const Duration(seconds: 15));
+      final after = await fixture.db.query(
+        'reference_materials',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      expect(after.first['active'], 0);
+    },
+    timeout: const Timeout(Duration(seconds: 25)),
+  );
 
-  test('parameter and unit writes inside the audit transaction do not self-lock',
-      () async {
-    await repo
-        .upsertParameter('pH', 'pH units')
-        .timeout(const Duration(seconds: 15));
-    await repo
-        .upsertUnit('kHz', name: 'kilohertz', dimension: 'frequency')
-        .timeout(const Duration(seconds: 15));
+  test(
+    'parameter and unit writes inside the audit transaction do not self-lock',
+    () async {
+      await repo
+          .upsertParameter('pH', 'pH units')
+          .timeout(const Duration(seconds: 15));
+      await repo
+          .upsertUnit('kHz', name: 'kilohertz', dimension: 'frequency')
+          .timeout(const Duration(seconds: 15));
 
-    await repo.deleteParameter('pH').timeout(const Duration(seconds: 15));
-    await repo.deleteUnit('kHz').timeout(const Duration(seconds: 15));
+      await repo.deleteParameter('pH').timeout(const Duration(seconds: 15));
+      await repo.deleteUnit('kHz').timeout(const Duration(seconds: 15));
 
-    expect(await fixture.db.query('parameters'), isEmpty);
-    // The registry is pre-seeded with defaults on every open and accumulates
-    // every used symbol, so only the deleted unit's own absence is asserted.
-    final unitSymbols = (await fixture.db.query('lab_units'))
-        .map((r) => '${r['symbol']}')
-        .toSet();
-    expect(unitSymbols, isNot(contains('kHz')));
-    expect(unitSymbols, containsAll(['%', 'L', 'mL', 'kg', 'g', 'pc']));
-  }, timeout: const Timeout(Duration(seconds: 25)));
+      expect(await repo.listParameters(), isEmpty);
+      // Deletions must remain as tombstones until every viewer receives them.
+      expect(
+        (await fixture.db.query('parameters')).single['deleted_at'],
+        isNotNull,
+      );
+      // The registry is pre-seeded with defaults on every open and accumulates
+      // every used symbol, so only the deleted unit's own absence is asserted.
+      final unitSymbols = (await fixture.db.query(
+        'lab_units',
+      )).map((r) => '${r['symbol']}').toSet();
+      expect(unitSymbols, isNot(contains('kHz')));
+      expect(unitSymbols, containsAll(['%', 'L', 'mL', 'kg', 'g', 'pc']));
+    },
+    timeout: const Timeout(Duration(seconds: 25)),
+  );
 }

@@ -5,6 +5,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/responsive/form_factor.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../design_system/widgets/app_page_size.dart'
     show kMobileMaxPageSize;
 import '../../../../di/service_locator.dart';
@@ -28,10 +29,18 @@ class InspectionCenterScreen extends StatefulWidget {
   const InspectionCenterScreen({
     super.key,
     this.initialReportsTab = false,
+    this.initialProductTab = false,
+    this.initialProductId,
+    this.initialProductDateFrom = '',
+    this.initialProductDateTo = '',
     this.highlightId,
   });
 
   final bool initialReportsTab;
+  final bool initialProductTab;
+  final int? initialProductId;
+  final String initialProductDateFrom;
+  final String initialProductDateTo;
 
   /// Local row id from a notification deep-link (`?highlight=<id>`).
   /// Shown as a banner; the registers already sort newest-first so the new
@@ -43,7 +52,9 @@ class InspectionCenterScreen extends StatefulWidget {
 }
 
 class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
-  late int _selectedTab = widget.initialReportsTab ? 2 : 0;
+  late int _selectedTab = widget.initialReportsTab
+      ? 2
+      : (widget.initialProductTab ? 1 : 0);
 
   /// The product register owns its cubit (kind filter + paging live there);
   /// the raw register keeps using the router-provided one above this screen.
@@ -53,10 +64,22 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
     repo: getIt<InspectionRepository>(),
     reports: getIt<ReportRepository>(),
     kind: 'product',
+    initialMaterialId: widget.initialProductId,
+    initialDateFrom: widget.initialProductDateFrom,
+    initialDateTo: widget.initialProductDateTo,
     // Same mobile cap as the router-provided raw cubit.
     initialPageSize: FormFactor.current.isMobile ? kMobileMaxPageSize : 200,
   );
   bool _productVisited = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialProductTab) {
+      _productVisited = true;
+      _productCubit.load();
+    }
+  }
 
   void _selectTab(int index) {
     if (index == 1 && !_productVisited) {
@@ -64,6 +87,14 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
       _productCubit.load();
     }
     setState(() => _selectedTab = index);
+  }
+
+  void _swipeTab(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < 350) return;
+    _selectTab((_selectedTab + (velocity < 0 ? 1 : -1))
+        .clamp(0, 2)
+        .toInt());
   }
 
   @override
@@ -125,7 +156,7 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
           ),
         ),
       SizedBox(
-        height: 46.h,
+        height: appUsesDesktopChrome(context) ? 46.h : 56,
         child: SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
@@ -154,22 +185,28 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
         ),
       ),
       Expanded(
-        child: IndexedStack(
-          index: _selectedTab,
-          children: [
-            BlocProvider.value(
-              value: context.read<InspectionsCubit>(),
-              child: const InspectionsScreen(),
-            ),
-            BlocProvider.value(
-              value: _productCubit,
-              child: const InspectionsScreen(),
-            ),
-            BlocProvider.value(
-              value: context.read<ReportsCubit>(),
-              child: const ReportsScreen(),
-            ),
-          ],
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onHorizontalDragEnd: appUsesDesktopChrome(context)
+              ? null
+              : _swipeTab,
+          child: IndexedStack(
+            index: _selectedTab,
+            children: [
+              BlocProvider.value(
+                value: context.read<InspectionsCubit>(),
+                child: const InspectionsScreen(),
+              ),
+              BlocProvider.value(
+                value: _productCubit,
+                child: const InspectionsScreen(),
+              ),
+              BlocProvider.value(
+                value: context.read<ReportsCubit>(),
+                child: const ReportsScreen(),
+              ),
+            ],
+          ),
         ),
       ),
     ],
@@ -186,6 +223,9 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
       avatar: Icon(icon, size: 18.r),
       label: Text(label),
       selected: _selectedTab == index,
+      materialTapTargetSize: appUsesDesktopChrome(context)
+          ? MaterialTapTargetSize.shrinkWrap
+          : MaterialTapTargetSize.padded,
       onSelected: (_) => _selectTab(index),
     ),
   );

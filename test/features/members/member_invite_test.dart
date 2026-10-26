@@ -12,7 +12,6 @@ class _MockRemote extends Mock implements AuthRemoteDataSource {}
 
 class _FakeGuard implements WriteGuard {
   _FakeGuard({
-    this.uid = 'uid_owner',
     this.memberId = 'member_owner',
     this.email = 'owner@lab.test',
     this.online = true,
@@ -20,7 +19,7 @@ class _FakeGuard implements WriteGuard {
   });
 
   @override
-  final String uid;
+  final String uid = 'uid_owner';
   @override
   final String memberId;
   @override
@@ -71,6 +70,7 @@ void main() {
         organizationId: any(named: 'organizationId'),
         email: any(named: 'email'),
         role: any(named: 'role'),
+        roles: any(named: 'roles'),
         invitedBy: any(named: 'invitedBy'),
       ),
     ).thenAnswer((_) async => 'member_new');
@@ -113,6 +113,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: captureAny(named: 'email'),
           role: captureAny(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       ).captured;
@@ -134,7 +135,11 @@ void main() {
         await expectLater(
           build(_FakeGuard()).members.invite(email: bad, role: AppRoles.lab),
           throwsA(
-            isA<OrganizationFailure>().having((e) => e.code, 'code', 'validation'),
+            isA<OrganizationFailure>().having(
+              (e) => e.code,
+              'code',
+              'validation',
+            ),
           ),
           reason: bad,
         );
@@ -144,6 +149,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       );
@@ -155,7 +161,11 @@ void main() {
           _FakeGuard(),
         ).members.invite(email: 'new@lab.test', role: 'superadmin'),
         throwsA(
-          isA<OrganizationFailure>().having((e) => e.code, 'code', 'validation'),
+          isA<OrganizationFailure>().having(
+            (e) => e.code,
+            'code',
+            'validation',
+          ),
         ),
       );
       verifyNever(
@@ -163,6 +173,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       );
@@ -174,7 +185,11 @@ void main() {
           _FakeGuard(email: 'owner@lab.test'),
         ).members.invite(email: ' Owner@Lab.Test ', role: AppRoles.lab),
         throwsA(
-          isA<OrganizationFailure>().having((e) => e.code, 'code', 'validation'),
+          isA<OrganizationFailure>().having(
+            (e) => e.code,
+            'code',
+            'validation',
+          ),
         ),
       );
       verifyNever(
@@ -182,6 +197,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       );
@@ -205,6 +221,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       );
@@ -216,6 +233,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       ).thenThrow(
@@ -251,8 +269,52 @@ void main() {
       ).captured;
       expect(audit[1], 'MEMBER_INVITED');
       expect(audit[2], 'member');
-      expect(audit[4], {'email': 'new@lab.test', 'role': 'viewer'});
+      expect(audit[4], {
+        'email': 'new@lab.test',
+        'role': 'viewer',
+        'roles': ['viewer'],
+      });
     });
+  });
+
+  test(
+    'disabling sends no activation metadata; activating requests an audit timestamp',
+    () async {
+      final repo = build(_FakeGuard());
+      await repo.members.setStatus(memberId: 'member_2', status: 'disabled');
+      verify(
+        () => remote.updateMember(
+          organizationId: 'org_1',
+          memberId: 'member_2',
+          data: {'status': 'disabled'},
+        ),
+      ).called(1);
+      await repo.members.setStatus(memberId: 'member_3', status: 'active');
+      verify(
+        () => remote.updateMember(
+          organizationId: 'org_1',
+          memberId: 'member_3',
+          data: {'status': 'active', 'activatedAt': null},
+        ),
+      ).called(1);
+    },
+  );
+
+  test('multi-role invitation forwards the complete grant set', () async {
+    await build(_FakeGuard()).members.invite(
+      email: 'multi@lab.test',
+      role: 'lab',
+      roles: ['lab', 'nutritionist'],
+    );
+    verify(
+      () => remote.createInvite(
+        organizationId: 'org_1',
+        email: 'multi@lab.test',
+        role: 'lab',
+        roles: ['lab', 'nutritionist'],
+        invitedBy: 'uid_owner',
+      ),
+    ).called(1);
   });
 
   group('resendInvite', () {
@@ -267,6 +329,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: captureAny(named: 'email'),
           role: captureAny(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       ).captured;
@@ -285,22 +348,26 @@ void main() {
       expect(rosterChanges, 1);
     });
 
-    test('resends pending_activation too (claimed but not activated)', () async {
-      when(() => remote.listMembers(any())).thenAnswer(
-        (_) async => [
-          _doc('member_3', 'claimed@lab.test', 'lab', 'pending_activation'),
-        ],
-      );
-      await build(_FakeGuard()).members.resendInvite(memberId: 'member_3');
-      verify(
-        () => remote.createInvite(
-          organizationId: any(named: 'organizationId'),
-          email: 'claimed@lab.test',
-          role: 'lab',
-          invitedBy: any(named: 'invitedBy'),
-        ),
-      ).called(1);
-    });
+    test(
+      'resends pending_activation too (claimed but not activated)',
+      () async {
+        when(() => remote.listMembers(any())).thenAnswer(
+          (_) async => [
+            _doc('member_3', 'claimed@lab.test', 'lab', 'pending_activation'),
+          ],
+        );
+        await build(_FakeGuard()).members.resendInvite(memberId: 'member_3');
+        verify(
+          () => remote.createInvite(
+            organizationId: any(named: 'organizationId'),
+            email: 'claimed@lab.test',
+            role: 'lab',
+            roles: ['lab'],
+            invitedBy: any(named: 'invitedBy'),
+          ),
+        ).called(1);
+      },
+    );
 
     test('active member cannot be resent', () async {
       when(() => remote.listMembers(any())).thenAnswer(
@@ -321,6 +388,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       );
@@ -330,11 +398,7 @@ void main() {
       await expectLater(
         build(_FakeGuard()).members.resendInvite(memberId: 'nope'),
         throwsA(
-          isA<OrganizationFailure>().having(
-            (e) => e.code,
-            'code',
-            'not_found',
-          ),
+          isA<OrganizationFailure>().having((e) => e.code, 'code', 'not_found'),
         ),
       );
     });
@@ -366,29 +430,34 @@ void main() {
       expect(active.needsActivation, isFalse);
     });
 
-    test('listMembers sorts active, then invited/pending, then disabled', () async {
-      when(() => remote.listMembers(any())).thenAnswer(
-        (_) async => [
-          _doc('m_disabled', 'z@lab.test', 'lab', 'disabled'),
-          _doc('m_pending', 'p@lab.test', 'lab', 'pending_activation'),
-          _doc('m_invited', 'i@lab.test', 'lab', 'invited'),
-          _doc('m_active', 'a@lab.test', 'lab', 'active'),
-        ],
-      );
-      final members = await build(_FakeGuard()).members.listMembers();
-      expect(members.first.status, 'active');
-      expect(members.last.status, 'disabled');
-      final middle = members.sublist(1, 3).map((m) => m.status).toSet();
-      expect(middle, {'invited', 'pending_activation'});
-    });
+    test(
+      'listMembers sorts active, then invited/pending, then disabled',
+      () async {
+        when(() => remote.listMembers(any())).thenAnswer(
+          (_) async => [
+            _doc('m_disabled', 'z@lab.test', 'lab', 'disabled'),
+            _doc('m_pending', 'p@lab.test', 'lab', 'pending_activation'),
+            _doc('m_invited', 'i@lab.test', 'lab', 'invited'),
+            _doc('m_active', 'a@lab.test', 'lab', 'active'),
+          ],
+        );
+        final members = await build(_FakeGuard()).members.listMembers();
+        expect(members.first.status, 'active');
+        expect(members.last.status, 'disabled');
+        final middle = members.sublist(1, 3).map((m) => m.status).toSet();
+        expect(middle, {'invited', 'pending_activation'});
+      },
+    );
 
     test('changeRole rejects unknown role before remote', () async {
       await expectLater(
-        build(
-          _FakeGuard(),
-        ).members.changeRole(memberId: 'm1', role: 'nope'),
+        build(_FakeGuard()).members.changeRole(memberId: 'm1', role: 'nope'),
         throwsA(
-          isA<OrganizationFailure>().having((e) => e.code, 'code', 'validation'),
+          isA<OrganizationFailure>().having(
+            (e) => e.code,
+            'code',
+            'validation',
+          ),
         ),
       );
       verifyNever(
@@ -416,6 +485,7 @@ void main() {
           organizationId: any(named: 'organizationId'),
           email: any(named: 'email'),
           role: any(named: 'role'),
+          roles: any(named: 'roles'),
           invitedBy: any(named: 'invitedBy'),
         ),
       );
@@ -448,16 +518,21 @@ void main() {
       await expectLater(
         repo.members.changeRole(memberId: 'member_owner', role: AppRoles.lab),
         throwsA(
-          isA<OrganizationFailure>().having((e) => e.code, 'code', 'validation'),
+          isA<OrganizationFailure>().having(
+            (e) => e.code,
+            'code',
+            'validation',
+          ),
         ),
       );
       await expectLater(
-        repo.members.setStatus(
-          memberId: 'member_owner',
-          status: 'disabled',
-        ),
+        repo.members.setStatus(memberId: 'member_owner', status: 'disabled'),
         throwsA(
-          isA<OrganizationFailure>().having((e) => e.code, 'code', 'validation'),
+          isA<OrganizationFailure>().having(
+            (e) => e.code,
+            'code',
+            'validation',
+          ),
         ),
       );
       verifyNever(
@@ -470,9 +545,9 @@ void main() {
     });
 
     test('listMembers maps remote not_allowed instead of empty', () async {
-      when(() => remote.listMembers(any())).thenThrow(
-        const RemoteAuthException('denied', code: 'not_allowed'),
-      );
+      when(
+        () => remote.listMembers(any()),
+      ).thenThrow(const RemoteAuthException('denied', code: 'not_allowed'));
       await expectLater(
         build(_FakeGuard()).members.listMembers(),
         throwsA(

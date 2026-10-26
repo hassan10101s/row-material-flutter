@@ -5,6 +5,7 @@ import '../database/database_helper.dart';
 import '../utils/app_dates.dart';
 import 'entity_registry.dart';
 import 'sync_queue.dart';
+import 'sync_write.dart' show ensureRemoteId;
 
 /// Result of one [BackfillService.enqueueUnsyncedSamples] pass.
 class BackfillReport {
@@ -96,13 +97,17 @@ class BackfillService {
     var skipped = 0;
     var alreadyQueued = 0;
 
-    bool budgetLeft() => queued + tombstones + skipped + alreadyQueued < limit;
+    // Existing outbox entries do not consume the quota for newly queued rows.
+    bool budgetLeft() => queued + tombstones + skipped < limit;
 
     final entities = [
       for (final e in syncEntities)
         if (onlyTypes == null || onlyTypes.contains(e.type)) e,
     ];
     for (final entity in entities) {
+      if (entity.permission != null && !guard.allows(entity.permission!)) {
+        continue;
+      }
       if (!budgetLeft()) break;
       // Skip entities whose table is missing on old installs.
       final tables = (await db.rawQuery(
@@ -137,6 +142,20 @@ class BackfillService {
             }
             String docId;
             try {
+              if (row.containsKey('remote_id') &&
+                  '${row['remote_id'] ?? ''}'.isEmpty) {
+                ensureRemoteId(
+                  row,
+                  entity.localTable,
+                  pkColumn: entity.pkColumn,
+                );
+                await txn.update(
+                  entity.localTable,
+                  {'remote_id': row['remote_id']},
+                  where: '${entity.pkColumn} = ?',
+                  whereArgs: [id],
+                );
+              }
               docId = entity.docId(row);
             } on Object {
               skipped++;
@@ -171,6 +190,7 @@ class BackfillService {
               );
               tombstones++;
             } else {
+              await stampSharedParents(txn, entity, row);
               final localVersion = (row['version'] as num?)?.toInt() ?? 1;
               final snapshot = Map<String, dynamic>.from(row)
                 ..['sync_state'] = 'queued';
@@ -220,7 +240,9 @@ class BackfillService {
       }
     }
 
-    debugPrint('[backfill] done: queued=$queued tombstones=$tombstones skipped=$skipped alreadyQueued=$alreadyQueued');
+    debugPrint(
+      '[backfill] done: queued=$queued tombstones=$tombstones skipped=$skipped alreadyQueued=$alreadyQueued',
+    );
     return BackfillReport(
       queued: queued,
       tombstones: tombstones,

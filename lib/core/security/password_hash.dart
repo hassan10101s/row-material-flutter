@@ -47,7 +47,10 @@ const int _maxStoredHashRounds = developerPasswordHashRounds * 4;
 
 String _randomSaltHex() {
   final rand = math.Random.secure();
-  return List.generate(16, (_) => rand.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  return List.generate(
+    16,
+    (_) => rand.nextInt(256).toRadixString(16).padLeft(2, '0'),
+  ).join();
 }
 
 String _pbkdf2DigestHex(List<int> passwordBytes, List<int> salt, int rounds) {
@@ -58,11 +61,13 @@ String _pbkdf2DigestHex(List<int> passwordBytes, List<int> salt, int rounds) {
 }
 
 String _hashResult(
-    List<int> material, List<int> salt, int rounds, bool isDeveloper) {
+  List<int> material,
+  List<int> salt,
+  int rounds,
+  bool isDeveloper,
+) {
   final digest = _pbkdf2DigestHex(material, salt, rounds);
-  final algo = isDeveloper
-      ? developerPasswordHashAlgo
-      : passwordHashAlgoV2;
+  final algo = isDeveloper ? developerPasswordHashAlgo : passwordHashAlgoV2;
   final saltHex = _toHex(salt);
   return '$algo\$$rounds\$$saltHex\$$digest';
 }
@@ -119,14 +124,18 @@ class PasswordHasher {
   Future<String> buildHash(String password, {bool isDeveloper = false}) async {
     final material = utf8.encode(password + pepper);
     final salt = _hexToBytes(_randomSaltHex());
-    final rounds = isDeveloper ? developerPasswordHashRounds : passwordHashRounds;
-    final outcome = await _runHash(_HashRequest(
-      material: material,
-      salt: salt,
-      rounds: rounds,
-      isDeveloper: isDeveloper,
-      verifyDigest: '',
-    ));
+    final rounds = isDeveloper
+        ? developerPasswordHashRounds
+        : passwordHashRounds;
+    final outcome = await _runHash(
+      _HashRequest(
+        material: material,
+        salt: salt,
+        rounds: rounds,
+        isDeveloper: isDeveloper,
+        verifyDigest: '',
+      ),
+    );
     return outcome.hash;
   }
 
@@ -161,13 +170,15 @@ class PasswordHasher {
     final material = algorithm == passwordHashAlgoLegacy
         ? utf8.encode(password)
         : utf8.encode(password + pepper);
-    final outcome = await _runHash(_HashRequest(
-      material: material,
-      salt: salt,
-      rounds: rounds,
-      isDeveloper: algorithm == developerPasswordHashAlgo,
-      verifyDigest: digest,
-    ));
+    final outcome = await _runHash(
+      _HashRequest(
+        material: material,
+        salt: salt,
+        rounds: rounds,
+        isDeveloper: algorithm == developerPasswordHashAlgo,
+        verifyDigest: digest,
+      ),
+    );
     return outcome.verified;
   }
 

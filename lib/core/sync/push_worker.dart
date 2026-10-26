@@ -11,6 +11,7 @@ import 'remote/remote_data_source.dart';
 import 'sync_codec.dart';
 import 'sync_metadata.dart';
 import 'sync_queue.dart';
+import 'sync_run_scope.dart';
 
 /// Outcome of one `push_worker` pass.
 class PushReport {
@@ -28,7 +29,12 @@ class PushReport {
   final int failed;
   final String? lastError;
 
-  static const PushReport empty = PushReport(pushed: 0, retried: 0, conflicts: 0, failed: 0);
+  static const PushReport empty = PushReport(
+    pushed: 0,
+    retried: 0,
+    conflicts: 0,
+    failed: 0,
+  );
 }
 
 /// Pushes `sync_queue` rows to the remote backend (plan §9.3).
@@ -51,12 +57,27 @@ class PushWorker {
 
   final SyncQueue queue;
   final SyncMetadata metadata;
+  SyncMetadata? _cycleMetadata;
+  SyncMetadata get _runMetadata => _cycleMetadata ?? metadata;
   final RemoteDataSource remote;
   final AuditLogger audit;
   final SessionSource source;
 
   /// Read live: the session changes on sign-in, sign-out and org switch.
-  AppSession get session => source.session;
+  AppSession get session => _scope?.session ?? source.session;
+
+  SyncRunScope? _scope;
+  Future<PushReport>? _running;
+
+  bool Function()? cycleIsCurrent;
+  void cancel() => _scope?.cancel();
+  void _checkScope() {
+    _scope?.check();
+    if (cycleIsCurrent != null && !cycleIsCurrent!()) {
+      throw const SyncRunCancelled();
+    }
+  }
+
   final int batchSize;
 
   /// Upper bound on simultaneous Firestore writes from one device.
@@ -68,9 +89,33 @@ class PushWorker {
 
   int get effectiveConcurrency => min(maxConcurrency, batchSize);
 
-  Future<PushReport> runOnce() async {
+  Future<PushReport> runOnce() => _running ??= _runScoped().whenComplete(() {
+    _running = null;
+    _scope = null;
+    _cycleMetadata = null;
+  });
+
+  Future<PushReport> _runScoped() async {
+    _scope = SyncRunScope(source, queue.dbHelper);
+    try {
+      final db = await queue.dbHelper.database;
+      _checkScope();
+      _cycleMetadata = metadata.bind(db);
+      return await _runOnce();
+    } on SyncRunCancelled {
+      return PushReport.empty;
+    }
+  }
+
+  Future<PushReport> _runOnce() async {
+    _checkScope();
     if (!remote.isSignedIn) return PushReport.empty;
-    final entries = await queue.claim(limit: batchSize);
+    final entries = await queue.claim(
+      limit: batchSize,
+      uid: session.uid,
+      checkCurrent: _checkScope,
+    );
+    _checkScope();
     if (entries.isEmpty) return PushReport.empty;
 
     var pushed = 0;
@@ -89,20 +134,41 @@ class PushWorker {
     for (final entry in entries) {
       final entity = entry.entity;
       if (entity == null) {
-        settlements.add(QueueSettlement.conflict(
-          entry,
-          direction: 'push_rejected',
-          error: 'Unknown entity type ${entry.entityType}',
-        ));
+        settlements.add(
+          QueueSettlement.conflict(
+            entry,
+            direction: 'push_rejected',
+            error: 'Unknown entity type ${entry.entityType}',
+          ),
+        );
+        conflicts++;
+        continue;
+      }
+      final actor = QueueEntry.payloadOwner(
+        entry.entityType,
+        entry.operation,
+        entry.payload,
+      );
+      if (entry.ownerUid != session.uid || actor != session.uid) {
+        settlements.add(
+          QueueSettlement.conflict(
+            entry,
+            direction: 'owner_unknown',
+            error:
+                'Queued change has no verified matching owner; review required.',
+          ),
+        );
         conflicts++;
         continue;
       }
       if (!_allowedLocally(entity)) {
-        settlements.add(QueueSettlement.conflict(
-          entry,
-          direction: 'push_rejected',
-          error: 'Permission ${entity.permission} is not granted',
-        ));
+        settlements.add(
+          QueueSettlement.conflict(
+            entry,
+            direction: 'push_rejected',
+            error: 'Permission ${entity.permission} is not granted',
+          ),
+        );
         final target = entry;
         audits.add(() => _auditDenied(target));
         conflicts++;
@@ -124,12 +190,16 @@ class PushWorker {
       (entry) => _pushOneGuarded(entry),
     );
 
+    _checkScope();
     for (var i = 0; i < results.length; i++) {
+      _checkScope();
       final entry = sendable[i];
       final result = results[i];
       switch (result.kind) {
         case PushResultKind.success:
-          settlements.add(QueueSettlement.done(entry, remoteVersion: result.version));
+          settlements.add(
+            QueueSettlement.done(entry, remoteVersion: result.version),
+          );
           pushed++;
           lastEntity = entry.entityType;
           lastError = null;
@@ -144,36 +214,51 @@ class PushWorker {
               lastEntity = entry.entityType;
               lastError = null;
             } else {
-              settlements.add(QueueSettlement.retry(entry, auto.error ?? 'auto-rebase deferred'));
+              settlements.add(
+                QueueSettlement.retry(
+                  entry,
+                  auto.error ?? 'auto-rebase deferred',
+                ),
+              );
               retried++;
               lastError = auto.error;
             }
             continue;
           }
-          settlements.add(QueueSettlement.conflict(
-            entry,
-            direction: 'push_rejected',
-            // Never throws: sanitized + try/catch inside. Previously a raw
-            // Firestore Timestamp here crashed the entire batch.
-            remotePayload: SyncCodec.tryEncodeMap(result.remote),
-            error: result.error,
-          ));
+          settlements.add(
+            QueueSettlement.conflict(
+              entry,
+              direction: 'push_rejected',
+              // Never throws: sanitized + try/catch inside. Previously a raw
+              // Firestore Timestamp here crashed the entire batch.
+              remotePayload: SyncCodec.tryEncodeMap(result.remote),
+              error: result.error,
+            ),
+          );
           final target = entry;
-          audits.add(() => _logConflict(target, result.error ?? 'permission denied'));
+          audits.add(
+            () => _logConflict(target, result.error ?? 'permission denied'),
+          );
           conflicts++;
           lastError = result.error;
         case PushResultKind.payloadTooLarge:
-          settlements.add(QueueSettlement.conflict(
-            entry,
-            direction: 'payload_too_large',
-            error: result.error,
-          ));
+          settlements.add(
+            QueueSettlement.conflict(
+              entry,
+              direction: 'payload_too_large',
+              error: result.error,
+            ),
+          );
           final target = entry;
-          audits.add(() => _logConflict(target, result.error ?? 'payload too large'));
+          audits.add(
+            () => _logConflict(target, result.error ?? 'payload too large'),
+          );
           conflicts++;
           lastError = result.error;
         case PushResultKind.retryable:
-          settlements.add(QueueSettlement.retry(entry, result.error ?? 'unknown error'));
+          settlements.add(
+            QueueSettlement.retry(entry, result.error ?? 'unknown error'),
+          );
           retried++;
           lastError = result.error;
       }
@@ -182,20 +267,23 @@ class PushWorker {
     // Phase 3: one commit for the whole batch. Writing each outcome as it
     // arrived meant an fsync per entry, and a crash midway left the queue
     // describing a push that had already happened.
-    await queue.settleAll(settlements);
+    _checkScope();
+    await queue.settleAll(settlements, checkCurrent: _checkScope);
+    _checkScope();
     for (final audit in audits) {
       await audit();
     }
 
+    _checkScope();
     if (pushed > 0) {
-      await metadata.markPush(DateTime.now());
-      await metadata.markError(null);
+      await _runMetadata.markPush(DateTime.now());
+      await _runMetadata.markError(null);
       // Wake the other devices: their 10 s heartbeat probes notice this bump
       // within seconds instead of on their 60 s timer. Best-effort — a failed
       // bump never fails the push that earned it.
       await _bumpHeartbeat(lastEntity);
     } else if (lastError != null) {
-      await metadata.markError(lastError);
+      await _runMetadata.markError(lastError);
     }
     if (failed > 0) {
       lastError = 'failed';
@@ -217,6 +305,7 @@ class PushWorker {
     final organizationId = session.organizationId;
     if (organizationId.isEmpty) return;
     try {
+      _checkScope();
       await remote.writeHeartbeat(
         organizationId: organizationId,
         data: {
@@ -225,13 +314,6 @@ class PushWorker {
           'version': DateTime.now().millisecondsSinceEpoch,
         },
       );
-      final beat = await remote.readHeartbeat(organizationId);
-      if (beat.exists) {
-        await metadata.set(
-          SyncMetadata.heartbeatSeenMarkerKey,
-          '${beat.data['lastWriteAt'] ?? beat.updatedAt ?? ''}#${beat.version}',
-        );
-      }
     } on Object {
       // Heartbeat is a notification, not data: never fail the push over it.
     }
@@ -240,7 +322,8 @@ class PushWorker {
   /// Per-entry guard: the data-source contract returns [PushResult], but a
   /// hostile map (raw Timestamp) or a throwing implementation must not escape
   /// as an unhandled exception and strand the batch in `in_flight`.
-  Future<PushResult> _pushOneGuarded(QueueEntry entry) async {    try {
+  Future<PushResult> _pushOneGuarded(QueueEntry entry) async {
+    try {
       return await _pushOne(entry);
     } on Object catch (e) {
       return PushResult.retryable('$e');
@@ -249,11 +332,14 @@ class PushWorker {
 
   /// The remote call for one entry, tombstone or document.
   Future<PushResult> _pushOne(QueueEntry entry) {
+    _checkScope();
     final entity = entry.entity;
     if (entity == null) {
       // Unreachable from [runOnce]: unresolvable entities are rejected locally
       // before they reach the send phase.
-      return Future.value(PushResult.retryable('Unknown entity type ${entry.entityType}'));
+      return Future.value(
+        PushResult.retryable('Unknown entity type ${entry.entityType}'),
+      );
     }
     return entry.operation == 'tombstone'
         ? _pushTombstone(entity, entry)
@@ -283,12 +369,43 @@ class PushWorker {
     return results.cast<R>();
   }
 
-  Future<PushResult> _pushDocument(SyncEntity entity, QueueEntry entry) async {
+  Future<PushResult> _pushDocument(
+    SyncEntity entity,
+    QueueEntry entry, {
+    int? baseVersion,
+  }) async {
     final organizationId = session.organizationId;
     if (organizationId.isEmpty) {
       return PushResult.retryable('no organization bound');
     }
     final payload = Map<String, dynamic>.from(entry.payload);
+    payload['deviceId'] = session.deviceId;
+    if (entity.type != 'auditLog') payload['updatedBy'] = session.uid;
+    // Repair pre-upgrade outbox snapshots as well as new writes. Updating
+    // linkage only leaves the claimed business payload/revision untouched.
+    if (entity.type == 'productBatchSample') {
+      final db = await queue.dbHelper.database;
+      final parents = await db.rawQuery(
+        'SELECT i.id, i.entry_code, i.remote_id FROM product_batch_samples s '
+        'JOIN inspections i ON i.id = s.batch_id '
+        "JOIN sync_queue q ON q.id = ? AND q.revision = ? AND q.status = 'in_flight' "
+        "WHERE s.remote_id = ? AND i.inspection_kind = 'product' LIMIT 1",
+        [entry.id, entry.revision, entry.entityId],
+      );
+      if (parents.isEmpty) {
+        return PushResult.retryable('product batch parent not available');
+      }
+      final parent = parents.single;
+      final code = '${parent['entry_code'] ?? ''}';
+      if (code.isEmpty) {
+        return PushResult.retryable('product batch entry code missing');
+      }
+      final remoteId = '${parent['remote_id'] ?? ''}';
+      payload['batchEntryCode'] = code;
+      payload['batchRemoteId'] = remoteId.isNotEmpty ? remoteId : code;
+      payload['batchId'] = parent['id'];
+    }
+    _checkScope();
     if (entity.appendOnly) {
       return remote.appendDocument(
         organizationId: organizationId,
@@ -302,58 +419,69 @@ class PushWorker {
       collection: entity.collection,
       documentId: entry.entityId,
       data: payload,
-      baseVersion: entry.baseVersion,
+      baseVersion: baseVersion ?? entry.baseVersion,
     );
   }
 
-  Future<PushResult> _pushTombstone(SyncEntity entity, QueueEntry entry) async {
+  Future<PushResult> _pushTombstone(
+    SyncEntity entity,
+    QueueEntry entry, {
+    int? baseVersion,
+  }) async {
     final organizationId = session.organizationId;
-    if (organizationId.isEmpty) return PushResult.retryable('no organization bound');
-    try {
-      await remote.deleteTombstone(
-        organizationId: organizationId,
-        collection: entity.collection,
-        documentId: entry.entityId,
-      );
-      return PushResult.success(entry.baseVersion + 1);
-    } on Object catch (e) {
-      // Auth/size rejections must become visible conflicts, not infinite
-      // pending retries: otherwise deletes of never-pushed docs spin forever
-      // while the badge still claims progress.
-      final text = '$e';
-      if (text.contains('permission-denied') ||
-          text.contains('permission_denied') ||
-          text.contains('unauthenticated') ||
-          text.contains('invalid-argument') ||
-          text.contains('failed-precondition')) {
-        return PushResult.rejected(text);
-      }
-      return PushResult.retryable(text);
+    if (organizationId.isEmpty) {
+      return PushResult.retryable('no organization bound');
     }
+    var payload = Map<String, dynamic>.from(entry.payload);
+    if (entry.localRef != null) {
+      final db = await queue.dbHelper.database;
+      _checkScope();
+      final rows = await db.query(
+        entity.localTable,
+        where: '${entity.pkColumn} = ?',
+        whereArgs: [entry.localRef],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        payload = {
+          ...buildRemotePayload(
+            entity,
+            Map<String, dynamic>.from(rows.single),
+            SyncPayloadContext(
+              organizationId: organizationId,
+              uid: session.uid,
+              deviceId: session.deviceId,
+              version: (baseVersion ?? entry.baseVersion) + 1,
+              versionField: 'version',
+            ),
+            asCreate: true,
+          ),
+          ...payload,
+        };
+      }
+    }
+    _checkScope();
+    payload['organizationId'] = organizationId;
+    payload['deviceId'] = session.deviceId;
+    payload['updatedBy'] = session.uid;
+    payload['deletedAt'] ??= SyncCodec.serverTimestampPlaceholder;
+    return remote.setDocument(
+      organizationId: organizationId,
+      collection: entity.collection,
+      documentId: entry.entityId,
+      data: payload,
+      baseVersion: baseVersion ?? entry.baseVersion,
+    );
   }
 
-  /// Automatic version-race resolution: no human tap.
-  ///
-  /// A rejection that carries the current remote document whose version moved
-  /// past our base is an edit/edit race, not an auth problem. Parking it for a
-  /// manual keep_local/keep_remote tap (the old behavior) asked the user to
-  /// decide every time two devices touched one row. Instead both sides apply
-  /// the same deterministic rule, so the race converges without interaction:
-  ///
-  /// * remote unmoved since our last sync (`remoteVersion <= syncedVersion`)
-  ///   → our queued edit is the only delta → re-push it on top;
-  /// * remote moved → newest `updatedAt` wins the whole document (row-level
-  ///   last-write-wins); ties and unparseable clocks break on `deviceId`.
-  ///   Clocks are device-local, so skew can tilt a tie — deterministic and
-  ///   audited beats silent or manual here; same-row concurrent edits are rare
-  ///   (same-*document* collisions across devices are already impossible: entry
-  ///   codes are device-scoped and history rows are append-only).
-  ///
-  /// Returns an [_AutoDecision] when this was a version race (resolved or
-  /// deferred to backoff), null when it is NOT one — genuine denial, oversized,
-  /// append-only entity, missing local row — those keep the manual path.
-  /// Never throws: undecidable here means manual, never a crashed batch.
-  Future<_AutoDecision?> _tryAutoRebase(QueueEntry entry, PushResult result) async {
+  /// Rebase only when the remote has not moved beyond an acknowledged base.
+  /// A true concurrent business edit is retained as a conflict; device clocks
+  /// never decide which data to discard. Server deletion remains terminal.
+  Future<_AutoDecision?> _tryAutoRebase(
+    QueueEntry entry,
+    PushResult result,
+  ) async {
+    _checkScope();
     final entity = entry.entity;
     final remote = result.remote;
     if (entity == null || entity.appendOnly) return null;
@@ -363,33 +491,43 @@ class PushWorker {
     if (freshRemote == null) return null;
     try {
       final db = await queue.dbHelper.database;
+      _checkScope();
       final rows = await db.query(
         entity.localTable,
         where: '${entity.pkColumn} = ?',
         whereArgs: [entry.localRef],
         limit: 1,
       );
+      _checkScope();
+      if (!await queue.isCurrentClaim(db, entry)) {
+        return _AutoDecision.retry('superseded local edit');
+      }
       if (rows.isEmpty) return null;
       final local = rows.first;
       final remoteVersion = (freshRemote['version'] as num?)?.toInt() ?? 0;
       final syncedVersion = (local['remote_version'] as num?)?.toInt() ?? 0;
       final bool localWins;
-      if (remoteVersion <= syncedVersion) {
-        // The remote document is exactly what we synced (or older): nobody
-        // else changed it, our queued edit is the only delta.
+      if (freshRemote['deletedAt'] != null && local['deleted_at'] == null) {
+        localWins = false;
+      } else if (remoteVersion <= syncedVersion) {
+        // This is a stale transport base, not a competing business edit.
         localWins = true;
       } else {
-        localWins = _localIsNewer(
-          localUpdatedAt: '${local['updated_at'] ?? ''}',
-          remoteUpdatedAt: '${freshRemote['updatedAt'] ?? ''}',
-          localDeviceId: session.deviceId,
-          remoteDeviceId: '${freshRemote['deviceId'] ?? ''}',
-        );
+        // Unsynchronised device clocks cannot prove which business edit was
+        // intended to win. Preserve both payloads for explicit review instead
+        // of deleting one because its wall-clock timestamp sorts earlier.
+        return null;
       }
       if (localWins) {
         return await _rebaseLocalWins(entry, entity, local, remoteVersion);
       }
-      return await _rebaseRemoteWins(entry, entity, local, freshRemote, remoteVersion);
+      return await _rebaseRemoteWins(
+        entry,
+        entity,
+        local,
+        freshRemote,
+        remoteVersion,
+      );
     } on Object {
       return null;
     }
@@ -418,7 +556,9 @@ class PushWorker {
         documentId: entry.entityId,
       );
       if (!fresh.exists) return null;
-      if (_looksLikeVersionRace(entry, fresh.data, result.error)) return fresh.data;
+      if (_looksLikeVersionRace(entry, fresh.data, result.error)) {
+        return fresh.data;
+      }
       return null;
     } on Object {
       return null;
@@ -437,25 +577,6 @@ class PushWorker {
     return remoteVersion != null && remoteVersion != entry.baseVersion;
   }
 
-  /// Newest `updatedAt` wins; ties (or unparseable clocks) break on `deviceId`
-  /// so both devices reach the same verdict independently.
-  bool _localIsNewer({
-    required String localUpdatedAt,
-    required String remoteUpdatedAt,
-    required String localDeviceId,
-    required String remoteDeviceId,
-  }) {
-    final local = DateTime.tryParse(localUpdatedAt);
-    final remote = DateTime.tryParse(remoteUpdatedAt);
-    if (local != null && remote != null && local != remote) {
-      return local.isAfter(remote);
-    }
-    if (localDeviceId.isNotEmpty || remoteDeviceId.isNotEmpty) {
-      return localDeviceId.compareTo(remoteDeviceId) >= 0;
-    }
-    return true;
-  }
-
   /// Re-push the current local row on top of [remoteVersion].
   Future<_AutoDecision> _rebaseLocalWins(
     QueueEntry entry,
@@ -463,28 +584,22 @@ class PushWorker {
     Map<String, Object?> local,
     int remoteVersion,
   ) async {
+    _checkScope();
+    final db = await queue.dbHelper.database;
+    _checkScope();
+    if (!await queue.isCurrentClaim(db, entry)) {
+      return _AutoDecision.retry('superseded local edit');
+    }
     final organizationId = session.organizationId;
     if (organizationId.isEmpty) {
       return _AutoDecision.retry('no organization bound');
     }
-    final payload = buildRemotePayload(
-      entity,
-      Map<String, Object?>.from(local).cast<String, dynamic>(),
-      SyncPayloadContext(
-        organizationId: organizationId,
-        uid: session.uid,
-        deviceId: session.deviceId,
-        version: remoteVersion,
-        versionField: 'version',
-      ),
-    );
-    final retry = await remote.setDocument(
-      organizationId: organizationId,
-      collection: entity.collection,
-      documentId: entry.entityId,
-      data: payload,
-      baseVersion: remoteVersion,
-    );
+    // Reuse exactly the first-send preparation, including stable parent
+    // linkage repair and complete tombstone envelopes. Rebuilding from the
+    // current business row here would mix a later edit into this old claim.
+    final retry = entry.operation == 'tombstone'
+        ? await _pushTombstone(entity, entry, baseVersion: remoteVersion)
+        : await _pushDocument(entity, entry, baseVersion: remoteVersion);
     if (retry.isSuccess) {
       await _auditAuto(
         entry,
@@ -500,7 +615,9 @@ class PushWorker {
     if (retry.kind == PushResultKind.retryable) {
       return _AutoDecision.retry(retry.error ?? 'rebase push transient');
     }
-    if (retry.kind == PushResultKind.payloadTooLarge) return const _AutoDecision.manual();
+    if (retry.kind == PushResultKind.payloadTooLarge) {
+      return const _AutoDecision.manual();
+    }
     if (_looksLikeVersionRace(entry, retry.remote ?? const {}, retry.error)) {
       return _AutoDecision.retry(retry.error ?? 'rebase race persists');
     }
@@ -518,34 +635,48 @@ class PushWorker {
     int remoteVersion,
   ) async {
     final db = await queue.dbHelper.database;
-    final columns = await availableColumns(db, entity.localTable);
-    final row = remoteToLocalRow(
-      entity,
-      Map<String, dynamic>.from(remote),
-      organizationId: session.organizationId,
-    )..['sync_state'] = 'synced';
-    // Same FK-safe mapping as the pull path: origin-device ids must never be
-    // written raw (they died on FK or linked the wrong row on keep-remote).
-    await resolveRemoteRowRefs(
-      db,
-      entity,
-      row,
-      Map<String, dynamic>.from(remote),
-      ensureProductSentinel:
-          (exec) => queue.dbHelper.ensureProductSentinelMaterialId(exec),
-    );
-    if (columns.contains('updated_at') && '${remote['updatedAt'] ?? ''}'.isNotEmpty) {
-      row['updated_at'] = '${remote['updatedAt']}';
-    }
-    await db.update(
-      entity.localTable,
-      {
-        for (final e in row.entries)
-          if (e.key != entity.pkColumn && columns.contains(e.key)) e.key: e.value,
-      },
-      where: '${entity.pkColumn} = ?',
-      whereArgs: [local[entity.pkColumn]],
-    );
+    _checkScope();
+    final applied = await tracedTransaction(db, 'push.applyRemoteWinner', (
+      txn,
+    ) async {
+      _checkScope();
+      if (!await queue.isCurrentClaim(txn, entry)) return false;
+      final columns = await availableColumns(txn, entity.localTable);
+      final row = remoteToLocalRow(
+        entity,
+        Map<String, dynamic>.from(remote),
+        organizationId: session.organizationId,
+      )..['sync_state'] = 'synced';
+      // Same FK-safe mapping as the pull path: origin-device ids must never be
+      // written raw (they died on FK or linked the wrong row on keep-remote).
+      await resolveRemoteRowRefs(
+        txn,
+        entity,
+        row,
+        Map<String, dynamic>.from(remote),
+        ensureProductSentinel: (exec) =>
+            queue.dbHelper.ensureProductSentinelMaterialId(exec),
+      );
+      if (columns.contains('updated_at') &&
+          '${remote['updatedAt'] ?? ''}'.isNotEmpty) {
+        row['updated_at'] = '${remote['updatedAt']}';
+      }
+      _checkScope();
+      await txn.update(
+        entity.localTable,
+        {
+          for (final e in row.entries)
+            if (e.key != entity.pkColumn && columns.contains(e.key))
+              e.key: e.value,
+        },
+        where: '${entity.pkColumn} = ?',
+        whereArgs: [local[entity.pkColumn]],
+      );
+      await queue.markDone(entry, remoteVersion: remoteVersion, executor: txn);
+      _checkScope();
+      return true;
+    });
+    if (!applied) return _AutoDecision.retry('superseded local edit');
     await _auditAuto(
       entry,
       'auto-rebase-remote',
@@ -556,9 +687,15 @@ class PushWorker {
     );
   }
 
-  Future<void> _auditAuto(QueueEntry entry, String strategy, String detail) async {
+  Future<void> _auditAuto(
+    QueueEntry entry,
+    String strategy,
+    String detail,
+  ) async {
+    _checkScope();
     final db = await queue.dbHelper.database;
     await tracedTransaction(db, 'push.auditAuto', (txn) async {
+      _checkScope();
       await audit.log(
         txn,
         action: AuditAction.syncConflict,
@@ -578,16 +715,19 @@ class PushWorker {
   /// Local gate before spending a network round-trip (the Rules are the second
   /// layer, this is the first one).
   bool _allowedLocally(SyncEntity entity) {
+    if (!session.isActiveMember || session.isOrgSuspended) return false;
     final permission = entity.permission;
     if (permission == null) return true;
     final parsed = Permission.byId(permission);
-    if (parsed == null) return true;
-    return session.can(parsed);
+    if (parsed == null) return false;
+    return !session.readOnlyDevice && session.can(parsed);
   }
 
   Future<void> _auditDenied(QueueEntry entry) async {
     final db = await queue.dbHelper.database;
+    _checkScope();
     await tracedTransaction(db, 'push.auditDenied', (txn) async {
+      _checkScope();
       await audit.log(
         txn,
         action: AuditAction.deniedEntry,
@@ -600,7 +740,9 @@ class PushWorker {
 
   Future<void> _logConflict(QueueEntry entry, String error) async {
     final db = await queue.dbHelper.database;
+    _checkScope();
     await tracedTransaction(db, 'push.auditConflict', (txn) async {
+      _checkScope();
       await audit.log(
         txn,
         action: AuditAction.syncConflict,
@@ -620,9 +762,7 @@ class PushWorker {
 class _AutoDecision {
   const _AutoDecision.settled(this.settlement) : error = null;
   const _AutoDecision.retry(this.error) : settlement = null;
-  const _AutoDecision.manual()
-      : settlement = null,
-        error = null;
+  const _AutoDecision.manual() : settlement = null, error = null;
 
   final QueueSettlement? settlement;
   final String? error;

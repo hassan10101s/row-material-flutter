@@ -130,24 +130,24 @@ class FirebaseConfig {
   }
 
   FirebaseOptions toOptions() => FirebaseOptions(
-        apiKey: apiKey,
-        appId: appId,
-        messagingSenderId: messagingSenderId,
-        projectId: projectId,
-        authDomain: authDomain,
-        storageBucket: storageBucket,
-      );
+    apiKey: apiKey,
+    appId: appId,
+    messagingSenderId: messagingSenderId,
+    projectId: projectId,
+    authDomain: authDomain,
+    storageBucket: storageBucket,
+  );
 
   Map<String, String> toRedactedMap() => {
-        'FIREBASE_API_KEY': _redact(apiKey),
-        'FIREBASE_APP_ID': appId,
-        'FIREBASE_MESSAGING_SENDER_ID': messagingSenderId,
-        'FIREBASE_PROJECT_ID': projectId,
-        'FIREBASE_AUTH_DOMAIN': authDomain,
-        'FIREBASE_STORAGE_BUCKET': storageBucket,
-        'GOOGLE_DESKTOP_CLIENT_ID': _redact(googleDesktopClientId),
-        'GOOGLE_ANDROID_CLIENT_ID': _redact(googleAndroidClientId),
-      };
+    'FIREBASE_API_KEY': _redact(apiKey),
+    'FIREBASE_APP_ID': appId,
+    'FIREBASE_MESSAGING_SENDER_ID': messagingSenderId,
+    'FIREBASE_PROJECT_ID': projectId,
+    'FIREBASE_AUTH_DOMAIN': authDomain,
+    'FIREBASE_STORAGE_BUCKET': storageBucket,
+    'GOOGLE_DESKTOP_CLIENT_ID': _redact(googleDesktopClientId),
+    'GOOGLE_ANDROID_CLIENT_ID': _redact(googleAndroidClientId),
+  };
 
   static String _redact(String value) {
     if (value.isEmpty) return '<missing>';
@@ -155,21 +155,26 @@ class FirebaseConfig {
     return '${value.substring(0, 6)}…${value.substring(value.length - 4)}';
   }
 
-  factory FirebaseConfig.fromMap(Map<String, dynamic> map, {FirebaseConfigSource source = FirebaseConfigSource.localFile}) =>
-      FirebaseConfig(
-        apiKey: '${map['apiKey'] ?? map['FIREBASE_API_KEY'] ?? ''}',
-        appId: '${map['appId'] ?? map['FIREBASE_APP_ID'] ?? ''}',
-        messagingSenderId:
-            '${map['messagingSenderId'] ?? map['FIREBASE_MESSAGING_SENDER_ID'] ?? ''}',
-        projectId: '${map['projectId'] ?? map['FIREBASE_PROJECT_ID'] ?? ''}',
-        authDomain: '${map['authDomain'] ?? map['FIREBASE_AUTH_DOMAIN'] ?? ''}',
-        storageBucket: '${map['storageBucket'] ?? map['FIREBASE_STORAGE_BUCKET'] ?? ''}',
-        googleWebClientId:
-            '${map['googleWebClientId'] ?? map['GOOGLE_WEB_CLIENT_ID'] ?? ''}',
-        googleDesktopClientId: '${map['googleDesktopClientId'] ?? map['GOOGLE_DESKTOP_CLIENT_ID'] ?? ''}',
-        googleAndroidClientId: '${map['googleAndroidClientId'] ?? map['GOOGLE_ANDROID_CLIENT_ID'] ?? ''}',
-        source: source,
-      );
+  factory FirebaseConfig.fromMap(
+    Map<String, dynamic> map, {
+    FirebaseConfigSource source = FirebaseConfigSource.localFile,
+  }) => FirebaseConfig(
+    apiKey: '${map['apiKey'] ?? map['FIREBASE_API_KEY'] ?? ''}',
+    appId: '${map['appId'] ?? map['FIREBASE_APP_ID'] ?? ''}',
+    messagingSenderId:
+        '${map['messagingSenderId'] ?? map['FIREBASE_MESSAGING_SENDER_ID'] ?? ''}',
+    projectId: '${map['projectId'] ?? map['FIREBASE_PROJECT_ID'] ?? ''}',
+    authDomain: '${map['authDomain'] ?? map['FIREBASE_AUTH_DOMAIN'] ?? ''}',
+    storageBucket:
+        '${map['storageBucket'] ?? map['FIREBASE_STORAGE_BUCKET'] ?? ''}',
+    googleWebClientId:
+        '${map['googleWebClientId'] ?? map['GOOGLE_WEB_CLIENT_ID'] ?? ''}',
+    googleDesktopClientId:
+        '${map['googleDesktopClientId'] ?? map['GOOGLE_DESKTOP_CLIENT_ID'] ?? ''}',
+    googleAndroidClientId:
+        '${map['googleAndroidClientId'] ?? map['GOOGLE_ANDROID_CLIENT_ID'] ?? ''}',
+    source: source,
+  );
 
   /// Build the effective configuration: dart-defines win over the local file.
   static Future<FirebaseConfig> load({AssetBundle? bundle}) async {
@@ -182,7 +187,9 @@ class FirebaseConfig {
       if (raw.trim().isEmpty) return env;
       final parsed = jsonDecode(raw);
       if (parsed is! Map) return env;
-      final fromFile = FirebaseConfig.fromMap(Map<String, dynamic>.from(parsed));
+      final fromFile = FirebaseConfig.fromMap(
+        Map<String, dynamic>.from(parsed),
+      );
       if (fromFile.isConfigured) return fromFile;
       return fromFile.source == FirebaseConfigSource.localFile ? fromFile : env;
     } catch (error) {

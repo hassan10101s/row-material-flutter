@@ -43,7 +43,8 @@ class DesktopFileDelivery implements FileDelivery {
   const DesktopFileDelivery();
 
   @override
-  bool get canReveal => Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+  bool get canReveal =>
+      Platform.isWindows || Platform.isMacOS || Platform.isLinux;
 
   @override
   bool get canRevealFolder => canReveal;
@@ -85,8 +86,7 @@ class DesktopFileDelivery implements FileDelivery {
   }
 
   @override
-  Future<bool> share(String filePath, {String? subject}) =>
-      reveal(filePath);
+  Future<bool> share(String filePath, {String? subject}) => reveal(filePath);
 }
 
 /// A delivery that does nothing.

@@ -5,6 +5,7 @@ import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_adaptive_list.dart';
+import '../../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../../design_system/widgets/app_field.dart';
@@ -186,18 +187,39 @@ class NcrActiveFilterChips extends StatelessWidget {
         horizontal: AppSpacing.md,
         vertical: AppSpacing.sm,
       ),
-      child: Wrap(
-        spacing: AppSpacing.xs,
-        runSpacing: AppSpacing.xs,
-        children: [
-          ...chips,
-          AppButton(
-            label: AppText.t('مسح الكل', 'Clear all'),
-            style: AppButtonStyle.ghost,
-            small: true,
-            onPressed: cubit.clearFilters,
+      child: appUsesDesktopChrome(context)
+          ? Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: [
+                ...chips,
+                AppButton(
+                  label: AppText.t('مسح الكل', 'Clear all'),
+                  style: AppButtonStyle.ghost,
+                  small: true,
+                  onPressed: cubit.clearFilters,
+                ),
+              ],
+            )
+          : SizedBox(
+        height: 40,
+        child: SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (final chip in chips) ...[
+                chip,
+                const SizedBox(width: AppSpacing.xs),
+              ],
+              AppButton(
+                label: AppText.t('مسح الكل', 'Clear all'),
+                style: AppButtonStyle.ghost,
+                small: true,
+                onPressed: cubit.clearFilters,
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

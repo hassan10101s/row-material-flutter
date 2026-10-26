@@ -20,13 +20,16 @@ class InspectionsState extends Equatable {
   /// Reason filter (`decision_reason` substring). Never rendered as a table
   /// column — only used to narrow the register and shown back as a chip.
   final String reason;
+
   /// Exact supplier filter (dashboard drill-down seeds it); empty = all.
   /// Unlike [materialId] it is a plain string — `supplier` is free text,
   /// stored trimmed, so equality is identity here.
   final String supplier;
+
   /// Inclusive `inspection_date` bounds (`yyyy-MM-dd`); empty = unbounded.
   final String dateFrom;
   final String dateTo;
+
   /// Selected material (raw register) or product (product register) id;
   /// null = all. The same fields serve both registers because each cubit
   /// instance is bound to one `kind` (see `InspectionsCubit.load`).
@@ -83,46 +86,44 @@ class InspectionsState extends Equatable {
     int? pageSize,
     int? total,
     Set<int>? selectedIds,
-  }) =>
-      InspectionsState(
-        rows: rows ?? this.rows,
-        visible: visible ?? this.visible,
-        query: query ?? this.query,
-        status: status ?? this.status,
-        reason: reason ?? this.reason,
-        supplier: supplier ?? this.supplier,
-        dateFrom: dateFrom ?? this.dateFrom,
-        dateTo: dateTo ?? this.dateTo,
-        materialId: clearMaterialId ? null : (materialId ?? this.materialId),
-        materialName:
-            clearMaterialId ? '' : (materialName ?? this.materialName),
-        loading: loading ?? this.loading,
-        exporting: exporting ?? this.exporting,
-        error: error ?? this.error,
-        page: page ?? this.page,
-        pageSize: pageSize ?? this.pageSize,
-        total: total ?? this.total,
-        selectedIds: selectedIds ?? this.selectedIds,
-      );
+  }) => InspectionsState(
+    rows: rows ?? this.rows,
+    visible: visible ?? this.visible,
+    query: query ?? this.query,
+    status: status ?? this.status,
+    reason: reason ?? this.reason,
+    supplier: supplier ?? this.supplier,
+    dateFrom: dateFrom ?? this.dateFrom,
+    dateTo: dateTo ?? this.dateTo,
+    materialId: clearMaterialId ? null : (materialId ?? this.materialId),
+    materialName: clearMaterialId ? '' : (materialName ?? this.materialName),
+    loading: loading ?? this.loading,
+    exporting: exporting ?? this.exporting,
+    error: error ?? this.error,
+    page: page ?? this.page,
+    pageSize: pageSize ?? this.pageSize,
+    total: total ?? this.total,
+    selectedIds: selectedIds ?? this.selectedIds,
+  );
 
   @override
   List<Object?> get props => [
-        rows,
-        visible,
-        query,
-        status,
-        reason,
-        supplier,
-        dateFrom,
-        dateTo,
-        materialId,
-        materialName,
-        loading,
-        exporting,
-        error,
-        page,
-        pageSize,
-        total,
-        selectedIds,
-      ];
+    rows,
+    visible,
+    query,
+    status,
+    reason,
+    supplier,
+    dateFrom,
+    dateTo,
+    materialId,
+    materialName,
+    loading,
+    exporting,
+    error,
+    page,
+    pageSize,
+    total,
+    selectedIds,
+  ];
 }

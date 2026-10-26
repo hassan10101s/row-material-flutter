@@ -1,0 +1,7058 @@
+{
+  "manifestVersion": 1,
+  "entities": {
+    "parameter": {
+      "collection": "parameters",
+      "table": "parameters",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "samples.read",
+      "appendOnly": false,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "importedAt",
+        "localId",
+        "organizationId",
+        "parameterName",
+        "parameterType",
+        "remoteId",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "parameterName": {
+          "column": "parameter_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "parameterType": {
+          "column": "parameter_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "importedAt": {
+          "column": "imported_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "parameter_name"
+          ],
+          "fields": [
+            "parameterName"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "materialBound": {
+      "collection": "materialBounds",
+      "table": "material_parameter_bounds",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "samples.read",
+      "appendOnly": false,
+      "fields": [
+        "active",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "isRequired",
+        "localId",
+        "materialId",
+        "materialRemoteId",
+        "maxValue",
+        "minValue",
+        "organizationId",
+        "parameterId",
+        "parameterRemoteId",
+        "parameterType",
+        "precision",
+        "remoteId",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "materialId": {
+          "column": "material_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "parameterId": {
+          "column": "parameter_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "parameterType": {
+          "column": "parameter_type",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "minValue": {
+          "column": "min_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "maxValue": {
+          "column": "max_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "precision": {
+          "column": "precision",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "active": {
+          "column": "active",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "isRequired": {
+          "column": "is_required",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "materialRemoteId": {
+          "column": "material_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "parameterRemoteId": {
+          "column": "parameter_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "materialId",
+          "localField": "material_id",
+          "type": "referenceMaterial",
+          "required": true
+        },
+        {
+          "relation": "parameterId",
+          "localField": "parameter_id",
+          "type": "parameter",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "material_id",
+            "parameter_id"
+          ],
+          "fields": [
+            "materialId",
+            "parameterId"
+          ],
+          "collations": [
+            "BINARY",
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "organizationSetting": {
+      "collection": "organizationSettings",
+      "table": "organization_settings",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "reports.create",
+      "readPermission": "reports.read",
+      "appendOnly": false,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "key",
+        "localId",
+        "organizationId",
+        "remoteId",
+        "updatedAt",
+        "updatedBy",
+        "value",
+        "version"
+      ],
+      "sqlFields": {
+        "key": {
+          "column": "key",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "value": {
+          "column": "value",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "key"
+          ],
+          "fields": [
+            "key"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "qcSop": {
+      "collection": "qcSops",
+      "table": "qc_sops",
+      "primaryKey": "sop_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "approveRoles",
+        "approvedAt",
+        "approverId",
+        "category",
+        "code",
+        "contentText",
+        "contentType",
+        "createdAt",
+        "createdBy",
+        "criticality",
+        "deletedAt",
+        "dept",
+        "deviceId",
+        "editRoles",
+        "effectiveDate",
+        "expiryDate",
+        "fileName",
+        "fileUrl",
+        "isActive",
+        "localId",
+        "mimeType",
+        "organizationId",
+        "ownerId",
+        "publishRoles",
+        "publishedAt",
+        "readAckMandatory",
+        "rejectionReason",
+        "remoteId",
+        "requiresReadAck",
+        "revNo",
+        "reviewedAt",
+        "site",
+        "status",
+        "tags",
+        "title",
+        "updatedAt",
+        "updatedBy",
+        "version",
+        "versionHash",
+        "viewRoles"
+      ],
+      "sqlFields": {
+        "code": {
+          "column": "code",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "title": {
+          "column": "title",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "category": {
+          "column": "category",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "dept": {
+          "column": "dept",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "site": {
+          "column": "site",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "status": {
+          "column": "status",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "contentType": {
+          "column": "content_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "contentText": {
+          "column": "content_text",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "fileUrl": {
+          "column": "file_url",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "fileName": {
+          "column": "file_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "mimeType": {
+          "column": "mime_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "revNo": {
+          "column": "rev_no",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "effectiveDate": {
+          "column": "effective_date",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "publishedAt": {
+          "column": "published_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "expiryDate": {
+          "column": "expiry_date",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "isActive": {
+          "column": "is_active",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "ownerId": {
+          "column": "owner_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "approverId": {
+          "column": "approver_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "approvedAt": {
+          "column": "approved_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "reviewedAt": {
+          "column": "reviewed_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectionReason": {
+          "column": "rejection_reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "tags": {
+          "column": "tags",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "criticality": {
+          "column": "criticality",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "viewRoles": {
+          "column": "view_roles",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "editRoles": {
+          "column": "edit_roles",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "approveRoles": {
+          "column": "approve_roles",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "publishRoles": {
+          "column": "publish_roles",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "requiresReadAck": {
+          "column": "requires_read_ack",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "readAckMandatory": {
+          "column": "read_ack_mandatory",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "versionHash": {
+          "column": "version_hash",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "code"
+          ],
+          "fields": [
+            "code"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "qcSopRevision": {
+      "collection": "qcSopRevisions",
+      "table": "qc_sop_revisions",
+      "primaryKey": "rev_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "changeReason",
+        "contentHash",
+        "contentText",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "diffSummary",
+        "editedAt",
+        "editedBy",
+        "editedByName",
+        "fileName",
+        "fileUrl",
+        "isPublishedRev",
+        "localId",
+        "mimeType",
+        "organizationId",
+        "prevRevIdRef",
+        "remoteId",
+        "revNo",
+        "sopId",
+        "sopRemoteId",
+        "supersededAt",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "sopId": {
+          "column": "sop_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "revNo": {
+          "column": "rev_no",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "contentText": {
+          "column": "content_text",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "fileUrl": {
+          "column": "file_url",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "fileName": {
+          "column": "file_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "mimeType": {
+          "column": "mime_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "changeReason": {
+          "column": "change_reason",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "editedBy": {
+          "column": "edited_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "editedAt": {
+          "column": "edited_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "diffSummary": {
+          "column": "diff_summary",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "prevRevIdRef": {
+          "column": "prev_rev_id_ref",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "contentHash": {
+          "column": "content_hash",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "isPublishedRev": {
+          "column": "is_published_rev",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "editedByName": {
+          "column": "edited_by_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "supersededAt": {
+          "column": "superseded_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "sopRemoteId": {
+          "column": "sop_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "sopId",
+          "localField": "sop_id",
+          "type": "qcSop",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "qcSopRead": {
+      "collection": "qcSopReads",
+      "table": "qc_sop_reads",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "ackMethod",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "geo",
+        "ipAddress",
+        "localId",
+        "organizationId",
+        "readAt",
+        "remoteId",
+        "revNo",
+        "signatureBase64",
+        "sopId",
+        "sopRemoteId",
+        "updatedAt",
+        "updatedBy",
+        "userId",
+        "userName",
+        "version"
+      ],
+      "sqlFields": {
+        "sopId": {
+          "column": "sop_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "revNo": {
+          "column": "rev_no",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "userId": {
+          "column": "user_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "userName": {
+          "column": "user_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "readAt": {
+          "column": "read_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "signatureBase64": {
+          "column": "signature_base64",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "ipAddress": {
+          "column": "ip_address",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "geo": {
+          "column": "geo",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "ackMethod": {
+          "column": "ack_method",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "sopRemoteId": {
+          "column": "sop_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "sopId",
+          "localField": "sop_id",
+          "type": "qcSop",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "sop_id",
+            "rev_no",
+            "user_id"
+          ],
+          "fields": [
+            "sopId",
+            "revNo",
+            "userId"
+          ],
+          "collations": [
+            "BINARY",
+            "BINARY",
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "sample": {
+      "collection": "samples",
+      "table": "inspections",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "samples.update",
+      "readPermission": "samples.read",
+      "appendOnly": false,
+      "fields": [
+        "batchNumber",
+        "chemicalReferenceJson",
+        "chemicalResultsJson",
+        "createdAt",
+        "createdBy",
+        "createdByName",
+        "decisionReason",
+        "decisionStatus",
+        "decisionVersion",
+        "deletedAt",
+        "deviceId",
+        "entryCode",
+        "expiryDate",
+        "followUpNote",
+        "formulaNumber",
+        "inspectionDate",
+        "inspectionKind",
+        "localId",
+        "materialCode",
+        "materialId",
+        "materialName",
+        "organizationId",
+        "payloadBytes",
+        "physicalReferenceJson",
+        "physicalResultsJson",
+        "productId",
+        "quantity",
+        "rejectedQuantity",
+        "remoteId",
+        "sampleNamesJson",
+        "sampleTakenBy",
+        "snapshotJson",
+        "specialistName",
+        "supplier",
+        "truckNumber",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "entryCode": {
+          "column": "entry_code",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "materialId": {
+          "column": "material_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "materialName": {
+          "column": "material_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "materialCode": {
+          "column": "material_code",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "inspectionDate": {
+          "column": "inspection_date",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "supplier": {
+          "column": "supplier",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "truckNumber": {
+          "column": "truck_number",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "quantity": {
+          "column": "quantity",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "sampleTakenBy": {
+          "column": "sample_taken_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "specialistName": {
+          "column": "specialist_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "physicalResultsJson": {
+          "column": "physical_results_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "chemicalResultsJson": {
+          "column": "chemical_results_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "physicalReferenceJson": {
+          "column": "physical_reference_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "chemicalReferenceJson": {
+          "column": "chemical_reference_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "decisionStatus": {
+          "column": "decision_status",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "decisionReason": {
+          "column": "decision_reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "followUpNote": {
+          "column": "follow_up_note",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectedQuantity": {
+          "column": "rejected_quantity",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "snapshotJson": {
+          "column": "snapshot_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "sampleNamesJson": {
+          "column": "sample_names_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "decisionVersion": {
+          "column": "decision_version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdByName": {
+          "column": "created_by_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "expiryDate": {
+          "column": "expiry_date",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inspectionKind": {
+          "column": "inspection_kind",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "productId": {
+          "column": "product_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "formulaNumber": {
+          "column": "formula_number",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "batchNumber": {
+          "column": "batch_number",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "createdBy"
+      ],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "materialId",
+          "localField": "material_id",
+          "type": "referenceMaterial",
+          "required": true
+        },
+        {
+          "relation": "productId",
+          "localField": "product_id",
+          "type": "labProduct",
+          "required": false
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "entry_code"
+          ],
+          "fields": [
+            "entryCode"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "qualityCheck": {
+      "collection": "qualityChecks",
+      "table": "inspection_status_history",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "qc.approve",
+      "readPermission": "lab_results.read",
+      "appendOnly": true,
+      "fields": [
+        "businessVersion",
+        "changeReason",
+        "changedAt",
+        "changedBy",
+        "changedByName",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "followUpNote",
+        "inspectionId",
+        "localId",
+        "newStatus",
+        "oldStatus",
+        "organizationId",
+        "rejectedQuantity",
+        "remoteId",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "inspectionId": {
+          "column": "inspection_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "oldStatus": {
+          "column": "old_status",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "newStatus": {
+          "column": "new_status",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "changeReason": {
+          "column": "change_reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "followUpNote": {
+          "column": "follow_up_note",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectedQuantity": {
+          "column": "rejected_quantity",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "changedBy": {
+          "column": "changed_by",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "changedByName": {
+          "column": "changed_by_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "changedAt": {
+          "column": "changed_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "changedBy"
+      ],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "inspectionId",
+          "localField": "inspection_id",
+          "type": "sample",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "labResult": {
+      "collection": "labResults",
+      "table": "lab_sample_tests",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "analysisId",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "dynamicValues",
+        "dynamicValuesJson",
+        "entryCode",
+        "localId",
+        "organizationId",
+        "remoteId",
+        "resultText",
+        "sampleName",
+        "sourceName",
+        "sourceRefId",
+        "sourceType",
+        "testedAt",
+        "testedBy",
+        "updatedAt",
+        "updatedBy",
+        "version",
+        "worksheetRowId"
+      ],
+      "sqlFields": {
+        "analysisId": {
+          "column": "analysis_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "sourceType": {
+          "column": "source_type",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "sourceRefId": {
+          "column": "source_ref_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "sourceName": {
+          "column": "source_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "sampleName": {
+          "column": "sample_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "resultText": {
+          "column": "result_text",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "dynamicValuesJson": {
+          "column": "dynamic_values_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "entryCode": {
+          "column": "entry_code",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "worksheetRowId": {
+          "column": "worksheet_row_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "testedBy": {
+          "column": "tested_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "testedAt": {
+          "column": "tested_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "testedBy",
+        "createdBy",
+        "updatedBy"
+      ],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "analysisId",
+          "localField": "analysis_id",
+          "type": "labAnalysis",
+          "required": true
+        },
+        {
+          "relation": "worksheetRowId",
+          "localField": "worksheet_row_id",
+          "type": "worksheet",
+          "required": false
+        }
+      ],
+      "unique": []
+    },
+    "productBatchSample": {
+      "collection": "productBatchSamples",
+      "table": "product_batch_samples",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "batchEntryCode",
+        "batchId",
+        "batchRemoteId",
+        "chemicalResultsJson",
+        "createdAt",
+        "createdBy",
+        "decisionReason",
+        "decisionStatus",
+        "deletedAt",
+        "deviceId",
+        "localId",
+        "organizationId",
+        "physicalResultsJson",
+        "remoteId",
+        "sampleName",
+        "sampleNo",
+        "sampleTaker",
+        "testedAt",
+        "testedBy",
+        "testedByName",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "batchId": {
+          "column": "batch_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "sampleNo": {
+          "column": "sample_no",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "sampleName": {
+          "column": "sample_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "sampleTaker": {
+          "column": "sample_taker",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "physicalResultsJson": {
+          "column": "physical_results_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "chemicalResultsJson": {
+          "column": "chemical_results_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "testedBy": {
+          "column": "tested_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "testedByName": {
+          "column": "tested_by_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "testedAt": {
+          "column": "tested_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "decisionStatus": {
+          "column": "decision_status",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "decisionReason": {
+          "column": "decision_reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "batchRemoteId": {
+          "column": "batch_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "batchEntryCode": {
+          "column": "batch_entry_code",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "testedBy",
+        "createdBy",
+        "updatedBy"
+      ],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "batchId",
+          "localField": "batch_id",
+          "type": "sample",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "batch_id",
+            "sample_no"
+          ],
+          "fields": [
+            "batchId",
+            "sampleNo"
+          ],
+          "collations": [
+            "BINARY",
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "labAnalysis": {
+      "collection": "labConfig",
+      "table": "lab_analyses",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "active",
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "description",
+        "deviceId",
+        "dynamicFieldsJson",
+        "formulaJson",
+        "localId",
+        "name",
+        "organizationId",
+        "parameterId",
+        "parameterRemoteId",
+        "payload",
+        "reference",
+        "remoteId",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "name": {
+          "column": "name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "reference": {
+          "column": "reference",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "dynamicFieldsJson": {
+          "column": "dynamic_fields_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "formulaJson": {
+          "column": "formula_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "parameterId": {
+          "column": "parameter_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "active": {
+          "column": "active",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "parameterRemoteId": {
+          "column": "parameter_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "name",
+        "unit",
+        "description",
+        "reference",
+        "dynamic_fields_json",
+        "formula_json",
+        "parameter_id",
+        "created_at",
+        "active",
+        "parameter_remote_id"
+      ],
+      "parents": [
+        {
+          "relation": "parameterId",
+          "localField": "parameter_id",
+          "type": "parameter",
+          "required": false
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "name"
+          ],
+          "fields": [
+            "name"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "labAnalysisItem": {
+      "collection": "labConfig",
+      "table": "lab_analysis_items",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "analysisId",
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "inventoryId",
+        "inventoryRemoteId",
+        "localId",
+        "organizationId",
+        "payload",
+        "qtyPerSample",
+        "remoteId",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "analysisId": {
+          "column": "analysis_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "inventoryId": {
+          "column": "inventory_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "qtyPerSample": {
+          "column": "qty_per_sample",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inventoryRemoteId": {
+          "column": "inventory_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "analysis_id",
+        "inventory_id",
+        "qty_per_sample",
+        "unit",
+        "inventory_remote_id"
+      ],
+      "parents": [
+        {
+          "relation": "inventoryId",
+          "localField": "inventory_id",
+          "type": "inventoryItem",
+          "required": true
+        },
+        {
+          "relation": "analysisId",
+          "localField": "analysis_id",
+          "type": "labAnalysis",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "analysis_id",
+            "inventory_id"
+          ],
+          "fields": [
+            "analysisId",
+            "inventoryId"
+          ],
+          "collations": [
+            "BINARY",
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "labFieldLink": {
+      "collection": "labConfig",
+      "table": "lab_field_chemical_links",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "analysisId",
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "dynamicField",
+        "fixedValue",
+        "inventoryId",
+        "inventoryRemoteId",
+        "kind",
+        "listValues",
+        "localId",
+        "organizationId",
+        "payload",
+        "remoteId",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "analysisId": {
+          "column": "analysis_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "dynamicField": {
+          "column": "dynamic_field",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "inventoryId": {
+          "column": "inventory_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "kind": {
+          "column": "kind",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "fixedValue": {
+          "column": "fixed_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "listValues": {
+          "column": "list_values",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inventoryRemoteId": {
+          "column": "inventory_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "analysis_id",
+        "dynamic_field",
+        "inventory_id",
+        "unit",
+        "kind",
+        "fixed_value",
+        "list_values",
+        "created_at",
+        "inventory_remote_id"
+      ],
+      "parents": [
+        {
+          "relation": "inventoryId",
+          "localField": "inventory_id",
+          "type": "inventoryItem",
+          "required": false
+        },
+        {
+          "relation": "analysisId",
+          "localField": "analysis_id",
+          "type": "labAnalysis",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "analysis_id",
+            "dynamic_field"
+          ],
+          "fields": [
+            "analysisId",
+            "dynamicField"
+          ],
+          "collations": [
+            "BINARY",
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "labConstant": {
+      "collection": "labConfig",
+      "table": "lab_constants",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "description",
+        "deviceId",
+        "expression",
+        "isExpression",
+        "isGlobal",
+        "localId",
+        "maxValue",
+        "minValue",
+        "name",
+        "organizationId",
+        "payload",
+        "precision",
+        "remoteId",
+        "symbol",
+        "unit",
+        "unitDim",
+        "updatedAt",
+        "updatedBy",
+        "valueText",
+        "version"
+      ],
+      "sqlFields": {
+        "name": {
+          "column": "name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "symbol": {
+          "column": "symbol",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "valueText": {
+          "column": "value_text",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "unitDim": {
+          "column": "unit_dim",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "isExpression": {
+          "column": "is_expression",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "expression": {
+          "column": "expression",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "minValue": {
+          "column": "min_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "maxValue": {
+          "column": "max_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "precision": {
+          "column": "precision",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "isGlobal": {
+          "column": "is_global",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "name",
+        "symbol",
+        "value_text",
+        "unit",
+        "unit_dim",
+        "is_expression",
+        "expression",
+        "min_value",
+        "max_value",
+        "precision",
+        "description",
+        "is_global",
+        "created_at"
+      ],
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "name"
+          ],
+          "fields": [
+            "name"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "labProduct": {
+      "collection": "labConfig",
+      "table": "lab_products",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "active",
+        "category",
+        "chemicalReferenceJson",
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "description",
+        "deviceId",
+        "localId",
+        "name",
+        "organizationId",
+        "payload",
+        "physicalReferenceJson",
+        "remoteId",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "name": {
+          "column": "name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "category": {
+          "column": "category",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "physicalReferenceJson": {
+          "column": "physical_reference_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "chemicalReferenceJson": {
+          "column": "chemical_reference_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "active": {
+          "column": "active",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "createdBy"
+      ],
+      "payloadFields": [
+        "id",
+        "name",
+        "category",
+        "description",
+        "physical_reference_json",
+        "chemical_reference_json",
+        "created_by",
+        "created_at",
+        "active"
+      ],
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "name"
+          ],
+          "fields": [
+            "name"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "nutritionFormulation": {
+      "collection": "labConfig",
+      "table": "nutrition_formulations",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "formulations.update",
+      "readPermission": "formulations.read",
+      "appendOnly": false,
+      "fields": [
+        "calculationJson",
+        "configType",
+        "copiedFromId",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "graphParametersJson",
+        "isArchived",
+        "itemsJson",
+        "localId",
+        "name",
+        "organizationId",
+        "parametersJson",
+        "payload",
+        "productId",
+        "remoteId",
+        "sourceSnapshotJson",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "name": {
+          "column": "name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "productId": {
+          "column": "product_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "itemsJson": {
+          "column": "items_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "parametersJson": {
+          "column": "parameters_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "graphParametersJson": {
+          "column": "graph_parameters_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "calculationJson": {
+          "column": "calculation_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "sourceSnapshotJson": {
+          "column": "source_snapshot_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "copiedFromId": {
+          "column": "copied_from_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "isArchived": {
+          "column": "is_archived",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "name",
+        "product_id",
+        "items_json",
+        "parameters_json",
+        "graph_parameters_json",
+        "calculation_json",
+        "source_snapshot_json",
+        "copied_from_id",
+        "is_archived",
+        "created_by",
+        "created_at"
+      ],
+      "parents": [],
+      "unique": []
+    },
+    "labProductAnalysis": {
+      "collection": "labConfig",
+      "table": "lab_product_analyses",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "analysisId",
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "isRequired",
+        "localId",
+        "maxValue",
+        "minValue",
+        "organizationId",
+        "payload",
+        "productId",
+        "remoteId",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "productId": {
+          "column": "product_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "analysisId": {
+          "column": "analysis_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "minValue": {
+          "column": "min_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "maxValue": {
+          "column": "max_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "isRequired": {
+          "column": "is_required",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "product_id",
+        "analysis_id",
+        "min_value",
+        "max_value",
+        "unit",
+        "is_required"
+      ],
+      "parents": [
+        {
+          "relation": "productId",
+          "localField": "product_id",
+          "type": "labProduct",
+          "required": true
+        },
+        {
+          "relation": "analysisId",
+          "localField": "analysis_id",
+          "type": "labAnalysis",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "product_id",
+            "analysis_id"
+          ],
+          "fields": [
+            "productId",
+            "analysisId"
+          ],
+          "collations": [
+            "BINARY",
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "labUnit": {
+      "collection": "labConfig",
+      "table": "lab_units",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "dimension",
+        "isActive",
+        "localId",
+        "name",
+        "organizationId",
+        "payload",
+        "remoteId",
+        "symbol",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "symbol": {
+          "column": "symbol",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "name": {
+          "column": "name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "dimension": {
+          "column": "dimension",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "isActive": {
+          "column": "is_active",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "symbol",
+        "name",
+        "dimension",
+        "is_active",
+        "created_at"
+      ],
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "symbol"
+          ],
+          "fields": [
+            "symbol"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "member": {
+      "collection": "members",
+      "table": "users",
+      "primaryKey": "id",
+      "autoIncrement": false,
+      "permission": "users.update",
+      "readPermission": "users.read",
+      "appendOnly": false,
+      "fields": [
+        "activatedAt",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "displayName",
+        "email",
+        "fullName",
+        "localId",
+        "memberId",
+        "organizationId",
+        "photoUrl",
+        "remoteId",
+        "role",
+        "roles",
+        "status",
+        "uid",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "uid": {
+          "column": "uid",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "memberId": {
+          "column": "member_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "email": {
+          "column": "email",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "fullName": {
+          "column": "full_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "role": {
+          "column": "role",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "status": {
+          "column": "status",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "displayName": {
+          "column": "display_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "photoUrl": {
+          "column": "photo_url",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "uid"
+          ],
+          "fields": [
+            "uid"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "inventoryItem": {
+      "collection": "inventoryItems",
+      "table": "lab_inventory",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "category",
+        "createdAt",
+        "createdBy",
+        "currentQty",
+        "deletedAt",
+        "description",
+        "deviceId",
+        "localId",
+        "minQty",
+        "name",
+        "organizationId",
+        "remoteId",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "name": {
+          "column": "name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "category": {
+          "column": "category",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "currentQty": {
+          "column": "current_qty",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": true
+        },
+        "minQty": {
+          "column": "min_qty",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": true
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "createdBy"
+      ],
+      "payloadFields": null,
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "name"
+          ],
+          "fields": [
+            "name"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "inventoryTransaction": {
+      "collection": "inventoryTransactions",
+      "table": "inventory_transactions",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": true,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "inventoryId",
+        "inventoryRemoteId",
+        "localId",
+        "organizationId",
+        "quantityDelta",
+        "reason",
+        "referenceId",
+        "referenceRemoteId",
+        "referenceType",
+        "remoteId",
+        "transactionType",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inventoryId": {
+          "column": "inventory_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "inventoryRemoteId": {
+          "column": "inventory_remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "quantityDelta": {
+          "column": "quantity_delta",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": false
+        },
+        "transactionType": {
+          "column": "transaction_type",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "referenceType": {
+          "column": "reference_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "referenceId": {
+          "column": "reference_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "referenceRemoteId": {
+          "column": "reference_remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "reason": {
+          "column": "reason",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "createdBy",
+        "updatedBy"
+      ],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "inventoryId",
+          "localField": "inventory_id",
+          "type": "inventoryItem",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "inventoryLot": {
+      "collection": "inventoryLots",
+      "table": "inventory_lots",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "expiryDate",
+        "inventoryId",
+        "inventoryRemoteId",
+        "localId",
+        "lotNo",
+        "note",
+        "organizationId",
+        "qtyReceived",
+        "qtyRemaining",
+        "receivedAt",
+        "receivedBy",
+        "remoteId",
+        "supplier",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inventoryId": {
+          "column": "inventory_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "inventoryRemoteId": {
+          "column": "inventory_remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "lotNo": {
+          "column": "lot_no",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "qtyReceived": {
+          "column": "qty_received",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": true
+        },
+        "qtyRemaining": {
+          "column": "qty_remaining",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": true
+        },
+        "expiryDate": {
+          "column": "expiry_date",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "supplier": {
+          "column": "supplier",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "note": {
+          "column": "note",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "receivedBy": {
+          "column": "received_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "receivedAt": {
+          "column": "received_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "receivedBy",
+        "updatedBy"
+      ],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "inventoryId",
+          "localField": "inventory_id",
+          "type": "inventoryItem",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "lot_no"
+          ],
+          "fields": [
+            "lotNo"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "consumption": {
+      "collection": "consumption",
+      "table": "lab_consumption_log",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": true,
+      "fields": [
+        "appliedQty",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "eventType",
+        "inventoryId",
+        "localId",
+        "lotId",
+        "lotNo",
+        "lotRemoteId",
+        "organizationId",
+        "qtyUsed",
+        "remoteId",
+        "requestedQty",
+        "reversalOfLogId",
+        "sampleTestId",
+        "shortfallQty",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "sampleTestId": {
+          "column": "sample_test_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "inventoryId": {
+          "column": "inventory_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "qtyUsed": {
+          "column": "qty_used",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": false
+        },
+        "requestedQty": {
+          "column": "requested_qty",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "appliedQty": {
+          "column": "applied_qty",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "shortfallQty": {
+          "column": "shortfall_qty",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": true
+        },
+        "eventType": {
+          "column": "event_type",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "reversalOfLogId": {
+          "column": "reversal_of_log_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "lotId": {
+          "column": "lot_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "lotNo": {
+          "column": "lot_no",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "lotRemoteId": {
+          "column": "lot_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "inventoryId",
+          "localField": "inventory_id",
+          "type": "inventoryItem",
+          "required": true
+        },
+        {
+          "relation": "sampleTestId",
+          "localField": "sample_test_id",
+          "type": "labResult",
+          "required": true
+        },
+        {
+          "relation": "lotId",
+          "localField": "lot_id",
+          "type": "inventoryLot",
+          "required": false
+        },
+        {
+          "relation": "reversalOfLogId",
+          "localField": "reversal_of_log_id",
+          "type": "consumption",
+          "required": false
+        }
+      ],
+      "unique": []
+    },
+    "stockAdjustment": {
+      "collection": "stockAdjustments",
+      "table": "lab_stock_adjustments",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": true,
+      "fields": [
+        "adjustedAt",
+        "adjustedBy",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "inventoryId",
+        "localId",
+        "newQty",
+        "oldQty",
+        "organizationId",
+        "reason",
+        "remoteId",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "inventoryId": {
+          "column": "inventory_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "oldQty": {
+          "column": "old_qty",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": false
+        },
+        "newQty": {
+          "column": "new_qty",
+          "type": "REAL",
+          "required": true,
+          "hasDefault": false
+        },
+        "reason": {
+          "column": "reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "adjustedBy": {
+          "column": "adjusted_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "adjustedAt": {
+          "column": "adjusted_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "adjustedBy"
+      ],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "inventoryId",
+          "localField": "inventory_id",
+          "type": "inventoryItem",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "equipment": {
+      "collection": "equipment",
+      "table": "lab_equipment",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "code",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "description",
+        "deviceId",
+        "lastCalibrationDate",
+        "localId",
+        "manufacturer",
+        "name",
+        "nextCalibrationDate",
+        "organizationId",
+        "remoteId",
+        "serialNumber",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "name": {
+          "column": "name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "code": {
+          "column": "code",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "manufacturer": {
+          "column": "manufacturer",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "serialNumber": {
+          "column": "serial_number",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "lastCalibrationDate": {
+          "column": "last_calibration_date",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "nextCalibrationDate": {
+          "column": "next_calibration_date",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "code"
+          ],
+          "fields": [
+            "code"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        },
+        {
+          "columns": [
+            "name"
+          ],
+          "fields": [
+            "name"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "equipmentEvent": {
+      "collection": "equipmentEvents",
+      "table": "lab_equipment_events",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "equipmentId",
+        "equipmentRemoteId",
+        "eventDate",
+        "eventType",
+        "localId",
+        "notes",
+        "organizationId",
+        "remoteId",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "equipmentId": {
+          "column": "equipment_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "equipmentRemoteId": {
+          "column": "equipment_remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "eventType": {
+          "column": "event_type",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "eventDate": {
+          "column": "event_date",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "notes": {
+          "column": "notes",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "equipmentId",
+          "localField": "equipment_id",
+          "type": "equipment",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "worksheet": {
+      "collection": "worksheets",
+      "table": "lab_worksheet",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "entryCode",
+        "localId",
+        "organizationId",
+        "remoteId",
+        "sampleNumber",
+        "sourceName",
+        "sourceRefId",
+        "sourceType",
+        "status",
+        "updatedAt",
+        "updatedBy",
+        "version",
+        "voidReason",
+        "voidedAt",
+        "voidedBy"
+      ],
+      "sqlFields": {
+        "sourceType": {
+          "column": "source_type",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "sourceRefId": {
+          "column": "source_ref_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "sourceName": {
+          "column": "source_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "sampleNumber": {
+          "column": "sample_number",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "entryCode": {
+          "column": "entry_code",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "status": {
+          "column": "status",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "voidReason": {
+          "column": "void_reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "voidedBy": {
+          "column": "voided_by",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "voidedAt": {
+          "column": "voided_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [
+        "createdBy",
+        "updatedBy",
+        "voidedBy"
+      ],
+      "payloadFields": null,
+      "parents": [],
+      "unique": []
+    },
+    "referenceMaterial": {
+      "collection": "referenceMaterials",
+      "table": "reference_materials",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "samples.read",
+      "appendOnly": false,
+      "fields": [
+        "active",
+        "category",
+        "chemicalReferenceJson",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "importedAt",
+        "localId",
+        "materialCode",
+        "materialName",
+        "organizationId",
+        "physicalReferenceJson",
+        "remoteId",
+        "sourceRow",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "materialName": {
+          "column": "material_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "materialCode": {
+          "column": "material_code",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "physicalReferenceJson": {
+          "column": "physical_reference_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "chemicalReferenceJson": {
+          "column": "chemical_reference_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "sourceRow": {
+          "column": "source_row",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "importedAt": {
+          "column": "imported_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "active": {
+          "column": "active",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "material_name"
+          ],
+          "fields": [
+            "materialName"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "labMaterialAnalysis": {
+      "collection": "labConfig",
+      "table": "lab_material_analyses",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "analysisId",
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "localId",
+        "materialId",
+        "materialRemoteId",
+        "maxValue",
+        "minValue",
+        "organizationId",
+        "payload",
+        "remoteId",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "materialId": {
+          "column": "material_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "analysisId": {
+          "column": "analysis_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "minValue": {
+          "column": "min_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "maxValue": {
+          "column": "max_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "materialRemoteId": {
+          "column": "material_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "material_id",
+        "analysis_id",
+        "min_value",
+        "max_value",
+        "unit",
+        "material_remote_id"
+      ],
+      "parents": [
+        {
+          "relation": "materialId",
+          "localField": "material_id",
+          "type": "referenceMaterial",
+          "required": true
+        },
+        {
+          "relation": "analysisId",
+          "localField": "analysis_id",
+          "type": "labAnalysis",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "material_id",
+            "analysis_id"
+          ],
+          "fields": [
+            "materialId",
+            "analysisId"
+          ],
+          "collations": [
+            "BINARY",
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "nirValidationSettings": {
+      "collection": "labConfig",
+      "table": "nir_validation_settings",
+      "primaryKey": "id",
+      "autoIncrement": true,
+      "permission": "lab_results.update",
+      "readPermission": "lab_results.read",
+      "appendOnly": false,
+      "fields": [
+        "configType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "entityId",
+        "entityName",
+        "localId",
+        "organizationId",
+        "parameter",
+        "payload",
+        "remoteId",
+        "resetBy",
+        "resetByName",
+        "resetNote",
+        "scope",
+        "startDate",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "startDate": {
+          "column": "start_date",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "resetNote": {
+          "column": "reset_note",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "resetBy": {
+          "column": "reset_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "resetByName": {
+          "column": "reset_by_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "scope": {
+          "column": "scope",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "entityId": {
+          "column": "entity_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "entityName": {
+          "column": "entity_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "parameter": {
+          "column": "parameter",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": [
+        "id",
+        "start_date",
+        "reset_note",
+        "reset_by",
+        "reset_by_name",
+        "scope",
+        "entity_id",
+        "entity_name",
+        "parameter",
+        "created_at"
+      ],
+      "parents": [],
+      "unique": []
+    },
+    "qcCustomTable": {
+      "collection": "qcCustomTables",
+      "table": "qc_custom_tables",
+      "primaryKey": "table_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "description",
+        "deviceId",
+        "localId",
+        "organizationId",
+        "remoteId",
+        "sortOrder",
+        "title",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "title": {
+          "column": "title",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "sortOrder": {
+          "column": "sort_order",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [],
+      "unique": []
+    },
+    "qcCustomTableField": {
+      "collection": "qcCustomTableFields",
+      "table": "qc_custom_table_fields",
+      "primaryKey": "field_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "colType",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "label",
+        "localId",
+        "organizationId",
+        "remoteId",
+        "required",
+        "sortOrder",
+        "tableId",
+        "tableRemoteId",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "tableId": {
+          "column": "table_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "tableRemoteId": {
+          "column": "table_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "label": {
+          "column": "label",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "colType": {
+          "column": "col_type",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "required": {
+          "column": "required",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "sortOrder": {
+          "column": "sort_order",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "tableId",
+          "localField": "table_id",
+          "type": "qcCustomTable",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "qcCustomTableRow": {
+      "collection": "qcCustomTableRows",
+      "table": "qc_custom_table_rows",
+      "primaryKey": "row_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "localId",
+        "note",
+        "organizationId",
+        "recordedAt",
+        "recordedBy",
+        "recordedByName",
+        "remoteId",
+        "tableId",
+        "tableRemoteId",
+        "updatedAt",
+        "updatedBy",
+        "valuesJson",
+        "version"
+      ],
+      "sqlFields": {
+        "tableId": {
+          "column": "table_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "tableRemoteId": {
+          "column": "table_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "valuesJson": {
+          "column": "values_json",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "note": {
+          "column": "note",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "recordedAt": {
+          "column": "recorded_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "recordedBy": {
+          "column": "recorded_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "recordedByName": {
+          "column": "recorded_by_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "tableId",
+          "localField": "table_id",
+          "type": "qcCustomTable",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "qcTemplate": {
+      "collection": "qcTemplates",
+      "table": "qc_templates",
+      "primaryKey": "template_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "allowNa",
+        "blockSubmitIfCriticalFail",
+        "businessVersion",
+        "category",
+        "code",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "dept",
+        "description",
+        "deviceId",
+        "effectiveDate",
+        "enforceEvidenceOnFail",
+        "expiryDate",
+        "isArchived",
+        "isPublished",
+        "localId",
+        "name",
+        "organizationId",
+        "ownerId",
+        "publishedAt",
+        "publishedBy",
+        "recurrence",
+        "remoteId",
+        "requiresApprovalOnSubmit",
+        "revisionNote",
+        "site",
+        "tags",
+        "type",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "name": {
+          "column": "name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "code": {
+          "column": "code",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "type": {
+          "column": "type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "dept": {
+          "column": "dept",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "site": {
+          "column": "site",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "category": {
+          "column": "category",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "isPublished": {
+          "column": "is_published",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "isArchived": {
+          "column": "is_archived",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "requiresApprovalOnSubmit": {
+          "column": "requires_approval_on_submit",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "allowNa": {
+          "column": "allow_na",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "enforceEvidenceOnFail": {
+          "column": "enforce_evidence_on_fail",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "blockSubmitIfCriticalFail": {
+          "column": "block_submit_if_critical_fail",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "ownerId": {
+          "column": "owner_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "publishedBy": {
+          "column": "published_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "publishedAt": {
+          "column": "published_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "effectiveDate": {
+          "column": "effective_date",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "expiryDate": {
+          "column": "expiry_date",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "tags": {
+          "column": "tags",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "revisionNote": {
+          "column": "revision_note",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "recurrence": {
+          "column": "recurrence",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [],
+      "unique": [
+        {
+          "columns": [
+            "code"
+          ],
+          "fields": [
+            "code"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "qcSection": {
+      "collection": "qcSections",
+      "table": "qc_sections",
+      "primaryKey": "section_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "conditionalRuleJson",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "description",
+        "deviceId",
+        "isCollapsible",
+        "localId",
+        "orderIndex",
+        "organizationId",
+        "remoteId",
+        "requiredAll",
+        "templateId",
+        "templateRemoteId",
+        "title",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "templateId": {
+          "column": "template_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "title": {
+          "column": "title",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "orderIndex": {
+          "column": "order_index",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "isCollapsible": {
+          "column": "is_collapsible",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "requiredAll": {
+          "column": "required_all",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "conditionalRuleJson": {
+          "column": "conditional_rule_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "templateRemoteId": {
+          "column": "template_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "templateId",
+          "localField": "template_id",
+          "type": "qcTemplate",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "qcItem": {
+      "collection": "qcItems",
+      "table": "qc_items",
+      "primaryKey": "item_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "allowNa",
+        "conditionalShowJson",
+        "createdAt",
+        "createdBy",
+        "defaultValue",
+        "defectCode",
+        "deletedAt",
+        "deviceId",
+        "failTriggerJson",
+        "helpText",
+        "isCritical",
+        "itemType",
+        "label",
+        "localId",
+        "maxValue",
+        "minValue",
+        "optionsJson",
+        "orderIndex",
+        "organizationId",
+        "remoteId",
+        "requireEvidenceIfFail",
+        "requireEvidenceIfValue",
+        "required",
+        "sectionId",
+        "sectionRemoteId",
+        "templateId",
+        "templateRemoteId",
+        "tolerance",
+        "toleranceType",
+        "unit",
+        "updatedAt",
+        "updatedBy",
+        "validationRuleJson",
+        "version"
+      ],
+      "sqlFields": {
+        "sectionId": {
+          "column": "section_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "templateId": {
+          "column": "template_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "label": {
+          "column": "label",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "itemType": {
+          "column": "item_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "orderIndex": {
+          "column": "order_index",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "required": {
+          "column": "required",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "allowNa": {
+          "column": "allow_na",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "isCritical": {
+          "column": "is_critical",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "requireEvidenceIfFail": {
+          "column": "require_evidence_if_fail",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "requireEvidenceIfValue": {
+          "column": "require_evidence_if_value",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "defaultValue": {
+          "column": "default_value",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "optionsJson": {
+          "column": "options_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "unit": {
+          "column": "unit",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "minValue": {
+          "column": "min_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "maxValue": {
+          "column": "max_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "tolerance": {
+          "column": "tolerance",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "toleranceType": {
+          "column": "tolerance_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "validationRuleJson": {
+          "column": "validation_rule_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "conditionalShowJson": {
+          "column": "conditional_show_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "failTriggerJson": {
+          "column": "fail_trigger_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "helpText": {
+          "column": "help_text",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "defectCode": {
+          "column": "defect_code",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "templateRemoteId": {
+          "column": "template_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "sectionRemoteId": {
+          "column": "section_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "sectionId",
+          "localField": "section_id",
+          "type": "qcSection",
+          "required": true
+        },
+        {
+          "relation": "templateId",
+          "localField": "template_id",
+          "type": "qcTemplate",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "qcInspection": {
+      "collection": "qcInspections",
+      "table": "qc_inspections",
+      "primaryKey": "inspection_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "approvedAt",
+        "approvedBy",
+        "approvedByName",
+        "batchNo",
+        "businessVersion",
+        "closedAt",
+        "createdAt",
+        "createdBy",
+        "criticalNcCount",
+        "deletedAt",
+        "dept",
+        "deviceId",
+        "endAt",
+        "grnNo",
+        "hasNc",
+        "inspectionDate",
+        "inspectorId",
+        "inspectorName",
+        "line",
+        "localId",
+        "location",
+        "lotNo",
+        "majorNcCount",
+        "minorNcCount",
+        "ncCount",
+        "organizationId",
+        "poNo",
+        "qtyInspected",
+        "qtyUnit",
+        "refId",
+        "refType",
+        "rejectedAt",
+        "rejectionReason",
+        "remarks",
+        "remoteId",
+        "resultOverall",
+        "reviewComments",
+        "reviewedAt",
+        "reviewerId",
+        "reviewerName",
+        "scorePct",
+        "shift",
+        "site",
+        "startAt",
+        "status",
+        "submittedAt",
+        "templateId",
+        "templateRemoteId",
+        "templateVersion",
+        "updatedAt",
+        "updatedBy",
+        "version",
+        "workCenter"
+      ],
+      "sqlFields": {
+        "templateId": {
+          "column": "template_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "templateVersion": {
+          "column": "template_version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "refType": {
+          "column": "ref_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "refId": {
+          "column": "ref_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "lotNo": {
+          "column": "lot_no",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "batchNo": {
+          "column": "batch_no",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "poNo": {
+          "column": "po_no",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "grnNo": {
+          "column": "grn_no",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "qtyInspected": {
+          "column": "qty_inspected",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "qtyUnit": {
+          "column": "qty_unit",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "dept": {
+          "column": "dept",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "site": {
+          "column": "site",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "location": {
+          "column": "location",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "line": {
+          "column": "line",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "workCenter": {
+          "column": "work_center",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "status": {
+          "column": "status",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "resultOverall": {
+          "column": "result_overall",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "scorePct": {
+          "column": "score_pct",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "hasNc": {
+          "column": "has_nc",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "ncCount": {
+          "column": "nc_count",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "criticalNcCount": {
+          "column": "critical_nc_count",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "majorNcCount": {
+          "column": "major_nc_count",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "minorNcCount": {
+          "column": "minor_nc_count",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "inspectorId": {
+          "column": "inspector_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inspectorName": {
+          "column": "inspector_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "reviewerId": {
+          "column": "reviewer_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "reviewerName": {
+          "column": "reviewer_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "approvedBy": {
+          "column": "approved_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "approvedByName": {
+          "column": "approved_by_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "submittedAt": {
+          "column": "submitted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "reviewedAt": {
+          "column": "reviewed_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "approvedAt": {
+          "column": "approved_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectedAt": {
+          "column": "rejected_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "closedAt": {
+          "column": "closed_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inspectionDate": {
+          "column": "inspection_date",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "startAt": {
+          "column": "start_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "endAt": {
+          "column": "end_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "shift": {
+          "column": "shift",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remarks": {
+          "column": "remarks",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "reviewComments": {
+          "column": "review_comments",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectionReason": {
+          "column": "rejection_reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "templateRemoteId": {
+          "column": "template_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "templateId",
+          "localField": "template_id",
+          "type": "qcTemplate",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "qcResponse": {
+      "collection": "qcResponses",
+      "table": "qc_responses",
+      "primaryKey": "resp_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "answeredBy",
+        "answeredByName",
+        "createdAt",
+        "createdBy",
+        "defectCode",
+        "deletedAt",
+        "deviceId",
+        "inspectionId",
+        "inspectionRemoteId",
+        "isCriticalFailure",
+        "itemId",
+        "itemRemoteId",
+        "localId",
+        "measuredAt",
+        "measuredValue",
+        "notes",
+        "organizationId",
+        "photosJson",
+        "remoteId",
+        "result",
+        "sectionId",
+        "sectionRemoteId",
+        "signatureBase64",
+        "updatedAt",
+        "updatedBy",
+        "value",
+        "valueType",
+        "version"
+      ],
+      "sqlFields": {
+        "inspectionId": {
+          "column": "inspection_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "itemId": {
+          "column": "item_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "sectionId": {
+          "column": "section_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "result": {
+          "column": "result",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "value": {
+          "column": "value",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "valueType": {
+          "column": "value_type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "notes": {
+          "column": "notes",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "photosJson": {
+          "column": "photos_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "signatureBase64": {
+          "column": "signature_base64",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "measuredAt": {
+          "column": "measured_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "measuredValue": {
+          "column": "measured_value",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "defectCode": {
+          "column": "defect_code",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "isCriticalFailure": {
+          "column": "is_critical_failure",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "answeredBy": {
+          "column": "answered_by",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "answeredByName": {
+          "column": "answered_by_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inspectionRemoteId": {
+          "column": "inspection_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "itemRemoteId": {
+          "column": "item_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "sectionRemoteId": {
+          "column": "section_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "inspectionId",
+          "localField": "inspection_id",
+          "type": "qcInspection",
+          "required": true
+        },
+        {
+          "relation": "itemId",
+          "localField": "item_id",
+          "type": "qcItem",
+          "required": true
+        },
+        {
+          "relation": "sectionId",
+          "localField": "section_id",
+          "type": "qcSection",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "inspection_id",
+            "item_id"
+          ],
+          "fields": [
+            "inspectionId",
+            "itemId"
+          ],
+          "collations": [
+            "BINARY",
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    },
+    "qcTaskLog": {
+      "collection": "qcTaskLogs",
+      "table": "qc_task_log",
+      "primaryKey": "log_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": true,
+      "fields": [
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "deviceId",
+        "inspectionId",
+        "inspectionRemoteId",
+        "itemId",
+        "itemRemoteId",
+        "localId",
+        "loggedAt",
+        "loggedBy",
+        "loggedByName",
+        "note",
+        "organizationId",
+        "remoteId",
+        "templateId",
+        "templateRemoteId",
+        "updatedAt",
+        "updatedBy",
+        "version"
+      ],
+      "sqlFields": {
+        "inspectionId": {
+          "column": "inspection_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "templateId": {
+          "column": "template_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "itemId": {
+          "column": "item_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "note": {
+          "column": "note",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "loggedBy": {
+          "column": "logged_by",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "loggedByName": {
+          "column": "logged_by_name",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "loggedAt": {
+          "column": "logged_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inspectionRemoteId": {
+          "column": "inspection_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "templateRemoteId": {
+          "column": "template_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "itemRemoteId": {
+          "column": "item_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "inspectionId",
+          "localField": "inspection_id",
+          "type": "qcInspection",
+          "required": true
+        },
+        {
+          "relation": "templateId",
+          "localField": "template_id",
+          "type": "qcTemplate",
+          "required": true
+        },
+        {
+          "relation": "itemId",
+          "localField": "item_id",
+          "type": "qcItem",
+          "required": true
+        }
+      ],
+      "unique": []
+    },
+    "qcFindingNc": {
+      "collection": "qcFindingsNc",
+      "table": "qc_findings_nc",
+      "primaryKey": "finding_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "actionPlan",
+        "assignedAt",
+        "assignedTo",
+        "assignedToName",
+        "capaId",
+        "capaRemoteId",
+        "category",
+        "closedAt",
+        "closedBy",
+        "code",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "description",
+        "deviceId",
+        "disposition",
+        "dueDate",
+        "evidenceJson",
+        "inspectionId",
+        "inspectionRemoteId",
+        "itemId",
+        "itemRemoteId",
+        "localId",
+        "organizationId",
+        "proposedAction",
+        "qtyAffected",
+        "qtyUnit",
+        "rejectedAt",
+        "rejectionReason",
+        "remoteId",
+        "respId",
+        "respRemoteId",
+        "rootCause",
+        "severity",
+        "status",
+        "type",
+        "updatedAt",
+        "updatedBy",
+        "verifiedAt",
+        "verifiedBy",
+        "verifiedByName",
+        "version"
+      ],
+      "sqlFields": {
+        "inspectionId": {
+          "column": "inspection_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "itemId": {
+          "column": "item_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "respId": {
+          "column": "resp_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "code": {
+          "column": "code",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "severity": {
+          "column": "severity",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "category": {
+          "column": "category",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "status": {
+          "column": "status",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "type": {
+          "column": "type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "dueDate": {
+          "column": "due_date",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "assignedTo": {
+          "column": "assigned_to",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "assignedToName": {
+          "column": "assigned_to_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "assignedAt": {
+          "column": "assigned_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rootCause": {
+          "column": "root_cause",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "actionPlan": {
+          "column": "action_plan",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "proposedAction": {
+          "column": "proposed_action",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "qtyAffected": {
+          "column": "qty_affected",
+          "type": "REAL",
+          "required": false,
+          "hasDefault": false
+        },
+        "qtyUnit": {
+          "column": "qty_unit",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "disposition": {
+          "column": "disposition",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "verifiedBy": {
+          "column": "verified_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "verifiedByName": {
+          "column": "verified_by_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "verifiedAt": {
+          "column": "verified_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "closedAt": {
+          "column": "closed_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "closedBy": {
+          "column": "closed_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectedAt": {
+          "column": "rejected_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectionReason": {
+          "column": "rejection_reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "evidenceJson": {
+          "column": "evidence_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "capaId": {
+          "column": "capa_id",
+          "type": "INTEGER",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "inspectionRemoteId": {
+          "column": "inspection_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "itemRemoteId": {
+          "column": "item_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "respRemoteId": {
+          "column": "resp_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        },
+        "capaRemoteId": {
+          "column": "capa_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "inspectionId",
+          "localField": "inspection_id",
+          "type": "qcInspection",
+          "required": false
+        },
+        {
+          "relation": "itemId",
+          "localField": "item_id",
+          "type": "qcItem",
+          "required": false
+        },
+        {
+          "relation": "respId",
+          "localField": "resp_id",
+          "type": "qcResponse",
+          "required": false
+        },
+        {
+          "relation": "capaId",
+          "localField": "capa_id",
+          "type": "qcCapa",
+          "required": false
+        }
+      ],
+      "unique": []
+    },
+    "qcCapa": {
+      "collection": "qcCapa",
+      "table": "qc_capa",
+      "primaryKey": "capa_id",
+      "autoIncrement": true,
+      "permission": "qc.write",
+      "readPermission": "qc.read",
+      "appendOnly": false,
+      "fields": [
+        "actionCompletedAt",
+        "actionCompletedBy",
+        "actionCompletionNotes",
+        "actionPlan",
+        "actionStepsJson",
+        "assignedTo",
+        "assignedToName",
+        "capaNo",
+        "closedAt",
+        "closedBy",
+        "closureNotes",
+        "createdAt",
+        "createdBy",
+        "deletedAt",
+        "dept",
+        "description",
+        "deviceId",
+        "dueAt",
+        "effectivenessCheckedAt",
+        "effectivenessNotes",
+        "evidenceJson",
+        "findingId",
+        "findingRemoteId",
+        "isEffective",
+        "localId",
+        "organizationId",
+        "priority",
+        "rejectedAt",
+        "rejectionReason",
+        "remoteId",
+        "rootCause",
+        "rootCauseMethod",
+        "status",
+        "targetCompletionAt",
+        "title",
+        "type",
+        "updatedAt",
+        "updatedBy",
+        "verificationNotes",
+        "verifiedAt",
+        "verifiedBy",
+        "verifiedByName",
+        "version"
+      ],
+      "sqlFields": {
+        "findingId": {
+          "column": "finding_id",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": false
+        },
+        "capaNo": {
+          "column": "capa_no",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "type": {
+          "column": "type",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "title": {
+          "column": "title",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "description": {
+          "column": "description",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rootCause": {
+          "column": "root_cause",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rootCauseMethod": {
+          "column": "root_cause_method",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "actionPlan": {
+          "column": "action_plan",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "actionStepsJson": {
+          "column": "action_steps_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "assignedTo": {
+          "column": "assigned_to",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "assignedToName": {
+          "column": "assigned_to_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "dept": {
+          "column": "dept",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "status": {
+          "column": "status",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "priority": {
+          "column": "priority",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": true
+        },
+        "dueAt": {
+          "column": "due_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "targetCompletionAt": {
+          "column": "target_completion_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "actionCompletedAt": {
+          "column": "action_completed_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "actionCompletedBy": {
+          "column": "action_completed_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "actionCompletionNotes": {
+          "column": "action_completion_notes",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "verifiedBy": {
+          "column": "verified_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "verifiedByName": {
+          "column": "verified_by_name",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "verifiedAt": {
+          "column": "verified_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "verificationNotes": {
+          "column": "verification_notes",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "isEffective": {
+          "column": "is_effective",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "effectivenessCheckedAt": {
+          "column": "effectiveness_checked_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "effectivenessNotes": {
+          "column": "effectiveness_notes",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "closureNotes": {
+          "column": "closure_notes",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "closedAt": {
+          "column": "closed_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "closedBy": {
+          "column": "closed_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectedAt": {
+          "column": "rejected_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "rejectionReason": {
+          "column": "rejection_reason",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "evidenceJson": {
+          "column": "evidence_json",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deletedAt": {
+          "column": "deleted_at",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "createdAt": {
+          "column": "created_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "updatedAt": {
+          "column": "updated_at",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": false
+        },
+        "createdBy": {
+          "column": "created_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "updatedBy": {
+          "column": "updated_by",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "version": {
+          "column": "version",
+          "type": "INTEGER",
+          "required": true,
+          "hasDefault": true
+        },
+        "remoteId": {
+          "column": "remote_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "deviceId": {
+          "column": "device_id",
+          "type": "TEXT",
+          "required": false,
+          "hasDefault": false
+        },
+        "findingRemoteId": {
+          "column": "finding_remote_id",
+          "type": "TEXT",
+          "required": true,
+          "hasDefault": true
+        }
+      },
+      "actors": [],
+      "payloadFields": null,
+      "parents": [
+        {
+          "relation": "findingId",
+          "localField": "finding_id",
+          "type": "qcFindingNc",
+          "required": true
+        }
+      ],
+      "unique": [
+        {
+          "columns": [
+            "capa_no"
+          ],
+          "fields": [
+            "capaNo"
+          ],
+          "collations": [
+            "BINARY"
+          ],
+          "where": null
+        }
+      ]
+    }
+  },
+  "sharedSettingKeys": [
+    "daily_report_form_no",
+    "department_label",
+    "equipment_label_form_no",
+    "followup_report_form_no",
+    "inspection_label_form_no",
+    "inspection_report_form_no",
+    "lab_daily_report_form_no",
+    "lab_monthly_report_form_no",
+    "lab_yearly_report_form_no",
+    "monthly_report_form_no",
+    "ncr_report_form_no",
+    "qa_form_no",
+    "report_logo_data_uri",
+    "yearly_report_form_no"
+  ]
+}

@@ -5,6 +5,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/constants/report_form_keys.dart';
 import '../../../../../core/utils/app_exceptions.dart';
@@ -128,6 +129,10 @@ class DetailHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final gate = getIt.isRegistered<AuthGate>() ? getIt<AuthGate>() : null;
+    final session = gate?.currentUser == null ? null : gate!.session;
+    final canExport = session?.canDo(Permission.reportsExport) ?? false;
+    final canSetForm = session?.canDo(Permission.reportsCreate) ?? false;
     return AppPageHeader(
       title: '${inspection['material_name']}',
       subtitle: '${inspection['entry_code']} — ${inspection['material_code']}',
@@ -136,44 +141,59 @@ class DetailHeader extends StatelessWidget {
         // Products carry no header quality decision (per-sample only).
         if ('${inspection['inspection_kind'] ?? 'raw'}' != 'product')
           AppStatusBadge('${inspection['decision_status']}'),
-        AppButton(
-          style: AppButtonStyle.pdf,
-          label: AppStrings.exportPdf,
-          icon: Icon(Icons.picture_as_pdf, size: 18.r),
-          loading: state.busy == 'report',
-          onPressed: state.busy.isEmpty ? () => onExportPdf('report') : null,
-        ),
-        AppButton(
-          style: AppButtonStyle.secondary,
-          label: AppText.t('QR', 'QR'),
-          icon: Icon(Icons.label_outline, size: 18.r),
-          loading: state.busy == 'label',
-          onPressed: state.busy.isEmpty ? () => onExportPdf('label') : null,
-        ),
-        IconButton(
-          tooltip: AppText.t('أرقام فورم الجودة', 'QA form numbers'),
-          onPressed: () => showFormNumbersDialog(
-            context,
-            title: AppText.t('أرقام فورم الفحص', 'Inspection form numbers'),
-            fields: [
-              FormNoField(
-                key: ReportFormKeys.inspectionReport,
-                label: AppText.t(
-                  'رقم فورم تقرير الفحص (PDF)',
-                  'Inspection report (PDF) form no.',
-                ),
-              ),
-              FormNoField(
-                key: ReportFormKeys.inspectionLabel,
-                label: AppText.t(
-                  'رقم فورم الملصق / QR',
-                  'Label / QR form no.',
-                ),
-              ),
-            ],
+        if (canExport) ...[
+          AppButton(
+            style: AppButtonStyle.pdf,
+            label: AppStrings.exportPdf,
+            icon: Icon(Icons.picture_as_pdf, size: 18.r),
+            loading: state.busy == 'report',
+            onPressed: state.busy.isEmpty ? () => onExportPdf('report') : null,
           ),
-          icon: Icon(Icons.settings_outlined, size: 20.r),
-        ),
+          AppButton(
+            style: AppButtonStyle.secondary,
+            label: AppText.t(
+              'تقرير بتفاصيل التحاليل',
+              'Report with analysis details',
+            ),
+            icon: const Icon(Icons.playlist_add),
+            loading: state.busy == 'detailed',
+            onPressed: state.busy.isEmpty
+                ? () => onExportPdf('detailed')
+                : null,
+          ),
+          AppButton(
+            style: AppButtonStyle.secondary,
+            label: AppText.t('QR', 'QR'),
+            icon: Icon(Icons.label_outline, size: 18.r),
+            loading: state.busy == 'label',
+            onPressed: state.busy.isEmpty ? () => onExportPdf('label') : null,
+          ),
+        ],
+        if (canSetForm)
+          IconButton(
+            tooltip: AppText.t('أرقام فورم الجودة', 'QA form numbers'),
+            onPressed: () => showFormNumbersDialog(
+              context,
+              title: AppText.t('أرقام فورم الفحص', 'Inspection form numbers'),
+              fields: [
+                FormNoField(
+                  key: ReportFormKeys.inspectionReport,
+                  label: AppText.t(
+                    'رقم فورم تقرير الفحص (PDF)',
+                    'Inspection report (PDF) form no.',
+                  ),
+                ),
+                FormNoField(
+                  key: ReportFormKeys.inspectionLabel,
+                  label: AppText.t(
+                    'رقم فورم الملصق / QR',
+                    'Label / QR form no.',
+                  ),
+                ),
+              ],
+            ),
+            icon: Icon(Icons.settings_outlined, size: 20.r),
+          ),
       ],
     );
   }

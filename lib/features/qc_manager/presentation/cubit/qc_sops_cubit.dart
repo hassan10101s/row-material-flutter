@@ -161,7 +161,9 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
           filters: initialFilters ?? const QcSopFilters(),
           loading: true,
         ),
-      );
+      ) {
+    refreshOnSync(load);
+  }
 
   final QcSopRepository repo;
   int _token = 0;

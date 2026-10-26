@@ -912,6 +912,25 @@
 
         <div class="accent-strip-bottom"></div>
 
+        {% if include_analysis_details %}
+        <section style="margin:16px 0;page-break-before:auto">
+            <h3>{% if is_en %}Analysis details{% else %}تفاصيل التحاليل{% endif %}</h3>
+            <table style="width:100%;border-collapse:collapse;font-size:10px">
+                <thead><tr>
+                    <th>{% if is_en %}Analysis / Reference{% else %}التحليل / المرجع{% endif %}</th>
+                    <th>{% if is_en %}Sample{% else %}العينة{% endif %}</th>
+                    <th>{% if is_en %}Result{% else %}النتيجة{% endif %}</th>
+                    <th>{% if is_en %}Inputs{% else %}المدخلات{% endif %}</th>
+                    <th>{% if is_en %}Tested at{% else %}توقيت التحليل{% endif %}</th>
+                </tr></thead>
+                <tbody>{% for test in analysis_details %}<tr>
+                    <td>{{ test.name }}<br>{{ test.reference }}</td>
+                    <td>{{ test.sample }}</td><td>{{ test.result }} {{ test.unit }}</td>
+                    <td>{{ test.inputs }}</td><td>{{ test.tested_at }}</td>
+                </tr>{% endfor %}</tbody>
+            </table>
+        </section>
+        {% endif %}
         <div class="footer">
             <div class="signature-box">
                 {% if is_en %}Quality Specialist{% else %}Quality Specialist / أخصائي الجودة{% endif %}<br>

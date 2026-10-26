@@ -106,10 +106,7 @@ class UnitsEditorState extends State<UnitsEditor> {
           error: _symbolError,
         ),
         const SizedBox(height: AppSpacing.md),
-        AppField(
-          label: AppText.t('الاسم', 'Name'),
-          controller: _name,
-        ),
+        AppField(label: AppText.t('الاسم', 'Name'), controller: _name),
         const SizedBox(height: AppSpacing.md),
         AppField(
           label: AppText.t('البعد', 'Dimension'),

@@ -1,3 +1,4 @@
+import 'app_text_field.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -40,11 +41,11 @@ class AppUnitField extends StatefulWidget {
 
   /// Symbols from `lab_units` rows, tolerating the map shape the cubits hold.
   static List<String> symbolsOf(List<Map<String, dynamic>> rows) => [
-        for (final r in rows)
-          if ('${r['symbol'] ?? ''}'.trim().isNotEmpty &&
-              (r['is_active'] as num?)?.toInt() != 0)
-            '${r['symbol']}'.trim(),
-      ];
+    for (final r in rows)
+      if ('${r['symbol'] ?? ''}'.trim().isNotEmpty &&
+          (r['is_active'] as num?)?.toInt() != 0)
+        '${r['symbol']}'.trim(),
+  ];
 }
 
 class _AppUnitFieldState extends State<AppUnitField> {
@@ -92,12 +93,11 @@ class _AppUnitFieldState extends State<AppUnitField> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextField(
+        AppTextField(
           controller: widget.controller,
           enabled: widget.enabled,
           decoration: InputDecoration(
             labelText: widget.label ?? AppText.t('الوحدة', 'Unit'),
-            border: const OutlineInputBorder(),
             isDense: true,
             suffixIcon: IconButton(
               tooltip: AppText.t('اختيار وحدة', 'Pick a unit'),
@@ -105,9 +105,7 @@ class _AppUnitFieldState extends State<AppUnitField> {
                   ? () => setState(() => _expanded = !_expanded)
                   : null,
               icon: Icon(
-                _expanded
-                    ? Icons.arrow_drop_up
-                    : Icons.arrow_drop_down,
+                _expanded ? Icons.arrow_drop_up : Icons.arrow_drop_down,
               ),
             ),
           ),
@@ -124,10 +122,7 @@ class _AppUnitFieldState extends State<AppUnitField> {
                 'وحدة جديدة — ستُضاف لجدول الوحدات عند الحفظ',
                 'New unit — will join the units table on save',
               ),
-              style: TextStyle(
-                fontSize: 11.spMax,
-                color: AppColors.info,
-              ),
+              style: TextStyle(fontSize: 11.spMax, color: AppColors.info),
             ),
           ),
         if (_expanded && widget.enabled) ...[
@@ -138,11 +133,7 @@ class _AppUnitFieldState extends State<AppUnitField> {
             children: [
               for (final s in _matches)
                 ActionChip(
-                  label: Text(
-                    s,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                  label: Text(s, maxLines: 1, overflow: TextOverflow.ellipsis),
                   visualDensity: VisualDensity.compact,
                   onPressed: () {
                     widget.controller.text = s;

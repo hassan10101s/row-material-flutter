@@ -14,8 +14,7 @@ import 'package:flutter/services.dart';
 class QrCameraPermission {
   QrCameraPermission._();
 
-  static const MethodChannel _channel =
-      MethodChannel('material_lab/qr_camera');
+  static const MethodChannel _channel = MethodChannel('material_lab/qr_camera');
 
   /// True when the camera may be used. Shows the one-time system dialog when
   /// the permission is still undetermined; callers invoke this only from the

@@ -47,10 +47,13 @@ class _AppExpandableCardState extends State<AppExpandableCard> {
           InkWell(
             onTap: _toggle,
             borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(AppRadii.md)),
+              top: Radius.circular(AppRadii.md),
+            ),
             child: Padding(
               padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.lg, vertical: AppSpacing.md),
+                horizontal: AppSpacing.lg,
+                vertical: AppSpacing.md,
+              ),
               child: Row(
                 children: [
                   if (widget.icon != null) ...[
@@ -91,10 +94,11 @@ class _AppExpandableCardState extends State<AppExpandableCard> {
             child: _expanded
                 ? Padding(
                     padding: const EdgeInsets.fromLTRB(
-                        AppSpacing.lg,
-                        0,
-                        AppSpacing.lg,
-                        AppSpacing.lg),
+                      AppSpacing.lg,
+                      0,
+                      AppSpacing.lg,
+                      AppSpacing.lg,
+                    ),
                     child: widget.child,
                   )
                 : const SizedBox(width: double.infinity),

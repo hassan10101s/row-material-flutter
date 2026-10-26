@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart' show debugPrint;
 
 import '../core/firebase/firebase_bootstrap.dart';
+import '../core/network/connectivity_service.dart';
 import '../core/sync/sync_engine.dart';
 import '../core/sync/sync_queue.dart';
 import '../di/service_locator.dart';
@@ -28,6 +29,9 @@ import '../features/auth/domain/auth_repository.dart';
 /// app degrades to the cached session or to the `needsBootstrap` state.
 Future<void> appBootstrap() async {
   await initServiceLocator();
+  if (!isHeadlessBackground && getIt<FirebaseBootstrapResult>().isReady) {
+    FcmPushService.registerBackgroundHandler();
+  }
 
   final auth = getIt<AuthRepository>();
   await registerOrganizationBinder(auth);
@@ -36,11 +40,18 @@ Future<void> appBootstrap() async {
   // (sign-in, sign-out, organization switch, refresh failures).
   getIt<AuthGate>().start();
 
+  // Auth must know reachability before choosing the cached-session path.
+  // Previously connectivity only started inside sync, after auth restoration.
+  final connectivity = getIt<ConnectivityService>();
+  await connectivity.refresh();
+  if (!isHeadlessBackground) connectivity.start();
   final state = await auth.restoreSession();
   debugPrint('[bootstrap] auth state: ${state.name}');
 
   if (state == AuthState.needsBootstrap) {
-    debugPrint('[bootstrap] firebase missing: ${getIt<FirebaseBootstrapResult>().missingKeys}');
+    debugPrint(
+      '[bootstrap] firebase missing: ${getIt<FirebaseBootstrapResult>().missingKeys}',
+    );
     return;
   }
 
@@ -62,7 +73,7 @@ Future<void> startNotifications() async {
   if (isHeadlessBackground) return;
   try {
     final service = getIt<NotificationService>();
-    await service.initOs();
+    await service.initOs(requestPermission: false);
     final controller = getIt<NotificationController>();
     final engine = getIt<SyncEngine>();
     // Remote rows (other devices) -> bell + OS notification after every pull
@@ -73,9 +84,8 @@ Future<void> startNotifications() async {
     // Own saves -> bell within seconds. Chains the engine's debounced push
     // (buildSyncEngine sets onEnqueued to scheduleSync).
     final queue = getIt<SyncQueue>();
-    final prev = queue.onEnqueued;
     queue.onEnqueued = () {
-      prev?.call();
+      engine.scheduleSync();
       unawaited(controller.refresh());
     };
     // One pass, not two: `refresh` already loads `recent` + `unread` when the
@@ -86,11 +96,8 @@ Future<void> startNotifications() async {
     // watermarked silently by the onEnqueued hook above, so only rows from
     // other devices reach showOs here.
     controller.startAutoRefresh(showOs: true);
-    // Killed-app push (FCM topic `org_<orgId>`): delivered by Play services
-    // even when the app is swiped away / force-stopped, where Workmanager
-    // polls cannot run. Foreground pushes render through the same channel;
-    // background/killed pushes render via the system tray + background
-    // handler in fcm_push_service.dart. Never throws (push is best-effort).
+    // Push delivery uses private registered devices. Android force-stop from
+    // settings still requires reopening the app; periodic polls are a fallback.
     try {
       final fcm = getIt<FcmPushService>();
       await fcm.init();
@@ -113,7 +120,12 @@ Future<void> startNotifications() async {
 /// Runs the per-organization side effects. The callback itself lives in
 /// `registerOrganizationBinder` (service_locator) so the repository never has
 /// to import a feature module.
-void startSyncEngine() => getIt<SyncEngine>().start();
+void startSyncEngine() {
+  // Workmanager owns one awaited pull/backup. Starting the foreground loop
+  // here launched an unawaited extra cycle that could outlive its engine.
+  if (isHeadlessBackground) return;
+  getIt<SyncEngine>().start();
+}
 
 /// Sign out and clear the in-memory session after a database restore.
 Future<void> resetAfterRestore() async {

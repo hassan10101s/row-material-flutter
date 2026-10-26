@@ -5,6 +5,7 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
+import '../../../../design_system/widgets/app_card.dart';
 
 class InsightsAndRecommendationsSection extends StatelessWidget {
   final Map<String, dynamic> summary;
@@ -22,7 +23,9 @@ class InsightsAndRecommendationsSection extends StatelessWidget {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: AppSpacing.sm),
-          Card(
+          AppCard(
+            padding: EdgeInsets.zero,
+            enableHover: false,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -103,7 +106,9 @@ class InsightCard extends StatelessWidget {
       'danger' => AppColors.danger,
       _ => AppColors.warning,
     };
-    return Card(
+    return AppCard(
+      padding: EdgeInsets.zero,
+      enableHover: false,
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(

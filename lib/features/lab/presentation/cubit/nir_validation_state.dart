@@ -8,6 +8,7 @@ class NirValidationState extends Equatable {
     this.loading = false,
     this.saving = false,
     this.error,
+    this.pendingApproval = false,
     this.settings,
     this.stats = const [],
     this.scopeFilter,
@@ -18,6 +19,7 @@ class NirValidationState extends Equatable {
   final bool loading;
   final bool saving;
   final String? error;
+  final bool pendingApproval;
   final NirValidationSettings? settings;
   final List<NirParameterStats> stats;
 
@@ -35,43 +37,44 @@ class NirValidationState extends Equatable {
     }).toList();
   }
 
-  static String scopeLabel(NirScope scope) =>
-      scope == NirScope.rawMaterial
-          ? AppText.t('خامة', 'Raw material')
-          : AppText.t('منتج', 'Product');
+  static String scopeLabel(NirScope scope) => scope == NirScope.rawMaterial
+      ? AppText.t('خامة', 'Raw material')
+      : AppText.t('منتج', 'Product');
 
   NirValidationState copyWith({
     bool? loading,
     bool? saving,
     String? error,
     bool clearError = false,
+    bool? pendingApproval,
     NirValidationSettings? settings,
     List<NirParameterStats>? stats,
     NirScope? scopeFilter,
     bool clearScope = false,
     String? query,
     List<NirValidationSettings>? resetHistory,
-  }) =>
-      NirValidationState(
-        loading: loading ?? this.loading,
-        saving: saving ?? this.saving,
-        error: clearError ? null : (error ?? this.error),
-        settings: settings ?? this.settings,
-        stats: stats ?? this.stats,
-        scopeFilter: clearScope ? null : (scopeFilter ?? this.scopeFilter),
-        query: query ?? this.query,
-        resetHistory: resetHistory ?? this.resetHistory,
-      );
+  }) => NirValidationState(
+    loading: loading ?? this.loading,
+    saving: saving ?? this.saving,
+    error: clearError ? null : (error ?? this.error),
+    pendingApproval: pendingApproval ?? this.pendingApproval,
+    settings: settings ?? this.settings,
+    stats: stats ?? this.stats,
+    scopeFilter: clearScope ? null : (scopeFilter ?? this.scopeFilter),
+    query: query ?? this.query,
+    resetHistory: resetHistory ?? this.resetHistory,
+  );
 
   @override
   List<Object?> get props => [
-        loading,
-        saving,
-        error,
-        settings,
-        stats,
-        scopeFilter,
-        query,
-        resetHistory,
-      ];
+    loading,
+    saving,
+    error,
+    pendingApproval,
+    settings,
+    stats,
+    scopeFilter,
+    query,
+    resetHistory,
+  ];
 }

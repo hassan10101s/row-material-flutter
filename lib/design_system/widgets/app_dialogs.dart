@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../core/constants/app_strings.dart';
-import '../tokens/app_breakpoints.dart';
+import 'app_adaptive.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
 import 'app_button.dart';
@@ -23,7 +23,7 @@ Future<bool> showAppConfirm(
   bool danger = false,
   IconData icon = Icons.help_outline,
 }) async {
-  final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+  final wide = appUsesDesktopChrome(context);
   if (wide) {
     final result = await showAppWindow<bool>(
       context,
@@ -128,7 +128,7 @@ Future<void> showAppAlert(
   String? okLabel,
   IconData icon = Icons.info_outline,
 }) {
-  final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+  final wide = appUsesDesktopChrome(context);
   if (wide) {
     return showAppWindow<void>(
       context,

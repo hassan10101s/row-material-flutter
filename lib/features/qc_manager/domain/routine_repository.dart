@@ -227,17 +227,16 @@ class RoutineHistoryFilters {
     String? itemQuery,
     int? limit,
     int? offset,
-  }) =>
-      RoutineHistoryFilters(
-        templateId: templateId ?? this.templateId,
-        from: from ?? this.from,
-        to: to ?? this.to,
-        person: person ?? this.person,
-        completion: completion ?? this.completion,
-        itemQuery: itemQuery ?? this.itemQuery,
-        limit: limit ?? this.limit,
-        offset: offset ?? this.offset,
-      );
+  }) => RoutineHistoryFilters(
+    templateId: templateId ?? this.templateId,
+    from: from ?? this.from,
+    to: to ?? this.to,
+    person: person ?? this.person,
+    completion: completion ?? this.completion,
+    itemQuery: itemQuery ?? this.itemQuery,
+    limit: limit ?? this.limit,
+    offset: offset ?? this.offset,
+  );
 }
 
 /// Simple daily/monthly routine lists over the existing QC checklist tables.

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/responsive/form_factor.dart';
 import '../../../design_system/tokens/app_colors.dart';
+import '../../../design_system/widgets/app_window.dart';
 import '../../../di/service_locator.dart';
 import '../../shell/presentation/shell_chrome.dart';
 import '../domain/notification_item.dart';
@@ -90,9 +91,8 @@ class NotificationBell extends StatelessWidget {
     if (ctl == null) return;
     await ctl.load();
     if (!context.mounted) return;
-    final selected = await showModalBottomSheet<NotificationItem>(
-      context: context,
-      isScrollControlled: true,
+    final selected = await showAppDialog<NotificationItem>(
+      context,
       builder: (_) => NotificationList(controller: ctl),
     );
     if (selected == null || !context.mounted) return;

@@ -48,6 +48,7 @@ class AuthGate extends ChangeNotifier {
       displayName: session.displayName,
       photoUrl: session.photoUrl,
       role: session.role,
+      roles: session.effectiveRoles,
       status: session.status,
       readOnlyDevice: session.readOnlyDevice,
     );
@@ -57,7 +58,8 @@ class AuthGate extends ChangeNotifier {
 
   /// Can the UI open a write dialog? (Local guard; Firestore rules are the
   /// second, independent layer.)
-  bool canWrite(Permission permission) => session.canDo(permission, online: online);
+  bool canWrite(Permission permission) =>
+      session.canDo(permission, online: online);
 
   bool get online => connectivity?.isOnline ?? session.isTokenFresh;
 

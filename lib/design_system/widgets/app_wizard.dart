@@ -37,9 +37,7 @@ class AppWizardBar extends StatelessWidget {
               child: ChoiceChip(
                 selected: i == current,
                 label: Text(steps[i]),
-                avatar: i < current
-                    ? const Icon(Icons.check, size: 16)
-                    : null,
+                avatar: i < current ? const Icon(Icons.check, size: 16) : null,
                 onSelected: (_) => onStep(i),
                 selectedColor: AppColors.primary,
                 checkmarkColor: Colors.white,
@@ -52,9 +50,7 @@ class AppWizardBar extends StatelessWidget {
                   fontWeight: FontWeight.w700,
                 ),
                 side: BorderSide(
-                  color: i == current
-                      ? AppColors.primary
-                      : AppColors.border,
+                  color: i == current ? AppColors.primary : AppColors.border,
                 ),
               ),
             ),
@@ -120,7 +116,11 @@ class AppProgressStepper extends StatelessWidget {
                   Container(
                     width: 32,
                     height: 2,
-                    margin: const EdgeInsets.only(bottom: 20, left: 4, right: 4),
+                    margin: const EdgeInsets.only(
+                      bottom: 20,
+                      left: 4,
+                      right: 4,
+                    ),
                     color: i < current
                         ? AppColors.success
                         : AppColors.borderMuted,

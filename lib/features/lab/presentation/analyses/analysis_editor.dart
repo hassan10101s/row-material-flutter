@@ -23,6 +23,8 @@ import '../../core/formula_engine.dart'
 import '../../domain/lab_local_repository.dart';
 import '../../domain/lab_result_repository.dart';
 import '../../../reference/domain/reference_repository.dart';
+import '../../../../design_system/widgets/app_select_field.dart';
+import '../../../../design_system/widgets/app_text_field.dart';
 
 /// Shared analysis editor: all fields, formula, items and save path.
 ///
@@ -636,13 +638,12 @@ class AnalysisEditorState extends State<AnalysisEditor> {
             style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
           ),
           const SizedBox(height: 6),
-          DropdownButtonFormField<int?>(
+          AppSelectField<int?>(
             initialValue: selectedId,
             isExpanded: true,
             menuMaxHeight: 320,
             decoration: InputDecoration(
               labelText: AppText.t('المادة', 'Material'),
-              isDense: true,
             ),
             items: [
               DropdownMenuItem<int?>(
@@ -685,13 +686,12 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                       '${_fieldLinks[index]['inventory_id'] ?? 0}',
                     ) ??
                     0;
-                return DropdownButtonFormField<String>(
+                return AppSelectField<String>(
                   initialValue: current.isEmpty ? null : current,
                   isExpanded: true,
                   menuMaxHeight: 320,
                   decoration: InputDecoration(
                     labelText: AppText.t('وحدة الاستهلاك', 'Consume unit'),
-                    isDense: true,
                   ),
                   items: [
                     for (final u in _consumeOptions(current, linkInvId))
@@ -749,7 +749,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
             style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
           ),
           const SizedBox(height: 6),
-          TextField(
+          AppTextField(
             controller: _valueCtrl(index),
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
             onChanged: (t) {
@@ -757,7 +757,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
             },
             decoration: InputDecoration(
               labelText: AppText.t('قيمة ثابتة', 'Fixed value'),
-              isDense: true,
             ),
           ),
         ],
@@ -827,7 +826,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
           Row(
             children: [
               Expanded(
-                child: TextField(
+                child: AppTextField(
                   controller: _listAddCtrl(index),
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
@@ -835,7 +834,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
                     labelText: AppText.t('قيمة...', 'Value...'),
-                    isDense: true,
                   ),
                 ),
               ),
@@ -949,14 +947,13 @@ class AnalysisEditorState extends State<AnalysisEditor> {
               const SizedBox(width: 8),
               SizedBox(
                 width: 84,
-                child: TextField(
+                child: AppTextField(
                   controller: ctrl,
                   keyboardType: AppQuantityField.keyboard,
                   inputFormatters: [AppQuantityField.formatter],
                   style: TextStyle(fontSize: 12.5.spMax),
                   decoration: InputDecoration(
                     labelText: AppText.t('الكمية', 'Qty'),
-                    isDense: true,
                   ),
                 ),
               ),
@@ -966,12 +963,12 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                 child: Builder(
                   builder: (context) {
                     final current = '${item['unit'] ?? 'g'}';
-                    return DropdownButtonFormField<String>(
+                    return AppSelectField<String>(
                       initialValue: current.isEmpty ? null : current,
                       isExpanded: true,
                       menuMaxHeight: 320,
                       isDense: true,
-                      decoration: const InputDecoration(isDense: true),
+                      decoration: const InputDecoration(),
                       style: TextStyle(fontSize: 12.spMax),
                       items: [
                         for (final u in _consumeOptions(current, itemId))
@@ -1116,15 +1113,15 @@ class AnalysisEditorState extends State<AnalysisEditor> {
         if (_linked)
           Align(
             alignment: AlignmentDirectional.centerStart,
-            child: TextButton.icon(
+            child: AppButton(
               onPressed: _saving ? null : _unlinkParameter,
-              icon: Icon(Icons.edit_outlined, size: 16.r),
-              label: Text(
-                AppText.t(
-                  'إلغاء الربط والكتابة يدوياً',
-                  'Unlink and type manually',
-                ),
+              label: AppText.t(
+                'إلغاء الربط والكتابة يدوياً',
+                'Unlink and type manually',
               ),
+              icon: Icon(Icons.edit_outlined, size: 16.r),
+              style: AppButtonStyle.ghost,
+              small: true,
             ),
           ),
         if (!_linked && _parameters.isNotEmpty)
@@ -1138,7 +1135,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
               style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
             ),
           ),
-        TextField(
+        AppTextField(
           controller: _name,
           enabled: !_linked && !_saving,
           onChanged: (_) => setState(() => _nameError = null),
@@ -1148,12 +1145,11 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                 ? null
                 : AppText.t('مثال: الرطوبة', 'e.g. Moisture'),
             errorText: _nameError,
-            isDense: true,
           ),
         ),
         const SizedBox(height: 8),
         if (_linked)
-          TextField(
+          AppTextField(
             controller: _unit,
             enabled: false,
             decoration: InputDecoration(
@@ -1161,7 +1157,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                 'الوحدة الموروثة من المرجع',
                 'Unit inherited from reference',
               ),
-              isDense: true,
             ),
           )
         else
@@ -1170,7 +1165,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
             symbols: _unitSymbols,
             enabled: !_saving,
           ),
-        TextField(
+        AppTextField(
           controller: _referenceText,
           maxLines: 2,
           decoration: InputDecoration(
@@ -1179,16 +1174,14 @@ class AnalysisEditorState extends State<AnalysisEditor> {
               'مثال: ISO 2171 أو طريقة المعمل',
               'e.g. ISO 2171 or in-house method',
             ),
-            isDense: true,
           ),
         ),
         const SizedBox(height: 8),
-        TextField(
+        AppTextField(
           controller: _description,
           maxLines: 2,
           decoration: InputDecoration(
             labelText: AppText.t('الوصف', 'Description'),
-            isDense: true,
           ),
         ),
         Text(
@@ -1224,7 +1217,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                     Icon(Icons.tune, size: 16.r, color: AppColors.textMuted),
                     const SizedBox(width: 6),
                     Expanded(
-                      child: TextField(
+                      child: AppTextField(
                         controller: _fieldControllers[i],
                         onChanged: (_) => setState(() {}),
                         decoration: InputDecoration(
@@ -1232,7 +1225,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                             'اسم الحقل ${i + 1}',
                             'Field name ${i + 1}',
                           ),
-                          isDense: true,
                         ),
                       ),
                     ),
@@ -1274,12 +1266,11 @@ class AnalysisEditorState extends State<AnalysisEditor> {
         Row(
           children: [
             Expanded(
-              child: TextField(
+              child: AppTextField(
                 controller: _newFieldController,
                 onChanged: (_) => setState(() {}),
                 decoration: InputDecoration(
                   labelText: AppText.t('أضف حقلاً...', 'Add a field...'),
-                  isDense: true,
                 ),
               ),
             ),
@@ -1293,7 +1284,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
-        TextField(
+        AppTextField(
           controller: _formula,
           maxLines: 2,
           textDirection: TextDirection.ltr,
@@ -1302,8 +1293,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
           decoration: InputDecoration(
             labelText: AppText.t('المعادلة', 'Formula'),
             hintText: '(V1 - V2) * C * 1.4007 * F / m',
-            border: const OutlineInputBorder(),
-            isDense: true,
           ),
         ),
         const SizedBox(height: 6),

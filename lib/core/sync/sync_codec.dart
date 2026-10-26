@@ -87,8 +87,7 @@ abstract final class SyncCodec {
         return '$value';
       }
     }
-    if (typeName.contains('DocumentReference') ||
-        typeName.contains('Blob')) {
+    if (typeName.contains('DocumentReference') || typeName.contains('Blob')) {
       return '$value';
     }
     // Generic fallback: many Firebase types expose toDate().

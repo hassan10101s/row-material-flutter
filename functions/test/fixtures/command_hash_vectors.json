@@ -1,0 +1,66 @@
+[
+  {
+    "label": "integer",
+    "payload": {
+      "sampleName": "Cement A",
+      "quantity": 3
+    },
+    "hash": "cb6bb09b5201cd04ee4f6412859e563a5a8148cd346afbe5735ea06b41ca1d1b"
+  },
+  {
+    "label": "decimal-equivalent",
+    "payload": {
+      "sampleName": "Cement A",
+      "quantity": 3
+    },
+    "hash": "cb6bb09b5201cd04ee4f6412859e563a5a8148cd346afbe5735ea06b41ca1d1b"
+  },
+  {
+    "label": "numeric-keys",
+    "payload": {
+      "2": "b",
+      "10": "a",
+      "nested": {
+        "3": 2,
+        "12": 1
+      }
+    },
+    "hash": "49fb136cfa158ed1bfde0fdc3730153885c0fdad5a4796dd02ea6aafa72ab1b0"
+  },
+  {
+    "label": "arabic-unicode",
+    "payload": {
+      "notes": "اختبار 🧪",
+      "sampleName": "عينة"
+    },
+    "hash": "ce5ed252c08745122d90c264db086412dd0fd6682e33e01df55a5825512bdbf3"
+  },
+  {
+    "label": "tiny-fraction",
+    "payload": {
+      "quantity": 1e-7,
+      "nested": [
+        0.1,
+        1.25,
+        null,
+        true,
+        false
+      ]
+    },
+    "hash": "a3130bed5637ec1ca405dc79f7b3b66f02ad8b23069a49fe39b61eb1e9d81303"
+  },
+  {
+    "label": "negative-zero",
+    "payload": {
+      "quantity": 0
+    },
+    "hash": "ec5d5262e0976723cfb2507d0f9ef692e9eb6bc97e903e1557a892603d9cbd00"
+  },
+  {
+    "label": "zero",
+    "payload": {
+      "quantity": 0
+    },
+    "hash": "ec5d5262e0976723cfb2507d0f9ef692e9eb6bc97e903e1557a892603d9cbd00"
+  }
+]

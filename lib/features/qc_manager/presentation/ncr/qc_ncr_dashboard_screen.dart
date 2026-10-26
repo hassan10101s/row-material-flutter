@@ -1,3 +1,4 @@
+import '../../../../design_system/widgets/app_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -5,7 +6,6 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
-import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
@@ -15,7 +15,9 @@ import '../../../../../di/service_locator.dart';
 import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
 import '../../domain/ncr_kpis.dart';
+import '../../domain/ncr_report_row.dart';
 import '../cubit/qc_ncr_cubit.dart';
+import '../widgets/ncr_pill.dart';
 import 'qc_ncr_create_screen.dart';
 
 /// NCR dashboard (plan V6_ENHANCED §22.6).
@@ -29,6 +31,7 @@ class QcNcrDashboardScreen extends StatelessWidget {
     super.key,
     this.cubit,
     this.onOpenList,
+    this.onOpenFinding,
     this.embedded = false,
   });
 
@@ -39,6 +42,10 @@ class QcNcrDashboardScreen extends StatelessWidget {
 
   /// Pushes the table view. Optional so the dashboard is usable standalone.
   final VoidCallback? onOpenList;
+
+  /// Called with the tapped finding's id so the records below the KPI cards
+  /// open the detail screen (where edit/delete live). Optional for tests.
+  final void Function(int findingId)? onOpenFinding;
 
   /// Embedded inside the QC hub tab row: the hub owns the chrome, so this
   /// widget drops the [Scaffold]/app bar and the surrounding padding.
@@ -63,6 +70,13 @@ class QcNcrDashboardScreen extends StatelessWidget {
                     _CreateActionRow(cubit: cubit),
                     const SizedBox(height: AppSpacing.md),
                     _KpiRow(kpis: state.kpis),
+                    const SizedBox(height: AppSpacing.md),
+                    _RecordsPanel(
+                      rows: state.rows,
+                      total: state.total,
+                      onOpenFinding: onOpenFinding,
+                      onOpenList: onOpenList,
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     _AgingPanel(buckets: state.aging, total: state.total),
                     const SizedBox(height: AppSpacing.md),
@@ -163,9 +177,11 @@ class _FilterSummary extends StatelessWidget {
           ),
         ),
         if (state.hasFilters)
-          TextButton(
+          AppButton(
             onPressed: cubitClear(context),
-            child: Text(AppText.t('مسح', 'Clear')),
+            label: AppText.t('مسح', 'Clear'),
+            style: AppButtonStyle.ghost,
+            small: true,
           ),
       ],
     );
@@ -251,6 +267,132 @@ class _KpiRow extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// The findings themselves, directly under the KPI cards: each record with
+/// its NCR reference, status and description, tappable into the detail
+/// screen (where the edit/delete actions live). The dashboard previously
+/// surfaced findings only through the KPI math — the actual records were
+/// reachable solely from the repeat panel, which meant a population with no
+/// repeats had no visible path to any record. The register's full list stays
+/// one "view all" tap away for filters and paging.
+class _RecordsPanel extends StatelessWidget {
+  const _RecordsPanel({
+    required this.rows,
+    required this.total,
+    this.onOpenFinding,
+    this.onOpenList,
+  });
+
+  final List<NcrReportRow> rows;
+  final int total;
+  final void Function(int findingId)? onOpenFinding;
+  final VoidCallback? onOpenList;
+
+  static const _preview = 8;
+
+  @override
+  Widget build(BuildContext context) {
+    final canSeeAll = onOpenList != null && total > _preview;
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                AppText.t('السجلات', 'Records'),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                '$total',
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+              ),
+              const Spacer(),
+              if (canSeeAll)
+                AppButton(
+                  small: true,
+                  style: AppButtonStyle.ghost,
+                  label: AppText.t('عرض الكل', 'View all'),
+                  onPressed: onOpenList,
+                ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          if (rows.isEmpty)
+            Text(
+              AppText.t('لا توجد سجلات مطابقة', 'No matching records'),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: AppColors.textMuted),
+            )
+          else
+            for (final row in rows.take(_preview))
+              _RecordTile(
+                row: row,
+                onTap: onOpenFinding == null
+                    ? null
+                    : () => onOpenFinding!(row.findingId),
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecordTile extends StatelessWidget {
+  const _RecordTile({required this.row, this.onTap});
+
+  final NcrReportRow row;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final created = row.createdAt.length >= 10
+        ? row.createdAt.substring(0, 10)
+        : row.createdAt;
+    return ListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      onTap: onTap,
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              row.reference.isNotEmpty
+                  ? row.reference
+                  : AppText.t('بدون مرجع', 'No reference'),
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w700,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+          ncrStatePill(row.status),
+        ],
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(row.description, maxLines: 2, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            created,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: AppColors.textMuted,
+            ),
+          ),
+        ],
+      ),
+      trailing: const Icon(Icons.chevron_right),
     );
   }
 }

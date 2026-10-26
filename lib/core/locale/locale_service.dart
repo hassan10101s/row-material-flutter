@@ -22,7 +22,9 @@ class LocaleService extends ChangeNotifier {
 
   Future<void> init() async {
     final value = await settings.getSettingValue(_key);
-    _locale = value == _enCode ? const Locale(_enCode) : const Locale(_defaultCode);
+    _locale = value == _enCode
+        ? const Locale(_enCode)
+        : const Locale(_defaultCode);
     AppText.useLanguage(_locale.languageCode);
     notifyListeners();
   }

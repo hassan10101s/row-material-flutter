@@ -52,10 +52,7 @@ class AppLoadMoreFooter extends StatelessWidget {
                 errorMore!,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: AppColors.danger,
-                  fontSize: 12.spMax,
-                ),
+                style: TextStyle(color: AppColors.danger, fontSize: 12.spMax),
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
@@ -309,10 +306,7 @@ class AppDesktopLoadMore extends StatelessWidget {
               '$loaded ${AppText.t('من', 'of')} $total',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 12.spMax,
-                color: AppColors.textMuted,
-              ),
+              style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
             ),
           ),
           if (loadingMore)
@@ -336,10 +330,7 @@ class AppDesktopLoadMore extends StatelessWidget {
           else
             Text(
               AppText.t('نهاية القائمة', 'End of list'),
-              style: TextStyle(
-                fontSize: 12.spMax,
-                color: AppColors.textMuted,
-              ),
+              style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
             ),
         ],
       ),

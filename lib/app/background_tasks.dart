@@ -4,8 +4,10 @@ import 'package:flutter/widgets.dart' show WidgetsFlutterBinding, debugPrint;
 import 'package:workmanager/workmanager.dart';
 
 import '../core/platform/platform_capability.dart';
+import '../core/network/connectivity_service.dart';
 
 import '../core/sync/sync_engine.dart';
+import '../core/commands/central_sync_driver.dart';
 import '../di/service_locator.dart';
 import '../features/backup/data/backup_manager.dart';
 import '../features/notifications/data/notification_service.dart';
@@ -31,10 +33,20 @@ void backgroundTaskDispatcher() {
         isHeadlessBackground = true;
         await appBootstrap();
         try {
-          await getIt<SyncEngine>().syncNow(
-            reason: 'notif-poll',
-            pullOnly: true,
-          );
+          if (centralCommandPilotEnabled) {
+            await getIt<CentralSyncDriver>().syncNow();
+            // Audit records have their own permission and collection contract;
+            // keep that narrowly scoped feed on its dedicated legacy worker.
+            await getIt<SyncEngine>().syncNow(
+              reason: 'notif-audit',
+              pullOnly: true,
+            );
+          } else {
+            await getIt<SyncEngine>().syncNow(
+              reason: 'notif-poll',
+              pullOnly: true,
+            );
+          }
         } on Object catch (e) {
           debugPrint('[notif] background pull skipped: $e');
         }
@@ -42,15 +54,6 @@ void backgroundTaskDispatcher() {
         await service.initOs(requestPermission: false);
         final found = await service.checkForNew(showOs: false);
         await service.showOsNotifications(found);
-        // appBootstrap() starts the sync engine when the session is ready:
-        // stop it before the isolate exits so its timers do not keep the
-        // database open and contend with the foreground process on the
-        // next poll (SQLITE_BUSY / BEGIN EXCLUSIVE stalls).
-        try {
-          getIt<SyncEngine>().stop();
-        } on Object catch (e) {
-          debugPrint('[notif] background engine stop skipped: $e');
-        }
         return true;
       }
       if (task == AndroidBackupScheduler.taskName) {
@@ -65,6 +68,26 @@ void backgroundTaskDispatcher() {
       // and a revoked key / missing org would retry without end.
       debugPrint('[background] task $task failed: $e');
       return true;
+    } finally {
+      if (isHeadlessBackground) {
+        // Release only this isolate's services after all its work was
+        // awaited. Native Firebase apps are shared with the UI; keep them.
+        try {
+          if (getIt.isRegistered<SyncEngine>()) {
+            getIt<SyncEngine>().stop();
+          }
+          if (getIt.isRegistered<CentralSyncDriver>()) {
+            getIt<CentralSyncDriver>().stop();
+          }
+          if (getIt.isRegistered<ConnectivityService>()) {
+            await getIt<ConnectivityService>().dispose();
+          }
+          // sqflite_android shares single-instance handles between engines.
+          // Closing that handle here could close the foreground connection.
+        } on Object catch (e) {
+          debugPrint('[background] cleanup skipped: $e');
+        }
+      }
     }
   });
 }
@@ -78,8 +101,10 @@ void backgroundTaskDispatcher() {
 /// is the single gate; schedulers additionally guard via their own `isScheduled`.
 Future<void> ensureBackgroundInitialized() async {
   if (!PlatformCapability.canScheduleBackground) {
-    debugPrint('[background] skipped: workmanager is Android-only '
-        '(platform=${Platform.operatingSystem})');
+    debugPrint(
+      '[background] skipped: workmanager is Android-only '
+      '(platform=${Platform.operatingSystem})',
+    );
     return;
   }
   if (_workmanagerInitialized) return;

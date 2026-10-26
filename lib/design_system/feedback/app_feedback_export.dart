@@ -81,8 +81,7 @@ class AppFeedbackExport {
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => Dialog(
-        insetPadding:
-            const EdgeInsets.symmetric(horizontal: 64, vertical: 48),
+        insetPadding: const EdgeInsets.symmetric(horizontal: 64, vertical: 48),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 480),
           child: Padding(
@@ -169,10 +168,7 @@ class _ExportSheet extends StatelessWidget {
                   title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textMuted,
-                  ),
+                  style: TextStyle(fontSize: 12, color: AppColors.textMuted),
                 ),
               ],
             ),
