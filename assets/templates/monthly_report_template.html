@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
 <head>
     <meta charset="UTF-8">
-    <title>{% if is_en %}Monthly Report - {% else %}التقرير الشهري - {% endif %}{{ month_name }} {{ year }}</title>
+    <title>{% if is_en %}Monthly raw material report - {% else %}تقرير الخامات الشهري - {% endif %}{{ month_name }} {{ year }}</title>
     {% if base_url %}<base href="{{ base_url }}">{% endif %}
     <link rel="stylesheet" href="fonts/fonts.css">
     <style>
@@ -377,26 +377,85 @@
             body { background: white; padding: 0; }
             .sheet { box-shadow: none; border: 1px solid #000; width: 100%; max-width: 100%; }
         }
-    </style>
+
+/* Institutional print layout: compact summaries, restrained decoration. */
+.sheet, .report-shell { border-radius: 8px !important; background: #fff !important; box-shadow: none !important; }
+.sheet { border: 0 !important; min-height: 0 !important; }
+.watermark, .corner-tr, .corner-bl { display: none !important; }
+.top-band, .accent-strip { height: 3px !important; background: #294961 !important; }
+.header { padding: 12px 14px !important; background: #fff !important; border-bottom: 1px solid #d7dee7 !important; }
+.header-grid { gap: 10px !important; }
+.header h1, .header .title { font-size: 18px !important; line-height: 1.35 !important; margin: 3px 0 !important; color: #172b4d !important; }
+.brand-logo, .report-logo { max-height: 42px !important; height: auto !important; max-width: 112px !important; box-shadow: none !important; }
+.organization-name { font-size: 12px !important; line-height: 1.35; margin: 4px auto 5px !important; color: #24364b; }
+.subtitle, .header-main > p { font-size: 11px !important; margin-top: 3px !important; }
+.eyebrow { border-radius: 8px !important; background: #f1f4f7 !important; color: #526171 !important; padding: 3px 7px !important; font-size: 9px !important; }
+.body { padding: 10px 12px 12px !important; }
+.meta-strip, .meta-grid, .summary-grid, .quarter-grid { gap: 6px !important; margin-top: 8px !important; margin-bottom: 8px !important; }
+.meta-card, .summary-card, .quarter-card, .material-kpi { min-height: 0 !important; height: auto !important; padding: 7px 9px !important; border-radius: 8px !important; border: 1px solid #d7dee7 !important; background: #fff !important; box-shadow: none !important; }
+.meta-card::before, .meta-card::after, .quarter-card::before, .quarter-card::after { display: none !important; }
+.meta-card .label, .summary-card .summary-label, .q-name, .kpi-label { font-size: 10px !important; margin-bottom: 3px !important; color: #64748b !important; font-weight: 600 !important; }
+.meta-card .value { font-size: 12px !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-value, .q-total { font-size: 18px !important; line-height: 1.15 !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-note { font-size: 10px !important; margin-top: 3px !important; line-height: 1.35; color: #64748b !important; font-weight: 500 !important; }
+.summary-card.success .summary-value { color: #276749 !important; }
+.summary-card.danger .summary-value { color: #9b2c2c !important; }
+.summary-card.warning .summary-value { color: #875c15 !important; }
+.section-head { margin: 10px 0 6px !important; gap: 8px !important; }
+.section-title { font-size: 13px !important; }
+.materials-list { gap: 9px !important; }
+.material-card, .source-card, .panel-card, .section { border-radius: 8px !important; border: 1px solid #d7dee7 !important; box-shadow: none !important; background: #fff !important; }
+.material-header, .source-header, .section-physical, .section-chemical { padding: 7px 9px !important; background: #edf1f5 !important; color: #24364b !important; border-bottom: 1px solid #d7dee7 !important; }
+.material-title, .source-title { font-size: 12px !important; color: #24364b !important; }
+.material-badge, .badge { border-radius: 8px !important; padding: 3px 7px !important; box-shadow: none !important; background: #f5f7f9 !important; border: 1px solid #d7dee7 !important; color: #334155 !important; }
+.material-kpis { padding: 6px 8px !important; gap: 5px !important; }
+.material-kpi { padding: 5px 6px !important; }
+.kpi-value { font-size: 14px !important; font-weight: 700 !important; }
+.table-wrap { padding: 7px 9px !important; }
+table { font-size: 11px !important; line-height: 1.35; }
+th, td { padding: 4px 6px !important; }
+th { background: #edf1f5 !important; color: #24364b !important; }
+.decision-box { padding: 8px 10px !important; border-radius: 8px !important; box-shadow: none !important; }
+.decision-box .decision-status { font-size: 14px !important; }
+.footer { padding: 8px 12px !important; background: #fff !important; border-top: 1px solid #d7dee7 !important; color: #64748b !important; }
+
+
+.sheet::before, .sheet::after { display: none !important; }
+.section-title { background: #edf1f5 !important; color: #24364b !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; padding: 6px 9px !important; }
+.section-title::after { display: none !important; }
+.material-item { background: #fff !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; margin-bottom: 9px !important; }
+.material-name { padding: 7px 9px !important; background: #f5f7f9 !important; font-size: 12px !important; }
+.material-stats { gap: 4px !important; padding: 6px !important; }
+
+
+html[dir="ltr"] body { direction:ltr; text-align:left; }
+html[dir="rtl"] body { direction:rtl; text-align:right; }
+
+.sheet { padding: 12px 14px !important; page-break-inside: auto; }
+.header { margin-bottom: 8px !important; padding: 8px 10px !important; }
+.section-title, .section-note { break-after: avoid; page-break-after: avoid; }
+.recommendations-list li { border: 1px solid #d7dee7 !important; border-radius: 8px !important; padding: 8px 12px !important; margin-bottom: 6px !important; }
+</style>
 </head>
 <body>
     <div class="sheet">
         <div class="watermark">{{ month_name }}</div>
-        
+
         <div class="header">
             {% if report_logo_data_uri %}
-            <div style="margin-bottom: 12px; text-align: center;">
-                <img src="{{ report_logo_data_uri }}" alt="Report Logo" style="max-height: 80px; max-width: 100%;">
+            <div style="margin-bottom: 4px; text-align: center;">
+                <img class="report-logo" src="{{ report_logo_data_uri }}" alt="Report Logo" style="max-height: 80px; max-width: 100%;">
             </div>
             {% endif %}
-            <h1>{% if is_en %}Quality Labs Monthly Report{% else %}التقرير الشهري لمعامل الجودة{% endif %}</h1>
+{% if organization_name %}<div class="organization-name" style="font-size:12px;font-weight:700;margin-top:6px;text-align:center;overflow-wrap:anywhere;">{{ organization_name }}</div>{% endif %}
+            <h1>{% if is_en %}Monthly raw material report{% else %}تقرير الخامات الشهري{% endif %}</h1>
             <p>{{ month_name_ar }} {{ year }}</p>
             <p style="font-size: 10px;">{{ department_label }}</p>
-            {% if form_no %}<p style="font-size: 10px;">{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
+            {% if form_no %}<p style="font-size: 10px;">{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
         </div>
-        
+
         <div class="accent-strip"></div>
-        
+
         <div class="meta-grid">
             <div class="meta-card">
                 <span class="label">{% if is_en %}Total Inspections{% else %}إجمالي الفحوصات{% endif %}</span>
@@ -445,10 +504,10 @@
                 <span class="value">{{ unique_suppliers }} | {{ unique_materials }}</span>
             </div>
         </div>
-        
+
         {% if materials %}
-        <div class="section-title">{% if is_en %}Received Materials Statistics{% else %}إحصائيات الخامات المستلمة | Received Materials Statistics{% endif %}</div>
-        
+        <div class="section-title">{% if is_en %}Received Materials Statistics{% else %}إحصائيات الخامات المستلمة{% endif %}</div>
+
         {% for material in materials %}
         <div class="material-item">
             <div class="material-name">
@@ -486,14 +545,14 @@
                     <div class="value">{{ material.rejected }}</div>
                 </div>
             </div>
-            
+
             {% if material.suppliers %}
             <div style="padding: 8px 12px;">
                 <h4 style="font-size: 11px; font-weight: 700; color: #0F0F10; margin-bottom: 8px;">{% if is_en %}Suppliers for this material{% else %}الموردين لهذه الخامة{% endif %}</h4>
                 <table class="supplier-table" style="margin-bottom: 0;">
                     <thead>
                         <tr>
-                            <th>{% if is_en %}Supplier{% else %}المورد | Supplier{% endif %}</th>
+                            <th>{% if is_en %}Supplier{% else %}المورد{% endif %}</th>
                             <th>{% if is_en %}Inspections Count{% else %}عدد الفحوصات{% endif %}</th>
                             <th>{% if is_en %}Total Quantity{% else %}إجمالي الكمية{% endif %}</th>
                             <th>{% if is_en %}Accepted Quantity{% else %}الكمية المقبولة{% endif %}</th>
@@ -535,7 +594,7 @@
         {% endif %}
 
         {% if trend_months %}
-        <div class="section-title">{% if is_en %}Monthly Reliability Trend{% else %}اتجاه الموثوقية الشهري | Monthly Reliability Trend{% endif %}</div>
+        <div class="section-title">{% if is_en %}Monthly Reliability Trend{% else %}اتجاه الموثوقية الشهري{% endif %}</div>
         <table class="trend-table">
             <thead>
                 <tr>
@@ -580,7 +639,7 @@
         {% endif %}
 
         {% if recommendations %}
-        <div class="section-title">{% if is_en %}Statistical Administrative Recommendations{% else %}توصيات ادارية احصائية | Statistical Administrative Recommendations{% endif %}</div>
+        <div class="section-title">{% if is_en %}Statistical Administrative Recommendations{% else %}توصيات ادارية احصائية{% endif %}</div>
         <p class="section-note">{% if is_en %}The following recommendations are based on a detailed analysis of quality-management data and provide a professional, statistics-based view to support purchasing and quality management decisions.{% else %}التوصيات التالية مستندة إلى تحليل بيانات دقيق للادارة الجودة وتقديم رؤية مهنية مستندة إلى الإحصائيات لدعم قرارات إدارة المشتريات والجودة.{% endif %}</p>
         <p class="section-note">{% if is_en %}Report audiences: senior management; purchasing and supply management.{% else %}الجهات التي تطلع على التقرير: الادارة العالية - ادارة المشتريات و التوريدات{% endif %}</p>
         <div class="section-box">
@@ -591,14 +650,14 @@
             </ul>
         </div>
         {% endif %}
-        
+
         <div class="footer">
-            <p style="margin-bottom: 8px; font-weight: 600; color: #d97706;">{% if is_en %}⚠️ Important: Quantities in this report are estimates and should not be used as official documentation{% else %}⚠️ ملاحظة هامة: الكميات الموجودة في هذا التقرير لا تأخذ كوثيقة رسمية | Important: Quantities in this report are estimates and should not be used as official documentation{% endif %}</p>
+            <p style="margin-bottom: 8px; font-weight: 600; color: #d97706;">{% if is_en %}⚠️ Important: Quantities in this report are estimates and should not be used as official documentation{% else %}⚠️ ملاحظة هامة: الكميات الموجودة في هذا التقرير لا تأخذ كوثيقة رسمية{% endif %}</p>
             <p>{% if is_en %}Report generated by the internal quality management system{% else %}تم إنشاء التقرير بواسطة نظام إدارة الجودة الداخلي{% endif %} | {{ now }}</p>
         </div>
     </div>
     <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
-        Powered by Material Lab
+        {% if is_en %}Powered by Material Lab{% else %}تم الإنشاء بواسطة Material Lab{% endif %}
     </div>
 </body>
 </html>

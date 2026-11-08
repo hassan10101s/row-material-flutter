@@ -1,0 +1,14 @@
+{
+  "name": "material-lab-server-contract",
+  "private": true,
+  "description": "Server-side command contract for the central sync protocol (no Cloud Functions): shared by firestore.rules parity checks and the migration tooling.",
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": "20"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

@@ -29,7 +29,7 @@ class LabReportsCubit extends AppCubit<LabReportsState> {
       final file = await reports.saveReport(doc);
       safeEmit(state.copyWith(busy: '', lastExport: file.path));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(busy: '', error: e.message));
+      safeEmit(state.copyWith(busy: '', error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(busy: '', error: AppError.friendly(e)));
     }

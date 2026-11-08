@@ -4,6 +4,60 @@ import 'package:material_lab/features/lab/data/nir_validation_repo.dart';
 
 void main() {
   group('NIR validation math', () {
+    test(
+      'excluded outliers affect no calibration metric or recommendation',
+      () {
+        NirValidationPoint point(int i, double lab, {bool included = true}) =>
+            NirValidationPoint(
+              inspectionId: i,
+              entryCode: '$i',
+              inspectionDate: '2026-01-01',
+              sampleName: '',
+              nirValue: i.toDouble(),
+              labValue: lab,
+              included: included,
+            );
+        final good = [for (var i = 1; i <= 6; i++) point(i, 2 * i - 1.0)];
+        NirParameterStats stats(List<NirValidationPoint> readings) =>
+            NirParameterStats(
+              scope: NirScope.rawMaterial,
+              entityId: 1,
+              entityName: 'Wheat',
+              parameter: 'Protein',
+              unit: '%',
+              points: readings,
+            );
+        final expected = stats(good);
+        final excluded = stats([...good, point(100, -500, included: false)]);
+        expect(excluded.allPoints, hasLength(7));
+        expect(excluded.count, 6);
+        expect(excluded.excludedCount, 1);
+        expect(excluded.meanNir, expected.meanNir);
+        expect(excluded.meanLab, expected.meanLab);
+        expect(excluded.bias, expected.bias);
+        expect(excluded.maxDeviation, expected.maxDeviation);
+        expect(excluded.slope, expected.slope);
+        expect(excluded.intercept, expected.intercept);
+        expect(excluded.slopeOnly, expected.slopeOnly);
+        expect(excluded.interceptTestT, expected.interceptTestT);
+        expect(excluded.reliability, expected.reliability);
+        expect(
+          excluded.adjustmentAdvice.recommended,
+          expected.adjustmentAdvice.recommended,
+        );
+        for (final mode in NirAdjustmentMode.values) {
+          expect(excluded.rmseOf(mode), expected.rmseOf(mode));
+          expect(excluded.biasOf(mode), expected.biasOf(mode));
+          expect(excluded.r2Of(mode), expected.r2Of(mode));
+        }
+        final none = stats([point(100, -500, included: false)]);
+        expect(none.count, 0);
+        expect(none.bias, 0);
+        expect(none.reliability, NirReliability.insufficientData);
+        expect(none.allPoints, hasLength(1));
+      },
+    );
+
     test('bias is the average signed deviation', () {
       final stats = NirParameterStats(
         scope: NirScope.rawMaterial,
@@ -38,13 +92,13 @@ void main() {
     test('perfect linear data fits lab = slope·nir + intercept exactly', () {
       // lab = 2·nir − 1: nir 2,3,4,5 → lab 3,5,7,9
       NirValidationPoint p(double nir, double lab) => NirValidationPoint(
-            inspectionId: 0,
-            entryCode: 'x',
-            inspectionDate: '2026-01-01',
-            sampleName: '',
-            nirValue: nir,
-            labValue: lab,
-          );
+        inspectionId: 0,
+        entryCode: 'x',
+        inspectionDate: '2026-01-01',
+        sampleName: '',
+        nirValue: nir,
+        labValue: lab,
+      );
       final stats = NirParameterStats(
         scope: NirScope.rawMaterial,
         entityId: 1,
@@ -88,13 +142,13 @@ void main() {
 
     test('slope-only is the through-origin least-squares slope', () {
       NirValidationPoint p(double nir, double lab) => NirValidationPoint(
-            inspectionId: 0,
-            entryCode: 'x',
-            inspectionDate: '2026-01-01',
-            sampleName: '',
-            nirValue: nir,
-            labValue: lab,
-          );
+        inspectionId: 0,
+        entryCode: 'x',
+        inspectionDate: '2026-01-01',
+        sampleName: '',
+        nirValue: nir,
+        labValue: lab,
+      );
       // lab = 2·nir exactly: a₀ = Σxy/Σx² = (2+8+18+32+50)/(1+4+9+16+25) = 2.
       final stats = NirParameterStats(
         scope: NirScope.rawMaterial,
@@ -109,21 +163,18 @@ void main() {
       expect(stats.biasOf(NirAdjustmentMode.slopeOnly), closeTo(0, 1e-9));
       // The intercept of the full fit is 0 → not significant → slope only.
       expect(stats.interceptTestT, closeTo(0, 1e-9));
-      expect(
-        stats.adjustmentAdvice.recommended,
-        NirAdjustmentMode.slopeOnly,
-      );
+      expect(stats.adjustmentAdvice.recommended, NirAdjustmentMode.slopeOnly);
     });
 
     test('significant intercept pushes the advice to slope + intercept', () {
       NirValidationPoint p(double nir, double lab) => NirValidationPoint(
-            inspectionId: 0,
-            entryCode: 'x',
-            inspectionDate: '2026-01-01',
-            sampleName: '',
-            nirValue: nir,
-            labValue: lab,
-          );
+        inspectionId: 0,
+        entryCode: 'x',
+        inspectionDate: '2026-01-01',
+        sampleName: '',
+        nirValue: nir,
+        labValue: lab,
+      );
       // lab = 2·nir − 1: the constant −1 offset can only be corrected with an
       // intercept; the through-origin fit leaves a systematic residual bias.
       final stats = NirParameterStats(
@@ -132,21 +183,14 @@ void main() {
         entityName: 'bread',
         parameter: 'moisture',
         unit: '%',
-        points: [
-          p(2, 3),
-          p(3, 5),
-          p(4, 7),
-          p(5, 9),
-          p(6, 11),
-        ],
+        points: [p(2, 3), p(3, 5), p(4, 7), p(5, 9), p(6, 11)],
       );
       expect(stats.slopeOnly, closeTo(160 / 90, 1e-9));
+      expect(stats.biasOf(NirAdjustmentMode.slopeOnly).abs(), greaterThan(0.1));
       expect(
-        stats.biasOf(NirAdjustmentMode.slopeOnly).abs(),
-        greaterThan(0.1),
+        stats.biasOf(NirAdjustmentMode.slopeAndIntercept),
+        closeTo(0, 1e-9),
       );
-      expect(stats.biasOf(NirAdjustmentMode.slopeAndIntercept),
-          closeTo(0, 1e-9));
       expect(stats.interceptTestT.abs(), greaterThan(2));
       expect(
         stats.adjustmentAdvice.recommended,

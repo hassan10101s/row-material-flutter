@@ -65,11 +65,17 @@ class NcrExportResult {
 
 /// Writes the NCR report to PDF and Excel (plan V6_ENHANCED 22.7).
 class NcrExportService {
-  NcrExportService({AppPaths? paths, HtmlPdfExporter? htmlPdf})
-    : _paths = paths ?? AppPaths(),
-      _htmlPdf = htmlPdf ?? HtmlPdfExporter();
+  NcrExportService({
+    AppPaths? paths,
+    HtmlPdfExporter? htmlPdf,
+    this.organizationName,
+    this.reportSettings,
+  }) : _paths = paths ?? AppPaths(),
+       _htmlPdf = htmlPdf ?? HtmlPdfExporter();
 
   final AppPaths _paths;
+  final String Function()? organizationName;
+  final Future<Map<String, dynamic>> Function()? reportSettings;
   final HtmlPdfExporter _htmlPdf;
 
   static List<String> _excelHeaders() => [
@@ -115,8 +121,18 @@ class NcrExportService {
     NcrExportBundle bundle, {
     Directory? directory,
   }) async {
-    final ctx = buildNcrReportContext(bundle, formNo: bundle.formNo);
-    ctx['is_en'] = !AppText.arabic;
+    final settings = await reportSettings?.call() ?? <String, dynamic>{};
+    final ctx = buildNcrReportContext(
+      bundle,
+      formNo: bundle.formNo,
+      settings: settings,
+    );
+    ctx['organization_name'] = organizationName?.call() ?? '';
+    if (reportSettings != null) {
+      ctx['organization_name'] =
+          settings['organization_name'] ?? ctx['organization_name'];
+      ctx['report_logo_data_uri'] = settings['report_logo_data_uri'] ?? '';
+    }
     final template = await _readTemplate();
     final html = tinyJinjaRender(template, ctx);
     final bytes = await _htmlPdf.exportPdf(html);

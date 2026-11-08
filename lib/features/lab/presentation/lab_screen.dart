@@ -1,3 +1,4 @@
+import '../../../core/security/secure_field_access.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -95,7 +96,7 @@ class LabScreen extends StatelessWidget {
         Icons.history,
         (context) => BlocProvider(
           create: (_) =>
-              TestHistoryCubit(results: results, local: local, config: config)
+              TestHistoryCubit(secureAccess: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null, results: results, local: local, config: config)
                 ..load(),
           child: TestHistoryTab(refreshTick: state.historyTick),
         ),
@@ -142,7 +143,7 @@ class LabScreen extends StatelessWidget {
         Icons.query_stats_outlined,
         (context) => BlocProvider(
           create: (_) =>
-              NirValidationCubit(repo: getIt<NirValidationRepository>())
+              NirValidationCubit(secureAccess: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null, repo: getIt<NirValidationRepository>())
                 ..load(),
           child: const NirValidationTab(),
         ),

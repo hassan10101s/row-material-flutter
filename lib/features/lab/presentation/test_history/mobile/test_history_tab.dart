@@ -1,4 +1,4 @@
-import '../../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -51,24 +51,18 @@ class MobileTestHistoryTab extends StatelessWidget {
   }
 
   Future<void> _openNewTest(BuildContext context) async {
-    await Navigator.of(context).push<void>(
-      appMaterialPageRoute<void>(
-        builder: (_) => BlocProvider(
-          create: (_) => RunTestCubit(
-            config: getIt<LabConfigurationRepository>(),
-            results: getIt<LabResultRepository>(),
-            local: getIt<LabLocalRepository>(),
-          )..load(),
-          child: Scaffold(
-            appBar: AppTopAppBar(title: AppText.t('اختبار جديد', 'New Test')),
-            body: SafeArea(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.pageMobile),
-                child: RunTestTab(onTestRun: () {}),
-              ),
-            ),
-          ),
-        ),
+    await showAppContent<void>(
+      context,
+      title: AppText.t('اختبار جديد', 'New Test'),
+      icon: Icons.science_outlined,
+      scrollBody: false,
+      builder: (_, _) => BlocProvider(
+        create: (_) => RunTestCubit(
+          config: getIt<LabConfigurationRepository>(),
+          results: getIt<LabResultRepository>(),
+          local: getIt<LabLocalRepository>(),
+        )..load(),
+        child: SingleChildScrollView(child: RunTestTab(onTestRun: () {})),
       ),
     );
     if (context.mounted) context.read<TestHistoryCubit>().load();
@@ -208,11 +202,9 @@ class MobileTestHistoryTab extends StatelessWidget {
           // inspections registers).
           child: Scaffold(
             backgroundColor: AppColors.background,
-            floatingActionButton: FloatingActionButton(
-              heroTag: null,
+            floatingActionButton: AppAddFloatingActionButton(
               tooltip: AppText.t('اختبار جديد', 'New test'),
               onPressed: () => _openNewTest(context),
-              child: Icon(Icons.add, size: 24.r),
             ),
             body: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import './app_tooltip.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../core/constants/app_strings.dart';
@@ -16,7 +17,7 @@ class AppExportIconButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final enabled = onPressed != null;
-    return Tooltip(
+    return AppTooltip(
       message: AppText.t('تصدير جدول', 'Export table'),
       child: InkWell(
         onTap: onPressed,

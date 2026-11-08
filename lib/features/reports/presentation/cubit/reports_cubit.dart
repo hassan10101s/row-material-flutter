@@ -18,6 +18,15 @@ class ReportsCubit extends AppCubit<ReportsState> {
   Future<void> runYearly(int year) =>
       _run('yearly', () => repo.yearlyReport(year: year));
 
+  Future<void> runProductDaily(String date) =>
+      _run('product_daily', () => repo.productDailyReport(date));
+  Future<void> runProductMonthly(int month, int year) => _run(
+    'product_monthly',
+    () => repo.productMonthlyReport(month: month, year: year),
+  );
+  Future<void> runProductYearly(int year) =>
+      _run('product_yearly', () => repo.productYearlyReport(year: year));
+
   Future<void> _run(String kind, Future<ReportDoc> Function() job) async {
     if (state.busy.isNotEmpty) return;
     safeEmit(
@@ -42,7 +51,7 @@ class ReportsCubit extends AppCubit<ReportsState> {
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(busy: '', error: e.message));
+      safeEmit(state.copyWith(busy: '', error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(busy: '', error: AppError.friendly(e)));
     }

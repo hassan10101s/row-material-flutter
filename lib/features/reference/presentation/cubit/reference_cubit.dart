@@ -11,20 +11,29 @@ import 'reference_state.dart';
 /// Desktop callers keep working — `load()` resets to the first page and
 /// `state.materials` still holds everything loaded so far.
 class ReferenceCubit extends AppCubit<ReferenceState> {
-  ReferenceCubit({required this.repo, this.pageSize = kMobilePageSize})
-    : super(const ReferenceState()) {
+  ReferenceCubit({
+    required this.repo,
+    this.pageSize = kMobilePageSize,
+    this.pendingRecords,
+  }) : super(const ReferenceState()) {
     refreshOnSync(load);
   }
 
   final ReferenceRepository repo;
   final int pageSize;
+  final Future<Set<int>> Function()? pendingRecords;
 
   int _token = 0;
 
   Future<void> load() async {
     final token = ++_token;
     safeEmit(
-      state.copyWith(loading: true, clearError: true, clearErrorMore: true),
+      state.copyWith(
+        loading: true,
+        loadingMore: false,
+        clearError: true,
+        clearErrorMore: true,
+      ),
     );
     try {
       final settled = await Future.wait([
@@ -34,17 +43,20 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
       if (token != _token) return;
       final rows = settled[0] as List<Map<String, dynamic>>;
       final total = settled[1] as int;
+      final pending = await pendingRecords?.call() ?? state.pendingIds;
+      if (token != _token) return;
       safeEmit(
         state.copyWith(
           loading: false,
           materials: rows,
           total: total,
           hasMore: rows.length >= pageSize,
+          pendingIds: pending,
         ),
       );
     } on AppError catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       if (token != _token) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
@@ -54,6 +66,7 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
   /// Appends the next page. No-op unless the last load filled a page.
   Future<void> loadMore() async {
     if (state.loading || state.loadingMore || !state.hasMore) return;
+    final token = _token;
     safeEmit(state.copyWith(loadingMore: true, clearErrorMore: true));
     try {
       final more = await repo.listMaterialsPaged(
@@ -61,6 +74,7 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
         limit: pageSize,
         offset: state.materials.length,
       );
+      if (token != _token) return;
       safeEmit(
         state.copyWith(
           loadingMore: false,
@@ -69,8 +83,12 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loadingMore: false, errorMore: e.message));
+      if (token != _token) return;
+      safeEmit(
+        state.copyWith(loadingMore: false, errorMore: AppError.friendly(e)),
+      );
     } catch (e) {
+      if (token != _token) return;
       safeEmit(state.copyWith(loadingMore: false, errorMore: '$e'));
     }
   }
@@ -94,7 +112,23 @@ class ReferenceCubit extends AppCubit<ReferenceState> {
 
   /// Soft-deletes a material (matches `materials_delete` in lab_vue).
   Future<void> delete(int id) async {
-    await repo.deleteMaterial(id);
-    await load();
+    if (state.isBlocked(id)) throw const MaterialActionPending();
+    safeEmit(state.copyWith(busyIds: {...state.busyIds, id}));
+    try {
+      await repo.deleteMaterial(id);
+      await load();
+    } catch (error) {
+      if (error is PendingOperation) {
+        safeEmit(state.copyWith(pendingIds: {...state.pendingIds, id}));
+      }
+      rethrow;
+    } finally {
+      safeEmit(state.copyWith(busyIds: {...state.busyIds}..remove(id)));
+    }
   }
+}
+
+class MaterialActionPending extends AppError implements PendingOperation {
+  const MaterialActionPending()
+    : super('يوجد طلب لهذه الخامة بانتظار التأكيد؛ راجع المزامنة.');
 }

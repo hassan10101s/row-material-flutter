@@ -29,7 +29,7 @@ String ensureRemoteId(
   return remoteId;
 }
 
-/// Next optimistic version for a local edit: 1 on first push, else max+1.
+/// Candidate version for explicit submission: 1 on create, else max+1.
 int nextVersion(Map<String, dynamic> row) {
   final version = (row['version'] as num?)?.toInt() ?? 0;
   final remoteVersion = (row['remote_version'] as num?)?.toInt() ?? 0;
@@ -37,9 +37,10 @@ int nextVersion(Map<String, dynamic> row) {
   return base <= 0 ? 1 : base + 1;
 }
 
-/// The single write contract for every shared table (plan §6):
-/// SQLite mutation + version bump + `sync_state='queued'` + `sync_queue` entry
-/// + audit record, all inside the caller's transaction.
+/// Captures a shared mutation, its candidate version and audit metadata inside
+/// the caller's transaction. The production authoring gateway rolls back this
+/// candidate and submits an explicit command. Approved SQLite data changes only
+/// after a verified server receipt. Queue entries never send automatically.
 ///
 /// [executor] MUST be the business transaction ([txn]). [row] is the fresh
 /// local row after the write (must contain `id`). [operation] is one of

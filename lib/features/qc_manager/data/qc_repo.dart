@@ -72,7 +72,7 @@ Map<String, dynamic> qcUpdatable(
 ///
 /// ## Why the repositories are thin
 /// These classes own the SQL and nothing else: no session, no permission check,
-/// no audit entry. That is the facade's job (`offline_first_qc_repository.dart`),
+/// no audit entry. That is the facade's job (`server_confirmed_qc_repository.dart`),
 /// and keeping the line sharp is what lets a test drive the SQL without building
 /// a signed-in user, and lets the facade guarantee that the write, its audit row
 /// and its queue row share one transaction.
@@ -835,6 +835,7 @@ class QcInspectionRepo extends QcLocalRepo {
   Future<int> createInspection(
     QcInspection inspection, {
     DatabaseExecutor? exec,
+    bool initializeResponses = true,
   }) async {
     Future<int> run(DatabaseExecutor txn) async {
       await qcEnsureUnit(txn, inspection.qtyUnit);
@@ -842,6 +843,7 @@ class QcInspectionRepo extends QcLocalRepo {
         'qc_inspections',
         qcInsertable(inspection.toMap(withId: false), 'inspection_id'),
       );
+      if (!initializeResponses) return inspectionId;
       final itemRows = await txn.query(
         'qc_items',
         where: qcAlive('template_id = ?'),

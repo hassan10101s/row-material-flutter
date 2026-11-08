@@ -5,7 +5,6 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../../app/auth_gate.dart';
 import '../../../../../core/auth/permissions.dart';
 import '../../../../../core/constants/app_strings.dart';
-import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -59,7 +58,8 @@ Future<void> _confirmDelete(BuildContext context, QcSop sop) async {
 }
 
 class QcSopDetailScreen extends StatelessWidget {
-  const QcSopDetailScreen({super.key});
+  const QcSopDetailScreen({super.key, this.windowed = false});
+  final bool windowed;
 
   /// Opens one SOP, built on top of the register cubit already in context.
   ///
@@ -70,17 +70,16 @@ class QcSopDetailScreen extends StatelessWidget {
     final sops = context.read<QcSopsCubit>();
     final detail = QcSopDetailCubit(repo: sops.repo, sops: sops, sopId: sopId)
       ..load();
-    return Navigator.of(context).push(
-      appMaterialPageRoute<void>(
-        builder: (_) => MultiBlocProvider(
-          providers: [
-            BlocProvider.value(value: sops),
-            BlocProvider.value(value: detail),
-          ],
-          child: const QcSopDetailScreen(),
-        ),
+    return showAppContentSurface<void>(
+      context,
+      builder: (_, fullScreen) => MultiBlocProvider(
+        providers: [
+          BlocProvider.value(value: sops),
+          BlocProvider.value(value: detail),
+        ],
+        child: QcSopDetailScreen(windowed: !fullScreen),
       ),
-    );
+    ).whenComplete(() => detail.close());
   }
 
   @override
@@ -101,40 +100,49 @@ class QcSopDetailScreen extends StatelessWidget {
       },
       builder: (context, state) {
         final sop = state.sop;
-        return Scaffold(
-          appBar: AppTopAppBar(
-            title: sop?.title ?? AppText.t('الإجراء', 'Procedure'),
-            actions: [
-              if (sop != null && sop.isEditable)
-                IconButton(
-                  tooltip: AppText.t('تعديل', 'Edit'),
-                  onPressed: () => QcSopFormScreen.open(
-                    context,
-                    sop: sop,
-                    detail: context.read<QcSopDetailCubit>(),
-                  ),
-                  icon: const Icon(Icons.edit_outlined),
+        final actions = <Widget>[
+          if (sop != null && sop.isEditable)
+            IconButton(
+              tooltip: AppText.t('تعديل', 'Edit'),
+              onPressed: () => QcSopFormScreen.open(
+                context,
+                sop: sop,
+                detail: context.read<QcSopDetailCubit>(),
+              ),
+              icon: const Icon(Icons.edit_outlined),
+            ),
+          if (sop != null && _canDelete)
+            IconButton(
+              tooltip: AppText.t('حذف', 'Delete'),
+              onPressed: () => _confirmDelete(context, sop),
+              icon: Icon(Icons.delete_outline, color: AppColors.danger),
+            ),
+        ];
+        final body = state.loading && sop == null
+            ? const AppSkeletonList(rows: 4, height: 320)
+            : sop == null
+            ? AppEmptyState(
+                icon: Icons.search_off,
+                title: AppText.t(
+                  'هذا الإجراء غير موجود',
+                  'This SOP no longer exists',
                 ),
-              if (sop != null && _canDelete)
-                IconButton(
-                  tooltip: AppText.t('حذف', 'Delete'),
-                  onPressed: () => _confirmDelete(context, sop),
-                  icon: Icon(Icons.delete_outline, color: AppColors.danger),
-                ),
-            ],
-          ),
-          body: state.loading && sop == null
-              ? const AppSkeletonList(rows: 4, height: 320)
-              : sop == null
-              ? AppEmptyState(
-                  icon: Icons.search_off,
-                  title: AppText.t(
-                    'هذا الإجراء غير موجود',
-                    'This SOP no longer exists',
-                  ),
-                )
-              : _Body(state: state, sop: sop),
-        );
+              )
+            : _Body(state: state, sop: sop);
+        final title = sop?.title ?? AppText.t('الإجراء', 'Procedure');
+        return windowed
+            ? AppWindow(
+                title: title,
+                icon: Icons.menu_book_outlined,
+                size: AppWindowSize.lg,
+                scrollBody: false,
+                actions: actions,
+                child: body,
+              )
+            : Scaffold(
+                appBar: AppTopAppBar(title: title, actions: actions),
+                body: body,
+              );
       },
     );
   }

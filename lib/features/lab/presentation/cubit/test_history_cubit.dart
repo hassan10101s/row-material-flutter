@@ -1,3 +1,4 @@
+import '../../../../core/security/secure_field_access.dart';
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../domain/lab_local_repository.dart';
@@ -15,8 +16,29 @@ class TestHistoryCubit extends AppCubit<TestHistoryState> {
     required this.results,
     required this.local,
     required this.config,
+    this.secureAccess,
   }) : super(const TestHistoryState()) {
     refreshOnSync(load);
+    secureAccess?.addListener(_privacyChanged);
+  }
+
+  final SecureFieldAccess? secureAccess;
+  void _privacyChanged() {
+    safeEmit(
+      state.copyWith(
+        rows: [
+          for (final row in state.rows)
+            if (row['secure_result'] != 1) SecureFieldAccess.publicRecord(row),
+        ],
+      ),
+    );
+    load();
+  }
+
+  @override
+  Future<void> close() {
+    secureAccess?.removeListener(_privacyChanged);
+    return super.close();
   }
 
   final LabResultRepository results;
@@ -31,16 +53,33 @@ class TestHistoryCubit extends AppCubit<TestHistoryState> {
         local.listConsumptionLog(),
         config.listAnalyses(),
       ]);
+      final rows = <Map<String, dynamic>>[];
+      for (final row in loaded[0] as List<Map<String, dynamic>>) {
+        if (row['secure_result'] == 1 && secureAccess?.enabled != true) {
+          continue;
+        }
+        rows.add(
+          secureAccess == null
+              ? row
+              : await secureAccess!.reveal('labResult', row),
+        );
+      }
       safeEmit(
         state.copyWith(
           loading: false,
-          rows: loaded[0] as List<Map<String, dynamic>>,
+          rows: secureAccess?.enabled == true
+              ? rows
+              : [
+                  for (final r in rows)
+                    if (r['secure_result'] != 1)
+                      SecureFieldAccess.publicRecord(r),
+                ],
           log: loaded[1] as List<Map<String, dynamic>>,
           analyses: loaded[2] as List<Map<String, dynamic>>,
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }

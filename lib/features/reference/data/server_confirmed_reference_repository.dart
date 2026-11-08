@@ -1,0 +1,531 @@
+import 'package:sqflite/sqflite.dart';
+
+import '../../../core/auth/permissions.dart';
+import '../../../core/constants/app_errors.dart';
+import '../../../core/database/business_transaction.dart';
+import '../../../core/sync/audit_logger.dart';
+import '../../../core/sync/entity_registry.dart';
+import '../../../core/sync/sync_queue.dart';
+import '../../../core/sync/shared_data_writer.dart';
+import '../../../core/sync/sync_write.dart' as sync_write;
+import '../../../core/utils/app_dates.dart';
+import '../../../core/utils/app_exceptions.dart';
+import '../../organizations/data/member_write_guard.dart';
+import 'reference_repo.dart';
+import '../../lab/data/server_confirmed_lab_repository.dart';
+
+/// Reference-data writes use the server-confirmed business gateway.
+/// The local repository supplies SQL for atomic candidate capture and audit.
+/// Offline work is a manual draft; approved cache rows change after a receipt.
+class ServerConfirmedReferenceRepository extends ReferenceRepo {
+  ServerConfirmedReferenceRepository({
+    required super.dbHelper,
+    super.deviceTagProvider,
+    required this.guard,
+    required this.queue,
+    required this.audit,
+  });
+
+  final WriteGuard guard;
+  final SyncQueue queue;
+  final AuditLogger audit;
+
+  Future<T> _inTransaction<T>(
+    DatabaseExecutor? exec,
+    Future<T> Function(DatabaseExecutor) action,
+  ) => exec == null ? dbHelper.businessTransaction(action) : action(exec);
+
+  @override
+  Future<void> saveDefinitionBounds(
+    DatabaseExecutor txn,
+    int id,
+    List<Map<String, dynamic>> bounds,
+  ) async {
+    await ServerConfirmedLabRepository(
+      dbHelper: dbHelper,
+      guard: guard,
+      queue: queue,
+      audit: audit,
+    ).saveMaterialBounds(id, bounds, txn);
+  }
+
+  static final SyncEntity _labUnit = syncEntities.firstWhere(
+    (e) => e.type == 'labUnit',
+  );
+  static SyncEntity _entity(String type) =>
+      SyncEntity.byType(type) ??
+      (throw StateError('Unknown sync entity: $type'));
+
+  Future<Map<String, dynamic>> _withRemoteId(
+    DatabaseExecutor txn,
+    String table,
+    Map<String, dynamic> row,
+  ) async {
+    final mutable = Map<String, dynamic>.from(row);
+    if ('${mutable['remote_id'] ?? ''}'.isNotEmpty) return mutable;
+    mutable['remote_id'] = sync_write.newRemoteId();
+    try {
+      await txn.update(
+        table,
+        {'remote_id': mutable['remote_id']},
+        where: 'id = ?',
+        whereArgs: [mutable['id']],
+      );
+    } on Object {
+      // Column absent until migration runs on next open.
+    }
+    return mutable;
+  }
+
+  Future<void> _enqueueMaterial(
+    DatabaseExecutor txn,
+    Map<String, dynamic> row,
+    String operation,
+  ) async {
+    await sync_write.enqueueLocalChange(
+      executor: txn,
+      entity: _entity('referenceMaterial'),
+      row: row,
+      operation: operation,
+      queue: queue,
+      audit: audit,
+      auditAction: AuditAction.settingsUpdated,
+      organizationId: guard.organizationId,
+      uid: guard.uid,
+      deviceId: guard.deviceId,
+    );
+  }
+
+  Future<void> _queueMaterialParameters(DatabaseExecutor txn) async {
+    final changed = await BusinessAuthoringContext.changedRows(
+      txn,
+      'parameter',
+    );
+    if (changed == null || changed.isEmpty) return;
+    await queueSharedRows(
+      txn,
+      type: 'parameter',
+      queue: queue,
+      guard: guard,
+      onlyChangedInOperation: true,
+    );
+  }
+
+  // ── §9.4 writes: Materials ────────────────────────────────────
+
+  @override
+  Future<int> createMaterial({
+    required String materialName,
+    required String materialCode,
+    Map<String, dynamic> physicalReference = const {},
+    Map<String, dynamic> chemicalReference = const {},
+    Map<String, dynamic> units = const {},
+    DatabaseExecutor? exec,
+  }) async {
+    _check(Permission.samplesUpdate);
+    late final int id;
+    await _inTransaction(exec, (txn) async {
+      id = await super.createMaterial(
+        materialName: materialName,
+        materialCode: materialCode,
+        physicalReference: physicalReference,
+        chemicalReference: chemicalReference,
+        units: units,
+        exec: txn,
+      );
+      final row = await getMaterialRaw(id, exec: txn);
+      if (row != null) {
+        final stamped = await _withRemoteId(
+          txn,
+          'reference_materials',
+          Map<String, dynamic>.from(row),
+        );
+        await _enqueueMaterial(txn, stamped, 'create');
+        await _queueMaterialParameters(txn);
+        await audit.log(
+          txn,
+          action: AuditAction.settingsUpdated,
+          entityType: 'referenceMaterial',
+          entityId: 'ref_mat_$id',
+          details: {
+            'localId': id,
+            'materialName': row['material_name'],
+            'materialCode': row['material_code'],
+          },
+        );
+      }
+    });
+    return id;
+  }
+
+  @override
+  Future<void> updateMaterial(
+    int id, {
+    required String materialName,
+    required String materialCode,
+    Map<String, dynamic>? physicalReference,
+    Map<String, dynamic>? chemicalReference,
+    Map<String, dynamic> units = const {},
+    DatabaseExecutor? exec,
+  }) async {
+    _check(Permission.samplesUpdate);
+    await _inTransaction(exec, (txn) async {
+      await super.updateMaterial(
+        id,
+        materialName: materialName,
+        materialCode: materialCode,
+        physicalReference: physicalReference,
+        chemicalReference: chemicalReference,
+        units: units,
+        exec: txn,
+      );
+      final row = await getMaterialRaw(id, exec: txn);
+      if (row != null) {
+        final stamped = await _withRemoteId(
+          txn,
+          'reference_materials',
+          Map<String, dynamic>.from(row),
+        );
+        await _enqueueMaterial(txn, stamped, 'update');
+        await _queueMaterialParameters(txn);
+        await audit.log(
+          txn,
+          action: AuditAction.settingsUpdated,
+          entityType: 'referenceMaterial',
+          entityId: 'ref_mat_$id',
+          details: {
+            'localId': id,
+            'materialName': row['material_name'],
+            'materialCode': row['material_code'],
+          },
+        );
+      }
+    });
+  }
+
+  /// A tombstone (soft-delete) so delete is auditable and consistent with
+  /// the rest of the domain.
+  @override
+  Future<void> deleteMaterial(int id, [DatabaseExecutor? exec]) async {
+    _check(Permission.samplesUpdate);
+    await _inTransaction(exec, (txn) async {
+      final before = await getMaterialRaw(id, exec: txn);
+      await super.deleteMaterial(id, txn);
+      if (before != null) {
+        final tombstone = Map<String, dynamic>.from(before)
+          ..['deleted_at'] = nowIso();
+        await _enqueueMaterial(txn, tombstone, 'tombstone');
+      }
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'referenceMaterial',
+        entityId: 'ref_mat_$id',
+        details: {'localId': id, 'operation': 'delete'},
+      );
+    });
+  }
+
+  // ── §9.4 writes: Parameters ───────────────────────────────────
+
+  @override
+  Future<void> upsertParameter(
+    String name,
+    String unit, {
+    String parameterType = 'chemical',
+    DatabaseExecutor? exec,
+  }) async {
+    _check(Permission.labResultsUpdate);
+    await dbHelper.businessTransaction((txn) async {
+      await super.upsertParameter(
+        name,
+        unit,
+        parameterType: parameterType,
+        exec: txn,
+      );
+      await queueSharedRows(
+        txn,
+        type: 'parameter',
+        queue: queue,
+        guard: guard,
+        where: 'parameter_name = ? COLLATE NOCASE',
+        whereArgs: [name.trim()],
+      );
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'parameter',
+        entityId: 'param_${parameterType}_${name.trim()}',
+        details: {
+          'parameterName': name.trim(),
+          'parameterType': parameterType,
+          'unit': unit.trim(),
+        },
+      );
+    });
+  }
+
+  @override
+  Future<void> deleteParameter(String name, [DatabaseExecutor? exec]) async {
+    _check(Permission.labResultsUpdate);
+    await dbHelper.businessTransaction((txn) async {
+      final rows = await txn.query(
+        'parameters',
+        where: 'parameter_name = ?',
+        whereArgs: [name],
+      );
+      for (final row in rows) {
+        final analyses = await txn.query(
+          'lab_analyses',
+          columns: ['id'],
+          where: 'parameter_id = ? AND deleted_at IS NULL',
+          whereArgs: [row['id']],
+        );
+        final at = nowIso();
+        await txn.update(
+          'material_parameter_bounds',
+          {'deleted_at': at, 'active': 0},
+          where: 'parameter_id = ?',
+          whereArgs: [row['id']],
+        );
+        await queueSharedRows(
+          txn,
+          type: 'materialBound',
+          queue: queue,
+          guard: guard,
+          where: 'parameter_id = ?',
+          whereArgs: [row['id']],
+        );
+        await txn.update(
+          'lab_analyses',
+          {'parameter_id': null, 'parameter_remote_id': ''},
+          where: 'parameter_id = ? AND deleted_at IS NULL',
+          whereArgs: [row['id']],
+        );
+        for (final analysis in analyses) {
+          await queueSharedRows(
+            txn,
+            type: 'labAnalysis',
+            queue: queue,
+            guard: guard,
+            where: 'id = ?',
+            whereArgs: [analysis['id']],
+          );
+        }
+      }
+      await txn.update(
+        'parameters',
+        {'deleted_at': nowIso()},
+        where: 'parameter_name = ?',
+        whereArgs: [name],
+      );
+      await queueSharedRows(
+        txn,
+        type: 'parameter',
+        queue: queue,
+        guard: guard,
+        where: 'parameter_name = ?',
+        whereArgs: [name],
+      );
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'parameter',
+        entityId: 'param_$name',
+        details: {'parameterName': name.trim(), 'operation': 'delete'},
+      );
+    });
+  }
+
+  // ── §9.4 writes: Lab units ────────────────────────────────────
+
+  @override
+  Future<void> upsertUnit(
+    String symbol, {
+    String name = '',
+    String dimension = '',
+    DatabaseExecutor? exec,
+  }) async {
+    _check(Permission.labResultsUpdate);
+    await dbHelper.businessTransaction((txn) async {
+      await super.upsertUnit(
+        symbol,
+        name: name,
+        dimension: dimension,
+        exec: txn,
+      );
+      final trimmed = symbol.trim();
+      final rows = await txn.query(
+        'lab_units',
+        where: 'symbol = ?',
+        whereArgs: [trimmed],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        await _enqueueLabUnit(
+          txn,
+          Map<String, dynamic>.from(rows.first),
+          operation: 'upsert',
+          action: AuditAction.settingsUpdated,
+          details: {
+            'symbol': trimmed,
+            'name': name.trim(),
+            'dimension': dimension.trim(),
+          },
+        );
+      }
+    });
+  }
+
+  /// Registry side-effect of an already-authorized save: no extra permission
+  /// gate (the caller's own `_check` already passed), but the row still joins
+  /// the lab-config sync like a Units-tab creation.
+  @override
+  Future<void> ensureUnit(String symbol, [DatabaseExecutor? exec]) async {
+    await dbHelper.businessTransaction((txn) async {
+      await ReferenceRepo.registerUnit(txn, symbol);
+      final trimmed = symbol.trim();
+      if (trimmed.isEmpty) return;
+      final rows = await txn.query(
+        'lab_units',
+        where: 'symbol = ?',
+        whereArgs: [trimmed],
+        limit: 1,
+      );
+      if (rows.isNotEmpty) {
+        await _enqueueLabUnit(
+          txn,
+          Map<String, dynamic>.from(rows.first),
+          operation: 'upsert',
+          action: AuditAction.settingsUpdated,
+          details: {'symbol': trimmed, 'operation': 'ensure'},
+        );
+      }
+    });
+  }
+
+  @override
+  Future<void> deleteUnit(String symbol, [DatabaseExecutor? exec]) async {
+    _check(Permission.labResultsUpdate);
+    await dbHelper.businessTransaction((txn) async {
+      final trimmed = symbol.trim();
+      final rows = await txn.query(
+        'lab_units',
+        where: 'symbol = ?',
+        whereArgs: [trimmed],
+        limit: 1,
+      );
+      await txn.update(
+        'lab_units',
+        {'is_active': 0, 'deleted_at': nowIso()},
+        where: 'symbol = ?',
+        whereArgs: [trimmed],
+      );
+      if (rows.isNotEmpty) {
+        final row = Map<String, dynamic>.from(rows.first)
+          ..['is_active'] = 0
+          ..['deleted_at'] = DateTime.now().toIso8601String();
+        await _enqueueLabUnit(
+          txn,
+          row,
+          operation: 'tombstone',
+          action: AuditAction.settingsUpdated,
+          details: {'symbol': trimmed, 'operation': 'delete'},
+        );
+      }
+    });
+  }
+
+  // ── Transaction plumbing ──────────────────────────────────────
+
+  /// §9.4: active member + permission + not a read-only device, and
+  /// connectivity for the privileged operations. Throws
+  /// [AuthorizationError] otherwise, before anything is written.
+  void _check(Permission permission) {
+    if (guard.allows(permission.id)) return;
+    final privileged = permissionRequiresFreshSession(permission);
+    throw AuthorizationError(
+      privileged && !guard.online
+          ? AppErrors.privilegedOperationNeedsConnection
+          : AppErrors.notAuthorizedForOperation,
+    );
+  }
+
+  /// Bumps the sync bookkeeping of the row, snapshots the remote payload,
+  /// queues it and appends the audit entry — all on the caller's executor.
+  Future<void> _enqueueLabUnit(
+    DatabaseExecutor txn,
+    Map<String, dynamic> row, {
+    required String operation,
+    required String action,
+    required Map<String, dynamic> details,
+  }) async {
+    final id = (row['id'] as num?)?.toInt();
+    if (id == null) return;
+    final localVersion = (row['version'] as num?)?.toInt() ?? 0;
+    final remoteVersion = (row['remote_version'] as num?)?.toInt() ?? 0;
+    final isFirstPush = remoteVersion == 0;
+    final nextVersion = isFirstPush
+        ? 1
+        : (localVersion > remoteVersion ? localVersion : remoteVersion) + 1;
+    await txn.update(
+      'lab_units',
+      {'version': nextVersion, 'sync_state': 'queued'},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    final snapshot = Map<String, dynamic>.from(row)
+      ..['version'] = nextVersion
+      ..['sync_state'] = 'queued'
+      ..['is_active'] = row['is_active'] is int
+          ? row['is_active']
+          : ((row['is_active'] as bool?) ?? true ? 1 : 0)
+      ..['deleted_at'] = row['deleted_at']
+      ..['config_type'] = 'unit'
+      ..['payload'] = {
+        'symbol': row['symbol'],
+        'name': row['name'],
+        'dimension': row['dimension'],
+        'is_active': row['is_active'] is int
+            ? row['is_active']
+            : ((row['is_active'] as bool?) ?? true ? 1 : 0),
+      };
+
+    final ctx = SyncPayloadContext(
+      organizationId: guard.organizationId,
+      uid: guard.uid,
+      deviceId: guard.deviceId,
+      version: nextVersion,
+      versionField: 'version',
+    );
+    final docId = _labUnit.docId(snapshot);
+    await queue.enqueue(
+      txn,
+      entityType: _labUnit.type,
+      entityId: docId,
+      localRef: id,
+      operation: operation,
+      payload: buildRemotePayload(
+        _labUnit,
+        snapshot,
+        ctx,
+        asCreate: isFirstPush || operation == 'tombstone',
+      ),
+      baseVersion: remoteVersion,
+    );
+    await audit.log(
+      txn,
+      action: action,
+      entityType: _labUnit.type,
+      entityId: docId,
+      details: {
+        ...details,
+        'localId': id,
+        'version': nextVersion,
+        'operation': operation,
+        'actor': guard.actorName,
+      },
+    );
+  }
+}

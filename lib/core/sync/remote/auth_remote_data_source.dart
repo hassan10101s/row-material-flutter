@@ -4,12 +4,14 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:google_sign_in_dartio/google_sign_in_dartio.dart'
     show GoogleSignInDart;
 
 import '../sync_codec.dart';
 import '../../auth/permissions.dart';
+import '../../commands/command_contract.dart';
 import '../../constants/app_strings.dart';
 import 'firestore_data_source.dart';
 import 'remote_data_source.dart';
@@ -42,6 +44,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       email: user.email ?? '',
       displayName: user.displayName,
       photoUrl: user.photoURL,
+      emailVerified: user.emailVerified,
     );
   }
 
@@ -155,6 +158,36 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
           password: password,
         );
       }
+    } on FirebaseAuthException catch (e) {
+      throw RemoteAuthException(_emailAuthMessage(e.code), code: e.code);
+    }
+    // The genesis rules require `email_verified`; send the link at
+    // account-creation time so the mailbox has it before the create-company
+    // screen is reached. Best-effort: a failed send must not fail sign-up
+    // (the create-organization screen offers a resend button).
+    try {
+      await _auth?.currentUser?.sendEmailVerification();
+    } on Object catch (e) {
+      debugPrint('[auth] verification email not sent: $e');
+    }
+  }
+
+  @override
+  Future<void> sendEmailVerification() async {
+    final auth = _auth;
+    if (auth == null) {
+      throw const RemoteAuthException('The account service is not available.');
+    }
+    final user = auth.currentUser;
+    if (user == null) {
+      throw const RemoteAuthException(
+        'The account service is not available.',
+        code: 'signed_out',
+      );
+    }
+    if (user.emailVerified) return;
+    try {
+      await user.sendEmailVerification();
     } on FirebaseAuthException catch (e) {
       throw RemoteAuthException(_emailAuthMessage(e.code), code: e.code);
     }
@@ -318,12 +351,15 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   static const String _base32Alphabet = 'abcdefghijklmnopqrstuvwxyz234567';
 
   @override
-  Future<OrganizationProfile> loadOrganization(String organizationId) async {
+  Future<OrganizationProfile?> loadOrganization(String organizationId) async {
+    // Null (not a crash) when the document is missing: the org gate treats a
+    // missing company like an unreadable one and lets the member status
+    // decide, instead of throwing "null check operator used on a null value".
     final data = await firestore
         .organizationRef(organizationId)
         .get()
         .then((s) => s.data());
-    return OrganizationProfile.fromMap(organizationId, data)!;
+    return OrganizationProfile.fromMap(organizationId, data);
   }
 
   @override
@@ -372,25 +408,17 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       );
     }
 
+    final memberBatch = firestore.newBatch();
     if (!existing.exists) {
-      // Step 1 - the organization itself, in its own commit so the rules can
-      // authorize the founder profile with `get(org).data.ownerUid == uid`
-      // instead of trusting a self-asserted `status: 'active'`.
-      // New companies start as `trial` with a one-time 30-day window
-      // (trialStartedAt/trialEndsAt); expiry flips the org to `suspended`
-      // via the server cron, and manual activation by support is permanent
-      // (manuallyActivated=true is never auto-suspended again).
-      final now = DateTime.now().toUtc();
-      final trialEndsAt = now.add(const Duration(days: 30));
-      final orgBatch = firestore.newBatch();
-      orgBatch.set(orgRef, <String, dynamic>{
+      // Genesis is one atomic commit: organization, founder, profile and
+      // zero sequence. No business seeds or legacy migration are involved.
+      memberBatch.set(orgRef, <String, dynamic>{
         'name': organizationName,
         'ownerUid': uid,
-        'status': 'trial',
-        'schemaVersion': 2,
-        'trialStartedAt': Timestamp.fromDate(now),
-        'trialEndsAt': Timestamp.fromDate(trialEndsAt),
-        'trialConsumed': false,
+        'status': 'active',
+        'schemaVersion': commandSchemaVersion,
+        'commandProtocol': freshOrganizationProtocol(orgId),
+        'trialConsumed': true,
         'manuallyActivated': false,
         'createdAt': firestore.serverTimestamp(),
         'createdBy': uid,
@@ -398,24 +426,27 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
         'updatedAt': firestore.serverTimestamp(),
         'version': 1,
       });
-      orgBatch.set(firestore.organizationMetaRef(orgId), <String, dynamic>{
-        'lastWriteAt': firestore.serverTimestamp(),
-        'lastWriteBy': uid,
-        'lastEntity': 'org',
-        'version': 1,
-      });
-      await orgBatch.commit();
+      memberBatch.set(
+        orgRef.collection('counters').doc('changeSequence'),
+        <String, dynamic>{'organizationId': orgId, 'value': 0},
+      );
     }
 
     // Step 2 - the founder is the first (active) member of the organization.
-    // A new company is a trial: the founder is `trial_owner` with limited
-    // permissions (plan §4). Promotion to `admin` happens on approval.
-    final memberBatch = firestore.newBatch();
+    // New organizations start with a full owner. A retry against a legacy
+    // trial must preserve its role rather than grant a client-side upgrade.
+    final founderRole = existing.exists && existing.data()?['status'] == 'trial'
+        ? AppRoles.trialOwner
+        : AppRoles.admin;
     memberBatch.set(firestore.memberRef(orgId, memberId), <String, dynamic>{
       'uid': uid,
       'email': email,
-      'role': 'trial_owner',
-      'roles': ['trial_owner'],
+      'role': founderRole,
+      'roles': [founderRole],
+      'organizationId': orgId,
+      'remoteId': memberId,
+      'localId': 1,
+      'fullName': displayName,
       'status': 'active',
       'displayName': displayName,
       'activatedAt': firestore.serverTimestamp(),
@@ -427,8 +458,8 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     memberBatch.set(firestore.userDoc(uid), <String, dynamic>{
       'email': email,
       'organizationId': orgId,
-      'role': 'trial_owner',
-      'roles': ['trial_owner'],
+      'role': founderRole,
+      'roles': [founderRole],
       'status': 'active',
       'memberId': memberId,
       'displayName': displayName,

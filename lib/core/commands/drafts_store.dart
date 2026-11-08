@@ -187,55 +187,55 @@ class DraftsStore {
   /// Insert or update this draft (identity = uuid [CommandDraft.id]).
   ///
   /// Draft-only: writing here creates no sync work.
-  Future<CommandDraft> save(CommandDraft draft) => _withDb('drafts.save', (
-    db,
-  ) async {
-    await tracedTransaction(db, 'drafts.save', (txn) async {
-      if (draft.state != DraftState.localDraft) {
-        throw StateError(
-          'Only the command lifecycle may approve or submit a draft',
-        );
-      }
-      final scope = scopeProvider?.call();
-      if (scopeProvider != null &&
-          (scope == null || !scope.owns(draft.organizationId, draft.uid))) {
-        throw StateError('Wrong draft owner');
-      }
-      final previous = await txn.query(
-        'drafts',
-        where: 'id = ?',
-        whereArgs: [draft.id],
-      );
-      if (previous.isNotEmpty &&
-          (previous.single['uid'] != draft.uid ||
-              previous.single['organization_id'] != draft.organizationId ||
-              previous.single['state'] == 'approved')) {
-        throw StateError('Draft ownership/state is immutable');
-      }
-      final sent = await txn.query(
-        'command_outbox',
-        where: 'draft_id = ?',
-        whereArgs: [draft.id],
-      );
-      if (sent.any(
-        (row) =>
-            row['state'] != 'pending' || (row['attempts'] as num).toInt() > 0,
-      )) {
-        throw StateError('Resolve the submitted operation before editing');
-      }
-      await txn.delete(
-        'command_outbox',
-        where: "draft_id = ? AND state = 'pending' AND attempts = 0",
-        whereArgs: [draft.id],
-      );
-      await txn.insert(
-        'drafts',
-        draft.toRow(),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
-    });
-    return draft;
-  });
+  Future<CommandDraft> save(CommandDraft draft) =>
+      _withDb('drafts.save', (db) async {
+        await tracedTransaction(db, 'drafts.save', (txn) async {
+          if (draft.state != DraftState.localDraft) {
+            throw StateError(
+              'Only the command lifecycle may approve or submit a draft',
+            );
+          }
+          final scope = scopeProvider?.call();
+          if (scopeProvider != null &&
+              (scope == null || !scope.owns(draft.organizationId, draft.uid))) {
+            throw StateError('Wrong draft owner');
+          }
+          final previous = await txn.query(
+            'drafts',
+            where: 'id = ?',
+            whereArgs: [draft.id],
+          );
+          if (previous.isNotEmpty &&
+              (previous.single['uid'] != draft.uid ||
+                  previous.single['organization_id'] != draft.organizationId ||
+                  previous.single['state'] == 'approved')) {
+            throw StateError('Draft ownership/state is immutable');
+          }
+          final sent = await txn.query(
+            'command_outbox',
+            where: 'draft_id = ?',
+            whereArgs: [draft.id],
+          );
+          if (sent.any(
+            (row) =>
+                !{'pending', 'archived'}.contains(row['state']) ||
+                (row['attempts'] as num).toInt() > 0,
+          )) {
+            throw StateError('Resolve the submitted operation before editing');
+          }
+          await txn.delete(
+            'command_outbox',
+            where: "draft_id = ? AND state = 'pending' AND attempts = 0",
+            whereArgs: [draft.id],
+          );
+          await txn.insert(
+            'drafts',
+            draft.toRow(),
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        });
+        return draft;
+      });
 
   Future<CommandDraft?> get(String id) => _withDb('drafts.get', (db) async {
     final scope = scopeProvider?.call();
@@ -288,6 +288,47 @@ class DraftsStore {
     );
     return rows.map(CommandDraft.fromRow).toList();
   });
+
+  Future<void> deleteUnsent(String id) => _withDb(
+    'drafts.deleteUnsent',
+    (db) => db.transaction((txn) async {
+      final rows = await txn.query('drafts', where: 'id = ?', whereArgs: [id]);
+      if (rows.isEmpty) return;
+      final draft = CommandDraft.fromRow(rows.single);
+      final scope = scopeProvider?.call();
+      if ((scopeProvider != null &&
+              (scope == null ||
+                  !scope.owns(draft.organizationId, draft.uid))) ||
+          draft.state != DraftState.localDraft) {
+        throw StateError('Only an owned unsent draft can be removed');
+      }
+      final requests = await txn.query(
+        'command_outbox',
+        where: 'draft_id = ?',
+        whereArgs: [id],
+      );
+      if (requests.any(
+        (row) =>
+            (row['attempts'] as num).toInt() > 0 ||
+            !{'pending', 'archived'}.contains(row['state']),
+      )) {
+        throw StateError('A submitted operation must be resolved first');
+      }
+      for (final row in requests) {
+        await txn.delete(
+          'central_command_entities',
+          where: 'operation_id = ?',
+          whereArgs: [row['operation_id']],
+        );
+      }
+      await txn.delete(
+        'command_outbox',
+        where: 'draft_id = ?',
+        whereArgs: [id],
+      );
+      await txn.delete('drafts', where: 'id = ?', whereArgs: [id]);
+    }),
+  );
 
   /// State machine of a submit/transport cycle inside the caller's txn.
   ///

@@ -9,17 +9,17 @@ import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/network/connectivity_service.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/audit_trail.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
 import 'package:material_lab/core/sync/device_registry.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
-import 'package:material_lab/core/sync/sync_engine.dart';
+import '../support/retired/core/sync/sync_engine.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/inspections/data/inspection_repo.dart';
-import 'package:material_lab/features/inspections/data/offline_first_inspection_repository.dart';
+import 'package:material_lab/features/inspections/data/server_confirmed_inspection_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 import 'package:material_lab/features/reference/data/reference_repo.dart';
 
@@ -102,7 +102,7 @@ class _Device {
     );
   }
 
-  OfflineFirstInspectionRepository repo() => OfflineFirstInspectionRepository(
+  ServerConfirmedInspectionRepository repo() => ServerConfirmedInspectionRepository(
     dbHelper: fixture.helper,
     referenceRepo: ReferenceRepo(
       dbHelper: fixture.helper,

@@ -2,9 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
 import 'package:material_lab/core/sync/entity_registry.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/pull_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';

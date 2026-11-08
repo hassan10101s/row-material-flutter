@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/app/auth_gate.dart';
+import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/design_system/widgets/app_adaptive_list.dart';
@@ -87,6 +88,8 @@ void main() {
     reports = _ReportMock();
     gate = _GateMock();
     when(() => gate.currentUser).thenReturn(null);
+    when(() => gate.canWrite(Permission.reportsRead)).thenReturn(true);
+    when(() => gate.canWrite(Permission.labResultsRead)).thenReturn(true);
 
     // Editors resolve registries through getIt; a route built under the
     // root navigator cannot see screen providers, so the singletons must

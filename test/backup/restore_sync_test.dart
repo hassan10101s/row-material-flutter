@@ -8,11 +8,11 @@ import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/core/network/connectivity_service.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
-import 'package:material_lab/core/sync/sync_engine.dart';
+import '../support/retired/core/sync/sync_engine.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/backup/data/backup_manager.dart';
@@ -138,7 +138,7 @@ void main() {
     audit = AuditLogger(queue: queue, session: () => session);
     backup = BackupManager(dbHelper: helper);
     engine = buildEngine();
-    cubit = DatabaseSettingsCubit(backup: backup, engine: engine);
+    cubit = DatabaseSettingsCubit(backup: backup, refreshApprovedData: () async { await engine.syncNow(); });
   });
 
   tearDown(() async {

@@ -14,16 +14,26 @@
  */
 'use strict';
 
-const {init, definition, uniqueClaims, keyOf, entityTypes, listDocs, loadParentDocs, parentRemoteId} = require('./shared');
+const {init, definition, uniqueClaims, keyOf, entityTypes, listDocs, parentRemoteId} = require('./shared');
 
 async function auditOrganization(db, orgId) {
   const entities = {};
+  const documents = new Map();
+  async function cached(type) {
+    if (!documents.has(type)) documents.set(type, await listDocs(db, orgId, type));
+    return documents.get(type);
+  }
   let blockerCount = 0;
   for (const type of entityTypes()) {
     const def = definition(type);
-    const docs = await listDocs(db, orgId, type);
+    const docs = await cached(type);
     const parentTypes = [...new Set(def.parents.map(parent => parent.type))];
-    const parentDocs = await loadParentDocs(db, orgId, parentTypes);
+    const parentDocs = new Map();
+    for (const parentType of parentTypes) {
+      for (const doc of await cached(parentType)) parentDocs.set(`${parentType}/${doc.id}`, {
+        exists: true, data: () => doc.data,
+      });
+    }
     const blockers = [];
     const claims = new Map();
     let live = 0;
@@ -46,16 +56,25 @@ async function auditOrganization(db, orgId) {
       }
       // Required parent links must resolve through the remote-id columns.
       for (const parent of def.parents) {
-        if (!parent.required) continue;
-        if (parentRemoteId(def, doc, parent) == null) {
-          blockers.push({where, code: 'MISSING_REQUIRED_PARENT', detail: parent.relation});
+        if (type === 'sample' && parent.relation === 'materialId' && doc.inspectionKind === 'product') continue;
+        if (parentRemoteId(def, doc, parent, parentDocs) == null) {
+          const nested = typeof doc.payload === 'string' ? (()=>{try{return JSON.parse(doc.payload);}catch{return {};}})() : doc.payload;
+          const remoteColumn = parent.localField.replace(/_id$/, '_remote_id');
+          const hasLink = doc.parentRefs?.[parent.relation] != null ||
+            doc[parent.relation] != null && doc[parent.relation] !== 0 ||
+            doc[parent.relation.replace(/Id$/, 'RemoteId')] != null ||
+            nested?.[remoteColumn] != null || nested?.[parent.localField] != null && nested[parent.localField] !== 0;
+          if (parent.required || hasLink) blockers.push({where,
+            code: parent.required ? 'MISSING_REQUIRED_PARENT' : 'INVALID_OPTIONAL_PARENT', detail: parent.relation});
         }
       }
       // Unique claims exactly as domain admission will compute them.
-      if (doc.deletedAt == null) {
+      // Partial unique indexes release deleted records themselves. Other
+      // unique identities remain reserved even after a tombstone.
+      {
         const refs = {};
         for (const parent of def.parents) {
-          const idValue = parentRemoteId(def, doc, parent);
+          const idValue = parentRemoteId(def, doc, parent, parentDocs);
           if (idValue != null) {
             refs[parent.relation] = {entityType: parent.type, entityId: idValue};
           }

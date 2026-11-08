@@ -24,17 +24,68 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
 
   /// Which list [state.materials] currently holds (`raw`, `product` or '').
   String _listKind = '';
+  int _catalogRequest = 0;
+  int _selectionRequest = 0;
+  int _entryCodeRequest = 0;
+  String? _entryCodeDate;
+
+  void _invalidateReferenceRequests() {
+    _selectionRequest++;
+    _entryCodeRequest++;
+    _entryCodeDate = null;
+  }
+
+  bool _currentSelection(int request) =>
+      !isClosed && !isEditing && request == _selectionRequest;
+
+  void _selectionFailed(Object error) {
+    safeEmit(
+      state.copyWith(
+        selectingReference: false,
+        physicalReference: const {},
+        chemicalReference: const {},
+        refRevision: state.refRevision + 1,
+        error: AppError.friendly(error),
+      ),
+    );
+  }
+
+  Future<String?> _selectionEntryCode(
+    int request,
+    String code,
+    String materialCode,
+    String date,
+  ) async {
+    var codeDate = date;
+    while (_currentSelection(request) && _entryCodeDate != codeDate) {
+      codeDate = _entryCodeDate ?? date;
+      code = await reference.generateEntryCode(materialCode, codeDate);
+    }
+    return _currentSelection(request) ? code : null;
+  }
 
   Future<void> loadMaterials() async {
-    safeEmit(state.copyWith(loading: true, error: null));
+    if (isEditing || isClosed) return;
+    final request = ++_catalogRequest;
+    _invalidateReferenceRequests();
+    _listKind = 'raw';
+    safeEmit(
+      state.copyWith(
+        loading: true,
+        selectingReference: false,
+        clearError: true,
+      ),
+    );
     try {
       final materials = await reference.listMaterials();
-      _listKind = 'raw';
+      if (isClosed || isEditing || request != _catalogRequest) return;
       safeEmit(state.copyWith(materials: materials, loading: false));
       await loadHistoryOptions();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      if (isClosed || isEditing || request != _catalogRequest) return;
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
+      if (isClosed || isEditing || request != _catalogRequest) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
@@ -42,10 +93,20 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
   /// Product catalog for the product-inspection form, mapped onto the same
   /// row shape the material picker consumes.
   Future<void> loadProducts() async {
-    safeEmit(state.copyWith(loading: true, error: null));
+    if (isEditing || isClosed) return;
+    final request = ++_catalogRequest;
+    _invalidateReferenceRequests();
+    _listKind = 'product';
+    safeEmit(
+      state.copyWith(
+        loading: true,
+        selectingReference: false,
+        clearError: true,
+      ),
+    );
     try {
       final products = await reference.listProductsForInspection();
-      _listKind = 'product';
+      if (isClosed || isEditing || request != _catalogRequest) return;
       safeEmit(
         state.copyWith(
           materials: [
@@ -61,8 +122,10 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
       );
       await loadHistoryOptions();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      if (isClosed || isEditing || request != _catalogRequest) return;
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
+      if (isClosed || isEditing || request != _catalogRequest) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
@@ -82,6 +145,7 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
 
   Future<void> loadSupplierOptions() async {
     final id = state.materialId;
+    final request = _selectionRequest;
     if (id == null || _listKind == 'product') {
       if (!isClosed) safeEmit(state.copyWith(supplierOptions: const []));
       return;
@@ -91,65 +155,136 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
       if (isClosed) return;
       // The selection may have moved while loading; stale options for
       // another material must never surface.
-      if (state.materialId == id) {
+      if (state.materialId == id &&
+          request == _selectionRequest &&
+          _listKind != 'product') {
         safeEmit(state.copyWith(supplierOptions: suppliers));
       }
     } catch (_) {}
   }
 
   Future<void> selectMaterial(int id, {required String date}) async {
+    if (isEditing || isClosed) return;
+    final request = ++_selectionRequest;
+    _entryCodeRequest++;
+    _entryCodeDate = date;
+    safeEmit(
+      state.copyWith(
+        selectingReference: true,
+        clearMaterialId: true,
+        materialCode: '',
+        entryCode: '',
+        supplierOptions: const [],
+        clearError: true,
+      ),
+    );
     try {
       final material = await reference.getMaterial(id, inspectionDate: date);
+      if (!_currentSelection(request)) return;
+      final code = await _selectionEntryCode(
+        request,
+        '${material['next_entry_code'] ?? ''}',
+        '${material['material_code'] ?? ''}',
+        date,
+      );
+      if (code == null || !_currentSelection(request)) return;
       safeEmit(
         state.copyWith(
           materialId: id,
           materialCode: '${material['material_code'] ?? ''}',
-          entryCode: '${material['next_entry_code'] ?? ''}',
+          entryCode: code,
           physicalReference: _asMap(material['physical_reference']),
           chemicalReference: _asMap(material['chemical_reference']),
           refRevision: state.refRevision + 1,
-          error: null,
+          selectingReference: false,
+          clearError: true,
         ),
       );
       await loadSupplierOptions();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(error: e.message));
+      if (!_currentSelection(request)) return;
+      _selectionFailed(e);
     } catch (e) {
-      safeEmit(state.copyWith(error: AppError.friendly(e)));
+      if (!_currentSelection(request)) return;
+      _selectionFailed(e);
     }
   }
 
   /// Product counterpart of [selectMaterial]: the reference grids rebuild
   /// from the product's analysis ranges instead of the material catalog.
   Future<void> selectProduct(int id, {required String date}) async {
+    if (isEditing || isClosed) return;
+    final request = ++_selectionRequest;
+    _entryCodeRequest++;
+    _entryCodeDate = date;
+    safeEmit(
+      state.copyWith(
+        selectingReference: true,
+        clearMaterialId: true,
+        materialCode: '',
+        entryCode: '',
+        supplierOptions: const [],
+        clearError: true,
+      ),
+    );
     try {
       final product = await reference.getProductForInspection(
         id,
         inspectionDate: date,
       );
+      if (!_currentSelection(request)) return;
+      final code = await _selectionEntryCode(
+        request,
+        '${product['next_entry_code'] ?? ''}',
+        '${product['product_code'] ?? ''}',
+        date,
+      );
+      if (code == null || !_currentSelection(request)) return;
       safeEmit(
         state.copyWith(
           materialId: id,
           materialCode: '${product['product_code'] ?? ''}',
-          entryCode: '${product['next_entry_code'] ?? ''}',
+          entryCode: code,
           physicalReference: _asMap(product['physical_reference']),
           chemicalReference: _asMap(product['chemical_reference']),
           refRevision: state.refRevision + 1,
-          error: null,
+          selectingReference: false,
+          clearError: true,
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(error: e.message));
+      if (!_currentSelection(request)) return;
+      _selectionFailed(e);
     } catch (e) {
-      safeEmit(state.copyWith(error: AppError.friendly(e)));
+      if (!_currentSelection(request)) return;
+      _selectionFailed(e);
     }
   }
 
   Future<void> regenerateEntryCode(String date) async {
+    if (isEditing) return;
+    _entryCodeDate = date;
+    final request = ++_entryCodeRequest;
+    if (state.selectingReference) return;
+    final materialCode = state.materialCode;
+    final materialId = state.materialId;
     try {
-      final code = await reference.generateEntryCode(state.materialCode, date);
+      final code = await reference.generateEntryCode(materialCode, date);
+      if (request != _entryCodeRequest ||
+          isEditing ||
+          state.materialId != materialId ||
+          state.materialCode != materialCode) {
+        return;
+      }
       safeEmit(state.copyWith(entryCode: code));
     } catch (e) {
+      if (isClosed ||
+          request != _entryCodeRequest ||
+          isEditing ||
+          state.materialId != materialId ||
+          state.materialCode != materialCode) {
+        return;
+      }
       safeEmit(state.copyWith(error: AppError.friendly(e)));
     }
   }
@@ -164,63 +299,54 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
   /// True after [loadForEdit]: [save] updates instead of creating.
   bool get isEditing => _editingId != null;
 
-  /// Prepares the form to edit [inspection] (a row as read from the repo,
-  /// e.g. the detail screen's map): ensures the right catalog list is loaded
-  /// (materials vs products by the row's kind), selects its material/product
-  /// so the reference grids rebuild, restores its stored entry code
-  /// (selection would mint a fresh one) and its decision. Field values
-  /// themselves stay in the widget, which fills them once the grids rebuild.
+  /// Editing uses the approved inspection's identity and reference snapshot.
+  /// Never re-select from the current catalogue or mint another entry code:
+  /// archived/unavailable catalogue rows must not erase an existing selection.
   Future<void> loadForEdit(Map<String, dynamic> inspection) async {
+    _catalogRequest++;
+    _invalidateReferenceRequests();
     _editingId = int.tryParse('${inspection['id'] ?? ''}');
-    final date = '${inspection['inspection_date'] ?? ''}';
-    if ('${inspection['inspection_kind'] ?? 'raw'}' == 'product') {
-      if (_listKind != 'product') await loadProducts();
-      final productId = int.tryParse('${inspection['product_id'] ?? ''}');
-      if (productId != null) {
-        await selectProduct(productId, date: date);
-        if (!isClosed) {
-          safeEmit(
-            state.copyWith(
-              entryCode: '${inspection['entry_code'] ?? ''}',
-              decision: '${inspection['decision_status'] ?? 'APPROVED'}',
-            ),
-          );
-        }
-      } else if (!isClosed) {
-        safeEmit(
-          state.copyWith(
-            decision: '${inspection['decision_status'] ?? 'APPROVED'}',
-          ),
-        );
-      }
-      return;
-    }
-    if (_listKind != 'raw') await loadMaterials();
-    final materialId = int.tryParse('${inspection['material_id'] ?? ''}');
-    if (materialId != null) {
-      await selectMaterial(materialId, date: date);
-      if (!isClosed) {
-        safeEmit(
-          state.copyWith(
-            entryCode: '${inspection['entry_code'] ?? ''}',
-            decision: '${inspection['decision_status'] ?? 'APPROVED'}',
-          ),
-        );
-      }
-    } else if (!isClosed) {
-      safeEmit(
-        state.copyWith(
-          decision: '${inspection['decision_status'] ?? 'APPROVED'}',
-        ),
-      );
-    }
+    final product = '${inspection['inspection_kind'] ?? 'raw'}' == 'product';
+    _listKind = product ? 'product' : 'raw';
+    final selectedId = int.tryParse(
+      '${inspection[product ? 'product_id' : 'material_id'] ?? ''}',
+    );
+    final code = '${inspection['material_code'] ?? ''}';
+    safeEmit(
+      state.copyWith(
+        materials: [
+          if (selectedId != null)
+            {
+              'id': selectedId,
+              'material_name': '${inspection['material_name'] ?? ''}',
+              'material_code': code,
+            },
+        ],
+        materialId: selectedId,
+        clearMaterialId: selectedId == null,
+        materialCode: code,
+        entryCode: '${inspection['entry_code'] ?? ''}',
+        physicalReference: _asMap(inspection['physical_reference']),
+        chemicalReference: _asMap(inspection['chemical_reference']),
+        decision: '${inspection['decision_status'] ?? 'APPROVED'}',
+        refRevision: state.refRevision + 1,
+        loading: false,
+        selectingReference: false,
+        clearError: true,
+      ),
+    );
+    await loadHistoryOptions();
   }
 
   /// Clears the selected material (returns the material picker to search mode).
   void clearMaterial() {
+    if (isEditing) return;
+    _invalidateReferenceRequests();
     safeEmit(
       state.copyWith(
-        materialId: null,
+        clearMaterialId: true,
+        selectingReference: false,
+        clearError: true,
         materialCode: '',
         entryCode: '',
         physicalReference: const {},
@@ -237,7 +363,10 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
     Map<String, dynamic> payload,
     UserContext userContext,
   ) async {
-    safeEmit(state.copyWith(saving: true, error: null, pendingApproval: false));
+    if (state.selectingReference) return false;
+    safeEmit(
+      state.copyWith(saving: true, clearError: true, pendingApproval: false),
+    );
     try {
       final editingId = _editingId;
       if (editingId != null) {
@@ -251,11 +380,11 @@ class InspectionFormCubit extends AppCubit<InspectionFormState> {
       // duplicate submission. Close it like a saved form and distinguish the
       // pending approval in the confirmation feedback.
       safeEmit(
-        state.copyWith(saving: false, error: null, pendingApproval: true),
+        state.copyWith(saving: false, clearError: true, pendingApproval: true),
       );
       return true;
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
       return false;
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));

@@ -8,6 +8,7 @@ import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
 import '../domain/reference_repository.dart';
+import '../../lab/data/lab_repo.dart';
 
 /// Reference materials / parameters / units repository
 /// (port of core/services/reference.py).
@@ -16,11 +17,9 @@ class ReferenceRepo implements ReferenceRepository {
 
   /// Resolves the current device tag used to scope minted entry codes.
   ///
-  /// Two offline devices must never mint the same `entry_code`: the sync
-  /// document id of an inspection IS its entry code, so a collision means one
-  /// device's push overwrites (or version-conflicts with) the other's and a
-  /// human has to untangle it on the Sync screen. Scoping the sequence per
-  /// device (`CODE-DATE-TAG-SEQ`) makes collisions structurally impossible.
+  /// The last six alphanumeric characters distinguish registered devices in
+  /// readable codes. Firestore unique reservations remain the final collision
+  /// guard; the inspection's immutable remote UUID is its document identity.
   /// Null (tests, pre-registration) keeps the legacy `CODE-DATE-SEQ` format.
   final Future<String> Function()? deviceTagProvider;
   String? _cachedDeviceTag;
@@ -35,6 +34,72 @@ class ReferenceRepo implements ReferenceRepository {
   ReferenceRepo({required this.dbHelper, this.deviceTagProvider});
 
   Future<Database> get _db => dbHelper.database;
+
+  @override
+  Future<int> saveMaterialDefinition({
+    int? id,
+    required String materialName,
+    required String materialCode,
+    Map<String, dynamic> physicalReference = const {},
+    Map<String, dynamic> chemicalReference = const {},
+    Map<String, dynamic> units = const {},
+    required List<Map<String, dynamic>> bounds,
+  }) => dbHelper.businessTransaction((txn) async {
+    final materialId =
+        id ??
+        await createMaterial(
+          materialName: materialName,
+          materialCode: materialCode,
+          physicalReference: physicalReference,
+          chemicalReference: chemicalReference,
+          units: units,
+          exec: txn,
+        );
+    if (id != null) {
+      await updateMaterial(
+        id,
+        materialName: materialName,
+        materialCode: materialCode,
+        physicalReference: physicalReference,
+        chemicalReference: chemicalReference,
+        units: units,
+        exec: txn,
+      );
+    }
+    final wanted = {
+      for (final spec in bounds)
+        '${spec['parameter_type']}:${'${spec['parameter_name'] ?? ''}'.trim().toLowerCase()}',
+    };
+    final previous = await txn.rawQuery(
+      'SELECT b.id, b.parameter_type, p.parameter_name '
+      'FROM material_parameter_bounds b LEFT JOIN parameters p ON p.id = b.parameter_id '
+      'WHERE b.material_id = ? AND b.active = 1 AND b.deleted_at IS NULL',
+      [materialId],
+    );
+    for (final row in previous) {
+      if (!wanted.contains(
+        '${row['parameter_type']}:${'${row['parameter_name'] ?? ''}'.trim().toLowerCase()}',
+      )) {
+        await txn.update(
+          'material_parameter_bounds',
+          {'active': 0, 'deleted_at': nowIso()},
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+    }
+    await saveDefinitionBounds(txn, materialId, bounds);
+    return materialId;
+  });
+
+  /// Data-layer composition hook; the facade supplies guarded, queued writes.
+  Future<void> saveDefinitionBounds(
+    DatabaseExecutor txn,
+    int id,
+    List<Map<String, dynamic>> bounds,
+  ) async {
+    await LabRepo(dbHelper: dbHelper).saveMaterialBounds(id, bounds, txn);
+  }
 
   // ── Materials ─────────────────────────────────────────────────
 
@@ -225,7 +290,7 @@ class ReferenceRepo implements ReferenceRepository {
       whereArgs: [id],
     );
     if (rows.isEmpty) return null;
-    return Map<String, dynamic>.from(rows.first);
+    return effectiveSecureDefinition(Map<String, dynamic>.from(rows.first));
   }
 
   @override
@@ -418,12 +483,14 @@ class ReferenceRepo implements ReferenceRepository {
         final unit = requestedUnit.isNotEmpty || units.containsKey(name)
             ? requestedUnit
             : '${existing['unit'] ?? ''}';
-        await db.update(
-          'parameters',
-          {'unit': unit},
-          where: 'id = ?',
-          whereArgs: [existing['id']],
-        );
+        if ('${existing['unit'] ?? ''}' != unit) {
+          await db.update(
+            'parameters',
+            {'unit': unit},
+            where: 'id = ?',
+            whereArgs: [existing['id']],
+          );
+        }
         existing['unit'] = unit;
       } else {
         final id = await db.insert('parameters', {
@@ -464,6 +531,7 @@ class ReferenceRepo implements ReferenceRepository {
       FROM lab_product_analyses lpa
       JOIN lab_analyses a ON a.id = lpa.analysis_id
       LEFT JOIN parameters p ON p.id = a.parameter_id
+      WHERE lpa.deleted_at IS NULL
       ORDER BY lpa.product_id ASC, a.name ASC
     ''');
     final byProduct = <int, List<Map<String, dynamic>>>{};
@@ -504,7 +572,7 @@ class ReferenceRepo implements ReferenceRepository {
       limit: 1,
     );
     if (rows.isEmpty) throw NotFoundError(AppErrors.productNotFound);
-    final product = Map<String, dynamic>.from(rows.first);
+    final product = effectiveSecureDefinition(Map<String, dynamic>.from(rows.first));
     if ((product['active'] as num?) != 1) {
       throw const ValidationError(
         'Selected product is inactive (archived) and cannot be used in a new inspection.',
@@ -533,7 +601,7 @@ class ReferenceRepo implements ReferenceRepository {
         FROM lab_product_analyses lpa
         JOIN lab_analyses a ON a.id = lpa.analysis_id
         LEFT JOIN parameters p ON p.id = a.parameter_id
-        WHERE lpa.product_id = ?
+        WHERE lpa.product_id = ? AND lpa.deleted_at IS NULL
         ORDER BY a.name ASC
         ''',
         [id],
@@ -594,10 +662,9 @@ class ReferenceRepo implements ReferenceRepository {
 
   /// Mints the next entry code for [materialCode] on [inspectionDate].
   ///
-  /// The sequence is per (material, day, device): with a device tag two
-  /// offline devices mint disjoint code spaces, so their rows can never share
-  /// a sync document id. Without a tag the legacy global-per-day sequence is
-  /// kept (single-device history and every existing test).
+  /// The sequence includes saved local drafts, so preparing a second offline
+  /// inspection cannot reuse the first draft's number. The server still checks
+  /// uniqueness. Without a device tag the legacy per-day format is retained.
   @override
   Future<String> generateEntryCode(
     String materialCode,
@@ -611,9 +678,15 @@ class ReferenceRepo implements ReferenceRepository {
         ? '$materialCode-$dateFragment-'
         : '$materialCode-$dateFragment-$tag-';
     final rows = await db.rawQuery(
-      'SELECT MAX(CAST(SUBSTR(entry_code, ?) AS INTEGER)) AS max_seq '
-      'FROM inspections WHERE entry_code LIKE ?',
-      [prefix.length + 1, '$prefix%'],
+      'SELECT MAX(CAST(SUBSTR(code, ?) AS INTEGER)) AS max_seq FROM ('
+      'SELECT entry_code AS code FROM inspections WHERE SUBSTR(entry_code, 1, ?) = ? '
+      'UNION ALL '
+      "SELECT json_extract(w.value, '\$.payload.entryCode') AS code "
+      "FROM drafts d, json_each(d.payload, '\$.writes') w "
+      "WHERE json_extract(w.value, '\$.entityType') = 'sample' "
+      "AND json_extract(w.value, '\$.operation') = 'create' "
+      "AND SUBSTR(json_extract(w.value, '\$.payload.entryCode'), 1, ?) = ?)",
+      [prefix.length + 1, prefix.length, prefix, prefix.length, prefix],
     );
     final maxSeq = rows.isNotEmpty
         ? (rows.first['max_seq'] as num?)?.toInt() ?? 0
@@ -630,7 +703,7 @@ class ReferenceRepo implements ReferenceRepository {
       final raw = await provider();
       final clean = raw.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
       if (clean.isEmpty) return '';
-      final tag = clean.length <= 6 ? clean : clean.substring(0, 6);
+      final tag = clean.length <= 6 ? clean : clean.substring(clean.length - 6);
       _cachedDeviceTag = tag;
       return tag;
     } on Object {

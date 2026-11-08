@@ -24,6 +24,9 @@ class ReportFormKeys {
   static const String dailyReport = 'daily_report_form_no';
   static const String monthlyReport = 'monthly_report_form_no';
   static const String yearlyReport = 'yearly_report_form_no';
+  static const String productDailyReport = 'product_daily_report_form_no';
+  static const String productMonthlyReport = 'product_monthly_report_form_no';
+  static const String productYearlyReport = 'product_yearly_report_form_no';
   static const String followUpReport = 'followup_report_form_no';
 
   // ── Lab (work) reports ───────────────────────────────────────────
@@ -43,6 +46,9 @@ class ReportFormKeys {
     dailyReport,
     monthlyReport,
     yearlyReport,
+    productDailyReport,
+    productMonthlyReport,
+    productYearlyReport,
     followUpReport,
     labDailyReport,
     labMonthlyReport,

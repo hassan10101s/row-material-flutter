@@ -2,7 +2,9 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:sqflite/sqflite.dart';
 
 import '../../../core/constants/app_errors.dart';
+import '../../../core/constants/app_strings.dart';
 import '../../../core/database/database_helper.dart';
+import '../../../core/domain/formulation_receipt_policy.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
@@ -488,7 +490,7 @@ class InspectionRepo {
   ///
   /// Rendering from uncommitted state is wrong anyway - the report describes a row
   /// that may still roll back - so the mutations below only call this when they
-  /// are the outermost operation ([exec] is null). `OfflineFirstInspectionRepository`
+  /// are the outermost operation ([exec] is null). `ServerConfirmedInspectionRepository`
   /// owns the transaction and refreshes the report after it commits.
   Future<void> refreshReportHtml(
     int inspectionId, {
@@ -615,7 +617,10 @@ class InspectionRepo {
       );
       args.addAll([like, like, like, like, like, like]);
     }
-    if (status.trim().isNotEmpty) {
+    if (status == formulationAcceptedStatusFilter) {
+      conditions.add('decision_status IN (?, ?)');
+      args.addAll(formulationAcceptedDecisions);
+    } else if (status.trim().isNotEmpty) {
       conditions.add('decision_status = ?');
       args.add(status.trim());
     }
@@ -803,7 +808,10 @@ class InspectionRepo {
       );
       args.addAll([like, like, like, like, like, like]);
     }
-    if (status.trim().isNotEmpty) {
+    if (status == formulationAcceptedStatusFilter) {
+      conditions.add('decision_status IN (?, ?)');
+      args.addAll(formulationAcceptedDecisions);
+    } else if (status.trim().isNotEmpty) {
       conditions.add('decision_status = ?');
       args.add(status.trim());
     }
@@ -1015,6 +1023,15 @@ class InspectionRepo {
     final existing = serializeInspectionRow(
       Map<String, dynamic>.from(existingRaw.first),
     );
+    if (payload.containsKey('entry_code') &&
+        '${payload['entry_code']}'.trim() != '${existing['entry_code']}') {
+      throw ValidationError(
+        AppText.t(
+          'رقم القيد ثابت بعد إنشاء الفحص ولا يمكن تغييره.',
+          'The entry code is fixed after creation and cannot be changed.',
+        ),
+      );
+    }
 
     final physicalRef = Map<String, dynamic>.from(
       existing['physical_reference'] ?? {},

@@ -15,7 +15,7 @@ import 'qc_template.dart';
 /// ## Transactions are the facade's business
 /// No method here takes a `DatabaseExecutor`. A caller that needs the local
 /// write and its `qc_audits` row to commit together gets that from the
-/// `OfflineFirst*` facades, which own the transaction and thread their executor
+/// `ServerConfirmed*` facades, which own the transaction and thread their executor
 /// down into the local repository. Exposing `exec` on the contract would invite a
 /// cubit to open a transaction it cannot also audit inside.
 ///
@@ -175,6 +175,8 @@ abstract interface class QcNcCapaRepository {
   Future<QcFindingNc?> getFinding(int findingId);
 
   Future<int> createFinding(QcFindingNc finding);
+  Future<int> saveProductSampleFinding(QcFindingNc finding);
+  Future<QcFindingNc?> getProductSampleFinding(int sampleId);
 
   Future<void> saveFinding(QcFindingNc finding);
 
@@ -233,7 +235,7 @@ abstract interface class QcAuditRepository {
 /// A user defines a register - any number of typed columns (number / text /
 /// date) - and records rows into it. Definitions and records are syncable
 /// entities with real cross-device identities, so every write path here goes
-/// through the sync write contract; the `OfflineFirst*` facade owns the
+/// through the sync write contract; the `ServerConfirmed*` facade owns the
 /// transaction, the validation and the queue.
 ///
 /// ## What the contract deliberately does not allow

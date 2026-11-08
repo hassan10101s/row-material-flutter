@@ -12,7 +12,7 @@ import 'package:material_lab/core/firebase/firebase_options.dart';
 import 'package:material_lab/core/network/connectivity_service.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
-import 'package:material_lab/features/auth/data/offline_first_auth_repository.dart';
+import 'package:material_lab/features/auth/data/firebase_auth_repository.dart';
 import 'package:material_lab/features/auth/domain/auth_repository.dart';
 
 class _MockRemote extends Mock implements AuthRemoteDataSource {}
@@ -110,10 +110,7 @@ void main() {
         role: AppRoles.lab,
         status: MemberStatus.pendingActivation,
       );
-      expect(
-        s.canDo(Permission.usersUpdate, online: true),
-        isFalse,
-      );
+      expect(s.canDo(Permission.usersUpdate, online: true), isFalse);
     });
 
     test('8. a manager holds users.update and can activate', () {
@@ -163,10 +160,7 @@ void main() {
     });
 
     test('legacy bound account without a status waits for activation', () {
-      expect(
-        normalizeMemberStatus(null),
-        MemberStatus.pendingActivation,
-      );
+      expect(normalizeMemberStatus(null), MemberStatus.pendingActivation);
       expect(normalizeMemberStatus(''), MemberStatus.pendingActivation);
       expect(normalizeMemberStatus('bogus'), MemberStatus.pendingActivation);
       // Never active by accident.
@@ -199,7 +193,7 @@ void main() {
     });
 
     test('13. company reads/writes require active status', () {
-      expect(rules, contains("myStatus() == 'active'"));
+      expect(rules, contains("profile.data.status == 'active'"));
       expect(rules, contains('activeInOrg(orgId)'));
     });
 
@@ -207,9 +201,7 @@ void main() {
       expect(rules, contains('pending_activation'));
       expect(
         rules,
-        contains(
-          "resource.data.status in ['invited','pending_activation']",
-        ),
+        contains("resource.data.status in ['invited','pending_activation']"),
       );
     });
 
@@ -263,40 +255,47 @@ void main() {
       when(() => db.bindOrg(any())).thenAnswer((_) async => '');
     });
 
-    OfflineFirstAuthRepository build() => OfflineFirstAuthRepository(
-          remote: remote,
-          sessionStore: store,
-          dbHelper: db,
-          connectivity: connectivity,
-          metadata: metadata,
-          bootstrap: const FirebaseBootstrapResult(
-            status: FirebaseStatus.ready,
-            config: FirebaseConfig(
-              apiKey: 'k',
-              appId: 'a',
-              messagingSenderId: 'm',
-              projectId: 'p',
-              authDomain: 'd',
-            ),
-          ),
-        )..onOrganizationBound = (orgId) async => bound.add(orgId);
+    FirebaseAuthRepository build() => FirebaseAuthRepository(
+      remote: remote,
+      sessionStore: store,
+      dbHelper: db,
+      connectivity: connectivity,
+      metadata: metadata,
+      bootstrap: const FirebaseBootstrapResult(
+        status: FirebaseStatus.ready,
+        config: FirebaseConfig(
+          apiKey: 'k',
+          appId: 'a',
+          messagingSenderId: 'm',
+          projectId: 'p',
+          authDomain: 'd',
+        ),
+      ),
+    )..onOrganizationBound = (orgId) async => bound.add(orgId);
 
     UserProfile pendingProfile() => const UserProfile(
-          uid: 'uid-1',
-          email: 'm@example.com',
-          organizationId: 'org_1',
-          role: AppRoles.lab,
-          status: MemberStatus.pendingActivation,
-          memberId: 'member_1',
-        );
+      uid: 'uid-1',
+      email: 'm@example.com',
+      organizationId: 'org_1',
+      role: AppRoles.lab,
+      status: MemberStatus.pendingActivation,
+      memberId: 'member_1',
+    );
 
     test('12. no binder / no sync source before activation', () async {
       when(
         () => remote.loadProfile(any()),
       ).thenAnswer((_) async => pendingProfile());
       final auth = build();
-      expect(await auth.resolveProfile(), AuthState.awaitingActivation);
-      expect(bound, isEmpty, reason: 'onOrganizationBound runs for active only');
+      expect(
+        await auth.resolveProfile(freshSignIn: true),
+        AuthState.awaitingActivation,
+      );
+      expect(
+        bound,
+        isEmpty,
+        reason: 'onOrganizationBound runs for active only',
+      );
       verify(() => db.bindOrg(null)).called(1);
       verifyNever(() => db.bindOrg('org_1'));
     });
@@ -313,7 +312,7 @@ void main() {
         ),
       );
       final auth = build();
-      expect(await auth.resolveProfile(), AuthState.ready);
+      expect(await auth.resolveProfile(freshSignIn: true), AuthState.ready);
       expect(bound, ['org_1']);
     });
   });

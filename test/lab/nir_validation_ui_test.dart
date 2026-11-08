@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -8,6 +9,8 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:material_lab/app/auth_gate.dart';
+import 'package:material_lab/app/widget_error_view.dart';
+import 'package:material_lab/core/utils/app_exceptions.dart';
 import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/core/responsive/layout_spec.dart';
@@ -41,6 +44,10 @@ NirParameterStats _stats({
     for (var i = 0; i < count; i++)
       NirValidationPoint(
         inspectionId: i + 1,
+        referenceId: i + 1,
+        referenceRemoteId: 'lab-$i',
+        selectionKey: 'point-$i',
+        referenceVersion: 1,
         entryCode: 'TEST-${100 + i}',
         inspectionDate: '2026-10-24',
         sampleName: 'عينة مرجعية ${i + 1}',
@@ -53,6 +60,7 @@ NirParameterStats _stats({
 );
 
 class _Repository extends Fake implements NirValidationRepository {
+  Future<NirValidationReport> Function()? onCompute;
   List<NirParameterStats> rows = [
     _stats(),
     _stats(parameter: 'الرطوبة', noisy: true),
@@ -64,15 +72,18 @@ class _Repository extends Fake implements NirValidationRepository {
     ),
   ];
   final resets = <(String, NirScope?, int?, String, String)>[];
+  List<NirValidationSettings> history = [];
   @override
   Future<NirValidationSettings?> getSettings() async => null;
   @override
   Future<List<NirValidationSettings>> listResetHistory({
     int limit = 50,
-  }) async => [];
+  }) async => history.take(limit).toList();
   @override
   Future<NirValidationReport> compute({String? startDate}) async =>
-      NirValidationReport(settings: null, stats: rows);
+      onCompute != null
+      ? await onCompute!()
+      : NirValidationReport(settings: null, stats: rows);
   @override
   Future<NirValidationSettings> resetValidation(
     String startDate, {
@@ -81,6 +92,7 @@ class _Repository extends Fake implements NirValidationRepository {
     int? entityId,
     String entityName = '',
     String parameter = '',
+    NirAppliedCorrection? appliedCorrection,
   }) async {
     resets.add((startDate, scope, entityId, entityName, parameter));
     return NirValidationSettings(id: 1, startDate: startDate);
@@ -188,6 +200,41 @@ void main() {
   });
 
   testWidgets(
+    'NIR refresh keeps finite sliver layout across loading, empty, error and restored data',
+    (tester) async {
+      final previous = ErrorWidget.builder;
+      ErrorWidget.builder = buildAppWidgetError;
+      addTearDown(() => ErrorWidget.builder = previous);
+      final repo = _Repository();
+      final cubit = await _page(tester, repo, size: const Size(1300, 900));
+      final request = Completer<NirValidationReport>();
+      repo.onCompute = () => request.future;
+      final refresh = cubit.load();
+      await tester.pump();
+      expect(find.byType(AppWidgetErrorView), findsNothing);
+      expect(tester.takeException(), isNull);
+      request.complete(const NirValidationReport(settings: null, stats: []));
+      await refresh;
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      repo.onCompute = () async =>
+          throw const ValidationError('NIR refresh failed');
+      await cubit.load();
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      repo.onCompute = null;
+      await cubit.load();
+      await tester.pumpAndSettle();
+      expect(find.byType(AppDataTable), findsWidgets);
+      expect(find.byType(AppWidgetErrorView), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 15));
+      await tester.pumpAndSettle();
+      ErrorWidget.builder = previous;
+    },
+  );
+
+  testWidgets(
     'desktop aligns metrics and filters reliability without writing records',
     (tester) async {
       final repo = _Repository();
@@ -260,6 +307,8 @@ void main() {
         );
         await tester.tap(find.text('افتح'));
         await tester.pumpAndSettle();
+        expect(find.byType(Dialog), mobile ? findsNothing : findsOneWidget);
+        if (mobile) expect(find.byType(BackButton), findsOneWidget);
         expect(find.text('معاينة التصحيح المقترح'), findsOneWidget);
         expect(find.text('بدء فترة جديدة لهذا التحليل'), findsNothing);
         await _capture(tester, mobile ? 'mobile_details' : 'desktop_details');
@@ -278,6 +327,89 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.tap(find.text('إغلاق'));
         await tester.pumpAndSettle();
+      },
+    );
+  }
+
+  for (final mobile in [false, true]) {
+    testWidgets(
+      '${mobile ? 'phone' : 'desktop'} No waits for approval, updates all metrics and Yes restores the pair',
+      (tester) async {
+        final original = _stats(count: 2);
+        var current = original;
+        Completer<NirParameterStats?>? response;
+        var calls = 0;
+        await _pump(
+          tester,
+          Builder(
+            builder: (context) => AppButton(
+              label: 'Open inclusion',
+              onPressed: () => showNirItemDetails(
+                context,
+                original,
+                onSetIncluded: (point, included) {
+                  calls++;
+                  response = Completer<NirParameterStats?>();
+                  final points = [
+                    for (final p in current.allPoints)
+                      NirValidationPoint(
+                        inspectionId: p.inspectionId,
+                        entryCode: p.entryCode,
+                        inspectionDate: p.inspectionDate,
+                        sampleName: p.sampleName,
+                        nirValue: p.nirValue,
+                        labValue: p.labValue,
+                        selectionKey: p.selectionKey,
+                        referenceRemoteId: p.referenceRemoteId,
+                        referenceId: p.referenceId,
+                        referenceVersion: p.referenceVersion + 1,
+                        included: p.selectionKey == point.selectionKey
+                            ? included
+                            : p.included,
+                      ),
+                  ];
+                  current = NirParameterStats(
+                    scope: current.scope,
+                    entityId: current.entityId,
+                    entityName: current.entityName,
+                    parameter: current.parameter,
+                    unit: current.unit,
+                    points: points,
+                  );
+                  return response!.future;
+                },
+              ),
+            ),
+          ),
+          mobile: mobile,
+        );
+        await tester.tap(find.text('Open inclusion'));
+        await tester.pumpAndSettle();
+        final toggle = find.byKey(const ValueKey('nir-inclusion-point-0'));
+        await tester.ensureVisible(toggle);
+        await tester.pumpAndSettle();
+        final no = find.descendant(of: toggle, matching: find.text('No'));
+        await tester.tap(no);
+        await tester.pump();
+        expect(tester.widget<SegmentedButton<bool>>(toggle).selected, {true});
+        expect(
+          tester.widget<SegmentedButton<bool>>(toggle).onSelectionChanged,
+          isNull,
+        );
+        response!.complete(current);
+        await tester.pumpAndSettle();
+        expect(tester.widget<SegmentedButton<bool>>(toggle).selected, {false});
+        expect(find.text('1 قراءة مستبعدة'), findsOneWidget);
+        final yes = find.descendant(of: toggle, matching: find.text('Yes'));
+        await tester.ensureVisible(yes);
+        await tester.tap(yes);
+        await tester.pump();
+        response!.complete(current);
+        await tester.pumpAndSettle();
+        expect(tester.widget<SegmentedButton<bool>>(toggle).selected, {true});
+        expect(find.text('1 قراءة مستبعدة'), findsNothing);
+        expect(calls, 2);
+        expect(tester.takeException(), isNull);
       },
     );
   }
@@ -373,4 +505,61 @@ void main() {
     expect(find.text('عرض التحليل والتوصية'), findsNothing);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'calibration history distinguishes captured metrics, current metrics and applied action',
+    (tester) async {
+      final repo = _Repository();
+      repo.history = [
+        NirValidationSettings(
+          id: 1,
+          startDate: '2026-11-01',
+          scope: 'raw_material',
+          materialId: 1,
+          entityName: 'قمح محلي',
+          parameter: 'البروتين',
+          resetByName: 'Ahmed',
+          resetNote: 'Cleaned and checked device',
+          calibrationSnapshot: const NirCalibrationSnapshot(
+            capturedAt: '2026-11-01 10:00:00',
+            summaries: [
+              {
+                'scope': 'raw_material',
+                'entityName': 'قمح محلي',
+                'parameter': 'البروتين',
+                'unit': '%',
+                'count': 12,
+                'bias': 0.4,
+                'r2': 0.95,
+                'rmse': 0.2,
+                'slopeOnly': 1.01,
+                'slope': 1.04,
+                'intercept': -0.3,
+              },
+            ],
+            appliedCorrection: NirAppliedCorrection(
+              slope: 1.02,
+              intercept: -0.1,
+            ),
+          ),
+        ),
+        const NirValidationSettings(
+          id: 2,
+          startDate: '2026-10-01',
+          resetByName: 'Legacy',
+        ),
+      ];
+      await _page(tester, repo, mobile: true, size: const Size(360, 900));
+      await tester.tap(find.text('سجل المعايرة'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('قمح محلي · البروتين'));
+      await tester.pumpAndSettle();
+      expect(find.text('قبل التصفير'), findsOneWidget);
+      expect(find.text('0.4000'), findsOneWidget);
+      expect(find.textContaining('تعديل أكّد المستخدم تطبيقه'), findsOneWidget);
+      expect(find.textContaining('1.0200'), findsOneWidget);
+      expect(repo.resets, isEmpty);
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

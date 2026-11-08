@@ -2,7 +2,7 @@ import 'permissions.dart';
 
 /// One-time 30-day trial policy (pure logic, no Firebase imports).
 ///
-/// The safety guarantee lives here, in one place, so it can be unit-tested:
+/// Client display policy; Firestore rules independently enforce server time:
 ///
 /// 1. A new organization starts as `trial` with `trialEndsAt = created + 30d`.
 /// 2. After `trialEndsAt`, the org is blocked (`suspended`) until manual
@@ -10,10 +10,9 @@ import 'permissions.dart';
 /// 3. After manual activation (`manuallyActivated == true`, `status == active`)
 ///    the org is **never** blocked again, no matter how much time passes.
 ///
-/// The server cron (`functions/index.js`) and the client gate
-/// (`OfflineFirstAuthRepository.resolveProfile`) both implement this same
-/// truth table; the client additionally treats an expired-but-not-yet-flipped
-/// `trial` as blocked so there is no gap before the cron runs.
+/// No scheduled function is required. The client gate displays the same
+/// expiry state; changing the device clock cannot bypass Firestore rules.
+/// Activation requires reviewed administration.
 abstract final class TrialPolicy {
   /// Length of the free trial.
   static const int trialDays = OrgStatus.trialDays;
@@ -25,8 +24,8 @@ abstract final class TrialPolicy {
   /// True when [now] is at or past [trialEndsAt].
   ///
   /// A missing/unparsable [trialEndsAt] is treated as "not expired" so legacy
-  /// documents without trial fields keep working until the backfill cron
-  /// stamps them; they are never locked by a parse error.
+  /// documents can still be described locally. This does not authorize a
+  /// server read or write; malformed trial records fail closed in rules.
   static bool isExpired(DateTime now, Object? trialEndsAt) {
     final endsAt = parseDate(trialEndsAt);
     if (endsAt == null) return false;
@@ -49,7 +48,7 @@ abstract final class TrialPolicy {
     }
   }
 
-  /// Whether the server cron should suspend this organization now.
+  /// Whether this organization should be shown as expired by client policy.
   ///
   /// Only ever true for `status == trial` with no manual activation and a
   /// passed `trialEndsAt`. Every other combination — especially anything with

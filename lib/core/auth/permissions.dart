@@ -26,7 +26,8 @@ enum Permission {
   qcReject('qc.reject', true),
   reportsRead('reports.read', false),
   reportsCreate('reports.create', true),
-  reportsExport('reports.export', true),
+  // Rendering/exporting existing data never mutates shared business records.
+  reportsExport('reports.export', false),
   devicesRead('devices.read', false),
   devicesRegister('devices.register', true, technical: true),
   devicesUpdate('devices.update', true, technical: true),
@@ -69,22 +70,10 @@ const Set<Permission> privilegedPermissions = {
   Permission.qcReject,
 };
 
-/// Roles that may run a privileged operation with no connectivity and no fresh
-/// token.
-///
-/// The organization manager is the account of last resort: it is the only role
-/// that can rename the organization, invite members and sign off on a QC
-/// decision, and it is the role an owner falls back to when the network is down
-/// or the token has expired. Requiring connectivity for exactly that role made
-/// the account unusable in the situation it exists for.
-///
-/// The exemption is deliberately narrow. It lifts **only** the online/fresh-token
-/// requirement, and only for `admin`, which already holds every permission in
-/// [Permission]. It does not lift the other two gates in `AppSession.canDo`:
-/// a read-only device and a non-active member still refuse everything, and an
-/// unknown role still gets an empty permission set. The write is queued
-/// locally like any other and reaches Firestore when the device reconnects,
-/// where the rules apply independently.
+/// Legacy UI freshness exemption for organization owners. This never bypasses
+/// the ten-day sign-in policy, explicit online submission or Firestore checks.
+/// Offline candidates remain local drafts until manually submitted; reconnect
+/// never sends them automatically.
 const Set<String> freshSessionExemptRoles = {AppRoles.admin};
 
 /// True when [permission] may only run online with a non-expired token.
@@ -168,7 +157,7 @@ abstract final class AppRoles {
   static String label(String role) => switch (role) {
     admin => AppText.t('مدير المؤسسة', 'Organization owner'),
     qualityManager => AppText.t('مدير الجودة', 'Quality manager'),
-    lab => AppText.t('اخصائي جودة', 'Quality specialist'),
+    lab => AppText.t('أخصائي جودة', 'Quality specialist'),
     nutritionist => AppText.t('أخصائي تغذية', 'Nutrition specialist'),
     viewer => AppText.t('اطّلاع فقط', 'Viewer'),
     trialOwner => AppText.t('مالك تجريبي', 'Trial owner'),
@@ -286,14 +275,22 @@ const Map<String, Set<Permission>> _rolePermissions = {
   },
   AppRoles.lab: {
     Permission.orgRead,
+    Permission.usersRead,
     Permission.samplesRead,
     Permission.samplesCreate,
     Permission.samplesUpdate,
     Permission.labResultsRead,
     Permission.labResultsCreate,
     Permission.labResultsUpdate,
+    Permission.qcRead,
+    Permission.qcWrite,
+    Permission.qcApprove,
+    Permission.qcReject,
     Permission.reportsRead,
+    Permission.reportsCreate,
+    Permission.reportsExport,
     Permission.devicesRegister,
+    Permission.auditRead,
     Permission.formulationsRead,
   },
   AppRoles.viewer: {
@@ -302,6 +299,7 @@ const Map<String, Set<Permission>> _rolePermissions = {
     Permission.labResultsRead,
     Permission.qcRead,
     Permission.reportsRead,
+    Permission.reportsExport,
     Permission.devicesRegister,
     Permission.formulationsRead,
   },

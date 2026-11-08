@@ -84,8 +84,6 @@ dependencies:
   # Killed-app push: FCM delivers even when the app is force-stopped /
   # swiped away, where Workmanager polls cannot run. Paired with
   # firebase_core ^4.15.0 (FlutterFire BoM 4.20.0 -> messaging 16.7.0).
-  firebase_messaging: ^16.7.0
-  cloud_functions: ^6.5.1
   http: any
 dependency_overrides:
   # FirebaseAuth's Android ID-token listener can run on a Firebase worker
@@ -97,6 +95,7 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  leak_tracker_flutter_testing: ^3.0.10
   mocktail: ^1.0.3
 
 flutter:

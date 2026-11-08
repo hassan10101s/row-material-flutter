@@ -54,6 +54,19 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
         code: 'signed_out',
       );
     }
+    // The genesis rules require `email_verified` for the precheck read and
+    // every write of the creation batch. Attempting with an unverified
+    // address is always `permission-denied`; the screen offers a resend
+    // button, so fail locally with the reason instead of a server error.
+    if (!user.emailVerified) {
+      throw OrganizationFailure(
+        AppText.t(
+          'وثّق بريدك الإلكتروني أولاً — أرسلنا رابط التوثيق إلى بريدك عند إنشاء الحساب. افتح الرابط ثم اضغط «تحققت الآن».',
+          'Verify your email first — we sent a verification link when the account was created. Open it, then press "I verified now".',
+        ),
+        code: 'email_unverified',
+      );
+    }
     // Single-company policy (§2): read the current profile before creating.
     // A bound account (invited/pending_activation/active) is refused with a
     // clear message — sign-out alone never unblocks this, only leaving does.
@@ -71,21 +84,25 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
         code: 'member_exists',
       );
     }
-    return remote
-        .createOrganization(
-          uid: user.uid,
-          email: user.email,
-          displayName: user.displayName ?? '',
-          organizationName: trimmed,
-        )
-        .onError<RemoteAuthException>((error, _) {
-          throw OrganizationFailure(
-            _remoteCreateMessage(error),
-            code: error.code,
-          );
-        });
+    try {
+      return await remote.createOrganization(
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName ?? '',
+        organizationName: trimmed,
+      );
+    } on RemoteAuthException catch (error) {
+      throw OrganizationFailure(
+        _remoteCreateMessage(error),
+        code: error.code,
+      );
+    } on Object catch (e) {
+      // A raw Firestore denial (stale deployed rules, unverified e-mail that
+      // slipped through, …) must never surface the generic fallback: the
+      // mapped message names permission/connection causes instead.
+      throw _mapRemoteError(e);
+    }
   }
-
   /// Bilingual mapping for the remote creation errors: raw technical English
   /// must never reach the UI, while the code stays for debugging.
   static String _remoteCreateMessage(
@@ -609,41 +626,43 @@ class _Members implements MemberRepository {
     if (!parts[1].contains('.')) return false;
     return true;
   }
+}
 
-  /// Maps raw Firestore/remote errors to bilingual `OrganizationFailure`s so
-  /// technical strings (`permission-denied`, `unavailable`) never reach the UI.
-  static OrganizationFailure _mapRemoteError(Object e) {
-    final text = '$e';
-    if (text.contains('permission-denied') ||
-        text.contains('PERMISSION_DENIED') ||
-        text.contains('permission_denied')) {
-      return OrganizationFailure(
-        AppText.t(
-          'تم الرفض من الخادم — تحقق من صلاحياتك وحدّث القائمة.',
-          'Rejected by the server — check your permissions and refresh.',
-        ),
-        code: 'not_allowed',
-      );
-    }
-    if (text.contains('unavailable') ||
-        text.contains('deadline-exceeded') ||
-        text.contains('network') ||
-        text.contains('offline')) {
-      return OrganizationFailure(
-        AppText.t(
-          'لا يوجد اتصال بالإنترنت — تحقق من الشبكة وحاول مجددًا.',
-          'No internet connection — check the network and try again.',
-        ),
-        code: 'offline',
-      );
-    }
-    if (e is OrganizationFailure) return e;
+/// Maps raw Firestore/remote errors to bilingual `OrganizationFailure`s so
+/// technical strings (`permission-denied`, `unavailable`) never reach the UI.
+/// Shared by the genesis path and the member operations so both show the same
+/// causes.
+OrganizationFailure _mapRemoteError(Object e) {
+  final text = '$e';
+  if (text.contains('permission-denied') ||
+      text.contains('PERMISSION_DENIED') ||
+      text.contains('permission_denied')) {
     return OrganizationFailure(
       AppText.t(
-        'تعذّر إتمام العملية. حاول مرة أخرى.',
-        'Could not complete the operation. Try again.',
+        'تم الرفض من الخادم — تحقق من صلاحياتك وحدّث القائمة.',
+        'Rejected by the server — check your permissions and refresh.',
       ),
-      code: 'remote_error',
+      code: 'not_allowed',
     );
   }
+  if (text.contains('unavailable') ||
+      text.contains('deadline-exceeded') ||
+      text.contains('network') ||
+      text.contains('offline')) {
+    return OrganizationFailure(
+      AppText.t(
+        'لا يوجد اتصال بالإنترنت — تحقق من الشبكة وحاول مجددًا.',
+        'No internet connection — check the network and try again.',
+      ),
+      code: 'offline',
+    );
+  }
+  if (e is OrganizationFailure) return e;
+  return OrganizationFailure(
+    AppText.t(
+      'تعذّر إتمام العملية. حاول مرة أخرى.',
+      'Could not complete the operation. Try again.',
+    ),
+    code: 'remote_error',
+  );
 }

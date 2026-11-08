@@ -2,13 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
-import 'package:material_lab/features/lab/data/offline_first_lab_repository.dart';
+import 'package:material_lab/features/lab/data/server_confirmed_lab_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 
 import '../sync/sync_test_fixture.dart';
 
 /// Regression for the startup stall seen during `registerOrganizationBinder`:
-/// the offline-first wrappers opened a `db.transaction` and then ran their
+/// the server-confirmed wrappers opened a `db.transaction` and then ran their
 /// inner `LabRepo` queries against the **database** instead of the transaction.
 /// On sqflite's serialized connection that inner query queues behind the very
 /// lock the transaction holds -> "database locked" warnings that blocked the
@@ -32,7 +32,7 @@ class _AllowAllGuard implements WriteGuard {
 
 void main() {
   late SyncFixture fixture;
-  late OfflineFirstLabRepository repo;
+  late ServerConfirmedLabRepository repo;
 
   setUp(() async {
     fixture = await openSyncFixture();
@@ -42,7 +42,7 @@ void main() {
     audit.uid = 'uid_admin';
     audit.userName = 'Ahmed Ali';
     audit.deviceId = 'dev_1';
-    repo = OfflineFirstLabRepository(
+    repo = ServerConfirmedLabRepository(
       dbHelper: fixture.helper,
       guard: _AllowAllGuard(),
       queue: queue,

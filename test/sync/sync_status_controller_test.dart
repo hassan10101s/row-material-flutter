@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
-import 'package:material_lab/features/sync/presentation/sync_status_controller.dart';
+import 'package:material_lab/features/connection/presentation/connection_status_controller.dart';
 
 import 'sync_test_fixture.dart';
 
@@ -34,8 +34,7 @@ void main() {
     await fixture.dispose();
   });
 
-  SyncStatusController controller() => SyncStatusController(
-    queue: queue,
+  ConnectionStatusController controller() => ConnectionStatusController(
     metadata: metadata,
     isOnline: () => online,
     connectivityChanges: connectivity.stream,
@@ -70,8 +69,7 @@ void main() {
     final c = controller();
     addTearDown(c.dispose);
     expect(c.status.online, isFalse);
-    expect(c.status.pending, 0);
-    expect(c.status.blocked, 0);
+
     expect(c.status.lastSync, isNull);
   });
 
@@ -83,9 +81,6 @@ void main() {
     await insertBlocked('S-3');
 
     await c.refresh();
-    expect(c.status.pending, 2);
-    expect(c.status.blocked, 1);
-    expect(c.status.hasWork, isTrue);
   });
 
   test('listeners are notified only when something actually changed', () async {
@@ -97,7 +92,7 @@ void main() {
     await c.refresh();
     expect(notifications, 0, reason: 'nothing changed yet');
 
-    await enqueueSample('S-1');
+    await metadata.markPull(DateTime(2026, 11, 1));
     await c.refresh();
     expect(notifications, 1);
 
@@ -113,7 +108,7 @@ void main() {
       await metadata.markError('network unavailable');
       await metadata.set(SyncMetadata.pullIncompleteKey, '1');
       await c.refresh();
-      expect(c.status.pending, 0);
+
       expect(c.status.hasError, isTrue);
       expect(c.status.pullIncomplete, isTrue);
       await metadata.markError(null);
@@ -164,7 +159,6 @@ void main() {
     // The stream handler refreshes asynchronously; give it a turn.
     await Future<void>.delayed(const Duration(milliseconds: 50));
     expect(c.status.online, isTrue);
-    expect(c.status.pending, 1);
   });
 
   test('a failing refresh keeps the last known values', () async {
@@ -172,10 +166,8 @@ void main() {
     addTearDown(c.dispose);
     await enqueueSample('S-1');
     await c.refresh();
-    expect(c.status.pending, 1);
 
     await fixture.db.close();
     await c.refresh(); // must not throw
-    expect(c.status.pending, 1, reason: 'the badge keeps showing what it knew');
   });
 }

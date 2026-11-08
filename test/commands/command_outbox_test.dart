@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/commands/command_outbox.dart';
 import 'package:material_lab/core/commands/command_contract.dart';
 import 'package:material_lab/core/commands/drafts_store.dart';
-import 'package:material_lab/core/commands/sync_checkpoint.dart';
+import '../support/retired/core/commands/sync_checkpoint.dart';
 import 'package:material_lab/core/utils/app_dates.dart';
 
 import '../sync/sync_test_fixture.dart';
@@ -127,7 +127,8 @@ void main() {
         expect(a, b);
 
         // The hash MUST equal the Node `hashPayload` output byte-for-byte
-        // (functions/commands.js) — the server's dedup key depends on it.
+        // (tool/central_migration/server/commands.js) — the server's dedup
+        // key depends on it.
         expect(
           hashPayload({'sampleName': 'Cement A', 'quantity': 3}),
           'cb6bb09b5201cd04ee4f6412859e563a5a8148cd346afbe5735ea06b41ca1d1b',
@@ -361,9 +362,10 @@ void main() {
         ),
       );
       expect(
-        await outbox.releaseLockAndArchive(stillPending.operationId),
+        await outbox.releaseLockAndArchive(stillPending.operationId, deleteDraft: true),
         isFalse,
       );
+      expect(await drafts.get('d-2'), isNotNull);
 
       expect(
         await outbox.releaseLockAndArchive(
@@ -378,11 +380,30 @@ void main() {
         whereArgs: [operationId],
       );
       expect(locks, isEmpty);
-      final row = (await outbox.list())
-          .singleWhere((r) => r.operationId == operationId);
+      final row = (await outbox.list()).singleWhere(
+        (r) => r.operationId == operationId,
+      );
       expect(row.state, OutboxState.archived);
       expect(row.lastError, 'قرار المستخدم');
     });
+
+    test(
+      'deleting a rejected draft removes its local row but keeps the request identity',
+      () async {
+        final operationId = await stageAndPark(OutboxState.rejected);
+        final before = await outbox.getByOperationId(operationId);
+        expect(
+          await outbox.releaseLockAndArchive(operationId, deleteDraft: true),
+          isTrue,
+        );
+        expect(await drafts.get('d-1'), isNull);
+        final after = await outbox.getByOperationId(operationId);
+        expect(after!.operationId, before!.operationId);
+        expect(after.payloadHash, before.payloadHash);
+        expect(after.lastError, before.lastError);
+        expect(after.state, OutboxState.archived);
+      },
+    );
 
     test('needs_review can be released; an approved row never', () async {
       final conflictId = await stageAndPark(
@@ -400,10 +421,7 @@ void main() {
       // Approved requests are settled: cleanup owns them, not this method.
       // (A new draft id: the archived conflict row still guards draft d-1,
       // which is exactly the production rule — "resolve before editing".)
-      final approvedId = await stageAndPark(
-        OutboxState.pending,
-        id: 'd-2',
-      );
+      final approvedId = await stageAndPark(OutboxState.pending, id: 'd-2');
       await outbox.claim();
       await outbox.settleApproved(
         approvedId,

@@ -57,6 +57,7 @@ class _MembersScreenState extends State<MembersScreen> {
   final Set<String> _roles = {AppRoles.lab};
   Timer? _searchDebounce;
   String _query = '';
+  String _organizationName = '';
 
   @override
   void initState() {
@@ -72,7 +73,21 @@ class _MembersScreenState extends State<MembersScreen> {
       _repo = null;
       return;
     }
+    _organizationName = _gate?.session.organizationName ?? '';
+    _loadOrganizationName();
     _load();
+  }
+
+  Future<void> _loadOrganizationName() async {
+    if (!getIt.isRegistered<OrganizationRepository>()) return;
+    try {
+      final org = await getIt<OrganizationRepository>().loadOrganization();
+      if (mounted && org != null && org.id == _gate?.organizationId) {
+        setState(() => _organizationName = org.name);
+      }
+    } on Object {
+      /* Keep the cached name when offline. */
+    }
   }
 
   /// Perf: debounce per-keystroke setState (300ms) so typing filters once
@@ -124,7 +139,7 @@ class _MembersScreenState extends State<MembersScreen> {
       await _load();
     } on OrganizationFailure catch (e) {
       if (mounted) setState(() => _error = e.message);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } on Object catch (e) {
       if (mounted) setState(() => _error = '$e');
       if (mounted) AppFeedback.errorFrom(context, e);
@@ -363,7 +378,9 @@ class _MembersScreenState extends State<MembersScreen> {
                     SelectableText(
                       orgId.isEmpty
                           ? AppText.t('غير متوفر', 'Unavailable')
-                          : orgId,
+                          : _organizationName.isEmpty
+                          ? orgId
+                          : '$_organizationName • $orgId',
                       style: TextStyle(
                         fontSize: 12.spMax,
                         color: AppColors.textMuted,
@@ -677,39 +694,41 @@ class _MembersScreenState extends State<MembersScreen> {
     final roles = member.effectiveRoles
         .where((role) => role != AppRoles.trialOwner)
         .toSet();
-    final selected = await showDialog<List<String>>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) => AppWindow(
-          title: AppText.t('أدوار الموظف', 'Employee roles'),
-          actions: [
-            AppButton(
-              style: AppButtonStyle.secondary,
-              onPressed: () => Navigator.pop(dialogContext),
-              label: AppText.t('إلغاء', 'Cancel'),
-            ),
-            AppButton(
-              onPressed: AppRoles.isValidAssignment(roles)
-                  ? () => Navigator.pop(dialogContext, roles.toList())
-                  : null,
-              label: AppText.t('حفظ الأدوار', 'Save roles'),
+    final selected = await showAppContent<List<String>>(
+      context,
+      title: AppText.t('أدوار الموظف', 'Employee roles'),
+      builder: (dialogContext, close) => StatefulBuilder(
+        builder: (context, setDialogState) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final role in AppRoles.all.where(
+              (value) => value != AppRoles.trialOwner,
+            ))
+              CheckboxListTile(
+                dense: true,
+                value: roles.contains(role),
+                title: Text(AppRoles.label(role)),
+                onChanged: (_) =>
+                    setDialogState(() => _toggleRole(roles, role)),
+              ),
+            const SizedBox(height: AppSpacing.md),
+            Wrap(
+              spacing: AppSpacing.sm,
+              children: [
+                AppButton(
+                  style: AppButtonStyle.secondary,
+                  onPressed: () => close(),
+                  label: AppText.t('إلغاء', 'Cancel'),
+                ),
+                AppButton(
+                  onPressed: AppRoles.isValidAssignment(roles)
+                      ? () => close(roles.toList())
+                      : null,
+                  label: AppText.t('حفظ الأدوار', 'Save roles'),
+                ),
+              ],
             ),
           ],
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final role in AppRoles.all.where(
-                (value) => value != AppRoles.trialOwner,
-              ))
-                CheckboxListTile(
-                  dense: true,
-                  value: roles.contains(role),
-                  title: Text(AppRoles.label(role)),
-                  onChanged: (_) =>
-                      setDialogState(() => _toggleRole(roles, role)),
-                ),
-            ],
-          ),
         ),
       ),
     );

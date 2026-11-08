@@ -10,6 +10,7 @@ import '../sync/sync_data_changes.dart';
 import '../sync/sync_run_scope.dart';
 import 'command_contract.dart';
 import 'domain_manifest.dart';
+import 'central_qc_audit_cache.dart';
 
 class ApprovedRecord {
   const ApprovedRecord({
@@ -91,6 +92,21 @@ class CentralProjection {
     );
   }
 
+  /// Access reductions clear canonical data immediately, even if the next
+  /// authorized download fails. Durable drafts and operation receipts remain.
+  Future<void> clearForAccessChange() async {
+    final scope = SyncRunScope(source, databaseHelper);
+    final db = await databaseHelper.database;
+    await db.transaction((txn) async {
+      scope.check();
+      await _wipeCanonical(txn, scope);
+      await txn.delete('central_bootstrap_staging');
+      await txn.delete('central_bootstrap_state');
+      scope.check();
+    });
+    SyncDataChanges.notify();
+  }
+
   /// One-time migration flag: archives materialized from pre-fix placeholder
   /// events cannot be reconciled locally (their stored payload hash covers the
   /// placeholder bytes), so the caller invalidates the snapshot and re-downloads
@@ -161,6 +177,53 @@ class CentralProjection {
       applied = true;
     });
     if (applied) SyncDataChanges.notify();
+  }
+
+  /// All after-images at one readTime are applied together. Older pointer
+  /// events are never materialized as if they contained a later version.
+  Future<void> applyCycle({
+    required int afterSequence,
+    required int throughSequence,
+    required List<ApprovedRecord> records,
+    required Set<String> operationIds,
+    required SyncRunScope scope,
+  }) async {
+    if (throughSequence < afterSequence) {
+      throw const FormatException('Regressed boundary');
+    }
+    final db = await databaseHelper.database;
+    await _prepare(db, scope);
+    await db.transaction((txn) async {
+      scope.check();
+      final rows = await txn.query(
+        'central_sync_state',
+        where: 'organization_id = ? AND uid = ?',
+        whereArgs: [scope.session.organizationId, scope.session.uid],
+      );
+      if (rows.length != 1 ||
+          rows.single['role'] != scope.session.rolesKey ||
+          rows.single['applied_sequence'] != afterSequence ||
+          !const [
+            'ready',
+            'catching_up',
+          ].contains(rows.single['bootstrap_state'])) {
+        throw StateError('Canonical cursor changed during read');
+      }
+      await _apply(txn, records, scope);
+      await txn.update(
+        'central_sync_state',
+        {
+          'applied_sequence': throughSequence,
+          'bootstrap_state': 'ready',
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'organization_id = ? AND uid = ?',
+        whereArgs: [scope.session.organizationId, scope.session.uid],
+      );
+      await _releaseCoveredLocks(txn, operationIds);
+      scope.check();
+    });
+    if (records.isNotEmpty) SyncDataChanges.notify();
   }
 
   /// Materializes the downloaded snapshot pages. It deliberately stores
@@ -466,8 +529,13 @@ class CentralProjection {
       await txn.delete(table);
     }
     for (final entity in syncEntities.reversed) {
+      if (entity.type == 'qcAudit') {
+        await txn.delete('central_qc_audits');
+        continue;
+      }
       await txn.delete(entity.localTable);
     }
+    await txn.delete('audit_logs');
     await txn.delete('central_entity_identities');
     await txn.delete('central_approved_records');
     await txn.delete(
@@ -488,6 +556,7 @@ class CentralProjection {
       'role': run.session.rolesKey,
       'applied_sequence': throughSequence,
       'bootstrap_state': 'catching_up',
+      'protocol_schema': commandSchemaVersion,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
@@ -568,6 +637,62 @@ class CentralProjection {
     }
   }
 
+  // Leave ample room below SQLite's legacy 999-variable limit. Grouping by
+  // type also uses the existing (entity_type, entity_id) primary-key index.
+  Future<Map<String, Map<String, Object?>>> _readRecordKeys(
+    DatabaseExecutor txn,
+    String table,
+    Iterable<(String, String)> keys,
+  ) async {
+    final grouped = <String, Set<String>>{};
+    for (final (type, id) in keys) {
+      (grouped[type] ??= {}).add(id);
+    }
+    final result = <String, Map<String, Object?>>{};
+    for (final entry in grouped.entries) {
+      final ids = entry.value.toList();
+      for (var offset = 0; offset < ids.length; offset += 400) {
+        final slice = ids.skip(offset).take(400).toList();
+        final rows = await txn.query(
+          table,
+          columns: table == 'central_approved_records'
+              ? ['entity_type', 'entity_id', 'version', 'payload_hash']
+              : ['entity_type', 'entity_id', 'local_ref', 'approved_version'],
+          where:
+              'entity_type = ? AND entity_id IN (${List.filled(slice.length, '?').join(',')})',
+          whereArgs: [entry.key, ...slice],
+        );
+        for (final row in rows) {
+          result['${row['entity_type']}/${row['entity_id']}'] = row;
+        }
+      }
+    }
+    return result;
+  }
+
+  Future<Map<String, List<Map<String, Object?>>>> _readLegacyKeys(
+    DatabaseExecutor txn,
+    String table,
+    String column,
+    Iterable<Object?> values,
+  ) async {
+    final keys = values.whereType<String>().toSet().toList();
+    final result = <String, List<Map<String, Object?>>>{};
+    for (var offset = 0; offset < keys.length; offset += 400) {
+      final slice = keys.skip(offset).take(400).toList();
+      final rows = await txn.query(
+        table,
+        columns: ['id', column],
+        where: '$column IN (${List.filled(slice.length, '?').join(',')})',
+        whereArgs: slice,
+      );
+      for (final row in rows) {
+        (result[row[column] as String] ??= []).add(row);
+      }
+    }
+    return result;
+  }
+
   /// Phase 1 — validation and identity allocation. Accepts any number of
   /// batches sharing one [state]; records already approved at an equal-or-
   /// newer version are remembered in `skipped` so phase 2 skips them too.
@@ -577,11 +702,37 @@ class CentralProjection {
     _ApplyState state,
     SyncRunScope scope,
   ) async {
+    final storedRecords = await _readRecordKeys(
+      txn,
+      'central_approved_records',
+      records.map((r) => (r.entityType, r.entityId)),
+    );
+    final identities = await _readRecordKeys(
+      txn,
+      'central_entity_identities',
+      records.map((r) => (r.entityType, r.entityId)),
+    );
+    final legacyUsers = await _readLegacyKeys(
+      txn,
+      'users',
+      'uid',
+      records.where((r) => r.entityType == 'member').map((r) => r.data['uid']),
+    );
+    final legacyUnits = await _readLegacyKeys(
+      txn,
+      'lab_units',
+      'symbol',
+      records
+          .where((r) => r.entityType == 'labUnit')
+          .map((r) => r.data['symbol']),
+    );
+    // Allocation writes reservations only. Domain maxima remain fixed during
+    // this phase; the local high-water mark advances after each reservation.
+    final maxima = <String, int>{};
     for (final record in records) {
       final entity = SyncEntity.byType(record.entityType);
       final key = '${record.entityType}/${record.entityId}';
       if (entity == null ||
-          record.entityType == 'auditLog' ||
           record.entityId.isEmpty ||
           record.version < 1 ||
           record.data['version'] != record.version ||
@@ -597,62 +748,49 @@ class CentralProjection {
         throw StateError('This session may not materialize the record');
       }
       final fingerprint = hashPayload(record.data);
-      final stored = await txn.query(
-        'central_approved_records',
-        where: 'entity_type = ? AND entity_id = ?',
-        whereArgs: [record.entityType, record.entityId],
-      );
-      if (stored.isNotEmpty &&
-          (stored.single['version'] as int) >= record.version) {
-        if (stored.single['version'] == record.version &&
-            stored.single['payload_hash'] != fingerprint) {
+      final stored = storedRecords[key];
+      if (stored != null && (stored['version'] as int) >= record.version) {
+        if (stored['version'] == record.version &&
+            stored['payload_hash'] != fingerprint) {
           throw StateError('An approved version has inconsistent contents');
         }
         state.skipped.add(key);
         continue;
       }
       state.fingerprints[key] = fingerprint;
-      final known = await txn.query(
-        'central_entity_identities',
-        where: 'entity_type = ? AND entity_id = ?',
-        whereArgs: [record.entityType, record.entityId],
-      );
+      final known = identities[key];
       int local;
-      if (known.isNotEmpty) {
-        local = known.single['local_ref'] as int;
+      if (known != null) {
+        local = known['local_ref'] as int;
       } else {
         final byUser =
             record.entityType == 'member' && record.data['uid'] is String
-            ? await txn.query(
-                'users',
-                columns: ['id'],
-                where: 'uid = ?',
-                whereArgs: [record.data['uid']],
-              )
+            ? legacyUsers[record.data['uid']] ?? const <Map<String, Object?>>[]
             : const <Map<String, Object?>>[];
         final byUnit =
             record.entityType == 'labUnit' && record.data['symbol'] is String
-            ? await txn.query(
-                'lab_units',
-                columns: ['id'],
-                where: 'symbol = ?',
-                whereArgs: [record.data['symbol']],
-              )
+            ? legacyUnits[record.data['symbol']] ??
+                  const <Map<String, Object?>>[]
             : const <Map<String, Object?>>[];
         if (byUser.length == 1 || byUnit.length == 1) {
           local =
               (byUser.isNotEmpty ? byUser.single : byUnit.single)['id'] as int;
         } else {
-          final maxRow = await txn.rawQuery(
-            'SELECT COALESCE(MAX(${entity.pkColumn}), 0) AS n FROM ${entity.localTable}',
-          );
-          final maxReservation = await txn.rawQuery(
-            'SELECT COALESCE(MAX(local_ref), 0) AS n FROM central_entity_identities WHERE entity_type = ?',
-            [entity.type],
-          );
-          final a = maxRow.single['n'] as int,
-              b = maxReservation.single['n'] as int;
-          local = (a > b ? a : b) + 1;
+          var maximum = maxima[entity.type];
+          if (maximum == null) {
+            final maxRow = await txn.rawQuery(
+              'SELECT COALESCE(MAX(${entity.pkColumn}), 0) AS n FROM ${entity.localTable}',
+            );
+            final maxReservation = await txn.rawQuery(
+              'SELECT COALESCE(MAX(local_ref), 0) AS n FROM central_entity_identities WHERE entity_type = ?',
+              [entity.type],
+            );
+            final a = maxRow.single['n'] as int,
+                b = maxReservation.single['n'] as int;
+            maximum = a > b ? a : b;
+          }
+          local = maximum + 1;
+          maxima[entity.type] = local;
         }
         await txn.insert('central_entity_identities', {
           'entity_type': entity.type,
@@ -664,6 +802,18 @@ class CentralProjection {
       state.targets[key] = local;
       if (record.entityType == 'member' && record.data['uid'] is String) {
         state.users[record.data['uid'] as String] = local;
+      }
+      if (record.entityType == 'qcAudit') {
+        final changed = await txn.rawUpdate(
+          'UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?',
+          [local, 'qc_audits'],
+        );
+        if (changed == 0) {
+          await txn.insert('sqlite_sequence', {
+            'name': 'qc_audits',
+            'seq': local,
+          });
+        }
       }
     }
     scope.check();
@@ -680,29 +830,51 @@ class CentralProjection {
     _ApplyState state,
     SyncRunScope scope,
   ) async {
+    final parentKeys = <(String, String)>[];
+    for (final record in records) {
+      final key = '${record.entityType}/${record.entityId}';
+      if (state.skipped.contains(key)) continue;
+      final refs = record.data['parentRefs'];
+      if (refs is! Map) continue;
+      for (final ref in refs.values) {
+        if (ref is Map &&
+            ref['entityType'] is String &&
+            ref['entityId'] is String) {
+          final type = ref['entityType'] as String;
+          final id = ref['entityId'] as String;
+          if (!state.targets.containsKey('$type/$id')) {
+            parentKeys.add((type, id));
+          }
+        }
+      }
+    }
+    final parentIdentities = await _readRecordKeys(
+      txn,
+      'central_entity_identities',
+      parentKeys,
+    );
     Future<int> actor(String uid, String? name) async {
       if (uid.isEmpty) throw StateError('Approved actor identity is missing');
-      final found = await txn.query(
-        'users',
-        columns: ['id'],
-        where: 'uid = ?',
-        whereArgs: [uid],
-      );
-      if (found.length == 1) return found.single['id'] as int;
+      if (state.actorIds == null) {
+        final rows = await txn.query('users', columns: ['id', 'uid']);
+        state.actorIds = {};
+        for (final row in rows) {
+          final id = row['id'] as int;
+          if (id > state.actorMaximum) state.actorMaximum = id;
+          if (row['uid'] is String) state.actorIds![row['uid'] as String] = id;
+        }
+        final reservedMax =
+            (await txn.rawQuery(
+                  "SELECT COALESCE(MAX(local_ref), 0) AS n FROM central_entity_identities WHERE entity_type = 'member'",
+                )).single['n']
+                as int;
+        if (reservedMax > state.actorMaximum) state.actorMaximum = reservedMax;
+      }
+      final found = state.actorIds![uid];
+      if (found != null) return found;
       final reserved = state.users[uid];
-      final actualMax =
-          (await txn.rawQuery(
-                'SELECT COALESCE(MAX(id), 0) AS n FROM users',
-              )).single['n']
-              as int;
-      final reservedMax =
-          (await txn.rawQuery(
-                "SELECT COALESCE(MAX(local_ref), 0) AS n FROM central_entity_identities WHERE entity_type = 'member'",
-              )).single['n']
-              as int;
-      final nextId = (actualMax > reservedMax ? actualMax : reservedMax) + 1;
       final id = await txn.insert('users', {
-        'id': reserved ?? nextId,
+        'id': reserved ?? state.actorMaximum + 1,
         'uid': uid,
         'email': '',
         'full_name': name ?? uid,
@@ -712,6 +884,8 @@ class CentralProjection {
         'updated_at': '',
       });
       state.users[uid] = id;
+      state.actorIds![uid] = id;
+      if (id > state.actorMaximum) state.actorMaximum = id;
       return id;
     }
 
@@ -720,20 +894,56 @@ class CentralProjection {
       if (state.skipped.contains(key)) continue;
       scope.check();
       final entity = SyncEntity.byType(record.entityType)!;
-      final definition = state.definitions[record.entityType] as Map;
+      final definition = record.entityType == 'auditLog'
+          ? const {'parents': <Object>[]}
+          : state.definitions[record.entityType] as Map;
       final local = state.targets[key]!;
       final row = remoteToLocalRow(
         entity,
         record.data,
         organizationId: scope.session.organizationId,
       );
+      if (entity.type == 'auditLog' &&
+          record.data['action'] == 'DOMAIN_COMMITTED' &&
+          record.data['records'] is List) {
+        row['details_json'] = jsonEncode({
+          'operationId': record.data['operationId'],
+          'records': record.data['records'],
+        });
+      }
       row[entity.pkColumn] = local;
       if (entity.pkColumn != 'id') row.remove('id');
+      if (entity.type == 'sample' && record.data['secureEntryId'] != null) {
+        row['report_html'] = '';
+      }
       row['remote_id'] = record.data['remoteId'] ?? record.entityId;
       row['created_by'] = record.data['createdBy'];
       row['sync_state'] = 'synced';
       row['remote_version'] = record.version;
       row['remote_synced_at'] = DateTime.now().toUtc().toIso8601String();
+      if (entity.type == 'qcAudit') {
+        await CentralQcAuditCache.put(
+          txn,
+          record.entityId,
+          local,
+          row,
+          record.data,
+        );
+        await txn.insert('central_approved_records', {
+          'entity_type': entity.type,
+          'entity_id': record.entityId,
+          'version': record.version,
+          'payload': jsonEncode(record.data),
+          'payload_hash': state.fingerprints[key],
+        });
+        await txn.update(
+          'central_entity_identities',
+          {'approved_version': record.version},
+          where: 'entity_type = ? AND entity_id = ?',
+          whereArgs: [entity.type, record.entityId],
+        );
+        continue;
+      }
       if (record.entityType == 'qualityCheck' &&
           record.data['businessVersion'] is num) {
         row['version'] = record.data['businessVersion'];
@@ -758,6 +968,12 @@ class CentralProjection {
             );
           }
           row[column] = null;
+          // Optional global references use an empty local cache stamp. Older
+          // approved payloads may contain explicit null despite SQLite's
+          // NOT NULL DEFAULT '' column, so do not copy that null on insert.
+          if (column.endsWith('_id')) {
+            row['${column.substring(0, column.length - 3)}_remote_id'] = '';
+          }
           continue;
         }
         if (ref['entityType'] != parent['type'] || ref['entityId'] is! String) {
@@ -766,15 +982,11 @@ class CentralProjection {
         final refKey = '${ref['entityType']}/${ref['entityId']}';
         var target = state.targets[refKey];
         if (target == null) {
-          final approved = await txn.query(
-            'central_entity_identities',
-            columns: ['local_ref'],
-            where:
-                'entity_type = ? AND entity_id = ?${state.resolveUnapproved ? '' : ' AND approved_version > 0'}',
-            whereArgs: [ref['entityType'], ref['entityId']],
-          );
-          if (approved.length == 1) {
-            target = approved.single['local_ref'] as int;
+          final approved = parentIdentities[refKey];
+          if (approved != null &&
+              (state.resolveUnapproved ||
+                  (approved['approved_version'] as int) > 0)) {
+            target = approved['local_ref'] as int;
           }
         }
         if (target == null) {
@@ -786,7 +998,7 @@ class CentralProjection {
             : null;
         if (stamp != null) row[stamp] = ref['entityId'];
       }
-      final info = await txn.rawQuery(
+      final info = state.tableInfo[entity.type] ??= await txn.rawQuery(
         'PRAGMA table_info(${entity.localTable})',
       );
       final columns = {for (final column in info) column['name'] as String};
@@ -814,6 +1026,9 @@ class CentralProjection {
         }
         filtered[entry.key] = entry.value;
       }
+      if (entity.type == 'organizationSetting') {
+        await _removeUnapprovedSettingShadow(txn, filtered['key'], local);
+      }
       final existing = await txn.query(
         entity.localTable,
         columns: [entity.pkColumn],
@@ -830,6 +1045,67 @@ class CentralProjection {
           whereArgs: [local],
         );
       }
+      if (entity.type == 'member' &&
+          state.actorIds != null &&
+          filtered.containsKey('uid')) {
+        // A materialized member may replace the uid at an existing local id.
+        // Keep actual rows separate from phase-1 reservations (state.users).
+        state.actorIds!.removeWhere((_, id) => id == local);
+        final uid = filtered['uid'];
+        if (uid is String) state.actorIds![uid] = local;
+        if (local > state.actorMaximum) state.actorMaximum = local;
+      }
+      if (entity.type == 'consumption' &&
+          (record.data['protocol'] as Map?)?['ledgerMode'] ==
+              'consumption_v1' &&
+          (record.data['appliedQty'] as num? ?? 0) > 0) {
+        // A read-model view of the approved immutable consumption, never a
+        // second shared write. Stable identity makes replay/bootstrap idempotent.
+        final ledgerId = 'derived_consumption_v1_${record.entityId}';
+        final ledger = <String, Object?>{
+          'remote_id': ledgerId,
+          'inventory_id': filtered['inventory_id'],
+          'inventory_remote_id': refs['inventoryId']['entityId'],
+          'quantity_delta': -(record.data['qtyUsed'] as num),
+          'transaction_type': record.data['eventType'],
+          'reference_type': 'sample_test',
+          'reference_id': filtered['sample_test_id'],
+          'reference_remote_id': refs['sampleTestId']['entityId'],
+          'reason': record.data['eventType'] == 'REVERSAL'
+              ? 'Lab test reversal'
+              : 'Lab test',
+          'created_by': await actor(record.data['createdBy'] as String, null),
+          'created_at': filtered['created_at'],
+          'updated_at': filtered['updated_at'],
+          'device_id': record.data['deviceId'],
+          'version': 1,
+          'remote_version': 1,
+          'sync_state': 'synced',
+        };
+        final existingLedger = await txn.query(
+          'inventory_transactions',
+          columns: ['id'],
+          where: 'remote_id = ?',
+          whereArgs: [ledgerId],
+        );
+        if (existingLedger.isEmpty) {
+          final maximum =
+              (await txn.rawQuery('''SELECT MAX(n) AS n FROM (
+            SELECT COALESCE(MAX(id),0) AS n FROM inventory_transactions
+            UNION ALL SELECT COALESCE(MAX(local_ref),0) AS n FROM central_entity_identities
+              WHERE entity_type = 'inventoryTransaction')''')).single['n']
+                  as num;
+          ledger['id'] = maximum.toInt() + 1;
+          await txn.insert('inventory_transactions', ledger);
+        } else {
+          await txn.update(
+            'inventory_transactions',
+            ledger,
+            where: 'id = ?',
+            whereArgs: [existingLedger.single['id']],
+          );
+        }
+      }
       await txn.insert('central_approved_records', {
         'entity_type': entity.type,
         'entity_id': record.entityId,
@@ -845,6 +1121,55 @@ class CentralProjection {
       );
     }
     scope.check();
+  }
+
+  /// Schema upgrades mirror local settings before their server identities are
+  /// known. Such a shadow can hold the incoming key at another local id.
+  /// Reconcile only this default/legacy cache row, inside the same transaction
+  /// as the approved after-image and cursor. Never merge approved identities.
+  Future<void> _removeUnapprovedSettingShadow(
+    DatabaseExecutor txn,
+    Object? key,
+    int keepLocalId,
+  ) async {
+    if (key is! String || key.isEmpty) {
+      throw StateError('Approved setting has no key');
+    }
+    final siblings = await txn.query(
+      'organization_settings',
+      where: 'key = ? AND id != ?',
+      whereArgs: [key, keepLocalId],
+    );
+    for (final sibling in siblings) {
+      final identity = await txn.rawQuery(
+        'SELECT 1 FROM central_entity_identities '
+        'WHERE entity_type = ? AND local_ref = ? AND approved_version > 0 '
+        'UNION ALL SELECT 1 FROM central_approved_records '
+        'WHERE entity_type = ? AND entity_id = ? LIMIT 1',
+        [
+          'organizationSetting',
+          sibling['id'],
+          'organizationSetting',
+          sibling['remote_id'],
+        ],
+      );
+      if (identity.isNotEmpty) {
+        throw StateError(
+          'Approved settings identities collide; checkpoint retained',
+        );
+      }
+      await txn.insert('legacy_sync_archive', {
+        'source_table': 'organization_settings',
+        'source_id': '${sibling['id']}',
+        'row_json': jsonEncode(sibling),
+        'archived_at': DateTime.now().toUtc().toIso8601String(),
+      });
+      await txn.delete(
+        'organization_settings',
+        where: 'id = ?',
+        whereArgs: [sibling['id']],
+      );
+    }
   }
 }
 
@@ -863,6 +1188,9 @@ class _ApplyState {
 
   final Map<String, int> targets = {};
   final Map<String, int> users = {};
+  Map<String, int>? actorIds;
+  int actorMaximum = 0;
+  final Map<String, List<Map<String, Object?>>> tableInfo = {};
   final Map<String, String> fingerprints = {};
   final Set<String> seen = {};
   final Set<String> skipped = {};

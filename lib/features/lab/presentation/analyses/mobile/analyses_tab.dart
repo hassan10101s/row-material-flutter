@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'dart:async';
 
@@ -97,7 +98,7 @@ class _MobileAnalysesTabState extends State<MobileAnalysesTab> {
       AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       await cubit.load();
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -113,11 +114,9 @@ class _MobileAnalysesTabState extends State<MobileAnalysesTab> {
       // lab tabs share one IndexedStack).
       child: Scaffold(
         backgroundColor: AppColors.background,
-        floatingActionButton: FloatingActionButton(
-          heroTag: null,
+        floatingActionButton: AppAddFloatingActionButton(
           tooltip: AppText.t('إضافة تحليل', 'Add analysis'),
           onPressed: () => _openEditor(context),
-          child: Icon(Icons.add, size: 24.r),
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

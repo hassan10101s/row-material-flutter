@@ -73,11 +73,7 @@ void main() {
       throwsA(isA<ValidationError>()),
     );
     expect(
-      () => repo.receiveLot(
-        inventoryId: 1,
-        qty: 10,
-        expiryDate: 'not-a-date',
-      ),
+      () => repo.receiveLot(inventoryId: 1, qty: 10, expiryDate: 'not-a-date'),
       throwsA(isA<ValidationError>()),
     );
     final lot = await repo.receiveLot(
@@ -93,16 +89,8 @@ void main() {
   });
 
   test('draws go earliest-expiry first, expired flagged', () async {
-    await repo.receiveLot(
-      inventoryId: 1,
-      qty: 10,
-      expiryDate: '2027-06-01',
-    );
-    await repo.receiveLot(
-      inventoryId: 1,
-      qty: 10,
-      expiryDate: '2020-01-01',
-    );
+    await repo.receiveLot(inventoryId: 1, qty: 10, expiryDate: '2027-06-01');
+    await repo.receiveLot(inventoryId: 1, qty: 10, expiryDate: '2020-01-01');
     final takes = await db.transaction((txn) async {
       final t = await repo.drawLotsFefo(txn, 1, 12);
       await repo.refreshInventoryCache(txn, 1);
@@ -183,6 +171,47 @@ void main() {
     expect(await pool(1), 0.0);
   });
 
+  test(
+    'repeated reductions across lots then deletion never return the same draw twice',
+    () async {
+      await repo.receiveLot(inventoryId: 1, qty: 5, expiryDate: '2027-01-01');
+      await repo.receiveLot(inventoryId: 1, qty: 5, expiryDate: '2028-01-01');
+      await db.transaction((txn) async {
+        for (final take in await repo.drawLotsFefo(txn, 1, 8)) {
+          final qty = (take['qty'] as num).toDouble();
+          await repo.insertConsumptionLine(
+            txn,
+            sampleTestId: 99,
+            inventoryId: 1,
+            qtyUsed: qty,
+            requestedQty: qty,
+            appliedQty: qty,
+            shortfallQty: 0,
+            eventType: 'CONSUMPTION',
+            lotId: take['lot_id'] as int,
+            lotNo: '${take['lot_no']}',
+            lotRemoteId: '${take['lot_remote_id']}',
+            timestamp: nowIso(),
+          );
+        }
+        await repo.refreshInventoryCache(txn, 1);
+        await repo.applyConsumptionDelta(txn, 99, {1: 8}, {1: 6}, null, null);
+        await repo.applyConsumptionDelta(txn, 99, {1: 6}, {1: 4}, null, null);
+        expect(await repo.lotBalance(txn, 1), 6);
+        expect(
+          await repo.reverseConsumptionToLots(txn, 99, timestamp: nowIso()),
+          1,
+        );
+        expect(
+          await repo.reverseConsumptionToLots(txn, 99, timestamp: nowIso()),
+          0,
+        );
+      });
+      expect(await pool(1), 10);
+      expect((await lotsOf(1)).map((r) => r['qty_remaining']), everyElement(5));
+    },
+  );
+
   test('reversal credits the source lot back exactly', () async {
     final a = await repo.receiveLot(
       inventoryId: 1,
@@ -259,10 +288,7 @@ void main() {
     expect(disposed, 10.0);
     expect(await pool(1), 7.0);
     final lots = await lotsOf(1);
-    expect(
-      lots.where((l) => (l['qty_remaining'] as num) > 0),
-      hasLength(1),
-    );
+    expect(lots.where((l) => (l['qty_remaining'] as num) > 0), hasLength(1));
   });
 
   test('backfill converts pooled stock into one undated lot', () async {

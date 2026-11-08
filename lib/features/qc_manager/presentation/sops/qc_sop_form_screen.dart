@@ -5,7 +5,7 @@ import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
-import '../../../../../design_system/tokens/app_breakpoints.dart';
+import '../../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
@@ -47,7 +47,7 @@ class QcSopFormScreen extends StatefulWidget {
     QcSopDetailCubit? detail,
   }) {
     final register = context.read<QcSopsCubit>();
-    final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
+    final wide = appUsesDesktopChrome(context);
     if (wide) {
       return showAppWindow(
         context,

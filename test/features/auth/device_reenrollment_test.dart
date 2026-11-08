@@ -12,7 +12,7 @@ import 'package:material_lab/core/sync/device_registry.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
-import 'package:material_lab/features/auth/data/offline_first_auth_repository.dart';
+import 'package:material_lab/features/auth/data/firebase_auth_repository.dart';
 import 'package:material_lab/features/auth/domain/auth_repository.dart';
 
 class _Db extends Mock implements DatabaseHelper {}
@@ -111,8 +111,8 @@ void main() {
         ).callCount,
         6,
       );
-    verify(() => remote.isSignedIn).called(6);
-    verifyNoMoreInteractions(remote);
+      verify(() => remote.isSignedIn).called(6);
+      verifyNoMoreInteractions(remote);
     },
   );
 
@@ -139,7 +139,7 @@ void main() {
     late _Network network;
     late _Metadata metadata;
     late _Devices devices;
-    late OfflineFirstAuthRepository auth;
+    late FirebaseAuthRepository auth;
     late DeviceIdentityStore identities;
     late String? boundOrg;
     late Map<String, String> values;
@@ -180,6 +180,13 @@ void main() {
       when(() => remote.loadOrganization('org')).thenAnswer((_) async => null);
       when(() => remote.signInWithGoogle()).thenAnswer((_) async {});
       when(() => remote.signOut()).thenAnswer((_) async {});
+      when(() => store.restore()).thenAnswer(
+        (_) async => AppSession(
+          uid: 'u',
+          authenticationPolicyVersion: 1,
+          signedInAt: DateTime.now(),
+        ),
+      );
       when(() => store.save(any())).thenAnswer((_) async {});
       when(() => store.clear()).thenAnswer((_) async {});
       when(
@@ -207,7 +214,7 @@ void main() {
           deviceId: 'old-revoked',
         ),
       ).thenAnswer((_) async => revoked);
-      auth = OfflineFirstAuthRepository(
+      auth = FirebaseAuthRepository(
         remote: remote,
         sessionStore: store,
         dbHelper: db,

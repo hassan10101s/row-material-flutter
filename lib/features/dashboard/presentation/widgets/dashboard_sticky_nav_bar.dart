@@ -47,11 +47,13 @@ class DashboardStickyNavBar extends SliverPersistentHeaderDelegate {
 
   double get _scaledRow => _rowBase * textScale.clamp(1.0, 1.3);
 
-  /// Fixed extent for the current text scale: content height plus a little
-  /// breathing room when fonts run large. Never changes with scroll, so the
-  /// pinned geometry stays exact (crash-history constraint).
+  /// Fixed extent for the current text scale: content height plus breathing
+  /// room (the two compact control rows measure ~2px taller than [_rowBase]
+  /// at scale 1.0, e.g. the compact filled-tonal IconButton row is 40px).
+  /// Never changes with scroll, so the pinned geometry stays exact
+  /// (crash-history constraint).
   double get contentExtent =>
-      topPadding + _verticalPadding + _scaledRow * 2 + _rowGap + 6;
+      topPadding + _verticalPadding + _scaledRow * 2 + _rowGap + 12;
 
   @override
   double get minExtent => contentExtent;

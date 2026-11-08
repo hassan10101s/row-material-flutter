@@ -71,6 +71,7 @@ Color statusColorsPut(String status) {
     case 'CONDITIONAL_APPROVAL':
       return AppColors.success;
     case 'PARTIAL_REJECTION':
+    case 'NON_CONFORMANCE':
       return AppColors.partial;
     case 'FULL_REJECTION':
       return AppColors.danger;
@@ -89,6 +90,8 @@ String statusLabel(String status) {
       return AppText.t('رفض جزئي', 'Partial');
     case 'FULL_REJECTION':
       return AppText.t('رفض كامل', 'Rejected');
+    case 'NON_CONFORMANCE':
+      return AppText.t('عدم مطابقة', 'Non-conformance');
     default:
       return AppText.t('قيد الانتظار', 'Pending');
   }

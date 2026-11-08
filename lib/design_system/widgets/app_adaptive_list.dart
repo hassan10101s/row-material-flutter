@@ -49,6 +49,8 @@ class AppAdaptiveDataView extends StatefulWidget {
     this.loading = false,
     this.headerTrailing,
     this.cardsOnly = false,
+    this.compactMobile = false,
+    this.mobileTrailingColumn,
     this.onPageSizeChanged,
     this.pageSizeOptions = kPageSizeOptions,
   });
@@ -65,6 +67,11 @@ class AppAdaptiveDataView extends StatefulWidget {
 
   /// Cards on desktop too — the table variant is skipped.
   final bool cardsOnly;
+
+  /// Register-style rows on phones, without nested cards or a vertical row
+  /// for every field. Desktop tables retain their normal layout.
+  final bool compactMobile;
+  final int? mobileTrailingColumn;
 
   final Future<void> Function(int pageSize)? onPageSizeChanged;
   final List<int> pageSizeOptions;
@@ -139,7 +146,13 @@ class _AppAdaptiveDataViewState extends State<AppAdaptiveDataView> {
                     : () => widget.onRowTap!(index);
                 return InkWell(
                   onTap: tap ?? row.onTap,
-                  child: _DataCard(row: row, headers: widget.headers),
+                  child: widget.compactMobile && !appUsesDesktopChrome(context)
+                      ? _CompactDataRow(
+                          row: row,
+                          headers: widget.headers,
+                          trailingColumn: widget.mobileTrailingColumn,
+                        )
+                      : _DataCard(row: row, headers: widget.headers),
                 );
               },
             ),
@@ -151,6 +164,85 @@ class _AppAdaptiveDataViewState extends State<AppAdaptiveDataView> {
 }
 
 /// One row as a card: the primary cell on top, the rest as label/value facts.
+class _CompactDataRow extends StatelessWidget {
+  const _CompactDataRow({
+    required this.row,
+    required this.headers,
+    this.trailingColumn,
+  });
+  final AppDataRow row;
+  final List<String> headers;
+  final int? trailingColumn;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+    child: DefaultTextStyle.merge(
+      style: const TextStyle(fontSize: 12, height: 1.3),
+      child: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: row.cells.isEmpty
+                      ? const SizedBox.shrink()
+                      : row.cells.first,
+                ),
+                if (trailingColumn != null &&
+                    trailingColumn! < row.cells.length)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 48,
+                      minHeight: 48,
+                    ),
+                    child: row.cells[trailingColumn!],
+                  ),
+              ],
+            ),
+            if (row.secondary?.isNotEmpty == true)
+              Text(
+                row.secondary!,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+              ),
+            const SizedBox(height: 3),
+            Wrap(
+              spacing: 12,
+              runSpacing: 4,
+              children: [
+                for (var i = 1; i < row.cells.length && i < headers.length; i++)
+                  if (i != trailingColumn)
+                    ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: constraints.maxWidth,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${headers[i]}: ',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          Flexible(child: row.cells[i]),
+                        ],
+                      ),
+                    ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _DataCard extends StatelessWidget {
   const _DataCard({required this.row, required this.headers});
 

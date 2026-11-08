@@ -5,12 +5,15 @@ import '../sync/entity_registry.dart';
 import '../sync/shared_settings.dart';
 
 String centralReadPermission(String entityType) {
+  if (entityType == 'secureFieldSubmission') return 'secure.read';
+  if (entityType == 'auditLog') return 'audit.read';
   if (entityType == 'nutritionFormulation') return 'formulations.read';
   if (entityType == 'member') return 'users.read';
   if (entityType == 'organizationSetting') return 'reports.read';
   if (entityType.startsWith('qc')) return 'qc.read';
   if (const {
     'sample',
+    'qualityCheck',
     'referenceMaterial',
     'parameter',
     'materialBound',
@@ -58,7 +61,19 @@ const _additionalParents = <String, Map<String, (String, bool)>>{
     'reversal_of_log_id': ('consumption', false),
   },
   'equipmentEvent': {'equipment_id': ('equipment', true)},
+  'nirValidationSettings': {
+    'material_id': ('referenceMaterial', false),
+    'product_id': ('labProduct', false),
+  },
   'productBatchSample': {'batch_id': ('sample', true)},
+  'secureFieldSubmission': {
+    'inspection_id': ('sample', false),
+    'batch_sample_id': ('productBatchSample', false),
+    'sample_test_id': ('labResult', false),
+    'nir_reset_id': ('nirValidationSettings', false),
+    'formulation_id': ('nutritionFormulation', false),
+  },
+  'qcFindingNc': {'product_sample_id': ('productBatchSample', false)},
   'qcCustomTableField': {'table_id': ('qcCustomTable', true)},
   'qcCustomTableRow': {'table_id': ('qcCustomTable', true)},
 };
@@ -98,6 +113,10 @@ Future<Map<String, dynamic>> buildDomainManifest(DatabaseExecutor db) async {
     final fields = {
       ...payload.keys,
       ...entity.mutableFields,
+      for (final column in info)
+        if ('${column['name']}'.startsWith('secure_'))
+          _camel(column['name'] as String),
+      if (entity.type == 'labAnalysis') 'chemicalDefinitions',
       if (entity.type == 'qualityCheck') 'businessVersion',
     }.toList()..sort();
     final parents = <String, Map<String, dynamic>>{};
@@ -180,6 +199,7 @@ Future<Map<String, dynamic>> buildDomainManifest(DatabaseExecutor db) async {
       'permission': entity.permission,
       'readPermission': centralReadPermission(entity.type),
       'appendOnly': entity.appendOnly,
+      if (entity.privateRead) 'privateRead': true,
       'fields': fields,
       'sqlFields': {
         for (final column in info)

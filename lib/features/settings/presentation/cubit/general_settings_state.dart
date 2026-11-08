@@ -6,6 +6,7 @@ class GeneralSettingsState extends Equatable {
   final bool loading;
   final bool saving;
   final String departmentLabel;
+  final String reportLanguage;
   final String logoPath;
   final String logoDataUri;
 
@@ -17,6 +18,7 @@ class GeneralSettingsState extends Equatable {
     this.loading = true,
     this.saving = false,
     this.departmentLabel = 'Quality Assurance Department',
+    this.reportLanguage = 'ar',
     this.logoPath = '',
     this.logoDataUri = '',
     this.exportRootPath = '',
@@ -26,6 +28,7 @@ class GeneralSettingsState extends Equatable {
     bool? loading,
     bool? saving,
     String? departmentLabel,
+    String? reportLanguage,
     String? logoPath,
     String? logoDataUri,
     String? exportRootPath,
@@ -33,6 +36,7 @@ class GeneralSettingsState extends Equatable {
     loading: loading ?? this.loading,
     saving: saving ?? this.saving,
     departmentLabel: departmentLabel ?? this.departmentLabel,
+    reportLanguage: reportLanguage ?? this.reportLanguage,
     logoPath: logoPath ?? this.logoPath,
     logoDataUri: logoDataUri ?? this.logoDataUri,
     exportRootPath: exportRootPath ?? this.exportRootPath,
@@ -43,6 +47,7 @@ class GeneralSettingsState extends Equatable {
     loading,
     saving,
     departmentLabel,
+    reportLanguage,
     logoPath,
     logoDataUri,
     exportRootPath,

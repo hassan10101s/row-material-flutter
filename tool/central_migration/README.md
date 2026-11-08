@@ -1,95 +1,71 @@
-# أداة الانتقال إلى بروتوكول المزامنة المركزية (الجاهزية للإنتاج — البند 5)
+# الترحيل والاستلام — Firestore مباشر، البروتوكول 3
 
-ترحيل مؤسسة واحدة من كتابة المسار القديم (push) إلى بروتوكول الأوامر المركزي
-(`schemaVersion 2`, `domainManifestVersion 1`) — على دفعات آمنة وقابلة لإعادة
-التشغيل (idempotent). كل مرحلة تُسجَّل في
-`organizations/{org}/migrationState/current` وتصبح no-op بعد إتمامها.
+التشغيل يستخدم Firebase Auth وFirestore فقط. المجلد `server/` أدوات عقد واختبارات محلية، وليس خدمة منشورة أو مسارًا لتجاوز قواعد Firestore. إعداد Firebase لا يحتوي نشر Functions، ولا يعتمد التطبيق على مرسل Push.
 
-> **قاعدة ذهبية:** لا تُشغَّل على مشروع حقيقي قبل إثباتها على المحاكي
-> (`demo-materiallab`) وقراءة تقرير التدقيق بالكامل.
+**هذه الأدوات لا تعني جاهزية الإصدار للإنتاج.** لا تفعّل البوابة الحقيقية دون أدلة الاستلام المطابقة لبصمة المصدر. الاختبارات المستهدفة لا تغطي وحدها أقصى حجم لكل عملية في جميع الشاشات.
 
-## الملفات
+## العقد الحالي
 
-| ملف | الوظيفة |
-|---|---|
-| `shared.js` | تهيئة admin + قراءة المانيفست وقواعد الفهرسة الفريدة من **نفس** كود الخادم (`domain_manifest.json`, `domain_admission.js`) — لا انحراف ممكن بين التدقيق والإنفاذ |
-| `audit.js` | تدقيق للقراءة فقط: blockers لكل كيان (organizationId، version، createdBy/createdAt/updatedAt، روابط الآباء المطلوبة `*_remote_id`، قيم فريدة مكررة) |
-| `backup.js` | نسخة JSONL لكل مجموعات المؤسسة + `restore-report.json` (شبكة الأمان قبل أي كتابة) |
-| `migrate.js` | التنفيذ: `audit → counters → parentRefs → reservations → gate` و`--abort` |
-| `proof.js` | إثبات آلي على المحاكي: بذرة قديمة → تدقيق → نسخ → ترحيل → إعادة تشغيل (idempotency) → بروتوكول المزامنة الحقيقي يخدم المؤسسة → إحباط |
+- أجهزة متعددة مسجلة ومصرح لها؛ لا قيد `writerDeviceId`.
+- `schemaVersion: 3` و`writePolicy: multi_authorized` و`mode: firestore_direct_v2`.
+- لا رفع للطابور القديم أو للبذور عند فتح الجلسة. المسودة المنفصلة تحتاج اختيار الإرسال.
+- الطلب المرسل يحتفظ بمعرفه ومحتواه عند فقد الرد؛ يُستعاد الإيصال قبل تكرار الأثر.
+- قارئ أمامي كل 30 ثانية، وحد قراءة ثابت `readTime` وتثبيت ذري للكاش والمؤشر.
+- الحد العام 4 آثار أعمال للطلب. توسعة 29 أكتوبر تتيح 10 آثار لتعريفات جداول الجودة وأعمدتها فقط (9 أعمدة كحد أقصى)، مع مرجع أثر متحقق منه داخل كل سجل. لا يثبت العدد قبول كل التركيبات ضمن ميزانية القواعد. لا تُقسّم عملية أعمال ذرية لتجاوز الحد.
+- التراجع التشغيلي يفرض الصيانة، ولا يفتح الرفع القديم.
 
-## ما تفعله كل مرحلة
+## الاختبارات المحلية
 
-1. **audit** — يعيد تشغيل حكم التدقيق؛ أي blocker يوقف الترحيل فورًا.
-2. **counters** — ينشئ `counters/changeSequence` (أقصى `seq` في changeEvents، وإلا 0)
-   و`counters/sampleNumber` (أقصى `sampleNo` في samples). البروتوكول يفشل بدون
-   العدّادات (PROTOCOL_NOT_READY).
-3. **parentRefs** — يملأ `parentRefs` في مستندات الأعمال القديمة من أعمدة
-   `*_remote_id` (المستندات القديمة لا تحملها، والعميل لا يستطيع تجميع اللقطة
-   بدونها). لا يرفع `version` — لا تغيير في المحتوى، فقط إضافة خريطة الآباء.
-4. **reservations** — يبني `uniqueReservations` لكل مستند **حي** بنفس مطالب
-   `uniqueClaims` التي سينفذها الاستقبال بعد القطع (tombstones مستثناة).
-5. **gate** — يضبط `commandProtocol`:
-   `{enabled: true, schemaVersion: 2, domainManifestVersion: 1, migrationId,
-   writerDeviceId, globalReferencesReady: true, uniqueAdmissionComplete: true}`.
-   من هذه اللحظة: قواعد Firestore ترفض الكتابة القديمة
-   (`legacyDomainWritesAllowed`) والقراءة المركزية تصبح مسموحة.
+من جذر المستودع، مع Node dependencies في `tool/central_migration/server`:
 
-`--abort` يعيد `enabled: false` (يفتح المسار القديم مجددًا) ويسجل الإحباط —
-كل ما بناه الترحيل يبقى مكانه لإعادة تشغيل لاحقة.
-
-## التشغيل على المحاكي (الإثبات)
-
-من جذر المستودع:
-
-```bash
+```powershell
+firebase emulators:exec --only firestore,auth --project demo-materiallab "flutter test test/security"
+firebase emulators:exec --only firestore --project demo-materiallab "node --test tool/central_migration/test/*.test.js tool/central_migration/server/test/*.test.js"
 firebase emulators:exec --only firestore --project demo-materiallab "node tool/central_migration/proof.js"
+node tool/central_migration/generate_rules.js --check
 ```
 
-الإثبات يغطي: تدقيق نظيف، نسخة احتياطية، عدّادات، parentRefs، حجوزات فريدة،
-البوابة، إعادة تشغيل بلا تغيير، خدمة `beginSnapshot/snapshotPage/events`
-الحقيقية للمؤسسة المُرحّلة، ثم الإحباط.
+`proof.js` يثبت الترحيل والاستعادة والإحباط في الصيانة على بيانات مصطنعة فقط. اختبار النقل والقواعد الفعلي موجود في `test/security/firestore_direct_sync_test.dart` ويستخدم مستخدم Firebase عاديًا؛ Admin لتجهيز البيانات فقط.
 
-## التشغيل على مؤسسة حقيقية (عند الجاهزية)
+## الأدوات
 
-```bash
-# 0) نفّذ أوامر الموظفين/الجهاز على جهاز الكاتب المعتمد فقط، ثم أوقف كل الأجهزة عن الكتابة.
-# 1) نسخة احتياطية أولًا:
-node tool/central_migration/backup.js --project <prod> --org <orgId> --out backup/<orgId>
+- `audit.js`: يميّز الروابط القديمة ويحسب ملاحظات التفرّد دون اختيار سجل أصح تلقائيًا.
+- `raw_material_plan.js`: تصنيف للقراءة فقط، لا يختار UUID ولا يحذف سجلات يتيمة.
+- `repair.js`: يقترح تغييرات مثبتة مع بصمة الحالة السابقة. التطبيق يحتاج قرارًا مراجعًا بسبب واضح ومراجع معلوم، ثم شرط نسخة السيرفر.
+- `backup.js`: تصدير typed format 2 للمؤسسة وشجرتها، بما فيها مجموعات تحت وثائق أب مفقودة، وملفات المستخدمين الجذرية وشجرتها، مع SHA-256 وعدّادات.
+- `restore.js`: تدقيق افتراضي؛ التطبيق يحتاج `--apply` ووضع الصيانة. يرفض المحتوى المختلف أو الوثائق الإضافية حتى تُراجع، ويثبت مقارنة المحتوى بعد الاستعادة.
+- `release_gate.js`: يربط الأدلة ببصمة المصدر وبصمات ملفات التقارير، ويرفض أي بوابة غير ناجحة أو عملية غير مغطاة.
 
-# 2) تدقيق للقراءة فقط — يجب أن ينتهي برمز 0:
-node tool/central_migration/audit.js --project <prod> --org <orgId> --json backup/<orgId>/audit.json
+## الانتقال الحقيقي، بعد استكمال جميع موانع الإصدار
 
-# 3) الترحيل بلا البوابة (عدّادات + parentRefs + حجوزات) — آمن قبل القطع:
-node tool/central_migration/migrate.js --project <prod> --org <orgId> --stage counters
-node tool/central_migration/migrate.js --project <prod> --org <orgId> --stage parentRefs
-node tool/central_migration/migrate.js --project <prod> --org <orgId> --stage reservations
+النشر يبدأ في staging. لا توجد في الإعداد الحالي هوية staging موثقة. استبدل القيم بين الأقواس بالقيم المراجعة؛ لا تستخدم مشروع الإنتاج كبيئة اختبار.
 
-# 4) القطع الفعلي — يحتاج هوية جهاز الكاتب:
-node tool/central_migration/migrate.js --project <prod> --org <orgId> \
-  --writer-device <deviceId> --migration-id <migrationId>
+```powershell
+# 1. فرض الصيانة من القواعد، ثم تصدير ثابت في مجلد جديد.
+node tool/central_migration/migrate.js --project <project> --org <org> --stage freeze
+node tool/central_migration/backup.js --project <project> --org <org> --out <new-backup-directory>
+node tool/central_migration/audit.js --project <project> --org <org> --json <audit-report>
 
-# التراجع (يفتح المسار القديم مجددًا):
-node tool/central_migration/migrate.js --project <prod> --org <orgId> --abort --abort-reason "..."
+# 2. الإصلاحات المراجعة فقط، ثم التدقيق مجددًا. لا حذف آلي لاجتياز التدقيق.
+# 3. المراحل التالية ترفض التنفيذ خارج الصيانة.
+node tool/central_migration/migrate.js --project <project> --org <org> --stage audit
+node tool/central_migration/migrate.js --project <project> --org <org> --stage counters
+node tool/central_migration/migrate.js --project <project> --org <org> --stage parentRefs
+node tool/central_migration/migrate.js --project <project> --org <org> --stage reservations
+
+# 4. مراجعة قواعد staging واختبارها، ثم تفعيل البوابة بالأدلة المطابقة فقط.
+node tool/central_migration/release_gate.js --evidence <acceptance-json>
+node tool/central_migration/migrate.js --project <project> --org <org> --stage gate --migration-id <id> --evidence <acceptance-json>
+
+# التراجع يمنع الكتابة، ولا يعيد المسار القديم.
+node tool/central_migration/migrate.js --project <project> --org <org> --abort --abort-reason <reason>
+
+# فحص الاستعادة أولًا؛ لا استعادة نسخة قديمة فوق كتابات جديدة.
+node tool/central_migration/restore.js --project <project> --from <backup-directory>
 ```
 
-## إجراء القطع (checklist)
+بعد أي كتابة جديدة: احتفظ بها في تصدير مستقل، وجرّب تسويتها واستعادتها على المحاكي ثم staging. لا توجد راية force لتجاوز تعارض المحتوى.
 
-1. إعلان صيانة قصيرة؛ إيقاف مزامنة الأجهزة (كاتب واحد فقط على الأجهزة).
-2. نسخة احتياطية + تدقيق نظيف (رمز 0) + أرشفة تقرير التدقيق.
-3. مراحل `counters/parentRefs/reservations` (يمكن أن تسبق القطع بأيام —
-   لا تلمس المحتوى ولا الإصدارات).
-4. تشغيل `gate` مع `writerDeviceId` = جهاز الكاتب المعتمد.
-5. أول جهاز يفتح التطبيق يبني الأرشيف (staging bootstrap) من الخادم المركزي —
-   راقب شاشة المزامنة حتى `catching_up`.
-6. إرسال أمر تجريبي (تعديل طفيف) والتحقق من `changeEvents` و`auditLogs`
-   ووصول الإشعارات للأجهزة الأخرى.
-7. توثيق `migrationId` في سجل التشغيل.
+النسخ المحلية تحت `backup/` أو `build/` قد تحتوي بيانات حساسة؛ لا تُضمّنها في Git أو حزمة تسليم عامة.
 
-## سياسة الأجهزة القديمة
-
-- أي جهاز أقدم من إصدار البروتوكول (لا يفهم `commandProtocol`) يُسحب من
-  `devices` (`status != 'active'`) قبل القطع؛ قواعد Firestore ترفض كتاباته
-  القديمة تلقائيًا (`legacyDomainWritesAllowed`)، لكن عدم الثقة فيه مسؤولية
-  تشغيلية.
-- إعادة تفعيل جهاز قديم بعد القطع غير مدعومة — يجب ترقيته أولًا.
+قرار نطاق الإصدار الأول: الأكبر من الحد الخاص بعائلة العملية يُحفظ مسودة غير مرسلة ويُعطّل إرساله بوضوح؛ الحد العام 4، وتعريفات الجداول وأعمدتها 10. لا يفرض استلام الإصدار تشغيل العمليات الكبيرة المعطلة؛ يفرض إثبات المنع وعدم الحفظ الجزئي واختبار كل عملية مفعّلة. راجع [العقد الحالي](../../SYNC_CURRENT_CONTRACT.md).

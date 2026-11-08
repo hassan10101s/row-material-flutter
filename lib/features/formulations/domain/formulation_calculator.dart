@@ -18,6 +18,8 @@ String formulationParameterKey(String name) {
   return aliases[normalized] ?? normalized;
 }
 
+enum FormulationDataSource { all, lab, nir }
+
 class MaterialReceipt {
   const MaterialReceipt({
     required this.materialId,
@@ -50,13 +52,46 @@ class MaterialReceipt {
 
   /// Resolve the latest test for each sample as it existed at this chart
   /// point. Later laboratory results must not rewrite an earlier period.
-  MaterialReceipt at(DateTime end) {
-    if (labHistory.isEmpty) return this;
-    final resolved = Map<String, double>.from(inspectionValues);
+  MaterialReceipt at(
+    DateTime end, {
+    FormulationDataSource dataSource = FormulationDataSource.all,
+  }) {
+    if (labHistory.isEmpty) {
+      if (dataSource == FormulationDataSource.all) return this;
+      final selected = <String, double>{};
+      if (dataSource == FormulationDataSource.nir) {
+        selected.addAll(inspectionValues);
+      }
+      for (final entry in values.entries) {
+        final origin = sources[entry.key] ?? source;
+        if ((dataSource == FormulationDataSource.lab && origin == 'lab') ||
+            (dataSource == FormulationDataSource.nir &&
+                origin == 'inspection')) {
+          selected.putIfAbsent(entry.key, () => entry.value);
+        }
+      }
+      return MaterialReceipt(
+        materialId: materialId,
+        code: code,
+        receivedAt: receivedAt,
+        source: source,
+        values: selected,
+        sources: {
+          for (final key in selected.keys)
+            key: dataSource == FormulationDataSource.lab ? 'lab' : 'inspection',
+        },
+        physicalKeys: physicalKeys,
+        parameterDates: parameterDates,
+      );
+    }
+    final resolved = dataSource == FormulationDataSource.lab
+        ? <String, double>{}
+        : Map<String, double>.from(inspectionValues);
     final origins = {for (final key in resolved.keys) key: 'inspection'};
     final dates = <String, DateTime>{};
     DateTime? latest;
     for (final entry in labHistory.entries) {
+      if (dataSource == FormulationDataSource.nir) continue;
       final samples = <String, ParameterObservation>{};
       for (final observation in entry.value) {
         if (observation.at.isAfter(end)) continue;
@@ -66,17 +101,18 @@ class MaterialReceipt {
         }
       }
       if (samples.isEmpty) continue;
-      // A reported but non-numeric lab result supersedes the other source;
-      // it cannot silently become zero or fall back to the receipt's value.
-      resolved.remove(entry.key);
-      origins.remove(entry.key);
+      // Each source contributes one per-receipt mean. Missing laboratory
+      // numbers never become zero or borrow NIR values in laboratory-only mode.
       final numbers = samples.values
           .map((e) => e.value)
           .whereType<double>()
           .toList();
       if (numbers.isNotEmpty) {
-        resolved[entry.key] = numbers.reduce((a, b) => a + b) / numbers.length;
-        origins[entry.key] = 'lab';
+        final labMean = numbers.reduce((a, b) => a + b) / numbers.length;
+        final nir = inspectionValues[entry.key];
+        final combine = dataSource == FormulationDataSource.all && nir != null;
+        resolved[entry.key] = combine ? (nir + labMean) / 2 : labMean;
+        origins[entry.key] = combine ? 'mixed' : 'lab';
       }
       for (final observation in samples.values) {
         final previousDate = dates[entry.key];
@@ -134,6 +170,7 @@ class ParameterAverage {
     required this.receiptCode,
     required this.receiptDate,
     required this.usedFallback,
+    this.usedFutureFallback = false,
   });
   final double? value;
   final String source;
@@ -141,6 +178,7 @@ class ParameterAverage {
   final String receiptCode;
   final DateTime receiptDate;
   final bool usedFallback;
+  final bool usedFutureFallback;
 }
 
 class IngredientResult {
@@ -173,7 +211,56 @@ class FormulationResult {
 
 /// How multiple receipts of the same material combine into one parameter
 /// value: the mean (current default), or the best/worst-case single value.
-enum FormulationAggregation { average, minimum, maximum }
+enum FormulationAggregation { average, minimum, maximum, mode }
+
+/// Reused within one tracking calculation. A receipt only changes when a lab
+/// observation becomes available, not at every daily chart boundary.
+class FormulationReceiptIndex {
+  FormulationReceiptIndex({
+    required this.receipts,
+    required Iterable<int> materialIds,
+    required this.dataSource,
+  }) : materialIds = materialIds.toSet() {
+    for (final receipt in receipts) {
+      if (!this.materialIds.contains(receipt.materialId)) continue;
+      byMaterial.putIfAbsent(receipt.materialId, () => []).add(receipt);
+      availableKeys.addAll(receipt.values.keys);
+      availableKeys.addAll(receipt.inspectionValues.keys);
+      availableKeys.addAll(receipt.labHistory.keys);
+    }
+  }
+
+  final List<MaterialReceipt> receipts;
+  final Set<int> materialIds;
+  final FormulationDataSource dataSource;
+  final byMaterial = <int, List<MaterialReceipt>>{};
+  final availableKeys = <String>{};
+  final _dates = <MaterialReceipt, List<DateTime>>{};
+  final _resolved = <MaterialReceipt, Map<int, MaterialReceipt>>{};
+
+  MaterialReceipt resolve(MaterialReceipt receipt, DateTime end) {
+    final dates = _dates.putIfAbsent(receipt, () {
+      return {
+        if (dataSource != FormulationDataSource.nir)
+          for (final history in receipt.labHistory.values)
+            for (final observation in history) observation.at,
+      }.toList()..sort();
+    });
+    var low = 0;
+    var high = dates.length;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      if (dates[middle].isAfter(end)) {
+        high = middle;
+      } else {
+        low = middle + 1;
+      }
+    }
+    return _resolved
+        .putIfAbsent(receipt, () => {})
+        .putIfAbsent(low, () => receipt.at(end, dataSource: dataSource));
+  }
+}
 
 abstract final class FormulationCalculator {
   static const names = <String, String>{
@@ -209,16 +296,37 @@ abstract final class FormulationCalculator {
     required DateTime to,
     bool fallback = true,
     FormulationAggregation aggregation = FormulationAggregation.average,
+    FormulationDataSource dataSource = FormulationDataSource.all,
+    FormulationReceiptIndex? prepared,
   }) {
     final start = DateTime(from.year, from.month, from.day);
     final end = DateTime(to.year, to.month, to.day, 23, 59, 59, 999);
+    final ids = materialIds.toSet();
+    final index =
+        prepared ??
+        FormulationReceiptIndex(
+          receipts: receipts,
+          materialIds: ids,
+          dataSource: dataSource,
+        );
+    if (!identical(index.receipts, receipts) ||
+        index.dataSource != dataSource ||
+        index.materialIds.length != ids.length ||
+        !index.materialIds.containsAll(ids)) {
+      throw ArgumentError('Receipt index does not match the calculation');
+    }
+    final availableKeys = index.availableKeys;
     final out = <int, Map<String, ParameterAverage>>{};
-    for (final id in materialIds.toSet()) {
-      final rows = receipts
-          .where((e) => e.materialId == id)
-          .map((e) => e.at(end))
-          .toList();
-      final keys = <String>{for (final row in rows) ...row.values.keys};
+    for (final id in ids) {
+      final originals = index.byMaterial[id] ?? const <MaterialReceipt>[];
+      final rows = originals.map((e) => index.resolve(e, end)).toList();
+      final keys = <String>{
+        ...availableKeys,
+        for (final row in rows) ...row.values.keys,
+        for (final row in originals) ...row.values.keys,
+        for (final row in originals) ...row.inspectionValues.keys,
+        for (final row in originals) ...row.labHistory.keys,
+      };
       final values = <String, ParameterAverage>{};
       for (final key in keys) {
         final current =
@@ -243,6 +351,7 @@ abstract final class FormulationCalculator {
             FormulationAggregation.maximum => current.reduce(
               (a, b) => a.values[key]! >= b.values[key]! ? a : b,
             ),
+            FormulationAggregation.mode => _modeReceipt(current, key),
           };
           final value = chosen != null
               ? chosen.values[key]
@@ -266,14 +375,34 @@ abstract final class FormulationCalculator {
           continue;
         }
         if (!fallback) continue;
-        final previous =
-            rows
-                .where(
-                  (row) =>
-                      !row.receivedAt.isAfter(end) && row.values[key] != null,
-                )
-                .toList()
-              ..sort((a, b) => b.receivedAt.compareTo(a.receivedAt));
+        final previous = <MaterialReceipt>[];
+        for (var i = 0; i < originals.length; i++) {
+          if (originals[i].receivedAt.isAfter(end)) continue;
+          var resolved = rows[i];
+          if (resolved.values[key] == null) {
+            // A newer missing lab number must not hide an older valid one.
+            final dates =
+                (originals[i].labHistory[key] ?? const [])
+                    .where((o) => o.value != null && !o.at.isAfter(end))
+                    .map((o) => o.at)
+                    .toSet()
+                    .toList()
+                  ..sort((a, b) => b.compareTo(a));
+            for (final date in dates) {
+              final candidate = index.resolve(originals[i], date);
+              if (candidate.values[key] != null) {
+                resolved = candidate;
+                break;
+              }
+            }
+          }
+          if (resolved.values[key] != null) previous.add(resolved);
+        }
+        previous.sort(
+          (a, b) => (b.parameterDates[key] ?? b.receivedAt).compareTo(
+            a.parameterDates[key] ?? a.receivedAt,
+          ),
+        );
         if (previous.isNotEmpty) {
           // Min/max keep that promise even on fallback: the extreme previous
           // value, not merely the most recent one.
@@ -285,20 +414,90 @@ abstract final class FormulationCalculator {
             FormulationAggregation.maximum => previous.reduce(
               (a, b) => a.values[key]! >= b.values[key]! ? a : b,
             ),
+            FormulationAggregation.mode => _modeReceipt(previous, key),
           };
           values[key] = ParameterAverage(
             value: row.values[key],
             source: row.sources[key] ?? row.source,
-            receipts: 1,
+            receipts: aggregation == FormulationAggregation.mode
+                ? previous.length
+                : 1,
             receiptCode: row.code,
             receiptDate: row.parameterDates[key] ?? row.receivedAt,
             usedFallback: true,
+          );
+          continue;
+        }
+        // Previous data always wins, even if a later value is closer. Only
+        // when this material/parameter has no usable past do we look ahead.
+        MaterialReceipt? next;
+        DateTime? nextAvailable;
+        for (final original in originals) {
+          final dates = <DateTime>{
+            if (original.receivedAt.isAfter(end)) original.receivedAt,
+            for (final observation in original.labHistory[key] ?? const [])
+              if (observation.at.isAfter(end) && observation.value != null)
+                observation.at.isBefore(original.receivedAt)
+                    ? original.receivedAt
+                    : observation.at,
+          }.toList()..sort();
+          for (final date in dates) {
+            final candidate = index.resolve(original, date);
+            if (candidate.values[key] == null) continue;
+            if (nextAvailable == null ||
+                date.isBefore(nextAvailable) ||
+                (date.isAtSameMomentAs(nextAvailable) &&
+                    original.code.compareTo(next!.code) < 0)) {
+              next = candidate;
+              nextAvailable = date;
+            }
+            break;
+          }
+        }
+        if (next != null) {
+          values[key] = ParameterAverage(
+            value: next.values[key],
+            source: next.sources[key] ?? next.source,
+            receipts: 1,
+            receiptCode: next.code,
+            receiptDate: next.parameterDates[key] ?? next.receivedAt,
+            usedFallback: true,
+            usedFutureFallback: true,
+          );
+        } else {
+          // No usable value for this material/parameter exists in the chosen
+          // source, before or after this period. Its blend contribution is zero;
+          // keep the full formulation weight in the denominator.
+          values[key] = ParameterAverage(
+            value: 0,
+            source: 'missing',
+            receipts: 0,
+            receiptCode: '',
+            receiptDate: end,
+            usedFallback: false,
           );
         }
       }
       out[id] = values;
     }
     return out;
+  }
+
+  /// Most frequent observed value, with the greater value winning a tie.
+  /// Provenance comes from its latest matching receipt.
+  static MaterialReceipt _modeReceipt(List<MaterialReceipt> rows, String key) {
+    final counts = <double, int>{};
+    for (final row in rows) {
+      final value = row.values[key]!;
+      counts[value] = (counts[value] ?? 0) + 1;
+    }
+    final mode = counts.keys.reduce(
+      (a, b) =>
+          counts[a]! > counts[b]! || (counts[a] == counts[b] && a > b) ? a : b,
+    );
+    return rows
+        .where((row) => row.values[key] == mode)
+        .reduce((a, b) => a.receivedAt.isAfter(b.receivedAt) ? a : b);
   }
 
   static FormulationResult calculate({

@@ -513,6 +513,11 @@ class BackupManager implements BackupService {
   Future<int> importInspectionsFromSource({
     required String sourceDbPath,
   }) async {
+    if (dbHelper.businessGateway != null) {
+      throw const ValidationError(
+        'الاستيراد إلى الأرشيف المعتمد يحتاج ترحيلًا مراجعًا على السيرفر.',
+      );
+    }
     final livePath = await dbHelper.databasePath;
     if (await _sameFile(sourceDbPath, livePath)) return 0;
 
@@ -691,6 +696,11 @@ class BackupManager implements BackupService {
     required String sourceDbPath,
     Future<int> Function()? importUnits,
   }) async {
+    if (dbHelper.businessGateway != null) {
+      throw const ValidationError(
+        'استيراد المراجع يحتاج ترحيلًا مراجعًا على السيرفر.',
+      );
+    }
     final db = await dbHelper.database;
     final livePath = await dbHelper.databasePath;
     Database? source;

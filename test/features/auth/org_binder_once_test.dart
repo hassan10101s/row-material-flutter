@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
@@ -11,7 +12,7 @@ import 'package:material_lab/core/network/connectivity_service.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/features/auth/domain/auth_repository.dart';
-import 'package:material_lab/features/auth/data/offline_first_auth_repository.dart';
+import 'package:material_lab/features/auth/data/firebase_auth_repository.dart';
 
 class _MockDatabaseHelper extends Mock implements DatabaseHelper {}
 
@@ -29,7 +30,7 @@ class _MockAuthRemote extends Mock implements AuthRemoteDataSource {}
 ///
 /// `restoreSession`, `signInWithGoogle` and `CreateOrganizationCubit` all funnel
 /// through `resolveProfile`, so before the guard in
-/// `OfflineFirstAuthRepository._bindOrganization` the whole binder ran three
+/// `FirebaseAuthRepository._bindOrganization` the whole binder ran three
 /// times in a single startup, vacuuming the database the user is about to save
 /// an inspection into. These tests pin the once-per-organization contract.
 void main() {
@@ -40,19 +41,21 @@ void main() {
   late _MockSyncMetadata metadata;
   late List<String> bound;
   String? currentOrg;
+  late DateTime clock;
+  AppSession? cached;
 
   setUpAll(() {
     registerFallbackValue(const AppSession());
   });
 
   UserProfile profileFor(String orgId) => UserProfile(
-        uid: 'uid-1',
-        email: 'owner@example.com',
-        organizationId: orgId,
-        role: AppRoles.admin,
-        status: MemberStatus.active,
-        memberId: 'member_1',
-      );
+    uid: 'uid-1',
+    email: 'owner@example.com',
+    organizationId: orgId,
+    role: AppRoles.admin,
+    status: MemberStatus.active,
+    memberId: 'member_1',
+  );
 
   setUp(() {
     remote = _MockAuthRemote();
@@ -62,15 +65,24 @@ void main() {
     metadata = _MockSyncMetadata();
     bound = <String>[];
     currentOrg = null;
+    clock = DateTime.utc(2026, 11, 1, 12);
+    cached = AppSession(
+      uid: 'uid-1',
+      authenticationPolicyVersion: 1,
+      signedInAt: clock.subtract(const Duration(days: 1)),
+    );
 
     when(() => remote.isConfigured).thenReturn(true);
-    when(() => remote.currentUser())
-        .thenAnswer((_) async => const RemoteUser(uid: 'uid-1', email: 'owner@example.com'));
+    when(() => remote.currentUser()).thenAnswer(
+      (_) async => const RemoteUser(uid: 'uid-1', email: 'owner@example.com'),
+    );
     when(() => connectivity.isOnline).thenReturn(true);
-    when(() => store.restore()).thenAnswer((_) async => null);
+    when(() => store.restore()).thenAnswer((_) async => cached);
     when(() => store.save(any())).thenAnswer((_) async {});
     when(() => store.clear()).thenAnswer((_) async {});
-    when(() => metadata.ensureDeviceId(any())).thenAnswer((_) async => 'device_windows_abc');
+    when(
+      () => metadata.ensureDeviceId(any()),
+    ).thenAnswer((_) async => 'device_windows_abc');
 
     // DatabaseHelper.boundOrgId is a getter over the mutable AppPaths.orgId.
     when(() => db.boundOrgId).thenAnswer((_) => currentOrg);
@@ -81,57 +93,69 @@ void main() {
     });
   });
 
-  OfflineFirstAuthRepository build() => OfflineFirstAuthRepository(
-        remote: remote,
-        sessionStore: store,
-        dbHelper: db,
-        connectivity: connectivity,
-        metadata: metadata,
-        bootstrap: const FirebaseBootstrapResult(
-          status: FirebaseStatus.ready,
-          config: FirebaseConfig(
-            apiKey: 'k',
-            appId: 'a',
-            messagingSenderId: 'm',
-            projectId: 'p',
-            authDomain: 'd',
-          ),
-        ),
-      )..onOrganizationBound = (orgId) async => bound.add(orgId);
+  FirebaseAuthRepository build() => FirebaseAuthRepository(
+    now: () => clock,
+    remote: remote,
+    sessionStore: store,
+    dbHelper: db,
+    connectivity: connectivity,
+    metadata: metadata,
+    bootstrap: const FirebaseBootstrapResult(
+      status: FirebaseStatus.ready,
+      config: FirebaseConfig(
+        apiKey: 'k',
+        appId: 'a',
+        messagingSenderId: 'm',
+        projectId: 'p',
+        authDomain: 'd',
+      ),
+    ),
+  )..onOrganizationBound = (orgId) async => bound.add(orgId);
 
-  test('the binder runs once per organization, not once per resolveProfile',
-      () async {
-    when(() => remote.loadProfile(any())).thenAnswer((_) async => profileFor('org_abc'));
-    final auth = build();
+  test(
+    'the binder runs once per organization, not once per resolveProfile',
+    () async {
+      when(
+        () => remote.loadProfile(any()),
+      ).thenAnswer((_) async => profileFor('org_abc'));
+      final auth = build();
 
-    // three resolveProfile calls in one startup: restore, sign-in, create-org
-    expect(await auth.resolveProfile(), AuthState.ready);
-    expect(await auth.resolveProfile(), AuthState.ready);
-    expect(await auth.resolveProfile(), AuthState.ready);
+      // three resolveProfile calls in one startup: restore, sign-in, create-org
+      expect(await auth.resolveProfile(), AuthState.ready);
+      expect(await auth.resolveProfile(), AuthState.ready);
+      expect(await auth.resolveProfile(), AuthState.ready);
 
-    expect(
-      bound,
-      ['org_abc'],
-      reason: 'the seeds / autoBackup / device-registration side effects must run once',
-    );
-    // bindOrg is still called every time - it is the cheap, idempotent part.
-    verify(() => db.bindOrg('org_abc')).called(3);
-  });
+      expect(
+        bound,
+        ['org_abc'],
+        reason:
+            'the seeds / autoBackup / device-registration side effects must run once',
+      );
+      // bindOrg is still called every time - it is the cheap, idempotent part.
+      verify(() => db.bindOrg('org_abc')).called(3);
+    },
+  );
 
   test('switching organization re-runs the binder', () async {
-    when(() => remote.loadProfile(any())).thenAnswer((_) async => profileFor('org_abc'));
+    when(
+      () => remote.loadProfile(any()),
+    ).thenAnswer((_) async => profileFor('org_abc'));
     final auth = build();
     await auth.resolveProfile();
     expect(bound, ['org_abc']);
 
-    when(() => remote.loadProfile(any())).thenAnswer((_) async => profileFor('org_xyz'));
+    when(
+      () => remote.loadProfile(any()),
+    ).thenAnswer((_) async => profileFor('org_xyz'));
     await auth.resolveProfile();
 
     expect(bound, ['org_abc', 'org_xyz']);
   });
 
   test('sign-out unbinds, so the next sign-in re-runs the binder', () async {
-    when(() => remote.loadProfile(any())).thenAnswer((_) async => profileFor('org_abc'));
+    when(
+      () => remote.loadProfile(any()),
+    ).thenAnswer((_) async => profileFor('org_abc'));
     when(() => remote.signOut()).thenAnswer((_) async {});
     final auth = build();
     await auth.resolveProfile();
@@ -154,4 +178,83 @@ void main() {
     // stays open. Binding a company id is what must never happen here.
     verifyNever(() => db.bindOrg('org_abc'));
   });
+  test(
+    'restore rejects a ten day session online before reading Firebase profile',
+    () async {
+      cached = AppSession(
+        uid: 'uid-1',
+        authenticationPolicyVersion: 1,
+        signedInAt: clock.subtract(const Duration(days: 10)),
+      );
+      final auth = build();
+      expect(await auth.restoreSession(), AuthState.signedOut);
+      expect(bound, isEmpty);
+      verify(() => store.clear()).called(1);
+      verifyNever(() => remote.loadProfile(any()));
+    },
+  );
+  test('expired session cannot regain access through offline cache', () async {
+    when(() => connectivity.isOnline).thenReturn(false);
+    cached = AppSession(
+      uid: 'uid-1',
+      organizationId: 'org_abc',
+      status: 'active',
+      authenticationPolicyVersion: 1,
+      signedInAt: clock.subtract(const Duration(days: 11)),
+    );
+    final auth = build();
+    expect(await auth.restoreSession(), AuthState.signedOut);
+    expect(bound, isEmpty);
+  });
+  test(
+    'profile refresh preserves sign-in age and cannot roll the deadline',
+    () async {
+      when(
+        () => remote.loadProfile(any()),
+      ).thenAnswer((_) async => profileFor('org_abc'));
+      final original = cached!.signedInAt;
+      final auth = build();
+      expect(await auth.resolveProfile(), AuthState.ready);
+      expect(auth.session.signedInAt, original);
+      clock = clock.add(const Duration(days: 8));
+      expect(await auth.resolveProfile(), AuthState.ready);
+      expect(auth.session.signedInAt, original);
+      clock = clock.add(const Duration(days: 1));
+      expect(await auth.resolveProfile(), AuthState.signedOut);
+    },
+  );
+  test(
+    'only successful explicit login starts a new ten day interval',
+    () async {
+      when(
+        () => remote.loadProfile(any()),
+      ).thenAnswer((_) async => profileFor('org_abc'));
+      cached = null;
+      final auth = build();
+      expect(await auth.resolveProfile(freshSignIn: true), AuthState.ready);
+      expect(auth.session.signedInAt, clock);
+    },
+  );
+  test(
+    'a legacy cache with unknown authentication age requires login',
+    () async {
+      cached = const AppSession(uid: 'uid-1');
+      expect(await build().restoreSession(), AuthState.signedOut);
+    },
+  );
+  test(
+    'a delayed profile reply cannot restore a session after logout',
+    () async {
+      final reply = Completer<UserProfile?>();
+      when(() => remote.loadProfile(any())).thenAnswer((_) => reply.future);
+      final auth = build();
+      final restoring = auth.resolveProfile();
+      await Future<void>.delayed(Duration.zero);
+      await auth.signOut();
+      reply.complete(profileFor('org_abc'));
+      expect(await restoring, AuthState.signedOut);
+      expect(auth.session.isSignedIn, isFalse);
+      expect(bound, isEmpty);
+    },
+  );
 }

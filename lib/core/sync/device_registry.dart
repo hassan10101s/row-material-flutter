@@ -132,7 +132,7 @@ class DeviceRegistry {
           text.contains('PERMISSION_DENIED')) {
         return true;
       }
-      // A temporary outage preserves the offline-first cache contract.
+      // A temporary outage preserves the server-confirmed cache contract.
       debugPrint('[devices] enrollment check unavailable: $error');
       return false;
     }
@@ -169,8 +169,10 @@ class DeviceRegistry {
             : _session.email,
         'platform': Platform.operatingSystem,
         'role': _session.role,
+        'status': 'active',
         'readOnly':
-            _session.readOnlyDevice || rolesAreReadOnly(_session.effectiveRoles),
+            _session.readOnlyDevice ||
+            rolesAreReadOnly(_session.effectiveRoles),
         'lastSeenAt': now,
       },
     );

@@ -25,6 +25,9 @@ import 'qr_render.dart';
 import 'report_builder.dart';
 import 'report_html_builder.dart';
 import 'tiny_jinja.dart';
+import 'chemical_consumption_report_builder.dart';
+import 'product_period_report_builder.dart';
+import '../../lab/domain/chemical_consumption_report.dart';
 
 /// Port of the report data layer: queries in core/controller.py report
 /// endpoints + report.py rendering flow, producing PDF bytes via the exact
@@ -121,7 +124,9 @@ class ReportService implements ReportRepository {
   ) async {
     final db = await dbHelper.readDatabase;
     final rows = await db.rawQuery(
-      'SELECT $reportColumns FROM inspections $whereClause',
+      'SELECT $reportColumns FROM '
+      '(SELECT * FROM inspections WHERE deleted_at IS NULL) AS inspections '
+      '$whereClause',
       params,
     );
     return [
@@ -148,7 +153,7 @@ class ReportService implements ReportRepository {
     final db = await dbHelper.readDatabase;
     final rows = await db.rawQuery(
       'SELECT inspection_date, decision_status, quantity, rejected_quantity '
-      "FROM inspections WHERE inspection_kind = 'raw' AND inspection_date >= ? AND inspection_date < ?",
+      "FROM inspections WHERE deleted_at IS NULL AND inspection_kind = 'raw' AND inspection_date >= ? AND inspection_date < ?",
       [_dateOnlyIso(windowStart), _dateOnlyIso(windowEnd)],
     );
     return [for (final r in rows) Map<String, dynamic>.from(r)];
@@ -162,7 +167,9 @@ class ReportService implements ReportRepository {
     String templateName,
     Map<String, dynamic> context,
   ) async {
-    context['is_en'] = !AppText.arabic;
+    final settings = await _settings();
+    context['is_en'] = settings['report_language'] == 'en';
+    context['organization_name'] = settings['organization_name'] ?? '';
     final template = await _readAssetText('assets/templates/$templateName');
     return tinyJinjaRender(template, context);
   }
@@ -430,7 +437,10 @@ class ReportService implements ReportRepository {
     return ReportDoc(
       filename: AppText.t('تقرير_اليومي_$day.pdf', 'Daily_Report_$day.pdf'),
       bytes: bytes,
-      title: AppText.t('التقرير اليومي - $day', 'Daily report - $day'),
+      title: AppText.t(
+        'تقرير الخامات اليومي - $day',
+        'Daily raw material report - $day',
+      ),
     );
   }
 
@@ -469,8 +479,8 @@ class ReportService implements ReportRepository {
       ),
       bytes: bytes,
       title: AppText.t(
-        'التقرير الشهري - $month/$year',
-        'Monthly report - $month/$year',
+        'تقرير الخامات الشهري - $month/$year',
+        'Monthly raw material report - $month/$year',
       ),
     );
   }
@@ -492,7 +502,109 @@ class ReportService implements ReportRepository {
     return ReportDoc(
       filename: AppText.t('تقرير_السنوي_$year.pdf', 'Yearly_Report_$year.pdf'),
       bytes: bytes,
-      title: AppText.t('التقرير السنوي - $year', 'Yearly report - $year'),
+      title: AppText.t(
+        'تقرير الخامات السنوي - $year',
+        'Yearly raw material report - $year',
+      ),
+    );
+  }
+
+  @override
+  Future<ReportDoc> productDailyReport(String dateStr) async {
+    _checkExport();
+    final text = dateStr.trim();
+    final day = DateTime.tryParse(text);
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(text) ||
+        day == null ||
+        _dateOnlyIso(day) != text) {
+      throw ValidationError(AppErrors.dateFormatInvalid);
+    }
+    return _productPeriodReport(
+      'daily',
+      text,
+      day,
+      DateTime(day.year, day.month, day.day + 1),
+    );
+  }
+
+  @override
+  Future<ReportDoc> productMonthlyReport({
+    required int month,
+    required int year,
+  }) async {
+    _checkExport();
+    _validateProductPeriod(year, month);
+    return _productPeriodReport(
+      'monthly',
+      '$year-${month.toString().padLeft(2, '0')}',
+      DateTime(year, month, 1),
+      DateTime(year, month + 1, 1),
+    );
+  }
+
+  @override
+  Future<ReportDoc> productYearlyReport({required int year}) async {
+    _checkExport();
+    _validateProductPeriod(year);
+    return _productPeriodReport(
+      'yearly',
+      '$year',
+      DateTime(year),
+      DateTime(year + 1),
+    );
+  }
+
+  void _validateProductPeriod(int year, [int month = 1]) {
+    if (year < 1970 || year > 9999 || month < 1 || month > 12) {
+      throw ValidationError(
+        AppText.t('أدخل فترة صحيحة', 'Enter a valid period'),
+      );
+    }
+  }
+
+  Future<ReportDoc> _productPeriodReport(
+    String type,
+    String period,
+    DateTime from,
+    DateTime to,
+  ) async {
+    final db = await dbHelper.readDatabase;
+    // A single SQLite read transaction keeps headers and samples from the
+    // same committed cache revision; no network writes or lab-test joins.
+    final data = await db.transaction((txn) async {
+      const where =
+          "i.inspection_kind = 'product' AND i.deleted_at IS NULL "
+          'AND i.inspection_date >= ? AND i.inspection_date < ?';
+      final args = [_dateOnlyIso(from), _dateOnlyIso(to)];
+      final headers = await txn.rawQuery(
+        'SELECT i.* FROM inspections i WHERE $where '
+        'ORDER BY i.inspection_date, i.id',
+        args,
+      );
+      final samples = await txn.rawQuery(
+        'SELECT s.* FROM product_batch_samples s '
+        'INNER JOIN inspections i ON i.id = s.batch_id WHERE $where AND s.deleted_at IS NULL '
+        'ORDER BY i.inspection_date, i.id, s.sample_no, s.id',
+        args,
+      );
+      return (headers, samples);
+    });
+    final settings = await _settings();
+    final context = buildProductPeriodContext(
+      type: type,
+      period: period,
+      inspections: data.$1,
+      samples: data.$2,
+      settings: settings,
+    );
+    final bytes = await _exportHtmlPdf(
+      'product_period_report_template.html',
+      context,
+    );
+    return ReportDoc(
+      filename: 'Product_${type}_$period.pdf',
+      bytes: bytes,
+      title: '${context['title']} - $period',
     );
   }
 
@@ -567,8 +679,14 @@ class ReportService implements ReportRepository {
     final ctx = buildLabReportContext(
       tests,
       settings: settings,
-      title: '${data['title']}',
-      periodLabel: '${data['period_label']}',
+      title: settings['report_language'] == 'en'
+          ? 'Laboratory analysis report'
+          : 'تقرير تحاليل المعمل',
+      periodLabel: type == 'daily'
+          ? (dateStr ?? '')
+          : type == 'monthly'
+          ? '$month/$year'
+          : '$year',
       formNoKey: switch (type) {
         'monthly' => ReportFormKeys.labMonthlyReport,
         'yearly' => ReportFormKeys.labYearlyReport,
@@ -618,6 +736,49 @@ class ReportService implements ReportRepository {
   }
 
   // ── Disk output (parity with controller._get_export_dir) ────────
+
+  @override
+  Future<String> chemicalConsumptionHtml(
+    ChemicalConsumptionReport report,
+  ) async {
+    return _htmlPdf.standaloneHtml(
+      (await _chemicalConsumptionDocument(report)).html,
+    );
+  }
+
+  Future<({String html, String title})> _chemicalConsumptionDocument(
+    ChemicalConsumptionReport report,
+  ) async {
+    _checkExport();
+    if (report.rows.isEmpty) {
+      throw ValidationError(
+        AppText.t('لا توجد مواد للتصدير.', 'No chemicals to export.'),
+      );
+    }
+    final settings = await _settings();
+    final context = buildChemicalConsumptionContext(report, settings: settings);
+    final template = await _readAssetText(
+      'assets/templates/chemical_consumption_report_template.html',
+    );
+    return (
+      html: tinyJinjaRender(template, context),
+      title: '${context['title']}',
+    );
+  }
+
+  @override
+  Future<ReportDoc> chemicalConsumptionReport(
+    ChemicalConsumptionReport report,
+  ) async {
+    final document = await _chemicalConsumptionDocument(report);
+    final bytes = await _pdfFromHtml(document.html);
+    return ReportDoc(
+      filename:
+          'Chemical_Consumption_${ConsumptionPeriod.date(report.period.from)}_${ConsumptionPeriod.date(report.period.to)}${report.inventoryId == null ? '' : '_${report.inventoryId}'}.pdf',
+      bytes: bytes,
+      title: document.title,
+    );
+  }
 
   /// Resolve the export folder: settings `export_root_path` or app exports
   /// root, optionally under `{year}/{month}/{day}` and a `labels` subfolder.

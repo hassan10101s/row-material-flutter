@@ -21,9 +21,9 @@ import 'package:material_lab/features/reports/data/report_service.dart';
 import 'package:material_lab/features/settings/data/settings_repo.dart';
 
 Map<String, dynamic> _settings() => {
-      'department_label': 'Quality Assurance Department',
-      'report_logo_data_uri': '',
-    };
+  'department_label': 'Quality Assurance Department',
+  'report_logo_data_uri': '',
+};
 
 Map<String, dynamic> _inspection() {
   return {
@@ -118,24 +118,21 @@ void main() {
   });
 
   test('inspection PDF renders from the builder context', () async {
-    final ctx = buildInspectionContext(
-      _inspection(),
-      settings: _settings(),
-    );
+    final ctx = buildInspectionContext(_inspection(), settings: _settings());
     final bytes = await PdfRenderer.renderInspection(ctx);
     expect(_isPdf(bytes), isTrue);
   });
 
   test('label and batch labels PDF render', () async {
-    final labelCtx =
-        buildLabelContext(_inspection(), settings: _settings());
+    final labelCtx = buildLabelContext(_inspection(), settings: _settings());
     final bytes = await PdfRenderer.renderLabel(labelCtx);
     expect(_isPdf(bytes), isTrue);
 
-    final batchCtx = buildBatchLabelsContext(
-      [_inspection(), _inspection(), _inspection()],
-      settings: _settings(),
-    );
+    final batchCtx = buildBatchLabelsContext([
+      _inspection(),
+      _inspection(),
+      _inspection(),
+    ], settings: _settings());
     final batchBytes = await PdfRenderer.renderBatchLabels(batchCtx);
     expect(_isPdf(batchBytes), isTrue);
   });
@@ -143,28 +140,30 @@ void main() {
   test('daily, monthly, yearly and follow-up PDFs render', () async {
     final inspections = <Map<String, dynamic>>[_inspection()];
 
-    final daily = await PdfRenderer.renderDaily(buildDailyContext(
-      inspections,
-      settings: _settings(),
-      dateStr: '2026-09-19',
-    ));
+    final daily = await PdfRenderer.renderDaily(
+      buildDailyContext(
+        inspections,
+        settings: _settings(),
+        dateStr: '2026-09-19',
+      ),
+    );
     expect(_isPdf(daily), isTrue);
 
     final monthly = await PdfRenderer.renderMonthly(_monthlyCtx());
     expect(_isPdf(monthly), isTrue);
 
-    final yearly = await PdfRenderer.renderYearly(buildYearlyContext(
-      inspections,
-      settings: _settings(),
-      year: 2026,
-    ));
+    final yearly = await PdfRenderer.renderYearly(
+      buildYearlyContext(inspections, settings: _settings(), year: 2026),
+    );
     expect(_isPdf(yearly), isTrue);
 
-    final followUp = await PdfRenderer.renderFollowUp(buildFollowUpContext(
-      inspections,
-      settings: _settings(),
-      dateStr: '2026-09-19',
-    ));
+    final followUp = await PdfRenderer.renderFollowUp(
+      buildFollowUpContext(
+        inspections,
+        settings: _settings(),
+        dateStr: '2026-09-19',
+      ),
+    );
     expect(_isPdf(followUp), isTrue);
   });
 
@@ -209,9 +208,7 @@ void main() {
     });
 
     test('equipment QR round-trips with the equipment kind', () {
-      final text = buildEquipmentQrPayloadText(
-        equipment: {'code': 'EQ-0007'},
-      );
+      final text = buildEquipmentQrPayloadText(equipment: {'code': 'EQ-0007'});
       final parsed = tryParseAppQr(text)!;
       expect(parsed.kind, appQrKindEquipment);
       expect(parsed.entryCode, 'EQ-0007');
@@ -227,20 +224,22 @@ void main() {
       expect(parsed.kind, appQrKindEquipment);
     });
 
-    test('equipment label PDF renders with and without a form number',
-        () async {
-      final withForm = await PdfRenderer.renderEquipmentLabel(
-        buildEquipmentLabelContext(
-          _equipment(),
-          settings: {'qa_form_no': 'QA-F-07'},
-        ),
-      );
-      expect(_isPdf(withForm), isTrue);
-      final withoutForm = await PdfRenderer.renderEquipmentLabel(
-        buildEquipmentLabelContext(_equipment(), settings: _settings()),
-      );
-      expect(_isPdf(withoutForm), isTrue);
-    });
+    test(
+      'equipment label PDF renders with and without a form number',
+      () async {
+        final withForm = await PdfRenderer.renderEquipmentLabel(
+          buildEquipmentLabelContext(
+            _equipment(),
+            settings: {'qa_form_no': 'QA-F-07'},
+          ),
+        );
+        expect(_isPdf(withForm), isTrue);
+        final withoutForm = await PdfRenderer.renderEquipmentLabel(
+          buildEquipmentLabelContext(_equipment(), settings: _settings()),
+        );
+        expect(_isPdf(withoutForm), isTrue);
+      },
+    );
   });
 
   serviceGroup();
@@ -264,10 +263,7 @@ Future<void> zoneSeedDatabase() async {
     'key': 'department_label',
     'value': 'Quality Assurance Department',
   });
-  await db.insert('settings', {
-    'key': 'report_logo_data_uri',
-    'value': '',
-  });
+  await db.insert('settings', {'key': 'report_logo_data_uri', 'value': ''});
   await db.insert('reference_materials', {
     'material_name': 'Sugar',
     'material_code': 'M-SUGAR-01',
@@ -367,8 +363,14 @@ void serviceGroup() {
     _service = ReportService(
       dbHelper: _dbHelper,
       settingsRepo: SettingsRepo(
-          dbHelper: _dbHelper, secret: secret, paths: _FakeAppPaths(tmp.path)),
-      inspectionRepo: InspectionRepo(dbHelper: _dbHelper, referenceRepo: referenceRepo),
+        dbHelper: _dbHelper,
+        secret: secret,
+        paths: _FakeAppPaths(tmp.path),
+      ),
+      inspectionRepo: InspectionRepo(
+        dbHelper: _dbHelper,
+        referenceRepo: referenceRepo,
+      ),
       labRepo: LabRepo(dbHelper: _dbHelper),
       secret: secret,
     );
@@ -377,83 +379,135 @@ void serviceGroup() {
   group('report_service against seeded DB', () {
     // Real HTML→PDF via headless Edge can be slow when the full suite runs in
     // parallel, so give these service tests room instead of the 30s default.
-    test('inspection report', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.inspectionReport(1);
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, 'Sugar_QC-2026-001.pdf');
-    });
+    test(
+      'inspection report',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.inspectionReport(1);
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, 'Sugar_QC-2026-001.pdf');
+      },
+    );
 
-    test('sample label', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.sampleLabelPdf(1);
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, startsWith('Label_QC-2026-001_'));
-      expect(doc.title, 'Label_QC-2026-001');
-    });
+    test(
+      'sample label',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.sampleLabelPdf(1);
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, startsWith('Label_QC-2026-001_'));
+        expect(doc.title, 'Label_QC-2026-001');
+      },
+    );
 
-    test('equipment label', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.equipmentLabelPdf(1);
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, startsWith('EquipmentLabel_EQ-0007_'));
-      expect(doc.title, 'EquipmentLabel_EQ-0007');
-    });
+    test(
+      'equipment label',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.equipmentLabelPdf(1);
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, startsWith('EquipmentLabel_EQ-0007_'));
+        expect(doc.title, 'EquipmentLabel_EQ-0007');
+      },
+    );
 
-    test('equipment batch labels', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.equipmentLabelsPdf([1, 2]);
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, startsWith('EquipmentLabels_2_'));
-    });
+    test(
+      'equipment batch labels',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.equipmentLabelsPdf([1, 2]);
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, startsWith('EquipmentLabels_2_'));
+      },
+    );
 
-    test('batch labels', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.batchLabelsPdf([1]);
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, startsWith('BatchLabels_1_'));
-    });
+    test(
+      'batch labels',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.batchLabelsPdf([1]);
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, startsWith('BatchLabels_1_'));
+      },
+    );
 
-    test('daily report', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.dailyReport('2026-09-01');
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, 'تقرير_اليومي_2026-09-01.pdf');
-      final day = await _service.dailyReport('2026-09-02');
-      expect(_isPdf(day.bytes), isTrue);
-    });
+    test(
+      'daily report',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.dailyReport('2026-09-01');
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, 'تقرير_اليومي_2026-09-01.pdf');
+        final day = await _service.dailyReport('2026-09-02');
+        expect(_isPdf(day.bytes), isTrue);
+      },
+    );
 
-    test('monthly report with trend', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.monthlyReport(month: 9, year: 2026);
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, 'تقرير_الشهري_202609.pdf');
-    });
+    test(
+      'monthly report with trend',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.monthlyReport(month: 9, year: 2026);
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, 'تقرير_الشهري_202609.pdf');
+      },
+    );
 
-    test('yearly report', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.yearlyReport(year: 2026);
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, 'تقرير_السنوي_2026.pdf');
-    });
+    test(
+      'yearly report',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.yearlyReport(year: 2026);
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, 'تقرير_السنوي_2026.pdf');
+      },
+    );
 
-    test('follow-up report', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.followUpReport([1], dateStr: '2026-09-20');
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, startsWith('تقرير_المتابعة_2026-09-20_'));
-    });
+    test(
+      'follow-up report',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.followUpReport([1], dateStr: '2026-09-20');
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, startsWith('تقرير_المتابعة_2026-09-20_'));
+      },
+    );
 
-    test('lab report (daily)', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final doc = await _service.labReport(type: 'daily', dateStr: '2026-09-05');
-      expect(_isPdf(doc.bytes), isTrue);
-      expect(doc.filename, startsWith('تقرير_المعمل_daily_'));
-      expect(doc.title, 'التقرير اليومي - 2026-09-05');
-    });
+    test(
+      'lab report (daily)',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final doc = await _service.labReport(
+          type: 'daily',
+          dateStr: '2026-09-05',
+        );
+        expect(_isPdf(doc.bytes), isTrue);
+        expect(doc.filename, startsWith('تقرير_المعمل_daily_'));
+        expect(doc.title, 'التقرير اليومي - 2026-09-05');
+      },
+    );
 
-    test('save report to export dir tree', timeout: Timeout(const Duration(minutes: 3)), () async {
-      final db = await _dbHelper.database;
-      await db.insert('settings', {
-        'key': 'export_root_path',
-        'value': (await Directory.systemTemp.createTemp('matlab_exports')).path,
-      });
-      final doc = await _service.dailyReport('2026-09-02');
-      final file = await _service.saveReport(doc, date: DateTime(2026, 9, 2));
-      expect(await file.exists(), isTrue);
-      expect(file.path, contains(RegExp(r'\\2026\\09\\02\\تقرير_اليومي_2026-09-02\.pdf$')));
-      expect(await file.length(), greaterThan(4));
-    });
+    test(
+      'save report to export dir tree',
+      timeout: Timeout(const Duration(minutes: 3)),
+      () async {
+        final db = await _dbHelper.database;
+        await db.insert('settings', {
+          'key': 'export_root_path',
+          'value': (await Directory.systemTemp.createTemp(
+            'matlab_exports',
+          )).path,
+        });
+        final doc = await _service.dailyReport('2026-09-02');
+        final file = await _service.saveReport(doc, date: DateTime(2026, 9, 2));
+        expect(await file.exists(), isTrue);
+        expect(
+          file.path,
+          contains(RegExp(r'\\2026\\09\\02\\تقرير_اليومي_2026-09-02\.pdf$')),
+        );
+        expect(await file.length(), greaterThan(4));
+      },
+    );
   });
 }
 

@@ -1,282 +1,29 @@
 import 'dart:convert' show jsonDecode;
+import 'dart:async' show unawaited;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../app/auth_gate.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_dates.dart';
-import '../../../../core/utils/app_format.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
-import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
-import '../../../../design_system/widgets/app_autocomplete.dart';
 import '../../../../design_system/widgets/app_button.dart';
-import '../../../../design_system/widgets/app_card.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
-import '../../../../design_system/widgets/app_date_field.dart';
-import '../../../../design_system/widgets/app_dropdown.dart';
-import '../../../../design_system/widgets/app_field.dart';
-import '../../../../design_system/widgets/app_history_autocomplete.dart';
-import '../../../../design_system/widgets/app_quantity_field.dart';
-import '../../../../design_system/widgets/app_required_toggle.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../di/service_locator.dart';
-import '../../../lab/core/formula_engine.dart';
 import '../../domain/inspection_repository.dart';
 import '../cubit/inspection_form_cubit.dart';
 import '../cubit/inspection_form_state.dart';
 import 'mobile/inspection_form_wizard.dart';
 import 'widgets/inspection_form_sections.dart';
-import '../../../../design_system/widgets/app_text_field.dart';
 
-/// Parsed chemical reference range shown in the results grid.
-class _ChemCell {
-  final String minText;
-  final String maxText;
-  final num? minNumeric;
-  final num? maxNumeric;
-  final num? exact;
-  final String unit;
-  const _ChemCell({
-    required this.minText,
-    required this.maxText,
-    this.minNumeric,
-    this.maxNumeric,
-    this.exact,
-    this.unit = '',
-  });
-}
-
-num? _numOf(Object? value) {
-  if (value == null) return null;
-  return double.tryParse('$value');
-}
-
-String _refDisplay(Object? value) {
-  final u = unwrapReferenceValue(value);
-  if (u == null) return '';
-  if (u is Map) return jsonDumps(u);
-  return '$u'.trim();
-}
-
-/// Port of `parseDisplayRange` + unit extraction (useRangeValidator.js).
-_ChemCell _chemCell(Object? value) {
-  final display = _refDisplay(value);
-  final unit = referenceUnitText(value);
-  num? minN;
-  num? maxN;
-  num? exact;
-  String minT = '-';
-  String maxT = '-';
-  dynamic decoded;
-  try {
-    decoded = jsonDecode(display);
-  } catch (_) {}
-  if (decoded is Map) {
-    final m = decoded['min'];
-    final x = decoded['max'];
-    final mn = _numOf(m);
-    final xn = _numOf(x);
-    if (mn != null) {
-      minN = mn;
-      minT = '$m';
-    } else if (m != null) {
-      minT = '$m';
-    }
-    if (xn != null) {
-      maxN = xn;
-      maxT = '$x';
-    } else if (x != null) {
-      maxT = '$x';
-    }
-  } else {
-    final t = display
-        .toLowerCase()
-        .replaceAll('–', '-')
-        .replaceAll('—', '-')
-        .replaceAll(':', '-')
-        .replaceAll(',', '.');
-    final maxM = RegExp(
-      r'(?:<=|≤|less than|max)\s*(-?\d+(?:\.\d+)?)',
-    ).firstMatch(t);
-    final minM = RegExp(
-      r'(?:>=|≥|more than|min)\s*(-?\d+(?:\.\d+)?)',
-    ).firstMatch(t);
-    if (maxM != null) {
-      maxN = double.parse(maxM.group(1)!);
-      maxT = maxM.group(1)!;
-    } else if (minM != null) {
-      minN = double.parse(minM.group(1)!);
-      minT = minM.group(1)!;
-    } else {
-      final r = parseNumericRange(display);
-      minN = r['min_value'] as num?;
-      maxN = r['max_value'] as num?;
-      minT = '${r['min_text'] ?? '-'}';
-      maxT = '${r['max_text'] ?? '-'}';
-      final t2 = display.toLowerCase();
-      if (minN != null &&
-          maxN == null &&
-          !t2.contains('min') &&
-          !t2.contains('max')) {
-        exact = minN;
-      }
-    }
-  }
-  return _ChemCell(
-    minText: minT,
-    maxText: maxT,
-    minNumeric: minN,
-    maxNumeric: maxN,
-    exact: exact,
-    unit: unit,
-  );
-}
-
-String _unitSuffix(String raw, String numericText) {
-  final idx = raw.indexOf(numericText);
-  if (idx == -1) return '';
-  final after = raw.substring(idx + numericText.length);
-  final m = RegExp(
-    r'^\s*(%|ppm|ppb|°C|°F|mg|g|kg|ml|L|cm|mm|m)\b',
-    caseSensitive: false,
-  ).firstMatch(after);
-  return m == null ? '' : m.group(1)!;
-}
-
-/// Port of `extractPhysicalSetValue` (fill button fills the reference value).
-String _extractPhysicalSetValue(String raw) {
-  final t = raw.trim();
-  if (t.isEmpty) return '';
-  final c = _chemCell(t);
-  if (c.maxText != '-' && c.maxNumeric != null) {
-    return c.maxText + _unitSuffix(t, c.maxText);
-  }
-  if (c.minText != '-' && c.minNumeric != null) {
-    return c.minText + _unitSuffix(t, c.minText);
-  }
-  if (t.contains('|') || t.contains('،') || t.contains(',')) {
-    final parts = t
-        .split(RegExp(r'[|،,]+'))
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty)
-        .toList();
-    if (parts.isNotEmpty) return parts.first;
-  }
-  return t;
-}
-
-/// Port of `expandPhysicalQuickCode` (blur normalization).
-String _expandPhysicalQuickCode(String raw) {
-  const aliases = {
-    'ok': 'Ok',
-    'pass': 'Pass',
-    'good': 'Good',
-    'no': 'No',
-    'fail': 'Fail',
-  };
-  return aliases[raw.trim().toLowerCase()] ?? raw.trim();
-}
-
-/// Port of `normalizeNumericInputValue` (chemical inputs).
-String _sanitizeNumeric(String raw) => raw
-    .replaceAll(RegExp(r'[^0-9.]'), '')
-    .replaceAllMapped(RegExp(r'(\..*)\.'), (m) => m.group(1)!);
-
-/// Port of `getPhysicalSuggestions` + standard quick keywords.
-List<String> _physicalSuggestions(String requirement) {
-  final result = <String>[];
-  final seen = <String>{};
-  void add(String s) {
-    final c = s.trim();
-    if (c.isNotEmpty && seen.add(c.toLowerCase())) result.add(c);
-  }
-
-  for (final p in requirement.split(RegExp(r'[|،,\/]+'))) {
-    add(p);
-    final clean = _extractPhysicalSetValue(p);
-    if (clean.isNotEmpty) add(clean);
-  }
-  for (final k in [
-    'Normal',
-    'Good',
-    'Acceptable',
-    'Very Good',
-    'OK',
-    'Abnormal',
-    'Not Good',
-    'Pale',
-    'No',
-  ]) {
-    add(k);
-  }
-  return result;
-}
-
-/// Port of `isPhysicalNumeric`.
-bool _isPhysicalNumeric(String name, String requirement) {
-  final p = name.toLowerCase();
-  final r = requirement.toLowerCase();
-  return p.contains('density') ||
-      p.contains('كثافة') ||
-      r.contains('max') ||
-      r.contains('min') ||
-      RegExp(r'\d').hasMatch(r);
-}
-
-bool _chemOut(TextEditingController ctrl, _ChemCell cell) {
-  if (cell.exact != null) {
-    final v = double.tryParse(ctrl.text.trim());
-    if (v == null) return false;
-    return v != cell.exact;
-  }
-  return isOutOfRange(ctrl.text, cell.minNumeric, cell.maxNumeric);
-}
-
-String _chemPlaceholder(_ChemCell cell) {
-  final min = cell.minNumeric;
-  final max = cell.maxNumeric;
-  if (min != null && max != null) {
-    if (min == max) return '= ${cell.minText}';
-    return '${cell.minText} - ${cell.maxText}';
-  }
-  if (min != null) {
-    return AppText.t('الحد ${cell.minText}', 'min ${cell.minText}');
-  }
-  if (max != null) {
-    return AppText.t('الأقصى ${cell.maxText}', 'max ${cell.maxText}');
-  }
-  return AppText.t('النتيجة', 'Result');
-}
-
-InputDecoration _inputDec(bool out, {required String hint}) {
-  return InputDecoration(hintText: hint);
-}
-
-String _addMonths(String iso, int months) {
-  final d = DateTime.tryParse(iso) ?? DateTime.now();
-  final m = (d.month - 1) + months;
-  final year = d.year + (m ~/ 12);
-  final month = (m % 12) + 1;
-  final lastDay = DateTime(year, month + 1, 0).day;
-  final day = d.day > lastDay ? lastDay : d.day;
-  String two(int v) => v.toString().padLeft(2, '0');
-  return '${year.toString().padLeft(4, '0')}-${two(month)}-${two(day)}';
-}
-
-/// New-inspection form (port of Web InspectionsForm + decision editing).
-///
-/// [wizard] renders the stepped mobile chrome ([InspectionFormWizard]) over
-/// the same controllers/cubit/save path instead of the stacked desktop form.
-/// [inspection] prefills the controllers for editing an existing record
-/// (keys mirror the repository map: `material_id`, `inspection_date`,
-/// `supplier`, `sample_names`, …); null means a blank new inspection.
 class InspectionFormScreen extends StatefulWidget {
   final VoidCallback? onSaved;
   final bool wizard;
@@ -324,6 +71,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   final Map<String, List<TextEditingController>> _chemical = {};
   final _materialController = TextEditingController();
   final _materialFocus = FocusNode();
+  int _renderedRefRevision = 0;
   int get _sampleCount => _sampleNames.length;
 
   /// True once the user has edited anything. Gates the unsaved-changes
@@ -348,11 +96,24 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
   /// Marks the form as user-edited on change.
   ///
   /// [setState] is required, not optional: `PopScope` caches `canPop` in its
-  /// State, so the guard stays inert until this rebuilds. Safe here because
-  /// every listener trigger is either a user gesture or a write already
-  /// suppressed by [_programmaticWrite]; none run during build.
+  /// State, so the guard stays inert until this rebuilds.
+  ///
+  /// Listeners do not only fire on user gestures: a child control can sync a
+  /// parent-supplied controller from its own [initState]/[didUpdateWidget]
+  /// (the entity pickers do exactly that), and `didUpdateWidget`-driven writes
+  /// land while the tree is still building. [setState] on this ancestor would
+  /// then trip the markNeedsBuild-during-build assertion, so mid-frame
+  /// triggers are deferred to after the current frame — one frame late is
+  /// irrelevant for the guard, and the deferred callbacks dedupe on [_dirty].
   void _markDirty() {
     if (_programmaticWrite || _dirty || !mounted) return;
+    if (SchedulerBinding.instance.schedulerPhase != SchedulerPhase.idle) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_programmaticWrite || _dirty || !mounted) return;
+        setState(() => _dirty = true);
+      });
+      return;
+    }
     setState(() => _dirty = true);
   }
 
@@ -383,14 +144,12 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
         ..clear()
         ..addAll([for (final n in names) TextEditingController(text: n)]);
     }
-    // Product rows point `material_id` at the sentinel; the editable
-    // identity is `product_id`.
-    final mid = _isProduct ? src['product_id'] : src['material_id'];
-    if (mid is num) {
-      _pendingMaterialId = mid.toInt();
-    } else if (mid is String) {
-      _pendingMaterialId = int.tryParse(mid);
-    }
+    _setText(
+      _materialController,
+      '${src['material_name'] ?? ''} (${src['material_code'] ?? ''})',
+    );
+    _rebuildResults(_physical, src['physical_reference'], 'physical');
+    _rebuildResults(_chemical, src['chemical_reference'], 'chemical');
   }
 
   /// Parses the stored `sample_names` value (JSON list, separator-joined
@@ -446,14 +205,28 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     c.dispose();
   }
 
-  /// Material id waiting for the cubit's material list before it can be
-  /// selected (edit-prefill arrives before `loadMaterials()` resolves).
-  int? _pendingMaterialId;
+  void _refreshEntryCode() {
+    if (!mounted || _programmaticWrite || widget.inspection != null) return;
+    final date = _date.text.trim();
+    final cubit = context.read<InspectionFormCubit>();
+    if (cubit.state.materialId == null ||
+        !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(date)) {
+      return;
+    }
+    unawaited(cubit.regenerateEntryCode(date));
+  }
 
   @override
   void initState() {
     super.initState();
     _prefillFromInspection();
+    final initial = context.read<InspectionFormCubit>().state;
+    _renderedRefRevision = initial.refRevision;
+    if (widget.inspection == null) {
+      _rebuildResults(_physical, initial.physicalReference, 'physical');
+      _rebuildResults(_chemical, initial.chemicalReference, 'chemical');
+      _setText(_entryCode, initial.entryCode);
+    }
     _watch([
       _date,
       _materialController,
@@ -472,10 +245,12 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       ..._physical.values.expand((l) => l),
       ..._chemical.values.expand((l) => l),
     ]);
+    _date.addListener(_refreshEntryCode);
   }
 
   @override
   void dispose() {
+    _date.removeListener(_refreshEntryCode);
     for (final c in _watched) {
       c.removeListener(_markDirty);
     }
@@ -637,7 +412,7 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
     // Inline save gate: every validation failure is rendered next to its
     // field on both form factors instead of as a transient toast.
     final errors = <String, String>{};
-    if (state.materialId == null) {
+    if (state.materialId == null && widget.inspection == null) {
       errors['material'] = _isProduct
           ? AppText.t('يجب اختيار المنتج', 'Product selection is required.')
           : AppText.t('يجب اختيار المادة', 'Material selection is required.');
@@ -690,7 +465,8 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       'batch_number': _batch.text.trim(),
       'inspection_date': _date.text.trim(),
       'expiry_date': _expiry.text.trim(),
-      'entry_code': _entryCode.text.trim(),
+      if (widget.inspection != null)
+        'entry_code': '${widget.inspection!['entry_code']}',
       'supplier': _supplier.text.trim(),
       'truck_number': _truck.text.trim(),
       'quantity': _qty.text.trim(),
@@ -789,11 +565,10 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
       child: BlocListener<InspectionFormCubit, InspectionFormState>(
         listenWhen: (prev, curr) =>
             prev.refRevision != curr.refRevision ||
-            prev.entryCode != curr.entryCode ||
-            (_pendingMaterialId != null &&
-                !identical(prev.materials, curr.materials)),
+            prev.entryCode != curr.entryCode,
         listener: (context, state) {
-          if (state.refRevision != 0) {
+          if (state.refRevision != _renderedRefRevision) {
+            _renderedRefRevision = state.refRevision;
             _rebuildResults(_physical, state.physicalReference, 'physical');
             _rebuildResults(_chemical, state.chemicalReference, 'chemical');
           }
@@ -801,16 +576,10 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
               state.entryCode.isNotEmpty) {
             _setText(_entryCode, state.entryCode);
           }
-          // Edit-prefill: select the material as soon as the list arrives.
-          final pending = _pendingMaterialId;
-          if (pending != null &&
-              state.materials.any((m) => (m['id'] as num).toInt() == pending)) {
-            _pendingMaterialId = null;
-            _selectMaterial(pending);
-          }
         },
         child: _FormBody(
           wizard: widget.wizard,
+          editing: widget.inspection != null,
           isProduct: _isProduct,
           title: _formTitle,
           date: _date,
@@ -835,15 +604,6 @@ class _InspectionFormScreenState extends State<InspectionFormScreen> {
           onSelectMaterial: _selectMaterial,
           onAddSample: _addSample,
           onRemoveSample: _removeSample,
-          onRegenerateEntry: () async {
-            if (context.read<InspectionFormCubit>().state.materialId == null) {
-              return;
-            }
-            final date = _date.text.trim().isEmpty
-                ? todayIso()
-                : _date.text.trim();
-            await context.read<InspectionFormCubit>().regenerateEntryCode(date);
-          },
           onSave: _save,
           fieldErrors: _fieldErrors,
         ),
@@ -856,6 +616,7 @@ class _FormBody extends StatelessWidget {
   /// True on phones: render the stepped [InspectionFormWizard] over the
   /// same controllers instead of the stacked desktop form.
   final bool wizard;
+  final bool editing;
 
   /// Product (batch) mode: formula/batch replace supplier/vehicle.
   final bool isProduct;
@@ -884,11 +645,11 @@ class _FormBody extends StatelessWidget {
   final ValueChanged<int> onSelectMaterial;
   final VoidCallback onAddSample;
   final ValueChanged<int> onRemoveSample;
-  final VoidCallback onRegenerateEntry;
   final VoidCallback onSave;
   final Map<String, String> fieldErrors;
   const _FormBody({
     this.wizard = false,
+    this.editing = false,
     this.isProduct = false,
     this.title = '',
     required this.date,
@@ -913,351 +674,55 @@ class _FormBody extends StatelessWidget {
     required this.onSelectMaterial,
     required this.onAddSample,
     required this.onRemoveSample,
-    required this.onRegenerateEntry,
     required this.onSave,
     this.fieldErrors = const {},
   });
   @override
   Widget build(BuildContext context) {
     final state = context.watch<InspectionFormCubit>().state;
-    Widget body;
-    if (state.loading && state.materials.isEmpty) {
-      body = const AppSkeletonList(rows: 8);
-    } else if (wizard) {
-      // Stepped mobile chrome over the same controllers/cubit/save path.
-      // The wizard owns its Scaffold + error feedback, so return directly.
+    final sections = InspectionFormSections(
+      isProduct: isProduct,
+      editing: editing,
+      compact: wizard,
+      date: date,
+      expiry: expiry,
+      supplier: supplier,
+      truck: truck,
+      formula: formula,
+      batch: batch,
+      qty: qty,
+      sampleTaker: sampleTaker,
+      entryCode: entryCode,
+      decisionReason: decisionReason,
+      followUp: followUp,
+      rejectedQty: rejectedQty,
+      sampleNames: sampleNames,
+      materialController: materialController,
+      materialFocus: materialFocus,
+      onChangeMaterial: onChangeMaterial,
+      physical: physical,
+      chemical: chemical,
+      sampleCount: sampleCount,
+      onSelectMaterial: onSelectMaterial,
+      onAddSample: onAddSample,
+      onRemoveSample: onRemoveSample,
+      fieldErrors: fieldErrors,
+    );
+    if (wizard) {
       return InspectionFormWizard(
-        sections: InspectionFormSections(
-          isProduct: isProduct,
-          compact: true,
-          date: date,
-          expiry: expiry,
-          supplier: supplier,
-          truck: truck,
-          formula: formula,
-          batch: batch,
-          qty: qty,
-          sampleTaker: sampleTaker,
-          entryCode: entryCode,
-          decisionReason: decisionReason,
-          followUp: followUp,
-          rejectedQty: rejectedQty,
-          sampleNames: sampleNames,
-          materialController: materialController,
-          materialFocus: materialFocus,
-          onChangeMaterial: onChangeMaterial,
-          physical: physical,
-          chemical: chemical,
-          sampleCount: sampleCount,
-          onSelectMaterial: onSelectMaterial,
-          onAddSample: onAddSample,
-          onRemoveSample: onRemoveSample,
-          onRegenerateEntry: onRegenerateEntry,
-          fieldErrors: fieldErrors,
-        ),
+        sections: sections,
         onSave: onSave,
         title: title,
-      );
-    } else {
-      body = SingleChildScrollView(
-        padding: const EdgeInsets.all(AppSpacing.page),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: AppSpacing.md),
-            _Card(
-              title: AppText.t('البيانات الأساسية', 'Basic data'),
-              children: [
-                _materialPicker(
-                  state.materials,
-                  state.materialId,
-                  isProduct,
-                  error: fieldErrors['material'],
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Row(
-                  children: [
-                    Expanded(
-                      child: AppDateField(
-                        label: AppText.t('تاريخ الفحص', 'Date (YYYY-MM-DD)'),
-                        controller: date,
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.lg),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          AppDateField(
-                            label: AppText.t(
-                              'تاريخ الانتهاء',
-                              'Expiry (YYYY-MM-DD)',
-                            ),
-                            controller: expiry,
-                          ),
-                          const SizedBox(height: AppSpacing.xs),
-                          Wrap(
-                            spacing: 6,
-                            children: [
-                              for (final m in const [
-                                (3, '3M'),
-                                (6, '6M'),
-                                (9, '9M'),
-                              ])
-                                AppButton(
-                                  small: true,
-                                  style: AppButtonStyle.secondary,
-                                  label: m.$2,
-                                  onPressed: () => expiry.text = _addMonths(
-                                    date.text.trim().isEmpty
-                                        ? todayIso()
-                                        : date.text.trim(),
-                                    m.$1,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
-                Row(
-                  children: [
-                    if (isProduct) ...[
-                      Expanded(
-                        child: AppField(
-                          label: AppText.t('رقم الفورمولا', 'Formula no.'),
-                          controller: formula,
-                          error: fieldErrors['formula'],
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.lg),
-                      Expanded(
-                        child: AppField(
-                          label: AppText.t('رقم التشغيلة', 'Batch no.'),
-                          controller: batch,
-                          error: fieldErrors['batch'],
-                        ),
-                      ),
-                    ] else ...[
-                      Expanded(
-                        child: AppHistoryAutocomplete(
-                          label: AppText.t('المورد', 'Supplier'),
-                          controller: supplier,
-                          options: state.supplierOptions,
-                          error: fieldErrors['supplier'],
-                          hint: AppText.t(
-                            'اكتب للبحث في موردي الخامة…',
-                            'Type to search this material\u2019s suppliers…',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.lg),
-                      Expanded(
-                        child: AppField(
-                          label: AppText.t('رقم الشاحنة', 'Truck no.'),
-                          controller: truck,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(width: AppSpacing.lg),
-                    Expanded(
-                      child: AppQuantityField(
-                        label: AppText.t('الكمية', 'Quantity'),
-                        hint: AppText.t('بالطن', 'In tons'),
-                        controller: qty,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
-                // Product reports are batch-traceability records: no
-                // header-level taker, no header result grids — samples
-                // (with their own taker, time and results) are added
-                // later, inside the record.
-                if (!isProduct)
-                  Row(
-                    children: [
-                      Expanded(
-                        child: AppHistoryAutocomplete(
-                          label: AppText.t('آخذ العينة', 'Sample taker'),
-                          controller: sampleTaker,
-                          options: state.sampleTakerOptions,
-                          error: fieldErrors['sampleTaker'],
-                          hint: AppText.t(
-                            'اكتب للبحث في سجل الفنيين…',
-                            'Type to search the technicians log…',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.lg),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: AppField(
-                                label: AppText.t('رقم القيد', 'Entry code'),
-                                controller: entryCode,
-                              ),
-                            ),
-                            const SizedBox(width: AppSpacing.sm),
-                            IconButton(
-                              tooltip: AppText.t('إعادة توليد', 'Regenerate'),
-                              onPressed: onRegenerateEntry,
-                              icon: Icon(Icons.refresh, size: 20.r),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  )
-                else
-                  Row(
-                    children: [
-                      Expanded(
-                        child: AppField(
-                          label: AppText.t('رقم القيد', 'Entry code'),
-                          controller: entryCode,
-                        ),
-                      ),
-                      const SizedBox(width: AppSpacing.sm),
-                      IconButton(
-                        tooltip: AppText.t('إعادة توليد', 'Regenerate'),
-                        onPressed: onRegenerateEntry,
-                        icon: Icon(Icons.refresh, size: 20.r),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            if (!isProduct && physical.isNotEmpty)
-              _Card(
-                title: AppText.t('النتائج الفيزيائية', 'Physical results'),
-                children: [
-                  _scrollableGrid(
-                    _physicalGrid(physical, state.physicalReference),
-                  ),
-                ],
-              ),
-            if (!isProduct && chemical.isNotEmpty) ...[
-              const SizedBox(height: AppSpacing.md),
-              _Card(
-                title: AppText.t('النتائج الكيميائية', 'Chemical results'),
-                children: [
-                  _scrollableGrid(
-                    _chemicalGrid(chemical, state.chemicalReference),
-                  ),
-                ],
-              ),
-            ],
-            if (!isProduct && (physical.isNotEmpty || chemical.isNotEmpty)) ...[
-              const SizedBox(height: AppSpacing.md),
-              Center(
-                child: AppButton(
-                  small: true,
-                  style: AppButtonStyle.secondary,
-                  label: AppText.t('إضافة عينة جديدة', 'Add New Sample'),
-                  icon: Icon(Icons.add, size: 18.r),
-                  onPressed: sampleCount >= 3 ? null : onAddSample,
-                ),
-              ),
-            ],
-            // Products carry no header quality decision (per-sample only).
-            if (!isProduct) ...[
-              const SizedBox(height: AppSpacing.md),
-              _Card(
-                title: AppText.t('قرار الجودة', 'Decision'),
-                children: [
-                  AppDropdown<String>(
-                    value: state.decision,
-                    labelText: AppText.t('القرار', 'Decision'),
-                    items: [
-                      AppDropdownItem(
-                        value: 'APPROVED',
-                        label: AppText.t('قبول نهائي', 'Approved'),
-                      ),
-                      AppDropdownItem(
-                        value: 'CONDITIONAL_APPROVAL',
-                        label: AppText.t('قبول مشروط', 'Conditional'),
-                      ),
-                      AppDropdownItem(
-                        value: 'PARTIAL_REJECTION',
-                        label: AppText.t('رفض جزئي', 'Partial rejection'),
-                      ),
-                      AppDropdownItem(
-                        value: 'FULL_REJECTION',
-                        label: AppText.t('رفض كامل', 'Full rejection'),
-                      ),
-                    ],
-                    onChanged: (value) {
-                      if (value != null) {
-                        context.read<InspectionFormCubit>().setDecision(value);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  if (state.decision == 'CONDITIONAL_APPROVAL') ...[
-                    AppField(
-                      label: AppText.t('ملاحظة المتابعة', 'Follow-up note'),
-                      hint: AppText.t('اختياري', 'Optional'),
-                      controller: followUp,
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  if (state.decision == 'PARTIAL_REJECTION') ...[
-                    AppQuantityField(
-                      label: AppText.t('الكمية المرفوضة', 'Rejected quantity'),
-                      controller: rejectedQty,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  if (state.decision == 'FULL_REJECTION' ||
-                      state.decision == 'PARTIAL_REJECTION') ...[
-                    AppField(
-                      label: AppText.t('سبب القرار', 'Decision reason'),
-                      controller: decisionReason,
-                      maxLines: 3,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                ],
-              ),
-            ],
-            const SizedBox(height: AppSpacing.xl),
-            Wrap(
-              spacing: AppSpacing.md,
-              runSpacing: AppSpacing.sm,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                AppButton(
-                  label: AppStrings.save,
-                  icon: Icon(Icons.check, size: 18.r),
-                  loading: state.saving,
-                  onPressed: state.saving ? null : onSave,
-                ),
-                AppButton(
-                  style: AppButtonStyle.secondary,
-                  label: AppStrings.cancel,
-                  onPressed: () => Navigator.of(context).pop(false),
-                ),
-              ],
-            ),
-          ],
-        ),
       );
     }
     return AppErrorFeedback<InspectionFormCubit, InspectionFormState>(
       selector: (s) => s.error,
-      // Desktop keyboard flow: Ctrl+Enter saves from any field. The TextFields
-      // only consume bare Enter, so the combo bubbles up to this host.
       child: CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.enter, control: true): () {
-            if (!state.saving) onSave();
+            if (!state.saving && !state.loading && !state.selectingReference) {
+              onSave();
+            }
           },
         },
         child: Scaffold(
@@ -1267,471 +732,53 @@ class _FormBody extends StatelessWidget {
                 ? AppText.t('فحص جديد', 'New Inspection')
                 : title,
           ),
-          body: body,
-        ),
-      ),
-    );
-  }
-
-  Widget _materialPicker(
-    List<Map<String, dynamic>> materials,
-    int? selectedId,
-    bool isProduct, {
-    String? error,
-  }) {
-    final selected = selectedId != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          isProduct
-              ? AppText.t('اسم المنتج', 'Product Name')
-              : AppText.t('اسم الخامة', 'Material Name'),
-          style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Row(
-          children: [
-            Expanded(
-              child: AppAutocomplete<int>(
-                options: [for (final m in materials) (m['id'] as num).toInt()],
-                selected: selectedId,
-                displayString: (id) {
-                  final m = _materialById(materials, id);
-                  return m == null
-                      ? ''
-                      : '${m['material_name']} (${m['material_code']})';
-                },
-                filter: (id, query) {
-                  final m = _materialById(materials, id);
-                  if (m == null) return false;
-                  return '${m['material_name']}'.toLowerCase().contains(
-                        query,
-                      ) ||
-                      '${m['material_code']}'.toLowerCase().contains(query);
-                },
-                onSelected: onSelectMaterial,
-                controller: materialController,
-                focusNode: materialFocus,
-                hint: AppText.t(
-                  'اكتب للبحث أو اختر من القائمة…',
-                  'Type to search or pick…',
-                ),
-                prefixIcon: isProduct
-                    ? Icons.factory_outlined
-                    : Icons.inventory_2_outlined,
-                emptyLabel: isProduct
-                    ? AppText.t('لا يوجد منتج مطابق', 'No matching product')
-                    : AppText.t('لا توجد خامة مطابقة', 'No matching material'),
-                dropdownLabel: AppText.t('عرض القائمة', 'Show the list'),
-                optionBuilder: (context, id, onSelected) =>
-                    _materialOption(materials, id, onSelected),
-              ),
-            ),
-            if (selected) ...[
-              const SizedBox(width: AppSpacing.sm),
-              IconButton(
-                tooltip: isProduct
-                    ? AppText.t('تغيير المنتج', 'Change product')
-                    : AppText.t('تغيير الخامة', 'Change material'),
-                onPressed: onChangeMaterial,
-                icon: Icon(
-                  Icons.swap_horiz,
-                  size: 20.r,
-                  color: AppColors.primary,
-                ),
-              ),
-            ],
-          ],
-        ),
-        if (error != null) ...[
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            error,
-            style: TextStyle(color: AppColors.danger, fontSize: 12.spMax),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Map<String, dynamic>? _materialById(
-    List<Map<String, dynamic>> materials,
-    int id,
-  ) {
-    for (final m in materials) {
-      if ((m['id'] as num).toInt() == id) return m;
-    }
-    return null;
-  }
-
-  Widget _materialOption(
-    List<Map<String, dynamic>> materials,
-    int id,
-    void Function(int) onSelected,
-  ) {
-    final m = _materialById(materials, id);
-    if (m == null) return const SizedBox.shrink();
-    return ListTile(
-      dense: true,
-      leading: Icon(
-        Icons.science_outlined,
-        size: 18.r,
-        color: AppColors.primary,
-      ),
-      title: Text(
-        '${m['material_name']}',
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 14.spMax, fontWeight: FontWeight.w500),
-      ),
-      subtitle: Text(
-        '${m['material_code']}',
-        style: TextStyle(fontSize: 11.spMax, color: AppColors.textMuted),
-      ),
-      onTap: () => onSelected(id),
-    );
-  }
-
-  Widget _scrollableGrid(Widget grid) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Below this the side-by-side parameter grid is narrower than a single
-        // readable cell, so it scrolls horizontally instead of squeezing.
-        const minWidth = AppBreakpoints.medium + 60;
-        final maxW = constraints.maxWidth;
-        final width = (maxW.isFinite && maxW > minWidth) ? maxW : minWidth;
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(width: width, child: grid),
-        );
-      },
-    );
-  }
-
-  Widget _physicalGrid(
-    Map<String, List<TextEditingController>> source,
-    Map<String, dynamic> refs,
-  ) {
-    return Column(
-      children: [
-        Row(
-          children: [
-            const Expanded(flex: 2, child: SizedBox()),
-            for (var i = 0; i < sampleCount; i++) _sampleHeader(i),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        for (final param in source.keys)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: AppSpacing.sm),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 4,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              param,
-                              style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 13.spMax,
-                              ),
-                            ),
-                            if (isReferenceRequired(refs[param]))
-                              const RequiredBadge(),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          refs[param] == null
-                              ? ''
-                              : referenceValueText(refs[param]),
-                          style: TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 11.spMax,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
-                        ),
+          body: state.loading && state.materials.isEmpty
+              ? const AppSkeletonList(rows: 8)
+              : SingleChildScrollView(
+                  padding: const EdgeInsets.all(AppSpacing.page),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      sections.basicCard(context),
+                      if (!isProduct) ...[
+                        if (physical.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          sections.physicalCard(context),
+                        ],
+                        if (chemical.isNotEmpty) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          sections.chemicalCard(context),
+                        ],
+                        if (sections.hasResults) ...[
+                          const SizedBox(height: AppSpacing.md),
+                          sections.addSampleButton(context),
+                        ],
+                        const SizedBox(height: AppSpacing.md),
+                        sections.decisionCard(context),
                       ],
-                    ),
-                  ),
-                ),
-                for (var i = 0; i < sampleCount; i++)
-                  Expanded(
-                    flex: 3,
-                    child: _physicalInput(
-                      param,
-                      source[param]![i],
-                      '${refs[param] ?? ''}',
-                    ),
-                  ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _physicalInput(String name, TextEditingController ctrl, String req) {
-    final suggestions = _physicalSuggestions(req);
-    void normalize() {
-      var v = _expandPhysicalQuickCode(ctrl.text);
-      v = _isPhysicalNumeric(name, req) ? _sanitizeNumeric(v) : v;
-      ctrl.text = v;
-    }
-
-    return ListenableBuilder(
-      listenable: ctrl,
-      builder: (_, _) {
-        final out = isPhysicalOutOfRange(ctrl.text, req);
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                child: AppTextField(
-                  controller: ctrl,
-                  onSubmitted: (_) => normalize(),
-                  decoration: _inputDec(out, hint: 'Result'),
-                ),
-              ),
-            ),
-            if (suggestions.isNotEmpty)
-              PopupMenuButton<String>(
-                tooltip: AppText.t('اقتراحات', 'Suggestions'),
-                onSelected: (v) => ctrl.text = v,
-                itemBuilder: (_) => [
-                  for (final s in suggestions)
-                    PopupMenuItem(value: s, child: Text(s)),
-                ],
-                icon: Icon(Icons.arrow_drop_down, size: 20.r),
-              ),
-            IconButton(
-              tooltip: AppText.t('تعبئة القيمة المرجعية', 'Fill reference'),
-              visualDensity: VisualDensity.compact,
-              onPressed: () => ctrl.text = _extractPhysicalSetValue(req),
-              icon: Icon(
-                Icons.content_paste_outlined,
-                size: 18.r,
-                color: AppColors.primary,
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _chemicalGrid(
-    Map<String, List<TextEditingController>> source,
-    Map<String, dynamic> refs,
-  ) {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              flex: 2,
-              child: Text(
-                AppText.t('البارامتر', 'Parameter'),
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.spMax,
-                ),
-              ),
-            ),
-            Expanded(
-              flex: 1,
-              child: Text(
-                'Min',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.spMax,
-                ),
-              ),
-            ),
-            Expanded(
-              flex: 1,
-              child: Text(
-                'Max',
-                style: TextStyle(
-                  color: AppColors.textMuted,
-                  fontSize: 12.spMax,
-                ),
-              ),
-            ),
-            for (var i = 0; i < sampleCount; i++) _sampleHeader(i),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        for (final param in source.keys)
-          Padding(
-            padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: AppSpacing.sm),
-                    child: Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          param,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13.spMax,
+                      const SizedBox(height: AppSpacing.xl),
+                      Wrap(
+                        spacing: AppSpacing.md,
+                        runSpacing: AppSpacing.sm,
+                        children: [
+                          AppButton(
+                            label: AppStrings.save,
+                            icon: const Icon(Icons.check, size: 18),
+                            loading: state.saving,
+                            onPressed: state.saving || state.selectingReference
+                                ? null
+                                : onSave,
                           ),
-                        ),
-                        if (isReferenceRequired(refs[param]))
-                          const RequiredBadge(),
-                      ],
-                    ),
+                          AppButton(
+                            style: AppButtonStyle.secondary,
+                            label: AppStrings.cancel,
+                            onPressed: () => Navigator.of(context).pop(false),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-                _boundCell(_chemCell(refs[param]).minText),
-                _boundCell(_chemCell(refs[param]).maxText),
-                for (var i = 0; i < sampleCount; i++)
-                  Expanded(
-                    flex: 3,
-                    child: _chemicalInput(
-                      _chemCell(refs[param]),
-                      source[param]![i],
-                    ),
-                  ),
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _boundCell(String text) {
-    return Expanded(
-      flex: 1,
-      child: Padding(
-        padding: const EdgeInsets.only(top: AppSpacing.sm),
-        child: Text(
-          text,
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.textMuted, fontSize: 13.spMax),
-        ),
-      ),
-    );
-  }
-
-  Widget _sampleHeader(int index) {
-    return Expanded(
-      flex: 3,
-      child: Row(
-        children: [
-          Expanded(
-            child: AppTextField(
-              controller: sampleNames[index],
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13.spMax, fontWeight: FontWeight.w600),
-              decoration: InputDecoration(
-                hintText: AppText.t('اسم العينة', 'Sample name'),
-              ),
-            ),
-          ),
-          if (sampleCount > 1 && index > 0)
-            IconButton(
-              tooltip: AppText.t('حذف العينة', 'Remove sample'),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              onPressed: () => onRemoveSample(index),
-              icon: Icon(Icons.close, size: 18.r, color: AppColors.danger),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _chemicalInput(_ChemCell cell, TextEditingController ctrl) {
-    return ListenableBuilder(
-      listenable: ctrl,
-      builder: (_, _) {
-        final out = _chemOut(ctrl, cell);
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                child: AppTextField(
-                  controller: ctrl,
-                  onChanged: (_) {},
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  decoration: _inputDec(out, hint: _chemPlaceholder(cell)),
-                ),
-              ),
-            ),
-            if (cell.unit.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(
-                  left: AppSpacing.xs,
-                  top: AppSpacing.xxs,
-                ),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xs,
-                    vertical: AppSpacing.sm,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceSoft,
-                    borderRadius: BorderRadius.circular(AppRadii.sm),
-                    border: Border.all(color: AppColors.borderMuted),
-                  ),
-                  child: Text(
-                    cell.unit,
-                    style: TextStyle(
-                      fontSize: 12.spMax,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _Card extends StatelessWidget {
-  final String title;
-  final List<Widget> children;
-  const _Card({required this.title, required this.children});
-  @override
-  Widget build(BuildContext context) {
-    return AppCard(
-      padding: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-            const SizedBox(height: AppSpacing.sm),
-            ...children,
-          ],
         ),
       ),
     );

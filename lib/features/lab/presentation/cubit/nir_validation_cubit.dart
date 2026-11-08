@@ -1,3 +1,4 @@
+import '../../../../core/security/secure_field_access.dart';
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../../../core/commands/central_authoring_gateway.dart';
@@ -6,29 +7,65 @@ import 'nir_validation_state.dart';
 
 /// Loads the NIR فلديشن report and performs the reset (new horizon).
 class NirValidationCubit extends AppCubit<NirValidationState> {
-  NirValidationCubit({required this.repo}) : super(const NirValidationState()) {
+  NirValidationCubit({required this.repo, this.secureAccess}) : super(const NirValidationState()) {
     refreshOnSync(load);
+    secureAccess?.addListener(_privacyChanged);
   }
 
+  final SecureFieldAccess? secureAccess;
+  void _privacyChanged() {
+    _loadGeneration++;
+    safeEmit(state.copyWith(stats: const [], resetHistory: const []));
+    load();
+  }
+  @override
+  Future<void> close() {
+    secureAccess?.removeListener(_privacyChanged);
+    return super.close();
+  }
   final NirValidationRepository repo;
+  int _loadGeneration = 0;
+
+  Future<bool> setPointIncluded(NirValidationPoint point, bool included) async {
+    if (state.saving || state.pendingApproval) return false;
+    safeEmit(state.copyWith(saving: true, clearError: true));
+    try {
+      await repo.setPointIncluded(point, included);
+      await load();
+      safeEmit(state.copyWith(saving: false));
+      return state.error == null;
+    } on CentralDraftPending {
+      safeEmit(state.copyWith(saving: false, pendingApproval: true));
+      return false;
+    } catch (error) {
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(error)));
+      return false;
+    }
+  }
 
   Future<void> load() async {
+    final generation = ++_loadGeneration;
     safeEmit(state.copyWith(loading: true, clearError: true));
     try {
-      final settings = await repo.getSettings();
+      // The repository resolves the horizon and measurements in one read
+      // snapshot. Do not fetch an earlier horizon and force it onto new data.
+      final report = await repo.compute();
       final history = await repo.listResetHistory();
-      final report = await compute(settings?.startDate);
+      if (generation != _loadGeneration || isClosed) return;
       safeEmit(
         state.copyWith(
           loading: false,
-          settings: settings,
+          settings: report.settings,
+          clearSettings: report.settings == null,
           resetHistory: history,
           stats: report.stats,
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      if (generation != _loadGeneration || isClosed) return;
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
+      if (generation != _loadGeneration || isClosed) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
@@ -46,6 +83,7 @@ class NirValidationCubit extends AppCubit<NirValidationState> {
     int? entityId,
     String entityName = '',
     String parameter = '',
+    NirAppliedCorrection? appliedCorrection,
   }) async {
     safeEmit(
       state.copyWith(saving: true, clearError: true, pendingApproval: false),
@@ -58,6 +96,7 @@ class NirValidationCubit extends AppCubit<NirValidationState> {
         entityId: entityId,
         entityName: entityName,
         parameter: parameter,
+        appliedCorrection: appliedCorrection,
       );
       await load();
       safeEmit(state.copyWith(saving: false));
@@ -68,7 +107,7 @@ class NirValidationCubit extends AppCubit<NirValidationState> {
       );
       return true;
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
       return false;
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));

@@ -5,6 +5,7 @@ library;
 enum NotificationType {
   inspection('inspection'),
   labResult('labResult'),
+  productSample('productSample'),
   sync('sync');
 
   const NotificationType(this.storage);
@@ -16,6 +17,8 @@ enum NotificationType {
         return NotificationType.labResult;
       case 'sync':
         return NotificationType.sync;
+      case 'productSample':
+        return NotificationType.productSample;
       case 'inspection':
         return NotificationType.inspection;
       default:
@@ -55,6 +58,8 @@ class NotificationItem {
           ? 'inspection'
           : type == NotificationType.labResult
           ? 'lab'
+          : type == NotificationType.productSample
+          ? 'productSample'
           : 'sync'}:$refId';
 
   /// Product batch analysis (vs raw-material inspection). Title prefix is

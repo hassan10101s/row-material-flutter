@@ -1,10 +1,9 @@
+import '../../../../core/security/secure_field_access.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/constants/app_strings.dart';
-import '../../../../design_system/animations/app_animations.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
-import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/widgets/app_window.dart';
 import '../../../../di/service_locator.dart';
 import '../../../inspections/domain/inspection_repository.dart';
@@ -22,8 +21,8 @@ Future<void> openLinkedInspection(
   BuildContext context,
   Map<String, dynamic> row,
 ) async {
-  final code = '${row['entry_code'] ?? ''}'.trim();
-  if (code.isEmpty) return;
+  final code = '${row['entry_code'] ?? ''}';
+  if (code.trim().isEmpty) return;
 
   Map<String, dynamic>? inspection;
   try {
@@ -56,6 +55,9 @@ Future<void> openLinkedInspection(
   final id = (inspection['id'] as num).toInt();
   Widget screen(BuildContext c) => BlocProvider(
     create: (_) => InspectionDetailCubit(
+      secureAccess: getIt.isRegistered<SecureFieldAccess>()
+          ? getIt<SecureFieldAccess>()
+          : null,
       inspectionId: id,
       repo: getIt<InspectionRepository>(),
       reports: getIt<ReportRepository>(),
@@ -64,17 +66,17 @@ Future<void> openLinkedInspection(
     child: InspectionDetailScreen(inspectionId: id),
   );
 
-  final wide = MediaQuery.sizeOf(context).width >= AppBreakpoints.medium;
-  if (wide) {
-    await showAppWindow<bool>(
-      context,
-      title: AppText.t('تفاصيل الفحص', 'Inspection Details'),
-      icon: Icons.fact_check_outlined,
-      size: AppWindowSize.lg,
-      scrollBody: false,
-      child: screen(context),
-    );
-  } else {
-    await Navigator.of(context).push<bool>(AppPageRoute(builder: screen));
-  }
+  await showAppContentSurface<bool>(
+    context,
+    builder: (context, fullScreen) {
+      if (fullScreen) return screen(context);
+      return AppWindow(
+        title: AppText.t('تفاصيل الفحص', 'Inspection Details'),
+        icon: Icons.fact_check_outlined,
+        size: AppWindowSize.lg,
+        scrollBody: false,
+        child: screen(context),
+      );
+    },
+  );
 }

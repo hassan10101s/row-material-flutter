@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import '../../../../design_system/widgets/app_tooltip.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
@@ -31,29 +32,22 @@ import '../../../../design_system/widgets/app_user_avatar.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../router/app_router.dart';
 import '../../../backup/domain/backup_service.dart';
-import '../../../../core/sync/sync_engine.dart';
+import '../../../../core/commands/central_sync_driver.dart';
 import '../../../audit/presentation/audit/audit_screen.dart';
 import '../../../audit/presentation/audit_controller.dart';
 import '../../../members/presentation/members/leave_organization_section.dart';
 import '../../../members/presentation/members/members_screen.dart';
-import '../../../sync/presentation/sync/sync_screen.dart';
 import '../cubit/database_settings_cubit.dart';
 import '../cubit/database_settings_state.dart';
 import '../cubit/general_settings_cubit.dart';
 import '../cubit/general_settings_state.dart';
 import 'migration_panel.dart';
+import 'secure_visibility_setting.dart';
 import '../../domain/settings_repository.dart';
 import '../../../../design_system/widgets/app_card.dart';
 
 /// Deep-linkable Settings sections, reachable as `/settings?tab=<key>`.
 enum SettingsTab {
-  account(
-    'account',
-    'الحساب',
-    'Account',
-    'الاسم وكلمة المرور',
-    'Name and password',
-  ),
   general('general', 'عام', 'General', 'الإعدادات العامة', 'General settings'),
   database(
     'database',
@@ -68,13 +62,6 @@ enum SettingsTab {
     'Members',
     'إدارة حسابات المؤسسة',
     'Organization accounts',
-  ),
-  sync(
-    'sync',
-    'المزامنة',
-    'Sync',
-    'حالة المزامنة والتعارضات',
-    'Sync status and conflicts',
   ),
   audit(
     'audit',
@@ -108,9 +95,17 @@ enum SettingsTab {
   );
 }
 
-/// Settings (port of Web SettingsView: General / Database / Members / Sync /
-/// Audit / Export). Members, Sync and Audit used to be top-level sidebar
-/// destinations; they are sections of this screen now.
+/// Personal account page. It never includes administrative settings tabs.
+class AccountScreen extends StatelessWidget {
+  const AccountScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.all(AppSpacing.page),
+    child: _ProfilePanel(),
+  );
+}
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key, this.initialTab = SettingsTab.general});
 
@@ -167,7 +162,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _body() => switch (_tab) {
-    SettingsTab.account => const _ProfilePanel(),
     SettingsTab.general => BlocProvider(
       create: (c) =>
           GeneralSettingsCubit(repo: getIt<SettingsRepository>())..load(),
@@ -176,12 +170,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     SettingsTab.database => BlocProvider(
       create: (c) => DatabaseSettingsCubit(
         backup: getIt<BackupService>(),
-        engine: getIt<SyncEngine>(),
+        refreshApprovedData: () async {
+          await getIt<CentralSyncDriver>().syncNow(forceSnapshot: true);
+        },
       ),
       child: const _DatabasePanel(),
     ),
     SettingsTab.members => const _MembersPanel(),
-    SettingsTab.sync => const SyncScreen(embedded: true),
     SettingsTab.audit => AuditScreen(
       controller: getIt<AuditController>(),
       embedded: true,
@@ -190,9 +185,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   };
 }
 
-/// Every section is always listed. A `lab` or `viewer` member cannot manage the
-/// roster, but they must still see their own membership and be able to leave,
-/// so the tab is never hidden from them.
+/// Administrative sections, visible only after the settings route owner guard.
 class _SettingsTabs extends StatelessWidget {
   const _SettingsTabs({required this.current, required this.onChange});
 
@@ -203,7 +196,7 @@ class _SettingsTabs extends StatelessWidget {
   Widget build(BuildContext context) {
     final tabs = [
       for (final tab in SettingsTab.values)
-        Tooltip(
+        AppTooltip(
           message: tab.subtitle,
           child: ChoiceChip(
             selected: current == tab,
@@ -231,10 +224,7 @@ class _SettingsTabs extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            for (final tab in tabs) ...[
-              tab,
-              const SizedBox(width: 8),
-            ],
+            for (final tab in tabs) ...[tab, const SizedBox(width: 8)],
           ],
         ),
       ),
@@ -284,7 +274,7 @@ class _ProfilePanelState extends State<_ProfilePanel> {
       if (!mounted) return;
       AppFeedback.success(context, AppText.t('تم حفظ الاسم', 'Name saved'));
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
     } finally {
@@ -307,7 +297,7 @@ class _ProfilePanelState extends State<_ProfilePanel> {
         ),
       );
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
     } finally {
@@ -412,6 +402,8 @@ class _ProfilePanelState extends State<_ProfilePanel> {
             ),
           ],
         ),
+        const SizedBox(height: AppSpacing.lg),
+        const LeaveOrganizationSection(),
       ],
     );
   }
@@ -445,7 +437,7 @@ class _GeneralPanelState extends State<_GeneralPanel> {
       if (!mounted) return;
       AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved'));
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -468,7 +460,7 @@ class _GeneralPanelState extends State<_GeneralPanel> {
       if (!mounted) return;
       AppFeedback.success(context, AppText.t('تم حفظ الشعار', 'Logo saved'));
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (_) {
       if (mounted) {
         AppFeedback.error(
@@ -518,7 +510,7 @@ class _GeneralPanelState extends State<_GeneralPanel> {
         AppText.t('تم حفظ مجلد الحفظ', 'Save folder updated'),
       );
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -567,6 +559,34 @@ class _GeneralPanelState extends State<_GeneralPanel> {
                 _SettingsCard(
                   title: AppText.t('القسم والتقارير', 'Department & reports'),
                   children: [
+                    const SecureVisibilitySetting(),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(AppText.t('لغة التقارير', 'Report language')),
+                      subtitle: Text(
+                        state.reportLanguage == 'en' ? 'English' : 'العربية',
+                      ),
+                      value: state.reportLanguage == 'en',
+                      onChanged: state.loading || state.saving
+                          ? null
+                          : (english) async {
+                              try {
+                                await context
+                                    .read<GeneralSettingsCubit>()
+                                    .saveReportLanguage(english);
+                              } catch (_) {
+                                if (context.mounted) {
+                                  AppFeedback.error(
+                                    context,
+                                    AppText.t(
+                                      'تعذر حفظ لغة التقارير',
+                                      'Could not save report language',
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                    ),
                     AppField(
                       label: AppText.t(
                         'اسم القسم في التقارير',

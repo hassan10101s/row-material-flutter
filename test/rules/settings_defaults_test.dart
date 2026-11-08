@@ -29,35 +29,48 @@ void main() {
     _dbHelper = DatabaseHelper(_FakeAppPaths(_tmp.path));
     final secret = LocalSecret(_tmp.path);
     _repo = SettingsRepo(
-        dbHelper: _dbHelper, secret: secret, paths: _FakeAppPaths(_tmp.path));
+      dbHelper: _dbHelper,
+      secret: secret,
+      paths: _FakeAppPaths(_tmp.path),
+    );
   });
 
-  test('ensureDefaults writes exactly the 10 reference keys', () async {
-    await _repo.ensureDefaults();
-    final settings = await _repo.getSettings();
-    expect(settings.keys, containsAll(const [
-      'pdf_export_dir',
-      'export_root_path',
-      'whatsapp_launch_url',
-      'department_label',
-      'usage_expiry_date',
-      'report_logo_path',
-      'reference_seed_done',
-      'security_clock_tamper_flag',
-      'security_max_seen_date',
-      'security_last_online_check',
-    ]));
-    // The 10 legacy reference keys …
-    expect(settings.keys,
-        containsAllInOrder(ReportFormKeys.all));
-    // … plus the 12 per-form QA form numbers added later, and nothing else.
-    expect(settings.length, 10 + ReportFormKeys.all.length);
-  });
+  test(
+    'ensureDefaults keeps legacy keys and the report-language preference',
+    () async {
+      await _repo.ensureDefaults();
+      final settings = await _repo.getSettings();
+      expect(
+        settings.keys,
+        containsAll(const [
+          'pdf_export_dir',
+          'export_root_path',
+          'whatsapp_launch_url',
+          'department_label',
+          'report_language',
+          'usage_expiry_date',
+          'report_logo_path',
+          'reference_seed_done',
+          'security_clock_tamper_flag',
+          'security_max_seen_date',
+          'security_last_online_check',
+        ]),
+      );
+      // The 10 legacy reference keys …
+      expect(settings.keys, containsAllInOrder(ReportFormKeys.all));
+      // Legacy keys, report language, and per-form QA form numbers.
+      expect(settings.length, 11 + ReportFormKeys.all.length);
+      expect(settings['report_language'], 'ar');
+    },
+  );
 
-  test('reference_seed_done defaults to "0" not empty (settings.py:32-45)', () async {
-    final settings = await _repo.getSettings();
-    expect(settings['reference_seed_done'], '0');
-  });
+  test(
+    'reference_seed_done defaults to "0" not empty (settings.py:32-45)',
+    () async {
+      final settings = await _repo.getSettings();
+      expect(settings['reference_seed_done'], '0');
+    },
+  );
 
   test('static defaults match the Python reference exactly', () async {
     final settings = await _repo.getSettings();
@@ -79,15 +92,20 @@ void main() {
     expect(pdfDir, contains('pdfs'));
   });
 
-  test('ensureDefaults is idempotent and never overwrites existing values', () async {
-    final db = await _dbHelper.database;
-    await db.insert('settings', {'key': 'department_label', 'value': 'My Lab'},
-        conflictAlgorithm: ConflictAlgorithm.replace);
-    await _repo.ensureDefaults();
-    final settings = await _repo.getSettings();
-    expect(settings['department_label'], 'My Lab');
-    // `ensureDefaults` still inserts every missing default, including the
-    // per-form keys; only the pre-existing `department_label` survives as-is.
-    expect(settings.length, 10 + ReportFormKeys.all.length);
-  });
+  test(
+    'ensureDefaults is idempotent and never overwrites existing values',
+    () async {
+      final db = await _dbHelper.database;
+      await db.insert('settings', {
+        'key': 'department_label',
+        'value': 'My Lab',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      await _repo.ensureDefaults();
+      final settings = await _repo.getSettings();
+      expect(settings['department_label'], 'My Lab');
+      // `ensureDefaults` still inserts every missing default, including the
+      // per-form keys; only the pre-existing `department_label` survives as-is.
+      expect(settings.length, 11 + ReportFormKeys.all.length);
+    },
+  );
 }

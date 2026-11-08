@@ -43,7 +43,7 @@ class QcTemplate extends Equatable {
   /// Why this version differs from the last - mandatory on a published change.
   final String revisionNote;
 
-  /// Simplified periodic tasks (plan §3): 'once' | 'daily' | 'weekly' | 'monthly'.
+  /// Periodic tasks: 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly'.
   /// 'once' = quality checklist on a shipment; others = recurring task list.
   final String recurrence;
 

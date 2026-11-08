@@ -23,6 +23,7 @@ import '../../../../../design_system/widgets/app_required_toggle.dart';
 import '../../../../lab/core/formula_engine.dart';
 import '../../cubit/inspection_form_cubit.dart';
 import '../../../../../design_system/widgets/app_text_field.dart';
+import '../../../../../design_system/widgets/analysis_value_advisory.dart';
 
 /// Parsed chemical reference range shown in the results grid.
 class ChemCell {
@@ -293,6 +294,7 @@ class InspectionFormSections {
   /// Product (batch) mode: formula/batch replace supplier/vehicle and the
   /// catalog list holds products.
   final bool isProduct;
+  final bool editing;
   final TextEditingController date;
   final TextEditingController expiry;
   final TextEditingController supplier;
@@ -315,7 +317,6 @@ class InspectionFormSections {
   final ValueChanged<int> onSelectMaterial;
   final VoidCallback onAddSample;
   final ValueChanged<int> onRemoveSample;
-  final VoidCallback onRegenerateEntry;
 
   /// Phone layout: every field takes the full width, stacked with generous
   /// gaps and a numbered step marker per group, instead of the desktop's
@@ -330,6 +331,7 @@ class InspectionFormSections {
 
   const InspectionFormSections({
     this.isProduct = false,
+    this.editing = false,
     required this.date,
     required this.expiry,
     required this.supplier,
@@ -352,7 +354,6 @@ class InspectionFormSections {
     required this.onSelectMaterial,
     required this.onAddSample,
     required this.onRemoveSample,
-    required this.onRegenerateEntry,
     this.compact = false,
     this.fieldErrors = const {},
   });
@@ -487,13 +488,8 @@ class InspectionFormSections {
                       child: AppField(
                         label: AppText.t('رقم القيد', 'Entry code'),
                         controller: entryCode,
+                        readOnly: true,
                       ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    IconButton(
-                      tooltip: AppText.t('إعادة توليد', 'Regenerate'),
-                      onPressed: onRegenerateEntry,
-                      icon: Icon(Icons.refresh, size: 20.r),
                     ),
                   ],
                 ),
@@ -507,13 +503,8 @@ class InspectionFormSections {
                 child: AppField(
                   label: AppText.t('رقم القيد', 'Entry code'),
                   controller: entryCode,
+                  readOnly: true,
                 ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              IconButton(
-                tooltip: AppText.t('إعادة توليد', 'Regenerate'),
-                onPressed: onRegenerateEntry,
-                icon: Icon(Icons.refresh, size: 20.r),
               ),
             ],
           ),
@@ -596,13 +587,8 @@ class InspectionFormSections {
           child: AppField(
             label: AppText.t('رقم القيد', 'Entry code'),
             controller: entryCode,
+            readOnly: true,
           ),
-        ),
-        const SizedBox(width: AppSpacing.sm),
-        IconButton(
-          tooltip: AppText.t('إعادة توليد', 'Regenerate'),
-          onPressed: onRegenerateEntry,
-          icon: Icon(Icons.refresh, size: 20.r),
         ),
       ],
     );
@@ -722,8 +708,7 @@ class InspectionFormSections {
           builder: (context, constraints) {
             final grid = _physicalGrid(physical, state.physicalReference);
             // Stacked cards need no horizontal scroll on phones.
-            if (constraints.maxWidth < AppBreakpoints.medium) return grid;
-            return _scrollableGrid(grid);
+            return grid;
           },
         ),
       ],
@@ -739,8 +724,7 @@ class InspectionFormSections {
         LayoutBuilder(
           builder: (context, constraints) {
             final grid = _chemicalGrid(chemical, state.chemicalReference);
-            if (constraints.maxWidth < AppBreakpoints.medium) return grid;
-            return _scrollableGrid(grid);
+            return grid;
           },
         ),
       ],
@@ -829,6 +813,15 @@ class InspectionFormSections {
     int? selectedId, {
     String? error,
   }) {
+    if (editing) {
+      return AppField(
+        label: isProduct
+            ? AppText.t('اسم المنتج', 'Product Name')
+            : AppText.t('اسم الخامة', 'Material Name'),
+        controller: materialController,
+        readOnly: true,
+      );
+    }
     final selected = selectedId != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -942,22 +935,6 @@ class InspectionFormSections {
     );
   }
 
-  Widget _scrollableGrid(Widget grid) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // Below this the side-by-side parameter grid is narrower than a single
-        // readable cell, so it scrolls horizontally instead of squeezing.
-        const minWidth = AppBreakpoints.medium + 60;
-        final maxW = constraints.maxWidth;
-        final width = (maxW.isFinite && maxW > minWidth) ? maxW : minWidth;
-        return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(width: width, child: grid),
-        );
-      },
-    );
-  }
-
   Widget _physicalGrid(
     Map<String, List<TextEditingController>> source,
     Map<String, dynamic> refs,
@@ -965,7 +942,7 @@ class InspectionFormSections {
     return LayoutBuilder(
       builder: (context, constraints) {
         // Phones: stacked cards instead of a squeezed table.
-        if (constraints.maxWidth < AppBreakpoints.medium) {
+        if (compact || constraints.maxWidth < AppBreakpoints.medium) {
           return Column(
             children: [
               for (final param in source.keys)
@@ -1037,7 +1014,7 @@ class InspectionFormSections {
                         child: _physicalInput(
                           param,
                           source[param]![i],
-                          '${refs[param] ?? ''}',
+                          refs[param],
                         ),
                       ),
                   ],
@@ -1072,14 +1049,13 @@ class InspectionFormSections {
                 param,
                 style: TextStyle(
                   fontWeight: FontWeight.w700,
-                  fontSize: 14.spMax,
+                  fontSize: 16.spMax,
                 ),
               ),
               if (isReferenceRequired(ref)) const RequiredBadge(),
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
-          _rangeCell(ref, alignCenter: false),
           const SizedBox(height: AppSpacing.sm),
           for (var i = 0; i < sampleCount; i++) ...[
             if (sampleCount > 1)
@@ -1096,15 +1072,22 @@ class InspectionFormSections {
                   ),
                 ),
               ),
-            _physicalInput(param, ctrls[i], '$ref'),
+            _physicalInput(param, ctrls[i], ref),
             if (i < sampleCount - 1) const SizedBox(height: AppSpacing.sm),
           ],
+          const SizedBox(height: AppSpacing.xs),
+          _referenceHint(ref),
         ],
       ),
     );
   }
 
-  Widget _physicalInput(String name, TextEditingController ctrl, String req) {
+  Widget _physicalInput(
+    String name,
+    TextEditingController ctrl,
+    Object? rawReference,
+  ) {
+    final req = referenceValueText(rawReference);
     final suggestions = _physicalSuggestions(req);
     void normalize() {
       var v = _expandPhysicalQuickCode(ctrl.text);
@@ -1112,49 +1095,72 @@ class InspectionFormSections {
       ctrl.text = v;
     }
 
-    return ListenableBuilder(
-      listenable: ctrl,
-      builder: (_, _) {
-        final out = isPhysicalOutOfRange(ctrl.text, req);
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                child: AppTextField(
-                  controller: ctrl,
-                  onSubmitted: (_) => normalize(),
-                  decoration: _inputDec(
-                    out,
-                    hint: AppText.t('أدخل النتيجة', 'Enter result'),
+    return AnalysisValueAdvisory(
+      controller: ctrl,
+      parameter: name,
+      reference: rawReference,
+      child: ListenableBuilder(
+        listenable: ctrl,
+        builder: (_, _) {
+          final out = isPhysicalOutOfRange(ctrl.text, req);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.xxs),
+                  child: AppTextField(
+                    controller: ctrl,
+                    onSubmitted: (_) => normalize(),
+                    decoration: _inputDec(
+                      out,
+                      hint: AppText.t('نتيجة $name', '$name result'),
+                    ),
                   ),
                 ),
               ),
-            ),
-            if (suggestions.isNotEmpty)
-              PopupMenuButton<String>(
-                tooltip: AppText.t('اقتراحات', 'Suggestions'),
-                onSelected: (v) => ctrl.text = v,
-                itemBuilder: (_) => [
-                  for (final s in suggestions)
-                    PopupMenuItem(value: s, child: Text(s)),
-                ],
-                icon: Icon(Icons.arrow_drop_down, size: 20.r),
-              ),
-            IconButton(
-              tooltip: AppText.t('تعبئة القيمة المرجعية', 'Fill reference'),
-              visualDensity: VisualDensity.compact,
-              onPressed: () => ctrl.text = _extractPhysicalSetValue(req),
-              icon: Icon(
-                Icons.content_paste_outlined,
-                size: 18.r,
-                color: AppColors.primary,
-              ),
-            ),
-          ],
-        );
-      },
+              if (compact)
+                PopupMenuButton<String>(
+                  tooltip: AppText.t('خيارات النتيجة', 'Result options'),
+                  onSelected: (value) => ctrl.text = value,
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: _extractPhysicalSetValue(req),
+                      child: Text(
+                        AppText.t('تعبئة القيمة المرجعية', 'Fill reference'),
+                      ),
+                    ),
+                    for (final value in suggestions)
+                      PopupMenuItem(value: value, child: Text(value)),
+                  ],
+                  icon: Icon(Icons.more_vert, size: 20.r),
+                )
+              else ...[
+                if (suggestions.isNotEmpty)
+                  PopupMenuButton<String>(
+                    tooltip: AppText.t('اقتراحات', 'Suggestions'),
+                    onSelected: (v) => ctrl.text = v,
+                    itemBuilder: (_) => [
+                      for (final s in suggestions)
+                        PopupMenuItem(value: s, child: Text(s)),
+                    ],
+                    icon: Icon(Icons.arrow_drop_down, size: 20.r),
+                  ),
+                IconButton(
+                  tooltip: AppText.t('تعبئة القيمة المرجعية', 'Fill reference'),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () => ctrl.text = _extractPhysicalSetValue(req),
+                  icon: Icon(
+                    Icons.content_paste_outlined,
+                    size: 18.r,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -1166,7 +1172,7 @@ class InspectionFormSections {
       builder: (context, constraints) {
         // Phones: one stacked card per parameter (range + full-width inputs)
         // instead of a squeezed multi-column table.
-        if (constraints.maxWidth < AppBreakpoints.medium) {
+        if (compact || constraints.maxWidth < AppBreakpoints.medium) {
           return Column(
             children: [
               for (final param in source.keys)
@@ -1236,7 +1242,8 @@ class InspectionFormSections {
                       Expanded(
                         flex: 3,
                         child: _chemicalInput(
-                          _chemCell(refs[param]),
+                          param,
+                          refs[param],
                           source[param]![i],
                         ),
                       ),
@@ -1276,7 +1283,7 @@ class InspectionFormSections {
                       param,
                       style: TextStyle(
                         fontWeight: FontWeight.w700,
-                        fontSize: 14.spMax,
+                        fontSize: 16.spMax,
                       ),
                     ),
                     if (isReferenceRequired(ref)) const RequiredBadge(),
@@ -1286,7 +1293,6 @@ class InspectionFormSections {
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
-          _rangeCell(ref, alignCenter: false),
           const SizedBox(height: AppSpacing.sm),
           for (var i = 0; i < sampleCount; i++) ...[
             if (sampleCount > 1)
@@ -1303,9 +1309,11 @@ class InspectionFormSections {
                   ),
                 ),
               ),
-            _chemicalInput(_chemCell(ref), ctrls[i]),
+            _chemicalInput(param, ref, ctrls[i]),
             if (i < sampleCount - 1) const SizedBox(height: AppSpacing.sm),
           ],
+          const SizedBox(height: AppSpacing.xs),
+          _referenceHint(ref),
         ],
       ),
     );
@@ -1313,6 +1321,18 @@ class InspectionFormSections {
 
   /// Formatted acceptable range + unit chip (single column replaces the old
   /// Min/Max pair, whose raw `-`/fragments looked broken).
+  Widget _referenceHint(Object? ref) {
+    final range = formatReferenceRange(ref);
+    return Text(
+      '${AppText.t('المدى المرجعي', 'Reference range')}: ${range.display}${range.unit.isEmpty ? '' : ' ${range.unit}'}',
+      style: TextStyle(
+        fontSize: 12.spMax,
+        color: AppColors.textMuted,
+        fontWeight: FontWeight.w400,
+      ),
+    );
+  }
+
   Widget _rangeCell(Object? ref, {bool alignCenter = true}) {
     final range = formatReferenceRange(ref);
     return Padding(
@@ -1387,55 +1407,65 @@ class InspectionFormSections {
     );
   }
 
-  Widget _chemicalInput(ChemCell cell, TextEditingController ctrl) {
-    return ListenableBuilder(
-      listenable: ctrl,
-      builder: (_, _) {
-        final out = _chemOut(ctrl, cell);
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(top: AppSpacing.xxs),
-                child: AppTextField(
-                  controller: ctrl,
-                  onChanged: (_) {},
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+  Widget _chemicalInput(
+    String name,
+    Object? reference,
+    TextEditingController ctrl,
+  ) {
+    final cell = _chemCell(reference);
+    return AnalysisValueAdvisory(
+      controller: ctrl,
+      parameter: name,
+      reference: reference,
+      child: ListenableBuilder(
+        listenable: ctrl,
+        builder: (_, _) {
+          final out = _chemOut(ctrl, cell);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: AppSpacing.xxs),
+                  child: AppTextField(
+                    controller: ctrl,
+                    onChanged: (_) {},
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    decoration: _inputDec(out, hint: _chemPlaceholder(cell)),
                   ),
-                  decoration: _inputDec(out, hint: _chemPlaceholder(cell)),
                 ),
               ),
-            ),
-            if (cell.unit.isNotEmpty)
-              Padding(
-                padding: const EdgeInsetsDirectional.only(
-                  start: AppSpacing.xs,
-                  top: AppSpacing.xxs,
-                ),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.xs,
-                    vertical: AppSpacing.sm,
+              if (cell.unit.isNotEmpty && !compact)
+                Padding(
+                  padding: const EdgeInsetsDirectional.only(
+                    start: AppSpacing.xs,
+                    top: AppSpacing.xxs,
                   ),
-                  decoration: BoxDecoration(
-                    color: AppColors.surfaceSoft,
-                    borderRadius: BorderRadius.circular(AppRadii.sm),
-                    border: Border.all(color: AppColors.borderMuted),
-                  ),
-                  child: Text(
-                    cell.unit,
-                    style: TextStyle(
-                      fontSize: 12.spMax,
-                      fontWeight: FontWeight.w600,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.xs,
+                      vertical: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceSoft,
+                      borderRadius: BorderRadius.circular(AppRadii.sm),
+                      border: Border.all(color: AppColors.borderMuted),
+                    ),
+                    child: Text(
+                      cell.unit,
+                      style: TextStyle(
+                        fontSize: 12.spMax,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ),
                 ),
-              ),
-          ],
-        );
-      },
+            ],
+          );
+        },
+      ),
     );
   }
 }

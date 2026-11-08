@@ -4,6 +4,9 @@ import 'package:equatable/equatable.dart';
 
 import '../../../core/constants/app_strings.dart';
 
+/// A table definition and its columns are submitted as one atomic operation.
+const int maxQcCustomTableColumns = 9;
+
 /// Column input types a user-authored table supports.
 ///
 /// Deliberately narrow: three stable, syncable, filterable types. Column

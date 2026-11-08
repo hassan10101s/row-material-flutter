@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../core/auth/app_session.dart';
+import '../core/auth/session_policy.dart';
 import '../core/auth/permissions.dart';
 import '../core/network/connectivity_service.dart';
 import '../features/auth/domain/auth_repository.dart';
@@ -11,7 +12,9 @@ import '../features/auth/domain/user.dart';
 /// Observable auth state consumed by the router guards and the shell badge
 /// (plan §8.1). Replaces the pre-V2 "is there a row in `users`" check.
 class AuthGate extends ChangeNotifier {
-  AuthGate(this.auth, {this.connectivity});
+  AuthGate(this.auth, {this.connectivity, DateTime Function()? now})
+    : _now = now ?? DateTime.now;
+  final DateTime Function() _now;
 
   final AuthRepository auth;
 
@@ -19,10 +22,12 @@ class AuthGate extends ChangeNotifier {
   final ConnectivityService? connectivity;
 
   StreamSubscription<AuthState>? _subscription;
+  Timer? _expiry;
+  bool _expiring = false;
 
   AppSession get session => auth.session;
 
-  bool get isAuthenticated => auth.state == AuthState.ready;
+  bool get isAuthenticated => !_expiring && auth.state == AuthState.ready;
 
   bool get needsBootstrap => auth.state == AuthState.needsBootstrap;
 
@@ -59,22 +64,56 @@ class AuthGate extends ChangeNotifier {
   /// Can the UI open a write dialog? (Local guard; Firestore rules are the
   /// second, independent layer.)
   bool canWrite(Permission permission) =>
-      session.canDo(permission, online: online);
+      session.canPrepareBusinessWrite(permission, online: online);
 
   bool get online => connectivity?.isOnline ?? session.isTokenFresh;
 
   void start() {
     _subscription?.cancel();
-    _subscription = auth.currentState.listen((_) => notifyListeners());
+    _subscription = auth.currentState.listen((_) {
+      _scheduleExpiry();
+      notifyListeners();
+    });
+    _scheduleExpiry();
   }
 
   /// Re-reads the repository synchronously (used after sign-in/sign-out and by
-  /// [offline_first_auth_repository] side effects such as organization binds).
-  void updated() => notifyListeners();
+  /// FirebaseAuthRepository side effects such as organization binds).
+  void updated() {
+    _scheduleExpiry();
+    notifyListeners();
+  }
+
+  void _scheduleExpiry() {
+    _expiry?.cancel();
+    if (!session.isSignedIn || _expiring) return;
+    final signedInAt = session.signedInAt;
+    if (SessionPolicy.requiresSignIn(
+      signedInAt,
+      _now(),
+      policyVersion: session.authenticationPolicyVersion,
+    )) {
+      _expiring = true;
+      unawaited(
+        auth.signOut().whenComplete(() {
+          _expiring = false;
+        }),
+      );
+      return;
+    }
+    _expiry = Timer(
+      signedInAt!.add(SessionPolicy.maximumAge).difference(_now()),
+      () {
+        _scheduleExpiry();
+        notifyListeners();
+      },
+    );
+  }
 
   @override
   void dispose() {
     _subscription?.cancel();
+    _expiry?.cancel();
     super.dispose();
   }
 }

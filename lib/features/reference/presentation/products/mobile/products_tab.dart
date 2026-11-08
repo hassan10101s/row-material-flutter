@@ -1,3 +1,5 @@
+import '../../../../../design_system/widgets/app_export_button.dart';
+import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -13,7 +15,7 @@ import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
-import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_text_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/export/table_html_export.dart';
@@ -93,7 +95,7 @@ class _MobileProductsTabState extends State<MobileProductsTab> {
         AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       }
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -108,37 +110,35 @@ class _MobileProductsTabState extends State<MobileProductsTab> {
       // Add floats like the raw-material register (heroTag null: sibling
       // tabs share one IndexedStack).
       child: Scaffold(
-        floatingActionButton: FloatingActionButton(
-          heroTag: null,
+        floatingActionButton: AppAddFloatingActionButton(
           tooltip: AppText.t('منتج جديد', 'New Product'),
           onPressed: () => _openEditor(context),
-          child: Icon(Icons.add, size: 24.r),
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header entrance only (see params_tab for the rationale).
             AppEntrance(
-              child: ProductsHeader(
-                compact: true,
-                showAdd: false,
-                subtitle:
-                    '${state.hasMore ? '${state.rows.length}+' : '${state.rows.length}'} ${AppText.t('منتج', 'products')}',
-                onAdd: () => _openEditor(context),
-                canExport: state.rows.isNotEmpty,
-                onExportTable: () => TableHtmlExport.export(
-                  context,
-                  filePrefix: 'products',
-                  title: ProductsTable.exportTitle(),
-                  headers: ProductsTable.exportHeaders(),
-                  rows: ProductsTable.exportRows(state.rows),
+              child: AppSearchRow(
+                search: AppTextField(
+                  controller: _searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: AppText.t('بحث بالاسم', 'Search by name...'),
+                    prefixIcon: const Icon(Icons.search),
+                  ),
+                ),
+                export: AppExportIconButton(
+                  onPressed: state.rows.isEmpty
+                      ? null
+                      : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'products',
+                          title: ProductsTable.exportTitle(),
+                          headers: ProductsTable.exportHeaders(),
+                          rows: ProductsTable.exportRows(state.rows),
+                        ),
                 ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            AppField(
-              label: AppText.t('بحث بالاسم', 'Search by name...'),
-              controller: _searchCtrl,
             ),
             const SizedBox(height: AppSpacing.sm),
             if (state.loading && state.rows.isNotEmpty)

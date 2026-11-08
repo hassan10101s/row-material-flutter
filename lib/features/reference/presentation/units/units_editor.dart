@@ -54,9 +54,11 @@ class UnitsEditorState extends State<UnitsEditor> {
     text: '${widget.unit?['dimension'] ?? ''}',
   );
   bool _saving = false;
+  bool _pending = false;
   String? _symbolError;
 
   bool get saving => _saving;
+  bool get pending => _pending;
 
   @override
   void dispose() {
@@ -74,7 +76,7 @@ class UnitsEditorState extends State<UnitsEditor> {
       );
       return;
     }
-    if (_saving) return;
+    if (_saving || _pending) return;
     setState(() => _saving = true);
     try {
       await widget.onSubmit(
@@ -84,9 +86,15 @@ class UnitsEditorState extends State<UnitsEditor> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pending = e is PendingOperation;
+        });
+        AppFeedback.errorFrom(context, e);
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -143,7 +151,7 @@ class UnitsEditorActions extends StatelessWidget {
         AppButton(
           label: AppStrings.save,
           loading: state.saving,
-          onPressed: state.saving ? null : state.submit,
+          onPressed: state.saving || state.pending ? null : state.submit,
         ),
       ],
     );

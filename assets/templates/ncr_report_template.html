@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
 <head>
     <meta charset="UTF-8">
     <title>{% if is_en %}Non-Conformance Report - {% else %}تقرير عدم المطابقة - {% endif %}{{ scope }}</title>
@@ -367,7 +367,60 @@
                 break-inside: avoid;
             }
         }
-    </style>
+
+/* Institutional print layout: compact summaries, restrained decoration. */
+.sheet, .report-shell { border-radius: 8px !important; background: #fff !important; box-shadow: none !important; }
+.sheet { border: 0 !important; min-height: 0 !important; }
+.watermark, .corner-tr, .corner-bl { display: none !important; }
+.top-band, .accent-strip { height: 3px !important; background: #294961 !important; }
+.header { padding: 12px 14px !important; background: #fff !important; border-bottom: 1px solid #d7dee7 !important; }
+.header-grid { gap: 10px !important; }
+.header h1, .header .title { font-size: 18px !important; line-height: 1.35 !important; margin: 3px 0 !important; color: #172b4d !important; }
+.brand-logo, .report-logo { max-height: 42px !important; height: auto !important; max-width: 112px !important; box-shadow: none !important; }
+.organization-name { font-size: 12px !important; line-height: 1.35; margin: 4px auto 5px !important; color: #24364b; }
+.subtitle, .header-main > p { font-size: 11px !important; margin-top: 3px !important; }
+.eyebrow { border-radius: 8px !important; background: #f1f4f7 !important; color: #526171 !important; padding: 3px 7px !important; font-size: 9px !important; }
+.body { padding: 10px 12px 12px !important; }
+.meta-strip, .meta-grid, .summary-grid, .quarter-grid { gap: 6px !important; margin-top: 8px !important; margin-bottom: 8px !important; }
+.meta-card, .summary-card, .quarter-card, .material-kpi { min-height: 0 !important; height: auto !important; padding: 7px 9px !important; border-radius: 8px !important; border: 1px solid #d7dee7 !important; background: #fff !important; box-shadow: none !important; }
+.meta-card::before, .meta-card::after, .quarter-card::before, .quarter-card::after { display: none !important; }
+.meta-card .label, .summary-card .summary-label, .q-name, .kpi-label { font-size: 10px !important; margin-bottom: 3px !important; color: #64748b !important; font-weight: 600 !important; }
+.meta-card .value { font-size: 12px !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-value, .q-total { font-size: 18px !important; line-height: 1.15 !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-note { font-size: 10px !important; margin-top: 3px !important; line-height: 1.35; color: #64748b !important; font-weight: 500 !important; }
+.summary-card.success .summary-value { color: #276749 !important; }
+.summary-card.danger .summary-value { color: #9b2c2c !important; }
+.summary-card.warning .summary-value { color: #875c15 !important; }
+.section-head { margin: 10px 0 6px !important; gap: 8px !important; }
+.section-title { font-size: 13px !important; }
+.materials-list { gap: 9px !important; }
+.material-card, .source-card, .panel-card, .section { border-radius: 8px !important; border: 1px solid #d7dee7 !important; box-shadow: none !important; background: #fff !important; }
+.material-header, .source-header, .section-physical, .section-chemical { padding: 7px 9px !important; background: #edf1f5 !important; color: #24364b !important; border-bottom: 1px solid #d7dee7 !important; }
+.material-title, .source-title { font-size: 12px !important; color: #24364b !important; }
+.material-badge, .badge { border-radius: 8px !important; padding: 3px 7px !important; box-shadow: none !important; background: #f5f7f9 !important; border: 1px solid #d7dee7 !important; color: #334155 !important; }
+.material-kpis { padding: 6px 8px !important; gap: 5px !important; }
+.material-kpi { padding: 5px 6px !important; }
+.kpi-value { font-size: 14px !important; font-weight: 700 !important; }
+.table-wrap { padding: 7px 9px !important; }
+table { font-size: 11px !important; line-height: 1.35; }
+th, td { padding: 4px 6px !important; }
+th { background: #edf1f5 !important; color: #24364b !important; }
+.decision-box { padding: 8px 10px !important; border-radius: 8px !important; box-shadow: none !important; }
+.decision-box .decision-status { font-size: 14px !important; }
+.footer { padding: 8px 12px !important; background: #fff !important; border-top: 1px solid #d7dee7 !important; color: #64748b !important; }
+
+
+.sheet::before, .sheet::after { display: none !important; }
+.section-title { background: #edf1f5 !important; color: #24364b !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; padding: 6px 9px !important; }
+.section-title::after { display: none !important; }
+.material-item { background: #fff !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; margin-bottom: 9px !important; }
+.material-name { padding: 7px 9px !important; background: #f5f7f9 !important; font-size: 12px !important; }
+.material-stats { gap: 4px !important; padding: 6px !important; }
+
+
+html[dir="ltr"] body { direction:ltr; text-align:left; }
+html[dir="rtl"] body { direction:rtl; text-align:right; }
+</style>
 </head>
 <body>
     <div class="page">
@@ -380,13 +433,14 @@
                         {% if report_logo_data_uri %}
                         <img class="brand-logo" src="{{ report_logo_data_uri }}" alt="Report Logo">
                         {% endif %}
+{% if organization_name %}<div class="organization-name" style="font-size:12px;font-weight:700;margin-top:6px;text-align:center;overflow-wrap:anywhere;">{{ organization_name }}</div>{% endif %}
                     </div>
 
                     <div class="brand-center">
-                        <div class="eyebrow">Non-Conformance Report</div>
-                        <h1 class="title">{% if is_en %}Non-Conformance Report{% else %}تقرير عدم المطابقة | Non-Conformance Report{% endif %}</h1>
+                        <div class="eyebrow">{% if is_en %}Non-Conformance Report{% else %}تقرير عدم المطابقة{% endif %}</div>
+                        <h1 class="title">{% if is_en %}Non-Conformance Report{% else %}تقرير عدم المطابقة{% endif %}</h1>
                         <p class="subtitle">{{ department_label }}</p>
-                        {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
+                        {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
                         <p class="subtitle">{{ generated_at }} | {{ generated_by }}</p>
                     </div>
 
@@ -395,19 +449,19 @@
 
                 <div class="meta-strip">
                     <div class="meta-card">
-                        <span class="label">Report Scope</span>
+                        <span class="label">{% if is_en %}Report Scope{% else %}نطاق التقرير{% endif %}</span>
                         <span class="value">{{ scope }}</span>
                     </div>
                     <div class="meta-card">
-                        <span class="label">Total Findings</span>
+                        <span class="label">{% if is_en %}Total Findings{% else %}إجمالي الحالات{% endif %}</span>
                         <span class="value">{{ total }}</span>
                     </div>
                     <div class="meta-card">
-                        <span class="label">Generated At</span>
+                        <span class="label">{% if is_en %}Generated At{% else %}تاريخ الإنشاء{% endif %}</span>
                         <span class="value">{{ generated_at }}</span>
                     </div>
                     <div class="meta-card">
-                        <span class="label">Generated By</span>
+                        <span class="label">{% if is_en %}Generated By{% else %}أعده{% endif %}</span>
                         <span class="value">{{ generated_by }}</span>
                     </div>
                 </div>
@@ -416,42 +470,42 @@
             <div class="body">
                 <div class="summary-grid">
                     <div class="summary-card primary">
-                        <span class="summary-label">Total</span>
+                        <span class="summary-label">{% if is_en %}Total{% else %}الإجمالي{% endif %}</span>
                         <span class="summary-value">{{ kpis.total }}</span>
                         <span class="summary-note">{% if is_en %}Total Cases{% else %}إجمالي الحالات{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Open</span>
+                        <span class="summary-label">{% if is_en %}Open{% else %}مفتوح{% endif %}</span>
                         <span class="summary-value">{{ kpis.open }}</span>
                         <span class="summary-note">{% if is_en %}Open Cases{% else %}حالات مفتوحة{% endif %}</span>
                     </div>
                     <div class="summary-card {% if kpis.overdue > 0 %}danger{% endif %}">
-                        <span class="summary-label">Overdue</span>
+                        <span class="summary-label">{% if is_en %}Overdue{% else %}متأخر{% endif %}</span>
                         <span class="summary-value">{{ kpis.overdue }}</span>
                         <span class="summary-note">{% if is_en %}Overdue Cases{% else %}حالات متأخرة{% endif %}</span>
                     </div>
                     <div class="summary-card {% if kpis.critical > 0 %}danger{% endif %}">
-                        <span class="summary-label">Critical</span>
+                        <span class="summary-label">{% if is_en %}Critical{% else %}حرج{% endif %}</span>
                         <span class="summary-value">{{ kpis.critical }}</span>
                         <span class="summary-note">{% if is_en %}Critical Cases{% else %}حالات حرجة{% endif %}</span>
                     </div>
                     <div class="summary-card success">
-                        <span class="summary-label">Closed</span>
+                        <span class="summary-label">{% if is_en %}Closed{% else %}مغلق{% endif %}</span>
                         <span class="summary-value">{{ kpis.closed }}</span>
                         <span class="summary-note">{% if is_en %}Closed Cases{% else %}حالات مغلقة{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">On-Time %</span>
+                        <span class="summary-label">{% if is_en %}On-Time %{% else %}الإغلاق في الموعد{% endif %}</span>
                         <span class="summary-value">{{ kpis.on_time_closure_display }}</span>
                         <span class="summary-note">{% if is_en %}Closed on Time{% else %}إغلاق في الموعد{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">MTTC</span>
+                        <span class="summary-label">{% if is_en %}MTTC{% else %}متوسط زمن الإغلاق{% endif %}</span>
                         <span class="summary-value">{{ kpis.mttc_display }}</span>
                         <span class="summary-note">{% if is_en %}Avg. Closing Days{% else %}متوسط أيام الإغلاق{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">MTTV</span>
+                        <span class="summary-label">{% if is_en %}MTTV{% else %}متوسط زمن التحقق{% endif %}</span>
                         <span class="summary-value">{{ kpis.mttv_display }}</span>
                         <span class="summary-note">{% if is_en %}Avg. Verification Days{% else %}متوسط أيام التحقق{% endif %}</span>
                     </div>
@@ -459,42 +513,42 @@
 
                 <div class="summary-grid" style="grid-template-columns: repeat(8, minmax(0, 1fr)); margin-top: -4px;">
                     <div class="summary-card">
-                        <span class="summary-label">Assigned</span>
+                        <span class="summary-label">{% if is_en %}Assigned{% else %}مسند{% endif %}</span>
                         <span class="summary-value">{{ kpis.assigned }}</span>
                         <span class="summary-note">{% if is_en %}Assigned{% else %}مسندة{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">In Progress</span>
+                        <span class="summary-label">{% if is_en %}In Progress{% else %}قيد المعالجة{% endif %}</span>
                         <span class="summary-value">{{ kpis.in_progress }}</span>
                         <span class="summary-note">{% if is_en %}In Progress{% else %}قيد المعالجة{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Verified</span>
+                        <span class="summary-label">{% if is_en %}Verified{% else %}تم التحقق{% endif %}</span>
                         <span class="summary-value">{{ kpis.verified }}</span>
                         <span class="summary-note">{% if is_en %}Verified{% else %}تم التحقق{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Major</span>
+                        <span class="summary-label">{% if is_en %}Major{% else %}كبير{% endif %}</span>
                         <span class="summary-value">{{ kpis.major }}</span>
                         <span class="summary-note">{% if is_en %}Major Cases{% else %}حالات كبرى{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Minor</span>
+                        <span class="summary-label">{% if is_en %}Minor{% else %}بسيط{% endif %}</span>
                         <span class="summary-value">{{ kpis.minor }}</span>
                         <span class="summary-note">{% if is_en %}Minor Cases{% else %}حالات بسيطة{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">CAPA Linked</span>
+                        <span class="summary-label">{% if is_en %}CAPA Linked{% else %}مرتبط بإجراء تصحيحي{% endif %}</span>
                         <span class="summary-value">{{ kpis.capa_linked }}</span>
                         <span class="summary-note">{% if is_en %}CAPA Linked{% else %}مرتبطة بإجراء{% endif %}</span>
                     </div>
                     <div class="summary-card {% if kpis.capa_overdue > 0 %}danger{% endif %}">
-                        <span class="summary-label">CAPA Overdue</span>
+                        <span class="summary-label">{% if is_en %}CAPA Overdue{% else %}إجراء تصحيحي متأخر{% endif %}</span>
                         <span class="summary-value">{{ kpis.capa_overdue }}</span>
                         <span class="summary-note">{% if is_en %}CAPA Overdue{% else %}إجراء متأخر{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Rejected</span>
+                        <span class="summary-label">{% if is_en %}Rejected{% else %}مرفوض{% endif %}</span>
                         <span class="summary-value">{{ kpis.rejected }}</span>
                         <span class="summary-note">{% if is_en %}Rejected Cases{% else %}حالات مرفوضة{% endif %}</span>
                     </div>
@@ -503,7 +557,7 @@
                 {% if top_defects %}
                 <div class="section-head">
                     <h2 class="section-title">{% if is_en %}Most Recurring Defects{% else %}أكثر العيوب تكراراً{% endif %}</h2>
-                    <div class="section-caption">Top Recurring Defects</div>
+                    <div class="section-caption">{% if is_en %}Top Recurring Defects{% else %}أكثر العيوب تكرارًا{% endif %}</div>
                 </div>
 
                 <div class="panel-card">
@@ -533,7 +587,7 @@
                 {% if aging %}
                 <div class="section-head">
                     <h2 class="section-title">{% if is_en %}Aging Distribution{% else %}التوزيع العمري{% endif %}</h2>
-                    <div class="section-caption">Aging Distribution</div>
+                    <div class="section-caption">{% if is_en %}Aging Distribution{% else %}توزيع أعمار الحالات{% endif %}</div>
                 </div>
 
                 <div class="panel-card">
@@ -562,7 +616,7 @@
 
                 <div class="section-head">
                     <h2 class="section-title">{% if is_en %}Matching Cases ({% else %}الحالات المطابقة ({% endif %}{{ total }})</h2>
-                    <div class="section-caption">Matching Findings</div>
+                    <div class="section-caption">{% if is_en %}Matching Findings{% else %}الحالات المطابقة{% endif %}</div>
                 </div>
 
                 {% if rows %}
@@ -596,7 +650,7 @@
                                         {% elif row.severity == 'Minor' %}
                                             color: var(--success-text); background-color: var(--success-bg);
                                         {% endif %}
-                                    ">{{ row.severity }}</span></td>
+                                    ">{{ row.severity_display or row.severity }}</span></td>
                                     <td><span class="pill" style="
                                         {% if row.status == 'Closed' %}
                                             color: var(--success-text); background-color: var(--success-bg);
@@ -605,7 +659,7 @@
                                         {% elif row.status == 'Open' %}
                                             color: var(--warning-text); background-color: var(--warning-bg);
                                         {% endif %}
-                                    ">{{ row.status }}</span></td>
+                                    ">{{ row.status_display or row.status }}</span></td>
                                     <td>{{ row.inspection }}</td>
                                     <td>{{ row.lot_batch or '-' }}</td>
                                     <td>{{ row.assignee }}</td>
@@ -628,12 +682,12 @@
 
             <div class="footer">
                 <div><strong>Material Lab</strong> | {% if is_en %}Internal lab management system{% else %}نظام ادارة المعمل الداخلي{% endif %}</div>
-                <div>Prepared Automatically by {{ department_label }}</div>
+                <div>{% if is_en %}Prepared automatically by{% else %}أُعد تلقائيًا بواسطة{% endif %} {{ department_label }}</div>
             </div>
         </div>
     </div>
     <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
-        Powered by Material Lab
+        {% if is_en %}Powered by Material Lab{% else %}تم الإنشاء بواسطة Material Lab{% endif %}
     </div>
 </body>
 </html>

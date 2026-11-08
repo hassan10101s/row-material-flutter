@@ -4,7 +4,9 @@ import 'lab_state.dart';
 /// Lab center coordination: active tab and the test-history refresh tick
 /// incremented each time a sample test finishes.
 class LabCubit extends AppCubit<LabState> {
-  LabCubit() : super(const LabState());
+  LabCubit() : super(const LabState()) {
+    refreshOnSync(() async => notifyTestRun());
+  }
 
   void setTab(int tab) {
     if (tab == state.tab) return;

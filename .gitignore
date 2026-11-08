@@ -1,6 +1,15 @@
 # Graphify generated knowledge graph
 /graphify-out/
 
+# Production org exports (tool/central_migration backup/audit output). Contains
+# real business data; NEVER commit.
+/backup/
+
+# Local release packages, UI captures, deployment evidence and JVM heap dumps.
+# These can contain production data or credentials and do not belong in Git.
+/output/
+*.hprof
+
 # Miscellaneous
 *.class
 *.log
@@ -50,6 +59,7 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/.kotlin/
 
 # Machine-local secrets. The template (empty values) is committed so the asset
 # declaration always resolves; the real values are added to a copy.
@@ -62,3 +72,4 @@ tool/firebase/*.env
 # the run/build command, e.g.:
 #   flutter run --dart-define-from-file=ven/firebase-android.json
 /ven/
+/.firebase.launch-check.json

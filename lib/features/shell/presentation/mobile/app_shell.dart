@@ -12,7 +12,7 @@ import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_window.dart';
 import '../../../auth/domain/user.dart';
-import '../../../sync/presentation/sync_status_controller.dart';
+import '../../../connection/presentation/connection_status_controller.dart';
 import '../shell_chrome.dart';
 import '../shell_nav.dart';
 import '../chrome_reveal.dart';
@@ -57,7 +57,7 @@ class MobileAppShell extends StatefulWidget {
   final List<ShellNavEntry> entries;
   final LocaleService locale;
   final ThemeService theme;
-  final SyncStatusController syncStatus;
+  final ConnectionStatusController syncStatus;
   final void Function(String path) onNavigate;
   final VoidCallback onLogout;
   final VoidCallback onLogoutThisDevice;
@@ -68,10 +68,22 @@ class MobileAppShell extends StatefulWidget {
   State<MobileAppShell> createState() => _MobileAppShellState();
 }
 
-class _MobileAppShellState extends State<MobileAppShell> {
+class _MobileAppShellState extends State<MobileAppShell>
+    with WidgetsBindingObserver {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
   bool _drawerOpen = false;
+
+  /// When the last back gesture was handled by the shell, so the "press back
+  /// again to exit" window can be measured from it.
+  DateTime? _lastBackAt;
+
+  /// The shell never lets the system back gesture pop its route: with every
+  /// destination reached by `go()` the stack is one page deep, so a pop would
+  /// close the app. Back goes to the dashboard instead, and a second press on
+  /// the dashboard - inside [_exitWindow] - exits immediately.
+  static const String _dashboardPath = '/dashboard';
+  static const Duration _exitWindow = Duration(seconds: 2);
 
   /// Scroll-driven chrome visibility: scrolling down folds the top bar and
   /// the bottom bar off their screen edges and hands the whole panel back to
@@ -97,6 +109,7 @@ class _MobileAppShellState extends State<MobileAppShell> {
   /// Navigating from the drawer closes it first, in the order the desktop's
   /// `onSelect` used to: dismiss the chrome, then move.
   void _navigate(String path) {
+    _navPath = path;
     if (_drawerOpen) _scaffoldKey.currentState?.closeDrawer();
     // A fresh page starts its scroll at the top, so it opens with the chrome.
     _chrome.reveal();
@@ -111,8 +124,66 @@ class _MobileAppShellState extends State<MobileAppShell> {
     _navigate(path);
   }
 
+  /// The path the shell last navigated into (`_navigate` is the only way the
+  /// shell's destinations move, so it is the current page for the back policy).
+  /// Kept off the build context on purpose: the state a build captures can lag
+  /// behind a `go()` the shell is not rebuilt for.
+  String _navPath = _dashboardPath;
+
+  /// The system back policy: dashboard when somewhere else, exit on a second
+  /// press on the dashboard, and the drawer closed first when it is open.
+  void _handleSystemBack() {
+    if (_navPath != _dashboardPath) {
+      _lastBackAt = DateTime.now();
+      _navigate(_dashboardPath);
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastBackAt != null && now.difference(_lastBackAt!) < _exitWindow) {
+      _lastBackAt = null;
+      SystemNavigator.pop();
+      return;
+    }
+    _lastBackAt = now;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          AppText.t(
+            'اضغط مرة أخرى للخروج الآن',
+            'Press back again to exit now',
+          ),
+        ),
+        duration: _exitWindow,
+      ),
+    );
+  }
+
+  /// Back gestures that leave the router stuck (every shell destination is a
+  /// `go()` away, so the current route's stack has nothing to pop) end here:
+  /// the engine falls through to the observers after the router declines, and
+  /// claiming the gesture stops the app close that would otherwise follow.
+  ///
+  /// With something to pop - a pushed page above the shell, a bottom sheet -
+  /// the router consumes the gesture itself and this is never called.
+  @override
+  Future<bool> didPopRoute() async {
+    if (_drawerOpen) {
+      _scaffoldKey.currentState?.closeDrawer();
+      return true;
+    }
+    _handleSystemBack();
+    return true;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _chrome.dispose();
     super.dispose();
   }
@@ -224,18 +295,24 @@ class _MobileAppShellState extends State<MobileAppShell> {
     final revealDuration = AppMotion.of(context, AppMotion.normal);
 
     return PopScope(
-      // While the drawer is up, back closes it instead of leaving the page.
+      // The shell never pops: back is the dashboard/exit policy below, not a
+      // route pop - every destination is reached by `go()`, so a popped shell
+      // page is the last page on the stack and closes the app.
       //
       // `ScaffoldState.openDrawer` already registers a `LocalHistoryEntry`, so
       // a bare `Navigator.pop` would close the drawer too - but only because the
       // pop is allowed to reach the navigator. `canPop: false` stops it, and a
       // blocked pop never removes that local history entry, so the drawer has
-      // to be closed explicitly here.
+      // to be closed explicitly in the handler.
       key: const Key('shell-back-guard'),
-      canPop: !_drawerOpen,
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop || !_drawerOpen) return;
-        _scaffoldKey.currentState?.closeDrawer();
+        if (didPop) return;
+        if (_drawerOpen) {
+          _scaffoldKey.currentState?.closeDrawer();
+          return;
+        }
+        _handleSystemBack();
       },
       child: Scaffold(
         key: _scaffoldKey,
@@ -277,7 +354,7 @@ class _MobileAppShellState extends State<MobileAppShell> {
                     theme: widget.theme,
                     syncStatus: widget.syncStatus,
                     title: _currentDestinationLabel(currentPath),
-                    onOpenSync: () => widget.onNavigate('/settings?tab=sync'),
+                    onRefreshData: widget.syncStatus.refreshData,
                     onMenu: () => _scaffoldKey.currentState?.openDrawer(),
                     // The identity card states the role, so the chip would only
                     // duplicate it and cost bar width the phone does not have.
@@ -319,9 +396,6 @@ class _MobileAppShellState extends State<MobileAppShell> {
         bottomNavigationBar: ListenableBuilder(
           listenable: Listenable.merge([widget.syncStatus, _chrome]),
           builder: (context, _) {
-            final attention =
-                widget.syncStatus.status.pending +
-                widget.syncStatus.status.blocked;
             return SafeArea(
               top: false,
               left: false,
@@ -388,14 +462,7 @@ class _MobileAppShellState extends State<MobileAppShell> {
                                   // tap and the bar's tooltip. Verified: a long press fires the
                                   // handler and does *not* also select the destination.
                                   icon: slot.isMore
-                                      ? (attention > 0
-                                            ? Badge(
-                                                smallSize: 9,
-                                                backgroundColor:
-                                                    AppColors.danger,
-                                                child: Icon(slot.icon),
-                                              )
-                                            : Icon(slot.icon))
+                                      ? Icon(slot.icon)
                                       : GestureDetector(
                                           behavior: HitTestBehavior.translucent,
                                           onLongPress: () => _showJumpList(),
@@ -463,7 +530,7 @@ class _ShellDrawer extends StatelessWidget {
                     user: user,
                     onLogout: onLogout,
                     onLogoutThisDevice: onLogoutThisDevice,
-                    onOpenSettings: () => onSelect('/settings'),
+                    onOpenAccount: () => onSelect('/account'),
                   ),
                   const Divider(height: 1),
                   // Small section label so the destination list does not

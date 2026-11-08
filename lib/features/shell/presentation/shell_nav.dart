@@ -34,11 +34,14 @@ const int shellBottomBarSlots = 4;
 /// Settings (`/settings?tab=audit`), so no audit flag exists here.
 List<ShellNavEntry> shellNavEntries({
   required bool canSeeSettings,
+  bool? canReadReference,
+  bool canReadMembers = false,
+  bool canReadAudit = false,
   bool canReadQc = false,
   bool canReadFormulations = false,
 }) {
-  // Sync and Members are no longer top-level destinations: both live in
-  // Settings now (`/settings?tab=sync`, `/settings?tab=members`).
+  // Account and sync have independent icon destinations. Administrative
+  // settings are owner-only; roster readers retain a standalone member page.
   final entries = <ShellNavEntry>[
     ShellNavEntry('/dashboard', AppStrings.dashboard, Icons.dashboard_outlined),
     ShellNavEntry(
@@ -52,8 +55,8 @@ List<ShellNavEntry> shellNavEntries({
     entries.add(
       ShellNavEntry(
         '/formulations',
-        AppText.t('التركيبات', 'Formulations'),
-        Icons.restaurant_menu_outlined,
+        AppText.t('متتبع التركيبات', 'Formula tracking'),
+        Icons.functions_rounded,
       ),
     );
   }
@@ -67,10 +70,30 @@ List<ShellNavEntry> shellNavEntries({
       ),
     );
   }
-  if (canSeeSettings) {
+  if (canReadReference ?? canSeeSettings) {
     entries.add(
       ShellNavEntry('/reference', AppStrings.reference, Icons.book_outlined),
     );
+  }
+  if (canReadMembers && !canSeeSettings) {
+    entries.add(
+      ShellNavEntry(
+        AppRoutes.members,
+        AppText.t('الأعضاء', 'Members'),
+        Icons.people_outline,
+      ),
+    );
+  }
+  if (canReadAudit && !canSeeSettings) {
+    entries.add(
+      ShellNavEntry(
+        AppRoutes.audit,
+        AppText.t('سجل التدقيق', 'Audit log'),
+        Icons.history_edu_outlined,
+      ),
+    );
+  }
+  if (canSeeSettings) {
     entries.add(
       ShellNavEntry('/settings', AppStrings.settings, Icons.settings_outlined),
     );
@@ -85,6 +108,7 @@ List<ShellNavEntry> shellNavEntries({
 /// Desktop pages render their own titles into this slot instead of repeating
 /// them inside the page, which frees vertical space for the tables below.
 String? shellPageTitle(String currentPath, List<ShellNavEntry> entries) {
+  if (currentPath == AppRoutes.account) return AppText.t('الحساب', 'Account');
   final index = shellSectionIndex(entries, currentPath);
   if (index < 0) return null;
   return entries[index].label;

@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../core/utils/decimal_input.dart';
 import '../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
@@ -24,6 +25,7 @@ import '../cubit/nir_validation_cubit.dart';
 import '../cubit/nir_validation_state.dart';
 import 'nir_item_details_window.dart';
 import 'nir_validation_components.dart';
+import 'nir_calibration_history.dart';
 
 class NirValidationTab extends StatefulWidget {
   const NirValidationTab({super.key});
@@ -62,6 +64,19 @@ class _NirValidationTabState extends State<NirValidationTab> {
                     ),
                     icon: Icons.query_stats_outlined,
                     actions: [
+                      AppButton(
+                        label: AppText.t('سجل المعايرة', 'Calibration history'),
+                        icon: const Icon(Icons.history, size: 18),
+                        style: AppButtonStyle.secondary,
+                        small: true,
+                        onPressed: () => showNirCalibrationHistory(
+                          context,
+                          history: state.resetHistory,
+                          current: state.stats,
+                          loadHistory: (limit) =>
+                              cubit.repo.listResetHistory(limit: limit),
+                        ),
+                      ),
                       AppButton(
                         label: AppText.t('تحديث النتائج', 'Refresh results'),
                         icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -144,8 +159,47 @@ class _NirValidationTabState extends State<NirValidationTab> {
     await showNirItemDetails(
       context,
       stats,
+      onSetIncluded: canReset && !cubit.state.pendingApproval
+          ? (point, included) async {
+              final saved = await cubit.setPointIncluded(point, included);
+              if (!saved) {
+                if (context.mounted && cubit.state.pendingApproval) {
+                  AppFeedback.show(
+                    context,
+                    AppText.t(
+                      'حُفظ طلب تغيير القراءة للمراجعة؛ لن يتغير الحساب قبل اعتماد السيرفر.',
+                      'Reading change saved for review; calculations stay unchanged until server approval.',
+                    ),
+                    type: AppFeedbackType.info,
+                  );
+                }
+                return null;
+              }
+              return cubit.state.stats
+                  .where(
+                    (row) =>
+                        row.scope == stats.scope &&
+                        row.entityId == stats.entityId &&
+                        row.parameter == stats.parameter,
+                  )
+                  .firstOrNull;
+            }
+          : null,
       onReset: canReset && !cubit.state.saving
-          ? () => _showResetDialog(context, cubit, target: stats)
+          ? () => _showResetDialog(
+              context,
+              cubit,
+              target:
+                  cubit.state.stats
+                      .where(
+                        (row) =>
+                            row.scope == stats.scope &&
+                            row.entityId == stats.entityId &&
+                            row.parameter == stats.parameter,
+                      )
+                      .firstOrNull ??
+                  stats,
+            )
           : null,
     );
   }
@@ -634,10 +688,16 @@ class _ResetFormState extends State<_ResetForm> {
     text: DateTime.now().toIso8601String().substring(0, 10),
   );
   final _note = TextEditingController();
+  final _slope = TextEditingController();
+  final _intercept = TextEditingController();
+  bool _applied = false;
+  String? _error;
   @override
   void dispose() {
     _date.dispose();
     _note.dispose();
+    _slope.dispose();
+    _intercept.dispose();
     super.dispose();
   }
 
@@ -653,8 +713,36 @@ class _ResetFormState extends State<_ResetForm> {
         style: AppButtonStyle.secondary,
       ),
       AppButton(
-        onPressed: () =>
-            Navigator.pop(context, (_date.text.trim(), _note.text.trim())),
+        onPressed: () {
+          NirAppliedCorrection? correction;
+          if (_applied) {
+            final slope = double.tryParse(normalizeDecimalInput(_slope.text));
+            final intercept = double.tryParse(
+              normalizeDecimalInput(_intercept.text),
+            );
+            if (slope == null ||
+                intercept == null ||
+                !slope.isFinite ||
+                !intercept.isFinite) {
+              setState(
+                () => _error = AppText.t(
+                  'أدخل الميل والقاطع المطبّقين فعليًا بأرقام صالحة',
+                  'Enter finite slope and intercept values actually applied',
+                ),
+              );
+              return;
+            }
+            correction = NirAppliedCorrection(
+              slope: slope,
+              intercept: intercept,
+            );
+          }
+          Navigator.pop(context, (
+            _date.text.trim(),
+            _note.text.trim(),
+            correction,
+          ));
+        },
         label: AppText.t('تأكيد بدء الفترة', 'Confirm new period'),
       ),
     ],
@@ -666,6 +754,13 @@ class _ResetFormState extends State<_ResetForm> {
           AppText.t(
             'سيُحسب هذا التحليل من التاريخ الجديد. القراءات القديمة تبقى محفوظة، وباقي التحاليل لا تتغير.',
             'This analysis will use the new start date. Older readings remain saved and other analyses keep their current periods.',
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          AppText.t(
+            'سيُحفظ ملخص الدورة الحالية في سجل المعايرة. تاريخ البداية شامل لقراءات ذلك اليوم.',
+            'The current cycle summary will be saved in calibration history. The start date includes readings on that day.',
           ),
         ),
         const SizedBox(height: AppSpacing.md),
@@ -684,6 +779,57 @@ class _ResetFormState extends State<_ResetForm> {
             ),
           ),
         ),
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          title: Text(
+            AppText.t(
+              'طبّقت تعديلًا على الجهاز وأريد توثيقه',
+              'I applied a device adjustment and want to record it',
+            ),
+          ),
+          value: _applied,
+          onChanged: (value) => setState(() {
+            _applied = value == true;
+            _error = null;
+          }),
+        ),
+        if (_applied) ...[
+          Text(
+            AppText.t(
+              'سجّل القيم الفعلية؛ التوصية الحسابية وحدها لا تعني تطبيقها. لن يغيّر البرنامج قياساتك المحفوظة.',
+              'Record the actual values; a recommendation does not establish that it was applied. Stored measurements remain unchanged.',
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppTextField(
+            controller: _slope,
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
+              signed: true,
+            ),
+            inputFormatters: [DecimalInputFormatter(signed: true)],
+            decoration: InputDecoration(
+              labelText: AppText.t('الميل المطبّق', 'Applied slope'),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppTextField(
+            controller: _intercept,
+            keyboardType: const TextInputType.numberWithOptions(
+              decimal: true,
+              signed: true,
+            ),
+            inputFormatters: [DecimalInputFormatter(signed: true)],
+            decoration: InputDecoration(
+              labelText: AppText.t(
+                'القاطع المطبّق (صفر للميل فقط)',
+                'Applied intercept (zero for slope only)',
+              ),
+            ),
+          ),
+        ],
+        if (_error != null)
+          Text(_error!, style: TextStyle(color: AppColors.danger)),
       ],
     ),
   );
@@ -694,7 +840,7 @@ Future<void> _showResetDialog(
   NirValidationCubit cubit, {
   required NirParameterStats target,
 }) async {
-  final result = await showAppDialog<(String, String)>(
+  final result = await showAppDialog<(String, String, NirAppliedCorrection?)>(
     context,
     builder: (_) => _ResetForm(target: target),
   );
@@ -706,6 +852,7 @@ Future<void> _showResetDialog(
     entityId: target.entityId,
     entityName: target.entityName,
     parameter: target.parameter,
+    appliedCorrection: result.$3,
   );
   if (saved && cubit.state.pendingApproval && context.mounted) {
     AppFeedback.show(

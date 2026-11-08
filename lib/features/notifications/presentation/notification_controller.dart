@@ -77,13 +77,15 @@ class NotificationController extends ChangeNotifier {
   }
 
   Future<void> markRead(NotificationItem item) async {
+    final generation = _generation;
     await service.markRead(item.id);
-    await load();
+    if (generation == _generation) await load();
   }
 
   Future<void> markAllRead() async {
+    final generation = _generation;
     await service.markAllRead();
-    await load();
+    if (generation == _generation) await load();
   }
 
   @override

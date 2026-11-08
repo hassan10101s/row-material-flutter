@@ -5,6 +5,7 @@ import 'package:material_lab/core/app_paths.dart';
 import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/features/notifications/data/notification_service.dart';
+import 'package:material_lab/features/notifications/data/notification_delivery_store.dart';
 import 'package:material_lab/features/notifications/domain/notification_item.dart';
 import 'package:material_lab/features/notifications/domain/push_event.dart';
 
@@ -85,12 +86,164 @@ void main() {
     service = NotificationService(
       dbHelper: helper,
       metadata: SyncMetadata(helper),
+      deliveryStore: NotificationDeliveryStore(paths: _FakeAppPaths(tmp.path)),
     );
   });
 
   tearDown(() async {
+    await service.deliveryStore.close();
     await helper.close();
     if (await tmp.exists()) await tmp.delete(recursive: true);
+  });
+
+  test(
+    'phone delivery binds to the current device and suppresses its own saves',
+    () async {
+      await service.bindSession(
+        const PushBinding(organizationId: 'org', uid: 'u', deviceId: 'phone'),
+      );
+      final other = PushEvent.forRecord(
+        organizationId: 'org',
+        kind: 'inspection',
+        remoteId: 'remote',
+        sourceDeviceId: 'desktop',
+      );
+      expect(await service.deliveryStore.claim(other), isTrue);
+      await service.deliveryStore.complete(other);
+      expect(await service.deliveryStore.claim(other), isFalse);
+      expect(
+        await service.deliveryStore.claim(
+          PushEvent.forRecord(
+            organizationId: 'org',
+            kind: 'inspection',
+            remoteId: 'own',
+            sourceDeviceId: 'phone',
+          ),
+        ),
+        isFalse,
+      );
+      await service.bindSession(null);
+      expect(
+        await service.deliveryStore.claim(
+          PushEvent.forRecord(
+            organizationId: 'org',
+            kind: 'inspection',
+            remoteId: 'after-signout',
+          ),
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test(
+    'a queued scan from the previous session writes no notifications or watermark',
+    () async {
+      await _insertInspection(helper, entryCode: 'STALE');
+      final stale = service.checkForNew(labEnabled: false);
+      await service.bindSession(
+        const PushBinding(
+          organizationId: 'next-org',
+          uid: 'next-user',
+          deviceId: 'phone',
+        ),
+      );
+      expect(await stale, isEmpty);
+      expect(await service.recent(), isEmpty);
+      expect(
+        await SyncMetadata(helper).get(SyncMetadata.notifSeenInspectionIdKey),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'notification history respects permissions after a session change',
+    () async {
+      await _insertInspection(helper, entryCode: 'PRIVATE');
+      await service.checkForNew(labEnabled: false);
+      final hidden = NotificationService(
+        dbHelper: helper,
+        metadata: SyncMetadata(helper),
+        canReadNotification: (_) => false,
+      );
+      expect(await hidden.recent(), isEmpty);
+      expect(await hidden.unread(), isEmpty);
+      expect(await hidden.unreadCount(), 0);
+      expect(await hidden.resolvePayload('inspection:1'), isNull);
+    },
+  );
+
+  test(
+    'sync problems can be stored once without violating the notification schema',
+    () async {
+      await service.notifySyncProblems(conflicts: 1, blocked: 0, failed: 0);
+      await service.notifySyncProblems(conflicts: 1, blocked: 0, failed: 0);
+      expect((await service.recent()).single.type, NotificationType.sync);
+      expect(await service.unreadCount(), 1);
+    },
+  );
+
+  test(
+    'product samples notify once and open their parent inspection',
+    () async {
+      final batch = await _insertInspection(helper, entryCode: 'BATCH-NOTIFY');
+      final db = await helper.database;
+      await db.update(
+        'inspections',
+        {'inspection_kind': 'product'},
+        where: 'id = ?',
+        whereArgs: [batch],
+      );
+      Future<int> add(int n) => db.insert('product_batch_samples', {
+        'batch_id': batch,
+        'sample_no': n,
+        'sample_name': 'Sample $n',
+        'tested_at': '2026-11-01',
+        'created_at': '2026-11-01',
+        'remote_id': 'remote-sample-$n',
+      });
+      final id = await add(1);
+      final found = await service.checkForNew(inspectionEnabled: false);
+      expect(found, hasLength(1));
+      expect(found.single.type, NotificationType.productSample);
+      expect(found.single.refId, id);
+      expect(
+        await service.resolvePayload(found.single.payload),
+        '/inspections?highlight=$batch',
+      );
+      expect(await service.checkForNew(inspectionEnabled: false), isEmpty);
+      await add(2);
+      expect(await service.checkForNew(inspectionEnabled: false), hasLength(1));
+      await service.markAllRead();
+      expect(await service.checkForNew(inspectionEnabled: false), isEmpty);
+    },
+  );
+
+  test('legacy notification upgrade preserves ids and read state', () async {
+    final db = await helper.database;
+    await db.execute('DROP TABLE notifications');
+    await db.execute(
+      "CREATE TABLE notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL CHECK(type IN ('inspection','labResult')), ref_id INTEGER NOT NULL, entry_code TEXT NOT NULL, title TEXT NOT NULL, subtitle TEXT NOT NULL, created_at TEXT NOT NULL, read INTEGER NOT NULL DEFAULT 0, UNIQUE(type, entry_code, ref_id))",
+    );
+    await db.insert('notifications', {
+      'id': 7,
+      'type': 'inspection',
+      'ref_id': 4,
+      'entry_code': 'OLD',
+      'title': 'Kept',
+      'subtitle': '',
+      'created_at': '2026-10-28',
+      'read': 1,
+    });
+    await helper.close();
+    final upgraded = await helper.database;
+    final old = (await upgraded.query('notifications')).single;
+    expect(old['id'], 7);
+    expect(old['read'], 1);
+    expect(old['title'], 'Kept');
+    await service.notifySyncProblems(conflicts: 0, blocked: 0, failed: 1);
+    expect(await service.recent(), hasLength(2));
   });
 
   test('inserted inspection is detected once, then quiet', () async {
@@ -212,10 +365,13 @@ void main() {
       });
 
       final found = await service.checkForNew(inspectionEnabled: false);
-      expect(found, hasLength(1));
-      expect(found.single.title, contains('متابعة تحليل منتج'));
-      expect(found.single.subtitle, contains('Flour 50T'));
-      expect(found.single.subtitle, contains('مقبول'));
+      final chemistry = found
+          .where((item) => item.type == NotificationType.labResult)
+          .toList();
+      expect(chemistry, hasLength(1));
+      expect(chemistry.single.title, contains('متابعة تحليل منتج'));
+      expect(chemistry.single.subtitle, contains('Flour 50T'));
+      expect(chemistry.single.subtitle, contains('مقبول'));
     },
   );
 

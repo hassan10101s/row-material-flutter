@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
 <head>
     <meta charset="UTF-8">
     <title>Sample Label - {{ inspection.entry_code }}</title>
@@ -229,7 +229,10 @@
             margin-top: 5px;
             letter-spacing: 0.5px;
         }
-    </style>
+
+html[dir="ltr"] body { direction:ltr; text-align:left; }
+html[dir="rtl"] body { direction:rtl; text-align:right; }
+</style>
 </head>
 <body>
     <div class="container">
@@ -250,42 +253,33 @@
                 </div>
 
                 <div class="info-grid">
-                    {% if inspection.inspection_kind == 'product' %}
+                    {% if inspection.inspection_kind != 'product' %}
                     <div class="info-item">
-                        <div class="info-label">Formula Number</div>
-                        <div class="info-value">{{ inspection.formula_number or '-' }}</div>
-                    </div>
-                    <div class="info-item">
-                        <div class="info-label">Batch Number</div>
-                        <div class="info-value">{{ inspection.batch_number or '-' }}</div>
-                    </div>
-                    {% else %}
-                    <div class="info-item">
-                        <div class="info-label">Supplier</div>
+                        <div class="info-label">{% if is_en %}Supplier{% else %}المورد{% endif %}</div>
                         <div class="info-value">{{ inspection.supplier or '-' }}</div>
                     </div>
                     <div class="info-item">
-                        <div class="info-label">Truck Number</div>
+                        <div class="info-label">{% if is_en %}Truck Number{% else %}رقم السيارة{% endif %}</div>
                         <div class="info-value">{{ inspection.truck_number or '-' }}</div>
                     </div>
                     {% endif %}
                     <div class="info-item">
-                        <div class="info-label">Quantity</div>
-                        <div class="info-value">{{ quantity_display }} Ton</div>
+                        <div class="info-label">{% if is_en %}Quantity{% else %}الكمية{% endif %}</div>
+                        <div class="info-value">{{ quantity_display }} {% if is_en %}ton{% else %}طن{% endif %}</div>
                     </div>
                     <div class="info-item">
-                        <div class="info-label">Specialist</div>
+                        <div class="info-label">{% if is_en %}Specialist{% else %}أخصائي الجودة{% endif %}</div>
                         <div class="info-value">{{ inspection.specialist_name or '-' }}</div>
                     </div>
                     <div class="info-item">
-                        <div class="info-label">Expiry Date</div>
+                        <div class="info-label">{% if is_en %}Expiry Date{% else %}تاريخ الصلاحية{% endif %}</div>
                         <div class="info-value">{{ inspection.expiry_date or '-' }}</div>
                     </div>
                 </div>
 
                 <div class="footer">
                     <span>{{ department_label }}</span>
-                    {% if form_no %}<span>{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</span>{% endif %}
+                    {% if form_no %}<span>{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</span>{% endif %}
                 </div>
             </div>
         </div>
@@ -298,9 +292,9 @@
             {% if qr_image_data_uri %}
             <img class="qr-img" src="{{ qr_image_data_uri }}" alt="QR Code">
             {% else %}
-            <div class="qr-img-fallback">NO QR DATA</div>
+            <div class="qr-img-fallback">{% if is_en %}NO QR DATA{% else %}الرمز غير متاح{% endif %}</div>
             {% endif %}
-            <div class="qr-hint">SCAN TO VERIFY</div>
+            <div class="qr-hint">{% if is_en %}SCAN TO VERIFY{% else %}امسح للتحقق{% endif %}</div>
         </div>
     </div>
 </body>

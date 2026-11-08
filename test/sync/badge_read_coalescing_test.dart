@@ -8,12 +8,12 @@ import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'sync_test_fixture.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
-import 'package:material_lab/core/sync/sync_engine.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
+import '../support/retired/core/sync/sync_engine.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
-import 'package:material_lab/features/sync/presentation/sync_status_controller.dart';
+import 'package:material_lab/features/connection/presentation/connection_status_controller.dart';
 
 class _MockQueue extends Mock implements SyncQueue {}
 
@@ -38,7 +38,7 @@ void main() {
     registerFallbackValue(() {});
   });
 
-  group('SyncStatusController.refresh', () {
+  group('ConnectionStatusController.refresh', () {
     late _MockQueue queue;
     late _MockMetadata metadata;
     late Completer<Map<String, String>> gate;
@@ -55,8 +55,7 @@ void main() {
     });
 
     test('overlapping refreshes share one underlying read pair', () async {
-      final c = SyncStatusController(
-        queue: queue,
+      final c = ConnectionStatusController(
         metadata: metadata,
         isOnline: () => true,
         refreshInterval: const Duration(days: 1),
@@ -72,8 +71,7 @@ void main() {
       await second;
 
       verify(() => metadata.readAll(any())).called(1);
-      verify(() => queue.countBadge()).called(1);
-      expect(c.status.pending, 1);
+      verifyNever(() => queue.countBadge());
     });
   });
 

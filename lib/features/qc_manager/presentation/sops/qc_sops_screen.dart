@@ -1,3 +1,5 @@
+import '../../../../../design_system/widgets/app_adaptive.dart';
+import '../../../../../design_system/widgets/app_mobile_add_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -44,6 +46,9 @@ class QcSopsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final canCreate =
+        getIt.isRegistered<AuthGate>() &&
+        getIt<AuthGate>().canWrite(Permission.qcWrite);
     final cubit = context.read<QcSopsCubit>();
     final body = BlocConsumer<QcSopsCubit, QcSopsState>(
       listenWhen: (a, b) => a.error != b.error && b.error != null,
@@ -62,7 +67,10 @@ class QcSopsScreen extends StatelessWidget {
                     'لا توجد إجراءات تطابق هذه الفلاتر',
                     'No procedures match these filters',
                   ),
-            action: state.filters.isEmpty
+            action:
+                canCreate &&
+                    state.filters.isEmpty &&
+                    appUsesDesktopChrome(context)
                 ? null
                 : AppButton(
                     label: AppText.t('مسح الفلاتر', 'Clear filters'),
@@ -114,45 +122,51 @@ class QcSopsScreen extends StatelessWidget {
       },
     );
     if (embedded) {
-      return Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: Row(
-              children: [
-                const Spacer(),
-                AppButton(
-                  small: true,
-                  style: AppButtonStyle.ghost,
-                  icon: const Icon(Icons.table_view_outlined, size: 18),
-                  onPressed: () =>
-                      RegisterExports.sops(context, cubit.state.sops),
-                ),
-                AppButton(
-                  small: true,
-                  style: AppButtonStyle.ghost,
-                  icon: const Icon(Icons.refresh, size: 18),
-                  onPressed: () => cubit.refresh(),
-                ),
-                AppButton(
-                  small: true,
-                  style: AppButtonStyle.ghost,
-                  label: AppText.t('فلاتر', 'Filters'),
-                  icon: const Icon(Icons.tune, size: 18),
-                  onPressed: () => _openFilters(context),
-                ),
-                AppButton(
-                  small: true,
-                  style: AppButtonStyle.secondary,
-                  label: AppText.t('إجراء جديد', 'New SOP'),
-                  icon: const Icon(Icons.add, size: 18),
-                  onPressed: () => QcSopFormScreen.open(context),
-                ),
-              ],
+      return AppMobileAddLayout(
+        floating: !appUsesDesktopChrome(context),
+        tooltip: AppText.t('إجراء جديد', 'New SOP'),
+        onAdd: canCreate ? () => QcSopFormScreen.open(context) : null,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: Row(
+                children: [
+                  const Spacer(),
+                  AppButton(
+                    small: true,
+                    style: AppButtonStyle.ghost,
+                    icon: const Icon(Icons.table_view_outlined, size: 18),
+                    onPressed: () =>
+                        RegisterExports.sops(context, cubit.state.sops),
+                  ),
+                  AppButton(
+                    small: true,
+                    style: AppButtonStyle.ghost,
+                    icon: const Icon(Icons.refresh, size: 18),
+                    onPressed: () => cubit.refresh(),
+                  ),
+                  AppButton(
+                    small: true,
+                    style: AppButtonStyle.ghost,
+                    label: AppText.t('فلاتر', 'Filters'),
+                    icon: const Icon(Icons.tune, size: 18),
+                    onPressed: () => _openFilters(context),
+                  ),
+                  if (canCreate && appUsesDesktopChrome(context))
+                    AppButton(
+                      small: true,
+                      style: AppButtonStyle.secondary,
+                      label: AppText.t('إجراء جديد', 'New SOP'),
+                      icon: const Icon(Icons.add, size: 18),
+                      onPressed: () => QcSopFormScreen.open(context),
+                    ),
+                ],
+              ),
             ),
-          ),
-          Expanded(child: body),
-        ],
+            Expanded(child: body),
+          ],
+        ),
       );
     }
     return Scaffold(
@@ -174,14 +188,20 @@ class QcSopsScreen extends StatelessWidget {
             onPressed: () => _openFilters(context),
             icon: const Icon(Icons.tune),
           ),
-          IconButton(
-            tooltip: AppText.t('إجراء جديد', 'New SOP'),
-            onPressed: () => QcSopFormScreen.open(context),
-            icon: const Icon(Icons.add),
-          ),
+          if (canCreate && appUsesDesktopChrome(context))
+            IconButton(
+              tooltip: AppText.t('إجراء جديد', 'New SOP'),
+              onPressed: () => QcSopFormScreen.open(context),
+              icon: const Icon(Icons.add),
+            ),
         ],
       ),
-      body: body,
+      body: AppMobileAddLayout(
+        floating: !appUsesDesktopChrome(context),
+        tooltip: AppText.t('إجراء جديد', 'New SOP'),
+        onAdd: canCreate ? () => QcSopFormScreen.open(context) : null,
+        child: body,
+      ),
     );
   }
 
@@ -205,6 +225,30 @@ class _SummaryStrip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!appUsesDesktopChrome(context)) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 4,
+          children: [
+            for (final entry in [
+              (AppText.t('الإجمالي', 'Total'), summary.total),
+              (AppText.t('مسودة', 'Draft'), summary.draft),
+              (
+                AppText.t('بانتظار الموافقة', 'Awaiting'),
+                summary.awaitingApproval,
+              ),
+              (AppText.t('ينتهي قريبًا', 'Expiring'), summary.expiringSoon),
+            ])
+              Text(
+                '${entry.$1}: ${entry.$2}',
+                style: TextStyle(fontSize: 12, color: AppColors.textMuted),
+              ),
+          ],
+        ),
+      );
+    }
     final cards = [
       AppSummaryCard(
         label: AppText.t('الإجمالي', 'Total'),
@@ -296,6 +340,84 @@ class _SopTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!appUsesDesktopChrome(context)) {
+      return Material(
+        color: AppColors.surface,
+        child: InkWell(
+          onTap: () => QcSopDetailScreen.open(context, sop.sopId ?? 0),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        sop.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            sop.code,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          SopPill.status(sop.status),
+                          if (sop.category.isNotEmpty)
+                            Text(
+                              sop.category,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: AppColors.textMuted,
+                              ),
+                            ),
+                        ],
+                      ),
+                      if (sop.isPublished && sop.needsAck)
+                        Text(
+                          AppText.t(
+                            'يتطلب إشعار قراءة',
+                            'Needs a read acknowledgement',
+                          ),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.warning,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                if (canDelete)
+                  PopupMenuButton<String>(
+                    tooltip: AppText.t('خيارات', 'Options'),
+                    onSelected: (_) => _confirmDelete(context),
+                    itemBuilder: (_) => [
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text(AppText.t('حذف', 'Delete')),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return AppCard(
       onTap: () => QcSopDetailScreen.open(context, sop.sopId ?? 0),
       child: Column(

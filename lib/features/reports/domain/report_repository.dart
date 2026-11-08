@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import '../../lab/domain/chemical_consumption_report.dart';
 
 /// Report generation and PDF export.
 ///
@@ -20,6 +21,9 @@ import 'dart:typed_data';
 /// [ReportRepository] keeps only the report API. How the bytes get produced
 /// (headless Edge/Chrome with a dart-pdf fallback) stays behind the interface.
 abstract interface class ReportRepository {
+  /// Same branded single-language document for browser printing and PDF.
+  Future<String> chemicalConsumptionHtml(ChemicalConsumptionReport report);
+  Future<ReportDoc> chemicalConsumptionReport(ChemicalConsumptionReport report);
   // ── Inspection documents ───────────────────────────────────────
 
   /// Full inspection report for one sample.
@@ -56,6 +60,13 @@ abstract interface class ReportRepository {
   Future<ReportDoc> monthlyReport({required int month, required int year});
 
   Future<ReportDoc> yearlyReport({required int year});
+
+  Future<ReportDoc> productDailyReport(String dateStr);
+  Future<ReportDoc> productMonthlyReport({
+    required int month,
+    required int year,
+  });
+  Future<ReportDoc> productYearlyReport({required int year});
 
   /// Daily/monthly/yearly lab-test report. The extra filters are optional
   /// narrowing; the type alone decides the period.

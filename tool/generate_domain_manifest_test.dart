@@ -14,7 +14,7 @@ void main() {
       final fixture = await openSyncFixture();
       try {
         final manifest = await buildDomainManifest(fixture.db);
-        await File('functions/domain_manifest.json').writeAsString(
+        await File('tool/central_migration/domain_manifest.json').writeAsString(
           '${const JsonEncoder.withIndent('  ').convert(manifest)}\n',
         );
         await generateDomainWireVectors(fixture);

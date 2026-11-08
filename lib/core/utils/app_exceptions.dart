@@ -12,6 +12,11 @@ abstract interface class UserFacingError {
 /// should describe its pending state instead of presenting it as a failed save.
 abstract interface class PendingOperation implements UserFacingError {}
 
+/// User chose Cancel before any business request was sent or draft persisted.
+class BusinessActionCancelled extends AppError {
+  const BusinessActionCancelled() : super('');
+}
+
 class AppError implements Exception, UserFacingError {
   final String message;
   const AppError(this.message);
@@ -25,6 +30,7 @@ class AppError implements Exception, UserFacingError {
   /// Cubits use this in their `catch` fallbacks so a raw driver exception can
   /// never be stored in state and end up on screen.
   static String friendly(Object error) {
+    if (error is BusinessActionCancelled || error is PendingOperation) return '';
     if (error is UserFacingError) {
       final text = error.userMessage.trim();
       if (text.isNotEmpty) return text;

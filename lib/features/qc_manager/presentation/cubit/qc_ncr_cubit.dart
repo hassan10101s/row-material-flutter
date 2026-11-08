@@ -152,7 +152,14 @@ class QcNcrState extends Equatable {
 /// "3 critical" above a table of 40 unrelated rows while two of the five
 /// parallel queries are still in flight.
 class QcNcrCubit extends AppCubit<QcNcrState> {
-  QcNcrCubit(this.repo, {this._pageSize = 200}) : super(const QcNcrState());
+  QcNcrCubit(this.repo, {this._pageSize = 200}) : super(const QcNcrState()) {
+    refreshOnSync(() async {
+      await loadOptions();
+      await load(resetPaging: false);
+      final selected = state.selectedFindingId;
+      if (selected != null) await selectFinding(selected);
+    });
+  }
 
   /// The domain contract, not a local seam.
   ///

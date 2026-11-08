@@ -1,3 +1,4 @@
+import '../../../../core/security/secure_field_access.dart';
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../core/utils/app_exceptions.dart';
@@ -14,8 +15,32 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
     required this.repo,
     required this.reports,
     this.labResults,
+    this.secureAccess,
   }) : super(const InspectionDetailState()) {
     refreshOnSync(load);
+    secureAccess?.addListener(_privacyChanged);
+  }
+
+  final SecureFieldAccess? secureAccess;
+  void _privacyChanged() {
+    if (state.inspection != null) {
+      safeEmit(
+        state.copyWith(
+          inspection: SecureFieldAccess.publicRecord(state.inspection!),
+          chemicalAnalyses: [
+            for (final r in state.chemicalAnalyses)
+              if (r['secure_result'] != 1) SecureFieldAccess.publicRecord(r),
+          ],
+        ),
+      );
+    }
+    load();
+  }
+
+  @override
+  Future<void> close() {
+    secureAccess?.removeListener(_privacyChanged);
+    return super.close();
   }
 
   final int inspectionId;
@@ -29,11 +54,14 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
       // Fetch the inspection row first (need entry_code), then load
       // status history (already inside getById) + lab tests in parallel
       // where possible. getById = row + history (1+1, expected on detail).
-      final inspection = await repo.getById(inspectionId);
-      final entryCode = '${inspection['entry_code'] ?? ''}'.trim();
+      var inspection = await repo.getById(inspectionId);
+      if (secureAccess != null) {
+        inspection = await secureAccess!.reveal('sample', inspection);
+      }
+      final entryCode = '${inspection['entry_code'] ?? ''}';
       // History already included; only the lab enrichment is extra.
       List<Map<String, dynamic>> chemicalAnalyses = const [];
-      if (entryCode.isNotEmpty && labResults != null) {
+      if (entryCode.trim().isNotEmpty && labResults != null) {
         chemicalAnalyses = await labResults!.listSampleTestsForEntryCode(
           entryCode,
         );
@@ -41,7 +69,9 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
       safeEmit(
         state.copyWith(
           loading: false,
-          inspection: inspection,
+          inspection: secureAccess?.enabled == true
+              ? inspection
+              : SecureFieldAccess.publicRecord(inspection),
           history: List<Map<String, dynamic>>.from(
             inspection['status_history'] ?? [],
           ),
@@ -49,7 +79,7 @@ class InspectionDetailCubit extends AppCubit<InspectionDetailState> {
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }

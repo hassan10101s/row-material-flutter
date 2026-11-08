@@ -10,6 +10,7 @@ import 'package:material_lab/features/inspections/domain/inspection_repository.d
 import 'package:material_lab/features/inspections/presentation/qr/qr_scan_screen.dart';
 import 'package:material_lab/features/lab/domain/lab_result_repository.dart';
 import 'package:material_lab/features/reports/domain/report_repository.dart';
+import 'package:material_lab/core/responsive/form_factor.dart';
 
 class _RepoMock extends Mock implements InspectionRepository {}
 
@@ -45,6 +46,7 @@ void main() {
   });
 
   tearDown(() {
+    FormFactor.debugSet(null);
     if (getIt.isRegistered<InspectionRepository>()) {
       getIt.unregister<InspectionRepository>();
     }
@@ -105,6 +107,45 @@ void main() {
     when(
       () => lab.listSampleTestsForEntryCode(any()),
     ).thenAnswer((_) async => []);
+  }
+
+  for (final size in [const Size(390, 844), const Size(844, 420)]) {
+    testWidgets('phone QR details stay a pushed page at ${size.width}dp', (
+      tester,
+    ) async {
+      FormFactor.debugSet(AppFormFactor.mobile);
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      when(
+        () => repo.list(
+          query: any(named: 'query'),
+          limit: any(named: 'limit'),
+        ),
+      ).thenAnswer((_) async => [row]);
+      stubDetail();
+      await tester.pumpWidget(
+        ScreenUtilInit(
+          designSize: const Size(400, 860),
+          minTextAdapt: true,
+          splitScreenMode: true,
+          builder: (_, _) => const MaterialApp(home: QrScanScreen()),
+        ),
+      );
+      await settle(tester);
+      await tester.enterText(find.byType(TextFormField), 'R-9');
+      await tester.ensureVisible(find.text('Search'));
+      await tester.tap(find.text('Search'));
+      await settle(tester);
+      expect(find.text('Cement'), findsWidgets);
+      expect(find.byType(Dialog), findsNothing);
+      expect(find.byType(BackButton), findsOneWidget);
+      await tester.binding.handlePopRoute();
+      await settle(tester);
+      expect(find.text('Scan QR code'), findsOneWidget);
+      expect(find.text('Cement'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
   }
 
   testWidgets('manual entry opens the inspection at once', (tester) async {

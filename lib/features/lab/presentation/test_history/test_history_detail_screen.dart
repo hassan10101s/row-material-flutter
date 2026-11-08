@@ -1,3 +1,5 @@
+import '../../../../core/security/secure_field_access.dart';
+import '../../../../core/security/secure_display_guard.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -5,7 +7,6 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
 import '../../../../core/constants/app_strings.dart';
-import '../../../../core/responsive/form_factor.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
@@ -45,30 +46,21 @@ class TestHistoryDetailScreen extends StatelessWidget {
     BuildContext context,
     Map<String, dynamic> row,
   ) async {
-    final isDesktop = FormFactor.current.isDesktop;
-    if (isDesktop) {
-      final edited = await showAppWindow<bool>(
-        context,
-        title: AppText.t('تعديل التحليل', 'Edit test'),
-        icon: Icons.science_outlined,
-        maxWidth: 1040,
-        height: 780,
-        scrollBody: false,
-        child: SingleChildScrollView(
-          child: Align(
-            alignment: Alignment.topCenter,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 920),
-              child: TestHistoryDetailScreen(row: row),
-            ),
+    final edited = await showAppContent<bool>(
+      context,
+      title: AppText.t('بيانات التحليل', 'Test details'),
+      icon: Icons.science_outlined,
+      maxWidth: 1040,
+      height: 780,
+      scrollBody: false,
+      builder: (_, _) => SingleChildScrollView(
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 920),
+            child: TestHistoryDetailScreen(row: row),
           ),
         ),
-      );
-      return edited ?? false;
-    }
-    final edited = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => TestHistoryDetailScreen(row: row, fullScreen: true),
       ),
     );
     return edited ?? false;
@@ -119,8 +111,8 @@ class TestHistoryDetailScreen extends StatelessWidget {
     // Write affordances follow the same gate the repository enforces
     // (`labResultsUpdate`): without it the screen is strictly read-only, so a
     // viewer/lab member can inspect a record but never reach the write path.
-    final canEdit = getIt<AuthGate>().canWrite(Permission.labResultsUpdate);
-    final content = canEdit ? _editor(context) : _readOnly(context);
+    final canEdit = row['secure_result'] != 1 && getIt<AuthGate>().canWrite(Permission.labResultsUpdate);
+    final content = SecureDisplayGuard(access: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null, child: canEdit ? _editor(context) : _readOnly(context));
     if (fullScreen) {
       return Scaffold(
         appBar: AppTopAppBar(

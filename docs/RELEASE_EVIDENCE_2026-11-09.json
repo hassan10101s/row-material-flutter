@@ -1,0 +1,102 @@
+{
+  "review": "2026-11-08--2026-11-09",
+  "project": "materiallab-63405",
+  "productionRules": {
+    "project": "materiallab-63405",
+    "previousRuleset": "projects/materiallab-63405/rulesets/a838beb7-e069-4f2b-a3cd-7204c1c76a11",
+    "ruleset": "projects/materiallab-63405/rulesets/ee858067-8cd9-41af-89df-f882087c3dce",
+    "sourceHash": "194dfb124ed12a6f2846e4cfce3896beef7eb744eb2880514703558afb3279e2",
+    "artifactHash": "fbaaad23c3ef6a8457341d75bea66b8353ac02f3d650dc075aed01fd825ae8c0",
+    "compiledBytes": 255781,
+    "executableVersion": "FIREBASE_RULES_EXECUTABLE_V1",
+    "verified": true,
+    "stagingWaivedExplicitly": true,
+    "responseError": "{\"status\":503,\"message\":\"The service is currently unavailable.\"}",
+    "verifiedAt": "2026-11-08T22:26:25.344Z",
+    "productionBusinessDataUntouched": true
+  },
+  "validation": {
+    "flutterAnalyzeIssues": 0,
+    "flutterUnitPassed": 2139,
+    "flutterUnitSkipped": 93,
+    "flutterSecurityPassed": 135,
+    "securityProject": "demo-materiallab",
+    "nodeContractPassed": 25,
+    "nodeEmulatorPassed": 9,
+    "generatedRulesInSync": true,
+    "logSha256": {
+      "analysis": "8d01b996b68f533e8bcdef80d7d1e828f6cf6f717ade8b5fb2dc39c013c045a6",
+      "unit": "264dc8e270b28f61d044f52be0bc8fee7d0fb2b1edb1619d0aab5e139fd2b3ec",
+      "security": "82128e581b3dea3483167f577059f83d773478ac389a8cfd02e1709b207293c6",
+      "nodeContract": "d6ec6ec50a6f8146e86a5ddcaaa740afb759259340e586d556356b328ce5ce0d",
+      "nodeEmulator": "a6ccc385def2d6e759a5609abaa2bad59ba3fb93f9f0532edca4d37dacd63d83"
+    }
+  },
+  "limits": {
+    "maxBusinessEffects": 10,
+    "maxStandardBusinessEffects": 4,
+    "maxLabDefinitionEffects": 6,
+    "maxLabConsumptionEffects": 10,
+    "maxProductReferenceEffects": 7,
+    "maxSimpleBusinessEffects": 12,
+    "maxChemicalDefinitions": 36,
+    "chemicalDefinitionBlockSize": 4,
+    "maxChemicalDefinitionProofBlocks": 9,
+    "simpleEntityTypes": [
+      "parameter",
+      "materialBound",
+      "organizationSetting",
+      "labConstant",
+      "labUnit",
+      "equipment",
+      "equipmentEvent",
+      "worksheet",
+      "referenceMaterial",
+      "labMaterialAnalysis",
+      "nutritionFormulation",
+      "qcCustomTableRow"
+    ],
+    "firestoreAtomicRuleAccessLimit": 20,
+    "expandedEntityTypes": [
+      "qcCustomTable",
+      "qcCustomTableField"
+    ],
+    "largeOperations": "draft_only_no_submission_no_partial_commit",
+    "foregroundRefreshSeconds": 30,
+    "customTableColumns": 9
+  },
+  "databaseMetadata": {
+    "project": "materiallab-63405",
+    "status": 200,
+    "name": "projects/materiallab-63405/databases/(default)",
+    "type": "FIRESTORE_NATIVE",
+    "databaseEdition": "STANDARD",
+    "locationId": "europe-west1",
+    "readOnly": true,
+    "capturedAt": "2026-11-08T22:21:31.960Z"
+  },
+  "billingReadOnly": {
+    "project": "materiallab-63405",
+    "status": 200,
+    "billingEnabled": false,
+    "billingAccountLinked": true,
+    "capturedAt": "2026-11-08T21:24:36.817Z",
+    "readOnly": true
+  },
+  "applicationBinaryBuilt": false,
+  "originalLocalHistoryBackup": "codex/local-history-before-release-20261108",
+  "sourcePublicationExcludes": [
+    "output/**",
+    "**/*.hprof",
+    "backup/**",
+    "build/**",
+    "ven/**"
+  ],
+  "stagedSourceScan": {
+    "stagedFiles": 577,
+    "textFilesScanned": 558,
+    "credentialFindings": [],
+    "forbiddenArtifacts": [],
+    "largeFiles": []
+  }
+}

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../app/auth_gate.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../core/utils/app_exceptions.dart';
+import '../../../../core/utils/decimal_input.dart';
+import '../../../../design_system/widgets/app_quantity_field.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
@@ -39,7 +40,19 @@ const _standaloneInspectionId = 0;
 /// which carries the §A9.4 write guard and the audit trail; this layer only
 /// validates what the user actually typed.
 class QcNcrCreateScreen extends StatefulWidget {
-  const QcNcrCreateScreen({super.key, this.assignees = const [], this.finding});
+  const QcNcrCreateScreen({
+    super.key,
+    this.assignees = const [],
+    this.finding,
+    this.productSampleId,
+    this.productContext = '',
+    this.initialDescription,
+    this.activateProductDecision = false,
+  });
+  final int? productSampleId;
+  final String productContext;
+  final String? initialDescription;
+  final bool activateProductDecision;
 
   /// The assignee roster the dashboard already fetched (`id`/`name` pairs).
   /// Passing it in keeps the form from re-querying a members list it does
@@ -61,11 +74,15 @@ class QcNcrCreateScreen extends StatefulWidget {
   /// Opens the editor: the caller's [QcNcrCubit] refetches when a finding
   /// was written (`true` result), so the cards and the register show it
   /// immediately on whichever surface hosts the button.
-  static Future<void> open(
+  static Future<bool> open(
     BuildContext context,
     QcNcrCubit cubit, {
     List<({String id, String name})> assignees = const [],
     QcFindingNc? finding,
+    int? productSampleId,
+    String productContext = '',
+    String? initialDescription,
+    bool activateProductDecision = false,
   }) {
     final editing = finding != null;
     final title = editing
@@ -93,6 +110,10 @@ class QcNcrCreateScreen extends StatefulWidget {
                   child: QcNcrCreateScreen(
                     assignees: assignees,
                     finding: finding,
+                    productSampleId: productSampleId,
+                    productContext: productContext,
+                    initialDescription: initialDescription,
+                    activateProductDecision: activateProductDecision,
                   ),
                 ),
               ),
@@ -107,11 +128,19 @@ class QcNcrCreateScreen extends StatefulWidget {
         subtitle: subtitle,
         icon: editing ? Icons.edit_outlined : Icons.flag_outlined,
         maxWidth: 720,
-        child: QcNcrCreateScreen(assignees: assignees, finding: finding),
+        child: QcNcrCreateScreen(
+          assignees: assignees,
+          finding: finding,
+          productSampleId: productSampleId,
+          productContext: productContext,
+          initialDescription: initialDescription,
+          activateProductDecision: activateProductDecision,
+        ),
       );
     }
     return action.then((saved) {
       if (saved == true) cubit.load();
+      return saved == true;
     });
   }
 
@@ -148,6 +177,8 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
   ({String id, String name})? _assignee;
   bool _loading = true;
   bool _saving = false;
+  String? _pendingMessage;
+  int? get _productSampleId => widget.productSampleId ?? _base?.productSampleId;
 
   QcFindingNc? get _base => widget.finding;
   bool get _editing => widget.finding != null;
@@ -160,8 +191,8 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
     // the first build, before the bootstrap round-trip returns.
     _roster = widget.assignees;
     final base = _base;
+    _description.text = widget.initialDescription ?? base?.description ?? '';
     if (base != null) {
-      _description.text = base.description;
       _category.text = base.category;
       _proposedAction.text = base.proposedAction;
       final qty = base.qtyAffected;
@@ -288,6 +319,7 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
   }
 
   Future<void> _save() async {
+    if (_saving || _pendingMessage != null) return;
     if (!(_formKey.currentState?.validate() ?? false)) {
       return;
     }
@@ -298,10 +330,13 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
     final dueDate = due.length >= 10 ? due.substring(0, 10) : due;
     final qty = _qty.text.trim().isEmpty
         ? null
-        : num.tryParse(_qty.text.trim().replaceAll(',', ''))?.toDouble();
+        : num.tryParse(normalizeDecimalInput(_qty.text))?.toDouble();
     final finding = base == null
         ? QcFindingNc(
-            inspectionId: _inspection?.inspectionId ?? _standaloneInspectionId,
+            inspectionId: _productSampleId != null
+                ? 0
+                : _inspection?.inspectionId ?? _standaloneInspectionId,
+            productSampleId: _productSampleId,
             code: _defect?.code ?? '',
             type: _type,
             severity: _severity,
@@ -325,6 +360,7 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
           )
         : QcFindingNc(
             findingId: base.findingId,
+            productSampleId: base.productSampleId,
             inspectionId:
                 _inspection?.inspectionId ??
                 (_inspectionChanged
@@ -369,7 +405,9 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
           );
     setState(() => _saving = true);
     try {
-      if (base == null) {
+      if (widget.activateProductDecision) {
+        await getIt<QcNcCapaRepository>().saveProductSampleFinding(finding);
+      } else if (base == null) {
         await getIt<QcNcCapaRepository>().createFinding(finding);
       } else {
         await getIt<QcNcCapaRepository>().saveFinding(finding);
@@ -390,8 +428,11 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
       Navigator.of(context).pop(true);
     } on AppError catch (e) {
       if (!mounted) return;
-      setState(() => _saving = false);
-      AppFeedback.error(context, e.message);
+      setState(() {
+        _saving = false;
+        if (e is PendingOperation) _pendingMessage = e.userMessage;
+      });
+      AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
@@ -408,6 +449,23 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_productSampleId != null) ...[
+            AppField(
+              label: AppText.t(
+                'محضر المنتج والعينة',
+                'Product report and sample',
+              ),
+              initialValue: widget.productContext.isEmpty
+                  ? AppText.t(
+                      'مرتبطة بعينة المنتج',
+                      'Linked to a product sample',
+                    )
+                  : widget.productContext,
+              enabled: false,
+            ),
+            const SizedBox(height: AppSpacing.md),
+          ],
+          if (_pendingMessage != null) Text(_pendingMessage!),
           if (_loading) ...[
             const LinearProgressIndicator(minHeight: 2),
             const SizedBox(height: AppSpacing.lg),
@@ -442,35 +500,37 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
                       clearable: true,
                     ),
                   ),
-                  SizedBox(
-                    width: _colWidth(constraints.maxWidth, 3, 2),
-                    child: _DropdownTile(
-                      label: AppText.t(
-                        'التفتيش المرتبط (اختياري)',
-                        'Inspection link (optional)',
+                  if (_productSampleId == null)
+                    SizedBox(
+                      width: _colWidth(constraints.maxWidth, 3, 2),
+                      child: _DropdownTile(
+                        label: AppText.t(
+                          'التفتيش المرتبط (اختياري)',
+                          'Inspection link (optional)',
+                        ),
+                        hint: _inspections.isEmpty
+                            ? AppText.t(
+                                'لا توجد عمليات تفتيش',
+                                'No inspections yet',
+                              )
+                            : AppText.t(
+                                'اتركه فارغاً لحالة مستقلة',
+                                'Leave empty for a standalone finding',
+                              ),
+                        enabled:
+                            !_saving && !_loading && _inspections.isNotEmpty,
+                        value: _inspection,
+                        items: [
+                          for (final i in _inspections)
+                            (item: i, label: _inspectionLabel(i)),
+                        ],
+                        onChanged: (v) => setState(() {
+                          _inspection = v;
+                          _inspectionChanged = true;
+                        }),
+                        clearable: true,
                       ),
-                      hint: _inspections.isEmpty
-                          ? AppText.t(
-                              'لا توجد عمليات تفتيش',
-                              'No inspections yet',
-                            )
-                          : AppText.t(
-                              'اتركه فارغاً لحالة مستقلة',
-                              'Leave empty for a standalone finding',
-                            ),
-                      enabled: !_saving && !_loading && _inspections.isNotEmpty,
-                      value: _inspection,
-                      items: [
-                        for (final i in _inspections)
-                          (item: i, label: _inspectionLabel(i)),
-                      ],
-                      onChanged: (v) => setState(() {
-                        _inspection = v;
-                        _inspectionChanged = true;
-                      }),
-                      clearable: true,
                     ),
-                  ),
                   SizedBox(
                     width: _colWidth(constraints.maxWidth, 3, 2),
                     child: _DropdownTile(
@@ -590,12 +650,21 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
                       ),
                       controller: _qty,
                       enabled: !_saving,
+                      validator: (value) {
+                        final text = normalizeDecimalInput(value ?? '');
+                        if (text.isEmpty) return null;
+                        final number = double.tryParse(text);
+                        return number == null || !number.isFinite || number < 0
+                            ? AppText.t(
+                                'أدخل كمية رقمية صحيحة غير سالبة.',
+                                'Enter a valid non-negative quantity.',
+                              )
+                            : null;
+                      },
                       keyboardType: const TextInputType.numberWithOptions(
                         decimal: true,
                       ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\-]')),
-                      ],
+                      inputFormatters: [AppQuantityField.formatter],
                       hint: '0.00',
                     ),
                   ),
@@ -647,7 +716,7 @@ class _QcNcrCreateScreenState extends State<QcNcrCreateScreen> {
                       ? Icon(Icons.save_outlined, size: 18.r)
                       : Icon(Icons.flag, size: 18.r),
                   loading: _saving,
-                  onPressed: _saving ? null : _save,
+                  onPressed: _saving || _pendingMessage != null ? null : _save,
                 ),
               ),
               const SizedBox(width: AppSpacing.md),

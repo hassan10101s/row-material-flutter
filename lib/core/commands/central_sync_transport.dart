@@ -1,92 +1,62 @@
-import 'dart:convert';
-
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:http/http.dart' as http;
+import 'central_projection.dart';
 
 class CentralSyncGap implements Exception {
   const CentralSyncGap();
 }
 
-class CentralSyncTransport {
-  CentralSyncTransport({
-    this.region = 'us-central1',
-    this.functionName = 'readCentralSync',
-    this.useRest = false,
-    this.projectId,
-    this.auth,
-    this.client,
-    this.tokenProvider,
+class CentralReadBoundary {
+  const CentralReadBoundary({
+    required this.sequence,
+    required this.readTime,
+    required this.manifestVersion,
+    this.privacyEpoch = 0,
   });
+  final int sequence;
+  final String readTime;
+  final int manifestVersion;
+  final int privacyEpoch;
+}
 
-  final String region;
-  final String functionName;
-  final bool useRest;
-  final String? projectId;
-  final FirebaseAuth? auth;
-  final http.Client? client;
-  final Future<String?> Function()? tokenProvider;
+class CentralRecordPage {
+  const CentralRecordPage(this.records, this.nextAfter);
+  final List<ApprovedRecord> records;
+  final String? nextAfter;
+}
 
+class CentralChangeSet {
+  const CentralChangeSet({required this.records, required this.operationIds});
+  final List<ApprovedRecord> records;
+  final Set<String> operationIds;
+}
+
+/// Production reader: one immutable server read boundary for a complete cycle.
+abstract interface class ConsistentCentralSyncReader
+    implements CentralSyncReader {
+  Future<CentralReadBoundary> readHead();
+  Future<CentralRecordPage> readSnapshotPage(
+    String entityType,
+    CentralReadBoundary boundary, {
+    String? after,
+  });
+  Future<CentralChangeSet> readChanges(
+    int afterSequence,
+    CentralReadBoundary boundary,
+  );
+}
+
+/// Compatibility feed contract for local contract tests. The installed
+/// production reader uses the typed consistent Firestore interface above.
+abstract interface class CentralSyncReader {
+  Future<Map<String, dynamic>> call(Map<String, Object?> data);
+}
+
+/// Fail closed while a direct backend is not yet installed. This performs no
+/// remote calls and cannot report a successful bootstrap or download.
+class UnconfiguredCentralSyncReader implements CentralSyncReader {
+  const UnconfiguredCentralSyncReader();
+
+  @override
   Future<Map<String, dynamic>> call(Map<String, Object?> data) async {
-    if (!useRest) {
-      try {
-        final response = await FirebaseFunctions.instanceFor(region: region)
-            .httpsCallable(
-              functionName,
-              options: HttpsCallableOptions(
-                timeout: const Duration(seconds: 60),
-              ),
-            )
-            .call<Map<String, dynamic>>(data);
-        return response.data;
-      } on FirebaseFunctionsException catch (error) {
-        final details = error.details;
-        if (details is Map && details['code'] == 'EVENT_GAP') {
-          throw const CentralSyncGap();
-        }
-        rethrow;
-      }
-    }
-    final project = projectId;
-    if (project == null || !RegExp(r'^[a-z0-9-]+$').hasMatch(project)) {
-      throw StateError('Central sync is not configured.');
-    }
-    final token = tokenProvider != null
-        ? await tokenProvider!()
-        : await (auth ?? FirebaseAuth.instance).currentUser?.getIdToken();
-    if (token == null || token.isEmpty) {
-      throw StateError('Sign in is required.');
-    }
-    final transport = client ?? http.Client();
-    try {
-      final response = await transport
-          .post(
-            Uri.https('$region-$project.cloudfunctions.net', '/$functionName'),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $token',
-            },
-            body: jsonEncode({'data': data}),
-          )
-          .timeout(const Duration(seconds: 60));
-      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
-      if (response.statusCode != 200 ||
-          decoded is! Map ||
-          decoded['result'] is! Map) {
-        final error = decoded is Map ? decoded['error'] : null;
-        final details = error is Map ? error['details'] : null;
-        if (details is Map && details['code'] == 'EVENT_GAP') {
-          throw const CentralSyncGap();
-        }
-        throw StateError(
-          error is Map
-              ? '${error['message'] ?? 'Central sync failed.'}'
-              : 'Central sync failed.',
-        );
-      }
-      return Map<String, dynamic>.from(decoded['result'] as Map);
-    } finally {
-      if (client == null) transport.close();
-    }
+    throw StateError('المزامنة المباشرة غير مهيأة على هذا الجهاز.');
   }
 }

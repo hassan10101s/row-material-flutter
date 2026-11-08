@@ -1,3 +1,4 @@
+import '../../../../design_system/widgets/app_add_floating_action_button.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -157,11 +158,9 @@ class _EquipmentTabState extends State<EquipmentTab> {
         // sibling lab tabs share one IndexedStack). Wide keeps inline add.
         if (wide) return list;
         return Scaffold(
-          floatingActionButton: FloatingActionButton(
-            heroTag: null,
+          floatingActionButton: AppAddFloatingActionButton(
             tooltip: AppText.t('إضافة جهاز', 'Add equipment'),
             onPressed: _add,
-            child: Icon(Icons.add, size: 24.r),
           ),
           body: list,
         );
@@ -262,7 +261,7 @@ class _MasterListState extends State<EquipmentMasterList> {
         documentName: file.uri.pathSegments.last,
       );
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -781,7 +780,7 @@ class _EquipmentDetailState extends State<_EquipmentDetail> {
     } on AppError catch (e) {
       if (!mounted) return;
       setState(() => _printing = false);
-      AppFeedback.error(context, e.message);
+      AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (!mounted) return;
       setState(() => _printing = false);

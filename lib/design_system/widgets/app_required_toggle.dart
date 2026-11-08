@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import './app_tooltip.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../core/constants/app_strings.dart';
@@ -22,7 +23,7 @@ class AppRequiredToggle extends StatelessWidget {
   Widget build(BuildContext context) {
     final fill = value ? AppColors.primary : Colors.transparent;
     final border = value ? AppColors.primary : AppColors.border;
-    return Tooltip(
+    return AppTooltip(
       message: AppText.t(
         'مطلوب: يجب إدخال قيمته عند حفظ المحضر',
         'Required: must be filled when saving the inspection',

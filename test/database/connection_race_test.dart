@@ -30,7 +30,7 @@ class _FakeAppPaths extends AppPaths {
 ///
 ///     Unhandled Exception: DatabaseException(error database_closed)
 ///     #3 SyncQueue._count (package:material_lab/core/sync/sync_queue.dart:388)
-///     #4 SyncEngine._current (package:material_lab/core/sync/sync_engine.dart:297)
+///     #4 SyncEngine._current (../support/retired/core/sync/sync_engine.dart:297)
 ///
 /// The tests below pin the contract: one connection, a memoized holder survives
 /// a close/reopen cycle only after it is told to drop its handle, and `close()`

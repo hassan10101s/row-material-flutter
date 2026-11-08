@@ -8,7 +8,7 @@ import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/core/utils/app_exceptions.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
-import 'package:material_lab/features/qc_manager/data/offline_first_qc_custom_tables.dart';
+import 'package:material_lab/features/qc_manager/data/server_confirmed_qc_custom_tables.dart';
 import 'package:material_lab/features/qc_manager/data/qc_custom_tables_repo.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_custom_table.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_repositories.dart';
@@ -120,7 +120,7 @@ void main() {
     helper = DatabaseHelper(_TestAppPaths(temporaryDirectory.path));
     database = await helper.database;
     queue = SyncQueue(helper);
-    repo = OfflineFirstQcCustomTablesRepository(
+    repo = ServerConfirmedQcCustomTablesRepository(
       local: QcCustomTablesRepo(helper),
       guard: const _Writer(),
       dbHelper: helper,
@@ -163,6 +163,26 @@ void main() {
       }
     },
   );
+
+  test('nine columns are accepted; a tenth writes nothing', () async {
+    final columns = List.generate(
+      maxQcCustomTableColumns,
+      (i) => newField('Column $i', QcCustomColType.text),
+    );
+    final id = await repo.createTable(newTable('Nine columns'), columns);
+    expect((await repo.getTableBundle(id))!.fields, hasLength(9));
+    final before = await database.query('sync_queue');
+    await expectLater(
+      repo.createTable(newTable('Too many'), [
+        ...columns,
+        newField('Tenth', QcCustomColType.text),
+      ]),
+      throwsA(isA<ValidationError>()),
+    );
+    expect(await database.query('qc_custom_tables'), hasLength(1));
+    expect(await database.query('qc_custom_table_fields'), hasLength(9));
+    expect(await database.query('sync_queue'), before);
+  });
 
   test('a record writes values keyed by column remote ids', () async {
     final tableId = await repo.createTable(newTable('Weights'), [
@@ -263,13 +283,9 @@ void main() {
       // smuggle a value under a bare string, though: it is foreign. The
       // required column is included so the record itself stands on its own.
       final keyB = after.fields.firstWhere((f) => f.label == 'B').remoteId;
-      await repo.addRow(
-        record(after.table, {idA: 'a value', keyB: 1}),
-      );
+      await repo.addRow(record(after.table, {idA: 'a value', keyB: 1}));
       await expectLater(
-        repo.addRow(
-          record(after.table, {'x': 1, keyB: 2}),
-        ),
+        repo.addRow(record(after.table, {'x': 1, keyB: 2})),
         throwsA(isA<ValidationError>()),
       );
       expect(await repo.listRows(tableId), hasLength(1));
@@ -424,7 +440,7 @@ void main() {
   });
 
   test('a read-only guard must not write anything', () async {
-    final readonly = OfflineFirstQcCustomTablesRepository(
+    final readonly = ServerConfirmedQcCustomTablesRepository(
       local: QcCustomTablesRepo(helper),
       guard: const _ReadOnly(),
       dbHelper: helper,

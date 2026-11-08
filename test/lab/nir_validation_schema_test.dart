@@ -25,8 +25,11 @@ void main() {
         "SELECT name FROM sqlite_master WHERE type = 'table' "
         "AND name = 'nir_validation_settings'",
       );
-      expect(rows, hasLength(1),
-          reason: 'the guarantee must recreate the dropped table on reopen');
+      expect(
+        rows,
+        hasLength(1),
+        reason: 'the guarantee must recreate the dropped table on reopen',
+      );
       // And the table accepts a reset row immediately.
       await db.insert('nir_validation_settings', {
         'start_date': '2026-01-01',
@@ -42,4 +45,55 @@ void main() {
       await fx.dispose();
     }
   });
+
+  test(
+    'opening a legacy reset table adds typed references and snapshots without rewriting history',
+    () async {
+      final fx = await openSyncFixture();
+      try {
+        await fx.db.execute('DROP TABLE nir_validation_settings');
+        await fx.db.execute(
+          '''CREATE TABLE nir_validation_settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, start_date TEXT NOT NULL,
+        reset_note TEXT, reset_by TEXT, reset_by_name TEXT,
+        scope TEXT, entity_id INTEGER, entity_name TEXT NOT NULL DEFAULT '',
+        parameter TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL)''',
+        );
+        await fx.db.insert('nir_validation_settings', {
+          'id': 41,
+          'start_date': '2026-01-01',
+          'scope': 'raw_material',
+          'entity_id': 7,
+          'entity_name': 'Legacy material',
+          'parameter': 'Protein',
+          'reset_note': 'Original note',
+          'created_at': '2026-01-01',
+          'updated_at': '2026-01-01',
+        });
+        await fx.helper.close();
+        final db = await fx.helper.database;
+        final row = (await db.query('nir_validation_settings')).single;
+        expect(row['id'], 41);
+        expect(row['entity_id'], 7);
+        expect(row['entity_name'], 'Legacy material');
+        expect(row['reset_note'], 'Original note');
+        for (final field in [
+          'material_id',
+          'product_id',
+          'reference_version',
+          'calibration_snapshot_json',
+        ]) {
+          expect(row.containsKey(field), isTrue);
+          expect(
+            row[field],
+            isNull,
+            reason: 'legacy identities and statistics must not be invented',
+          );
+        }
+      } finally {
+        await fx.helper.close();
+        await fx.dispose();
+      }
+    },
+  );
 }

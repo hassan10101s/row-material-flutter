@@ -202,25 +202,25 @@ class NcrActiveFilterChips extends StatelessWidget {
               ],
             )
           : SizedBox(
-        height: 40,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: Row(
-            children: [
-              for (final chip in chips) ...[
-                chip,
-                const SizedBox(width: AppSpacing.xs),
-              ],
-              AppButton(
-                label: AppText.t('مسح الكل', 'Clear all'),
-                style: AppButtonStyle.ghost,
-                small: true,
-                onPressed: cubit.clearFilters,
+              height: 40,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    for (final chip in chips) ...[
+                      chip,
+                      const SizedBox(width: AppSpacing.xs),
+                    ],
+                    AppButton(
+                      label: AppText.t('مسح الكل', 'Clear all'),
+                      style: AppButtonStyle.ghost,
+                      small: true,
+                      onPressed: cubit.clearFilters,
+                    ),
+                  ],
+                ),
               ),
-            ],
-          ),
-        ),
-      ),
+            ),
     );
   }
 }

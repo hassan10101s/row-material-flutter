@@ -7,7 +7,9 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:go_router/go_router.dart';
 
 import 'app/app_bootstrap.dart';
+import 'core/diagnostics/error_reporter.dart';
 import 'app/auth_gate.dart';
+import 'app/widget_error_view.dart';
 import 'core/constants/app_strings.dart';
 import 'core/locale/locale_service.dart';
 import 'core/platform/app_scroll_behavior.dart';
@@ -31,46 +33,78 @@ Future<void> main() async {
   // tree gets an Arabic-friendly fallback instead of a grey screen.
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
+    unawaited(
+      ErrorReporter.instance.record(
+        'flutter',
+        details.exception,
+        details.stack ?? StackTrace.current,
+      ),
+    );
     debugPrint('[flutter-error] ${details.exceptionAsString()}');
   };
   PlatformDispatcher.instance.onError = (error, stack) {
-    debugPrint('[platform-error] $error');
+    unawaited(ErrorReporter.instance.record('platform', error, stack));
+    debugPrint('[platform-error] ${error.runtimeType}');
     return true;
   };
-  ErrorWidget.builder = (details) => _StartupErrorView(
-    message:
-        'حدث خطأ غير متوقع. أعد تشغيل التطبيق.\nUnexpected error — restart the app.',
-    details: kDebugMode ? '${details.exception}' : null,
-    retry: null,
-  );
+  ErrorWidget.builder = buildAppWidgetError;
 
   await runZonedGuarded(
     () async {
       WidgetsFlutterBinding.ensureInitialized();
+      await bootstrapAndRun();
+    },
+    (error, stack) {
+      unawaited(ErrorReporter.instance.record('zone', error, stack));
+      debugPrint('[zone-error] ${error.runtimeType}');
+    },
+  );
+}
 
-      // First pixels ASAP: bootstrap (Firebase init, per-org DB open, seeds,
-      // backup) stays off the critical path behind a splash instead of a black
-      // screen. The splash is deliberately dependency-free — no theme service,
-      // no ScreenUtil, no localization — so it can paint before any of that.
-      runApp(const _BootstrapSplash());
-      try {
-        await appBootstrap();
-      } on Object catch (e) {
-        // Bootstrap (DB open, Firebase, seeds) failed: swap the spinner for a
-        // retry screen instead of hanging forever. Keeps MSIX/EXE + mobile
-        // parity — same widget on every platform.
-        debugPrint('[bootstrap] failed: $e');
-        runApp(
-          _StartupErrorView(
-            message:
-                'تعذر بدء التشغيل. تحقق من الاتصال ثم أعد المحاولة.\nStartup failed — check your connection and try again.',
-            details: kDebugMode ? '$e' : null,
-            retry: () => main(),
-          ),
-        );
-        return;
-      }
+/// One launch at a time: [bootstrapAndRun] replaces the visible tree with the
+/// splash immediately, but a double-tap on retry must not stack two boots.
+bool _bootstrapping = false;
 
+/// The single, retryable launch body: splash → bootstrap → theme/locale →
+/// router → app. [main] runs it once inside its guarded zone; the startup
+/// error view's retry re-enters *this* function instead of `main()` — a
+/// re-run of `main()` would build a second `runZonedGuarded` zone around a
+/// binding that was initialized in the first one (the debug "Zone mismatch"
+/// assertion in the log) and then crash re-registering DI singletons.
+Future<void> bootstrapAndRun() async {
+  if (_bootstrapping) return;
+  _bootstrapping = true;
+  try {
+    // First pixels ASAP: bootstrap (Firebase init, per-org DB open, seeds,
+    // backup) stays off the critical path behind a splash instead of a black
+    // screen. The splash is deliberately dependency-free — no theme service,
+    // no ScreenUtil, no localization — so it can paint before any of that.
+    // On a retry this call also swaps the error view back to the splash.
+    runApp(const _BootstrapSplash());
+
+    void presentStartupFailure(Object error) {
+      debugPrint('[bootstrap] failed: $error');
+      runApp(
+        _StartupErrorView(
+          message:
+              'تعذر بدء التشغيل. تحقق من الاتصال ثم أعد المحاولة.\nStartup failed — check your connection and try again.',
+          details: kDebugMode ? '$error' : null,
+          retry: bootstrapAndRun,
+        ),
+      );
+    }
+
+    try {
+      await appBootstrap();
+    } on Object catch (e) {
+      // Bootstrap (DB open, Firebase, seeds) failed: swap the spinner for a
+      // retry screen instead of hanging forever. Keeps MSIX/EXE + mobile
+      // parity — same widget on every platform.
+      presentStartupFailure(e);
+      return;
+    }
+
+    try {
       final themeService = getIt<ThemeService>();
       await themeService.init();
 
@@ -93,11 +127,14 @@ Future<void> main() async {
         unawaited(startNotifications());
         unawaited(PdfRenderer.precache());
       });
-    },
-    (error, stack) {
-      debugPrint('[zone-error] $error');
-    },
-  );
+    } on Object catch (e) {
+      // A failure after the DI/bootstrap stage (theme, locale, router) must
+      // also land on the retry view, not a splash that never resolves.
+      presentStartupFailure(e);
+    }
+  } finally {
+    _bootstrapping = false;
+  }
 }
 
 /// Retry-capable fatal-startup view. Dependency-free like [_BootstrapSplash]

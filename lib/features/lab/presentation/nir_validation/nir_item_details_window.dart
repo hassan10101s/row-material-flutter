@@ -1,5 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import '../../../../design_system/widgets/app_tooltip.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -24,39 +25,38 @@ Future<void> showNirItemDetails(
   BuildContext context,
   NirParameterStats stats, {
   Future<void> Function()? onReset,
+  Future<NirParameterStats?> Function(NirValidationPoint, bool)? onSetIncluded,
 }) async {
-  final reset = await showAppDialog<bool>(
+  final reset = await showAppContent<bool>(
     context,
-    builder: (overlay) => AppDialog(
-      title: '${stats.entityName} · ${stats.parameter}',
-      subtitle: _detailsSubtitle(stats),
-      icon: Icons.insights_outlined,
-      size: AppWindowSize.lg,
-      actions: [
-        if (onReset != null)
-          AppButton(
-            label: AppText.t(
-              'بدء فترة جديدة لهذا التحليل',
-              'New period for this analysis',
-            ),
-            icon: const Icon(Icons.restart_alt_outlined, size: 18),
-            style: AppButtonStyle.ghost,
-            onPressed: () => Navigator.pop(overlay, true),
-          ),
+    title: AppText.t('تفاصيل المعايرة', 'Calibration details'),
+    subtitle: _detailsSubtitle(stats),
+    icon: Icons.insights_outlined,
+    size: AppWindowSize.lg,
+    actionsBuilder: (_, close) => [
+      if (onReset != null)
         AppButton(
-          label: AppText.t('إغلاق', 'Close'),
-          style: AppButtonStyle.secondary,
-          onPressed: () => Navigator.pop(overlay, false),
+          label: AppText.t(
+            'بدء فترة جديدة لهذا التحليل',
+            'New period for this analysis',
+          ),
+          icon: const Icon(Icons.restart_alt_outlined, size: 18),
+          style: AppButtonStyle.ghost,
+          onPressed: () => close(true),
         ),
-      ],
-      child: _NirItemDetails(stats: stats),
-    ),
+      AppButton(
+        label: AppText.t('إغلاق', 'Close'),
+        style: AppButtonStyle.secondary,
+        onPressed: () => close(false),
+      ),
+    ],
+    builder: (_, _) =>
+        _NirItemDetails(stats: stats, onSetIncluded: onSetIncluded),
   );
   if (reset == true && context.mounted) await onReset?.call();
 }
 
 String _detailsSubtitle(NirParameterStats stats) {
-  final count = '${stats.count} ${AppText.t('نقطة مطابقة', 'matched points')}';
   final scope = NirValidationState.scopeLabel(stats.scope);
   final unit = stats.unit.trim();
   final horizon = stats.horizonStart.trim();
@@ -65,8 +65,8 @@ String _detailsSubtitle(NirParameterStats stats) {
       : '${AppText.t('التصفير', 'Reset')}: ${_displayDate(horizon)}'
             '${stats.scopedHorizon ? '' : ' (${AppText.t('عام', 'global')})'}';
   return unit.isEmpty
-      ? '$count · $scope · $horizonLabel'
-      : '$count · $scope ($unit) · $horizonLabel';
+      ? '$scope · $horizonLabel'
+      : '$scope ($unit) · $horizonLabel';
 }
 
 /// `yyyy-MM-dd` → `dd/MM/yyyy` (Arabic) / ISO (English).
@@ -79,9 +79,11 @@ String _displayDate(String iso) {
 }
 
 class _NirItemDetails extends StatefulWidget {
-  const _NirItemDetails({required this.stats});
+  const _NirItemDetails({required this.stats, this.onSetIncluded});
 
   final NirParameterStats stats;
+  final Future<NirParameterStats?> Function(NirValidationPoint, bool)?
+  onSetIncluded;
 
   @override
   State<_NirItemDetails> createState() => _NirItemDetailsState();
@@ -90,7 +92,21 @@ class _NirItemDetails extends StatefulWidget {
 class _NirItemDetailsState extends State<_NirItemDetails> {
   late NirAdjustmentMode _mode = widget.stats.adjustmentAdvice.recommended;
 
-  NirParameterStats get _stats => widget.stats;
+  late NirParameterStats _stats = widget.stats;
+  bool _changing = false;
+
+  Future<void> _setIncluded(NirValidationPoint point, bool included) async {
+    if (_changing || point.included == included) return;
+    setState(() => _changing = true);
+    try {
+      final updated = await widget.onSetIncluded?.call(point, included);
+      if (mounted && updated != null) setState(() => _stats = updated);
+    } catch (error) {
+      if (mounted) AppFeedback.errorFrom(context, error);
+    } finally {
+      if (mounted) setState(() => _changing = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -127,6 +143,10 @@ class _NirItemDetailsState extends State<_NirItemDetails> {
                   Text(
                     '${_stats.count} ${AppText.t('نقطة مطابقة', 'matched pairs')}',
                   ),
+                  if (_stats.excludedCount > 0)
+                    Text(
+                      '${_stats.excludedCount} ${AppText.t('قراءة مستبعدة', 'excluded readings')}',
+                    ),
                 ],
               ),
               const SizedBox(height: AppSpacing.sm),
@@ -192,12 +212,17 @@ class _NirItemDetailsState extends State<_NirItemDetails> {
           title: AppText.t('القراءات المطابقة', 'Matched readings'),
           icon: Icons.table_rows_outlined,
           subtitle: AppText.t(
-            'الانحراف = NIR − المعمل. الإشارة تحدد اتجاه الفرق فقط.',
-            'Deviation = NIR − lab. The sign indicates direction only.',
+            'Yes تدخل في المعايرة، وNo تستبعد من جميع حساباتها دون حذف القراءة. الاستبعاد مشترك بين الأجهزة بعد اعتماد السيرفر.',
+            'Yes includes the pair; No excludes it from every calibration calculation without deleting it. Selection is shared after server approval.',
           ),
         ),
         const SizedBox(height: AppSpacing.sm),
-        NirPointsTable(points: _stats.points, unit: _stats.unit),
+        NirPointsTable(
+          points: _stats.allPoints,
+          unit: _stats.unit,
+          changing: _changing,
+          onSetIncluded: widget.onSetIncluded == null ? null : _setIncluded,
+        ),
       ],
     );
   }
@@ -789,9 +814,17 @@ class _AllMetricsCard extends StatelessWidget {
 
 /// Desktop pagination and mobile cards keep large reference sets manageable.
 class NirPointsTable extends StatefulWidget {
-  const NirPointsTable({super.key, required this.points, required this.unit});
+  const NirPointsTable({
+    super.key,
+    required this.points,
+    required this.unit,
+    this.onSetIncluded,
+    this.changing = false,
+  });
   final List<NirValidationPoint> points;
   final String unit;
+  final bool changing;
+  final Future<void> Function(NirValidationPoint, bool)? onSetIncluded;
   @override
   State<NirPointsTable> createState() => _NirPointsTableState();
 }
@@ -801,8 +834,38 @@ class _NirPointsTableState extends State<NirPointsTable> {
   @override
   void didUpdateWidget(covariant NirPointsTable oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!identical(oldWidget.points, widget.points)) _visible = 20;
+    // A toggle retains the current reading page rather than jumping to the top.
+    if (oldWidget.points.isNotEmpty &&
+        widget.points.isNotEmpty &&
+        oldWidget.points.first.inspectionId !=
+            widget.points.first.inspectionId) {
+      _visible = 20;
+    }
   }
+
+  Widget _inclusion(NirValidationPoint point) => SegmentedButton<bool>(
+    key: ValueKey(
+      'nir-inclusion-${point.selectionKey.isEmpty ? '${point.inspectionId}-${point.sampleName}' : point.selectionKey}',
+    ),
+    showSelectedIcon: false,
+    style: const ButtonStyle(
+      visualDensity: VisualDensity.compact,
+      padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 6)),
+      minimumSize: WidgetStatePropertyAll(Size(40, 36)),
+    ),
+    segments: const [
+      ButtonSegment(value: true, label: Text('Yes')),
+      ButtonSegment(value: false, label: Text('No')),
+    ],
+    selected: {point.included},
+    onSelectionChanged:
+        widget.onSetIncluded == null ||
+            widget.changing ||
+            point.selectionKey.isEmpty ||
+            point.referenceRemoteId.isEmpty
+        ? null
+        : (value) => widget.onSetIncluded!(point, value.single),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -824,19 +887,20 @@ class _NirPointsTableState extends State<NirPointsTable> {
         height: 320,
         rowsPerPage: 10,
         rowHeight: 60,
-        minTableWidth: 640,
-        columnFlex: const [2.5, 2.5, 1.5, 1.5, 1.5],
+        minTableWidth: 780,
+        columnFlex: const [2.5, 2.5, 1.5, 1.5, 1.5, 2.5],
         headers: [
           AppText.t('التاريخ / المحضر', 'Date / inspection'),
           AppText.t('العينة', 'Sample'),
           'NIR$suffix',
           '${AppText.t('المعمل', 'Lab')}$suffix',
           AppText.t('الانحراف', 'Deviation'),
+          AppText.t('تدخل في المعايرة', 'Include in calibration'),
         ],
         rows: [
           for (final point in widget.points)
             [
-              Tooltip(
+              AppTooltip(
                 message: '${point.inspectionDate} · ${point.entryCode}',
                 child: Text(
                   '${point.inspectionDate}\n${point.entryCode}',
@@ -844,7 +908,7 @@ class _NirPointsTableState extends State<NirPointsTable> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              Tooltip(
+              AppTooltip(
                 message: point.sampleName,
                 child: Text(
                   point.sampleName,
@@ -864,6 +928,7 @@ class _NirPointsTableState extends State<NirPointsTable> {
                 point.deviation.toStringAsFixed(3),
                 textDirection: TextDirection.ltr,
               ),
+              _inclusion(point),
             ],
         ],
       ),
@@ -884,6 +949,17 @@ class _NirPointsTableState extends State<NirPointsTable> {
                   Text(
                     '${point.inspectionDate} · ${point.sampleName}',
                     style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        AppText.t('تدخل في المعايرة', 'Include in calibration'),
+                      ),
+                      _inclusion(point),
+                    ],
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   Wrap(

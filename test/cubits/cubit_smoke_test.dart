@@ -16,6 +16,7 @@ import 'package:material_lab/features/auth/presentation/cubit/create_organizatio
 import 'package:material_lab/features/auth/presentation/cubit/login_state.dart';
 import 'package:material_lab/features/backup/data/backup_manager.dart';
 import 'package:material_lab/features/dashboard/domain/dashboard_repository.dart';
+import 'package:material_lab/features/dashboard/domain/dashboard_kpis.dart';
 import 'package:material_lab/features/dashboard/presentation/cubit/dashboard_cubit.dart';
 import 'package:material_lab/features/dashboard/presentation/cubit/dashboard_kpis_cubit.dart';
 import 'package:material_lab/features/inspections/domain/inspection_repository.dart';
@@ -42,28 +43,50 @@ import 'package:material_lab/features/settings/presentation/cubit/general_settin
 import 'package:material_lab/features/organizations/domain/organization_repository.dart';
 
 class _AuthRepositoryMock extends Mock implements AuthRepository {}
-class _OrganizationRepositoryMock extends Mock implements OrganizationRepository {}
+
+class _OrganizationRepositoryMock extends Mock
+    implements OrganizationRepository {}
+
 class _AuthGateMock extends Mock implements AuthGate {}
+
 class _DashboardRepoMock extends Mock implements DashboardRepository {}
+
 class _InspectionRepoMock extends Mock implements InspectionRepository {}
+
 class _ReferenceRepoMock extends Mock implements ReferenceRepo {}
+
 class _ReportServiceMock extends Mock implements ReportRepository {}
-class _SettingsRepoMock extends Mock implements SettingsRepo {}
+
+class _SettingsRepoMock extends Mock implements SettingsRepo {
+  _SettingsRepoMock() {
+    when(
+      () => getSettingValue('report_language'),
+    ).thenAnswer((_) async => null);
+  }
+}
+
 class _BackupManagerMock extends Mock implements BackupManager {}
-// The real `OfflineFirstLabRepository` satisfies all three lab contracts, so the
+
+// The real `ServerConfirmedLabRepository` satisfies all three lab contracts, so the
 // single stub does too - that is what lets one `repo` stand in for any of them.
 class _LabRepoMock extends Mock
-    implements LabLocalRepository, LabConfigurationRepository, LabResultRepository {}
+    implements
+        LabLocalRepository,
+        LabConfigurationRepository,
+        LabResultRepository {}
 
-
-ReportDoc _doc(String name) =>
-    ReportDoc(filename: name, bytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46]));
+ReportDoc _doc(String name) => ReportDoc(
+  filename: name,
+  bytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46]),
+);
 
 void main() {
   setUpAll(() {
     registerFallbackValue(const UserContext(id: 0, fullName: '', role: ''));
     registerFallbackValue(<String, dynamic>{});
-    registerFallbackValue(ReportDoc(filename: '', bytes: Uint8List.fromList([])));
+    registerFallbackValue(
+      ReportDoc(filename: '', bytes: Uint8List.fromList([])),
+    );
   });
 
   group('LoginCubit (Google)', () {
@@ -95,7 +118,9 @@ void main() {
     });
 
     test('reports a cancelled sign-in as an error', () async {
-      when(auth.signInWithGoogle).thenThrow(const AuthFailure('cancelled', code: 'cancelled'));
+      when(
+        auth.signInWithGoogle,
+      ).thenThrow(const AuthFailure('cancelled', code: 'cancelled'));
 
       final ok = await cubit.signIn();
 
@@ -106,8 +131,12 @@ void main() {
     });
 
     test('missing Firebase configuration is shown, not thrown', () async {
-      when(() => auth.missingConfiguration).thenReturn(const ['GOOGLE_WEB_CLIENT_ID']);
-      when(auth.signInWithGoogle).thenThrow(const AuthFailure('no config', code: 'missing_config'));
+      when(
+        () => auth.missingConfiguration,
+      ).thenReturn(const ['GOOGLE_WEB_CLIENT_ID']);
+      when(
+        auth.signInWithGoogle,
+      ).thenThrow(const AuthFailure('no config', code: 'missing_config'));
 
       final ok = await cubit.signIn();
 
@@ -117,7 +146,9 @@ void main() {
     });
 
     test('applyBootstrap() switches to the configuration state', () {
-      when(() => auth.missingConfiguration).thenReturn(const ['FIREBASE_API_KEY']);
+      when(
+        () => auth.missingConfiguration,
+      ).thenReturn(const ['FIREBASE_API_KEY']);
 
       cubit.applyBootstrap();
 
@@ -147,14 +178,19 @@ void main() {
       // `no_company` by default: the account may create a trial company.
       when(() => auth.session).thenReturn(kEmptySession);
       when(auth.resolveProfile).thenAnswer((_) async => AuthState.ready);
-      cubit = CreateOrganizationCubit(auth: auth, organizations: orgs, gate: gate);
+      cubit = CreateOrganizationCubit(
+        auth: auth,
+        organizations: orgs,
+        gate: gate,
+      );
     });
 
     tearDown(() => cubit.close());
 
     test('creates the organization and resolves the profile', () async {
-      when(() => orgs.createOrganization(name: 'Acme'))
-          .thenAnswer((_) async => 'org_ABC');
+      when(
+        () => orgs.createOrganization(name: 'Acme'),
+      ).thenAnswer((_) async => 'org_ABC');
 
       cubit.setName('Acme');
       final ok = await cubit.submit();
@@ -175,8 +211,9 @@ void main() {
     test('surfaces OrganizationFailure (e.g. invite not found)', () async {
       cubit.useInvite();
       cubit.setInviteCode('org_MISSING');
-      when(() => orgs.joinWithInvite(organizationId: 'org_MISSING'))
-          .thenThrow(const OrganizationFailure('no invite', code: 'invite_not_found'));
+      when(() => orgs.joinWithInvite(organizationId: 'org_MISSING')).thenThrow(
+        const OrganizationFailure('no invite', code: 'invite_not_found'),
+      );
 
       final ok = await cubit.submit();
 
@@ -185,8 +222,7 @@ void main() {
       expect(cubit.state.busy, isFalse);
     });
 
-    test('a bound account is refused locally without any remote call',
-        () async {
+    test('a bound account is refused locally without any remote call', () async {
       when(() => auth.session).thenReturn(
         const AppSession(
           uid: 'uid-1',
@@ -207,23 +243,80 @@ void main() {
     });
   });
 
-
   group('DashboardCubit', () {
-    test('loads summary, KPIs and filter options', () async {
-      final repo = _DashboardRepoMock();
-      final opts = const DashboardFilterOptions(
-          materials: [], suppliers: [], statuses: []);
-      when(() => repo.summary(
+    test(
+      'bundle failure preserves metrics and a successful refresh clears error',
+      () async {
+        final repo = _DashboardRepoMock();
+        when(
+          () => repo.summary(
             period: any(named: 'period'),
             materialId: any(named: 'materialId'),
             supplier: any(named: 'supplier'),
             status: any(named: 'status'),
-          )).thenAnswer((_) async => {'total': 5});
+          ),
+        ).thenAnswer((_) async => {'total': 4});
+        when(() => repo.todayKpis()).thenAnswer((_) async => {});
+        when(() => repo.filterOptions()).thenAnswer(
+          (_) async => const DashboardFilterOptions(
+            materials: [],
+            suppliers: [],
+            statuses: [],
+          ),
+        );
+        var failed = false;
+        when(
+          () => repo.dashboardBundle(
+            period: any(named: 'period'),
+            materialId: any(named: 'materialId'),
+            supplier: any(named: 'supplier'),
+            status: any(named: 'status'),
+          ),
+        ).thenAnswer((_) async {
+          if (failed) throw const AppError('Analytics unavailable');
+          return const DashboardBundle(volume: VolumeKpis(total: 4));
+        });
+        final kpis = DashboardKpisCubit();
+        final cubit = DashboardCubit(repo: repo, kpis: kpis);
+        await cubit.load();
+        failed = true;
+        await cubit.load();
+        expect(cubit.state.error, 'Analytics unavailable');
+        expect(kpis.state.bundle.volume.total, 4);
+        failed = false;
+        await cubit.load();
+        expect(cubit.state.error, isNull);
+        await cubit.close();
+        await kpis.close();
+      },
+    );
+    test('loads summary, KPIs and filter options', () async {
+      final repo = _DashboardRepoMock();
+      when(
+        () => repo.dashboardBundle(
+          period: any(named: 'period'),
+          materialId: any(named: 'materialId'),
+          supplier: any(named: 'supplier'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async => const DashboardBundle());
+      final opts = const DashboardFilterOptions(
+        materials: [],
+        suppliers: [],
+        statuses: [],
+      );
+      when(
+        () => repo.summary(
+          period: any(named: 'period'),
+          materialId: any(named: 'materialId'),
+          supplier: any(named: 'supplier'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async => {'total': 5});
       when(() => repo.todayKpis()).thenAnswer((_) async => {'approved': 2});
       when(() => repo.filterOptions()).thenAnswer((_) async => opts);
 
-      final cubit =
-          DashboardCubit(repo: repo, kpis: DashboardKpisCubit());
+      final cubit = DashboardCubit(repo: repo, kpis: DashboardKpisCubit());
       await cubit.load();
 
       expect(cubit.state.loading, isFalse);
@@ -235,19 +328,32 @@ void main() {
 
     test('surfaces load failures in state', () async {
       final repo = _DashboardRepoMock();
-      when(() => repo.summary(
-            period: any(named: 'period'),
-            materialId: any(named: 'materialId'),
-            supplier: any(named: 'supplier'),
-            status: any(named: 'status'),
-          )).thenThrow(const AppError('db locked'));
+      when(
+        () => repo.dashboardBundle(
+          period: any(named: 'period'),
+          materialId: any(named: 'materialId'),
+          supplier: any(named: 'supplier'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async => const DashboardBundle());
+      when(
+        () => repo.summary(
+          period: any(named: 'period'),
+          materialId: any(named: 'materialId'),
+          supplier: any(named: 'supplier'),
+          status: any(named: 'status'),
+        ),
+      ).thenThrow(const AppError('db locked'));
       when(() => repo.todayKpis()).thenAnswer((_) async => {});
-      when(() => repo.filterOptions())
-          .thenAnswer((_) async => const DashboardFilterOptions(
-              materials: [], suppliers: [], statuses: []));
+      when(() => repo.filterOptions()).thenAnswer(
+        (_) async => const DashboardFilterOptions(
+          materials: [],
+          suppliers: [],
+          statuses: [],
+        ),
+      );
 
-      final cubit =
-          DashboardCubit(repo: repo, kpis: DashboardKpisCubit());
+      final cubit = DashboardCubit(repo: repo, kpis: DashboardKpisCubit());
       await cubit.load();
 
       expect(cubit.state.loading, isFalse);
@@ -257,20 +363,32 @@ void main() {
 
     test('clearFilters resets all three filters in one reload', () async {
       final repo = _DashboardRepoMock();
-      when(() => repo.summary(
-            period: any(named: 'period'),
-            materialId: any(named: 'materialId'),
-            supplier: any(named: 'supplier'),
-            status: any(named: 'status'),
-          )).thenAnswer((_) async => {'total': 5});
+      when(
+        () => repo.dashboardBundle(
+          period: any(named: 'period'),
+          materialId: any(named: 'materialId'),
+          supplier: any(named: 'supplier'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async => const DashboardBundle());
+      when(
+        () => repo.summary(
+          period: any(named: 'period'),
+          materialId: any(named: 'materialId'),
+          supplier: any(named: 'supplier'),
+          status: any(named: 'status'),
+        ),
+      ).thenAnswer((_) async => {'total': 5});
       when(() => repo.todayKpis()).thenAnswer((_) async => {'approved': 2});
       when(() => repo.filterOptions()).thenAnswer(
         (_) async => const DashboardFilterOptions(
-            materials: [], suppliers: [], statuses: []),
+          materials: [],
+          suppliers: [],
+          statuses: [],
+        ),
       );
 
-      final cubit =
-          DashboardCubit(repo: repo, kpis: DashboardKpisCubit());
+      final cubit = DashboardCubit(repo: repo, kpis: DashboardKpisCubit());
       void applyAll() {
         cubit.setMaterial('Salt');
         cubit.setSupplier('Acme');
@@ -289,12 +407,14 @@ void main() {
       expect(cubit.state.selectedSupplier, 'ALL');
       expect(cubit.state.selectedStatus, 'ALL');
       expect(cubit.state.loading, isFalse);
-      verify(() => repo.summary(
-            period: any(named: 'period'),
-            materialId: 'ALL',
-            supplier: 'ALL',
-            status: 'ALL',
-          ));
+      verify(
+        () => repo.summary(
+          period: any(named: 'period'),
+          materialId: 'ALL',
+          supplier: 'ALL',
+          status: 'ALL',
+        ),
+      );
       await cubit.close();
     });
   });
@@ -303,72 +423,88 @@ void main() {
     test('loads a server-filtered page and pages through it', () async {
       final repo = _InspectionRepoMock();
       final reports = _ReportServiceMock();
-      when(() => repo.list(
-            query: any(named: 'query'),
-            status: any(named: 'status'),
-            limit: any(named: 'limit'),
-            offset: any(named: 'offset'),
-            orderBy: any(named: 'orderBy'),
-            kind: any(named: 'kind'),
-            dateFrom: any(named: 'dateFrom'),
-            dateTo: any(named: 'dateTo'),
-          )).thenAnswer((_) async => [
-                {'id': 1, 'decision_status': 'APPROVED'},
-                {'id': 2, 'decision_status': 'REJECTED'},
-              ]);
-      when(() => repo.count(
-            query: any(named: 'query'),
-            status: any(named: 'status'),
-            kind: any(named: 'kind'),
-            dateFrom: any(named: 'dateFrom'),
-            dateTo: any(named: 'dateTo'),
-          )).thenAnswer((_) async => 2);
+      when(
+        () => repo.list(
+          query: any(named: 'query'),
+          status: any(named: 'status'),
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+          orderBy: any(named: 'orderBy'),
+          kind: any(named: 'kind'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer(
+        (_) async => [
+          {'id': 1, 'decision_status': 'APPROVED'},
+          {'id': 2, 'decision_status': 'REJECTED'},
+        ],
+      );
+      when(
+        () => repo.count(
+          query: any(named: 'query'),
+          status: any(named: 'status'),
+          kind: any(named: 'kind'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer((_) async => 2);
       final cubit = InspectionsCubit(repo: repo, reports: reports);
       await cubit.load();
 
       expect(cubit.state.visible, hasLength(2));
       expect(cubit.state.total, 2);
       // Server-side filtering: a status change refetches from the DB.
-      when(() => repo.list(
-            query: any(named: 'query'),
-            status: 'APPROVED',
-            limit: any(named: 'limit'),
-            offset: any(named: 'offset'),
-            orderBy: any(named: 'orderBy'),
-            kind: any(named: 'kind'),
-            dateFrom: any(named: 'dateFrom'),
-            dateTo: any(named: 'dateTo'),
-          )).thenAnswer((_) async => [
-                {'id': 1, 'decision_status': 'APPROVED'},
-              ]);
-      when(() => repo.count(
-            query: any(named: 'query'),
-            status: 'APPROVED',
-            kind: any(named: 'kind'),
-            dateFrom: any(named: 'dateFrom'),
-            dateTo: any(named: 'dateTo'),
-          )).thenAnswer((_) async => 1);
+      when(
+        () => repo.list(
+          query: any(named: 'query'),
+          status: 'APPROVED',
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+          orderBy: any(named: 'orderBy'),
+          kind: any(named: 'kind'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer(
+        (_) async => [
+          {'id': 1, 'decision_status': 'APPROVED'},
+        ],
+      );
+      when(
+        () => repo.count(
+          query: any(named: 'query'),
+          status: 'APPROVED',
+          kind: any(named: 'kind'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer((_) async => 1);
       await cubit.setStatus('APPROVED');
       expect(cubit.state.visible, hasLength(1));
       expect(cubit.state.visible.single['id'], 1);
 
-      when(() => repo.list(
-            query: 'zzz',
-            status: any(named: 'status'),
-            limit: any(named: 'limit'),
-            offset: any(named: 'offset'),
-            orderBy: any(named: 'orderBy'),
-            kind: any(named: 'kind'),
-            dateFrom: any(named: 'dateFrom'),
-            dateTo: any(named: 'dateTo'),
-          )).thenAnswer((_) async => const []);
-      when(() => repo.count(
-            query: 'zzz',
-            status: any(named: 'status'),
-            kind: any(named: 'kind'),
-            dateFrom: any(named: 'dateFrom'),
-            dateTo: any(named: 'dateTo'),
-          )).thenAnswer((_) async => 0);
+      when(
+        () => repo.list(
+          query: 'zzz',
+          status: any(named: 'status'),
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+          orderBy: any(named: 'orderBy'),
+          kind: any(named: 'kind'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer((_) async => const []);
+      when(
+        () => repo.count(
+          query: 'zzz',
+          status: any(named: 'status'),
+          kind: any(named: 'kind'),
+          dateFrom: any(named: 'dateFrom'),
+          dateTo: any(named: 'dateTo'),
+        ),
+      ).thenAnswer((_) async => 0);
       await cubit.setQuery('zzz');
       expect(cubit.state.visible, isEmpty);
       await cubit.close();
@@ -385,38 +521,44 @@ void main() {
         initialDateFrom: '2026-09-01',
         initialDateTo: '2026-09-30',
       );
-      when(() => repo.list(
-            query: any(named: 'query'),
-            status: 'APPROVED',
-            limit: any(named: 'limit'),
-            offset: any(named: 'offset'),
-            orderBy: any(named: 'orderBy'),
-            kind: any(named: 'kind'),
-            dateFrom: '2026-09-01',
-            dateTo: '2026-09-30',
-            supplier: 'Acme',
-          )).thenAnswer((_) async => []);
-      when(() => repo.count(
-            query: any(named: 'query'),
-            status: 'APPROVED',
-            kind: any(named: 'kind'),
-            dateFrom: '2026-09-01',
-            dateTo: '2026-09-30',
-            supplier: 'Acme',
-          )).thenAnswer((_) async => 0);
+      when(
+        () => repo.list(
+          query: any(named: 'query'),
+          status: 'APPROVED',
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+          orderBy: any(named: 'orderBy'),
+          kind: any(named: 'kind'),
+          dateFrom: '2026-09-01',
+          dateTo: '2026-09-30',
+          supplier: 'Acme',
+        ),
+      ).thenAnswer((_) async => []);
+      when(
+        () => repo.count(
+          query: any(named: 'query'),
+          status: 'APPROVED',
+          kind: any(named: 'kind'),
+          dateFrom: '2026-09-01',
+          dateTo: '2026-09-30',
+          supplier: 'Acme',
+        ),
+      ).thenAnswer((_) async => 0);
       await cubit.load();
       // Deep-link seeds reach the SQL layer verbatim.
-      verify(() => repo.list(
-            query: '',
-            status: 'APPROVED',
-            limit: any(named: 'limit'),
-            offset: any(named: 'offset'),
-            orderBy: any(named: 'orderBy'),
-            kind: any(named: 'kind'),
-            dateFrom: '2026-09-01',
-            dateTo: '2026-09-30',
-            supplier: 'Acme',
-          )).called(1);
+      verify(
+        () => repo.list(
+          query: '',
+          status: 'APPROVED',
+          limit: any(named: 'limit'),
+          offset: any(named: 'offset'),
+          orderBy: any(named: 'orderBy'),
+          kind: any(named: 'kind'),
+          dateFrom: '2026-09-01',
+          dateTo: '2026-09-30',
+          supplier: 'Acme',
+        ),
+      ).called(1);
       await cubit.close();
     });
 
@@ -433,13 +575,15 @@ void main() {
   group('InspectionDetailCubit', () {
     test('loads the inspection and its history', () async {
       final repo = _InspectionRepoMock();
-      when(() => repo.getById(1)).thenAnswer((_) async => {
-            'id': 1,
-            'inspection_date': '2026-09-05',
-            'status_history': [
-              {'new_status': 'APPROVED'},
-            ],
-          });
+      when(() => repo.getById(1)).thenAnswer(
+        (_) async => {
+          'id': 1,
+          'inspection_date': '2026-09-05',
+          'status_history': [
+            {'new_status': 'APPROVED'},
+          ],
+        },
+      );
       final cubit = InspectionDetailCubit(
         inspectionId: 1,
         repo: repo,
@@ -457,9 +601,12 @@ void main() {
       final repo = _InspectionRepoMock();
       final reports = _ReportServiceMock();
       when(() => repo.getById(1)).thenAnswer((_) async => {'id': 1});
-      when(() => reports.inspectionReport(1)).thenAnswer((_) async => _doc('r.pdf'));
-      when(() => reports.saveReport(any(), date: any(named: 'date')))
-          .thenAnswer((_) async => File('out/r.pdf'));
+      when(
+        () => reports.inspectionReport(1),
+      ).thenAnswer((_) async => _doc('r.pdf'));
+      when(
+        () => reports.saveReport(any(), date: any(named: 'date')),
+      ).thenAnswer((_) async => File('out/r.pdf'));
 
       final cubit = InspectionDetailCubit(
         inspectionId: 1,
@@ -479,18 +626,23 @@ void main() {
     test('selects a material and bumps the reference revision', () async {
       final repo = _InspectionRepoMock();
       final reference = _ReferenceRepoMock();
-      when(() => reference.listMaterials())
-          .thenAnswer((_) async => [{'id': 1, 'material_name': 'Sugar'}]);
-      when(() => reference.getMaterial(1, inspectionDate: '2026-09-05'))
-          .thenAnswer((_) async => {
-                'material_code': 'S-1',
-                'next_entry_code': 'QC-9',
-                'physical_reference': {'Moisture': '14%'},
-                'chemical_reference': <String, dynamic>{},
-              });
+      when(() => reference.listMaterials()).thenAnswer(
+        (_) async => [
+          {'id': 1, 'material_name': 'Sugar'},
+        ],
+      );
+      when(
+        () => reference.getMaterial(1, inspectionDate: '2026-09-05'),
+      ).thenAnswer(
+        (_) async => {
+          'material_code': 'S-1',
+          'next_entry_code': 'QC-9',
+          'physical_reference': {'Moisture': '14%'},
+          'chemical_reference': <String, dynamic>{},
+        },
+      );
 
-      final cubit =
-          InspectionFormCubit(repo: repo, reference: reference);
+      final cubit = InspectionFormCubit(repo: repo, reference: reference);
       await cubit.loadMaterials();
       expect(cubit.state.materials, hasLength(1));
 
@@ -505,15 +657,14 @@ void main() {
     test('saves via repo.create', () async {
       final repo = _InspectionRepoMock();
       final reference = _ReferenceRepoMock();
-      when(() => repo.create(any(), any()))
-          .thenAnswer((_) async => <String, dynamic>{});
-      final cubit =
-          InspectionFormCubit(repo: repo, reference: reference);
+      when(
+        () => repo.create(any(), any()),
+      ).thenAnswer((_) async => <String, dynamic>{});
+      final cubit = InspectionFormCubit(repo: repo, reference: reference);
 
-      final ok = await cubit.save(
-        {'supplier': 'x'},
-        const UserContext(id: 1, fullName: 'U', role: 'Admin'),
-      );
+      final ok = await cubit.save({
+        'supplier': 'x',
+      }, const UserContext(id: 1, fullName: 'U', role: 'Admin'));
 
       expect(ok, isTrue);
       expect(cubit.state.saving, isFalse);
@@ -524,15 +675,17 @@ void main() {
     test('loadForEdit restores material, entry code and decision', () async {
       final repo = _InspectionRepoMock();
       final reference = _ReferenceRepoMock();
-      when(() => reference.getMaterial(1, inspectionDate: '2026-09-05'))
-          .thenAnswer((_) async => {
-                'material_code': 'S-1',
-                'next_entry_code': 'QC-9',
-                'physical_reference': {'Moisture': '14%'},
-                'chemical_reference': <String, dynamic>{},
-              });
-      final cubit =
-          InspectionFormCubit(repo: repo, reference: reference);
+      when(
+        () => reference.getMaterial(1, inspectionDate: '2026-09-05'),
+      ).thenAnswer(
+        (_) async => {
+          'material_code': 'S-1',
+          'next_entry_code': 'QC-9',
+          'physical_reference': {'Moisture': '14%'},
+          'chemical_reference': <String, dynamic>{},
+        },
+      );
+      final cubit = InspectionFormCubit(repo: repo, reference: reference);
 
       await cubit.loadForEdit({
         'id': 7,
@@ -552,17 +705,20 @@ void main() {
     test('save updates when editing instead of creating', () async {
       final repo = _InspectionRepoMock();
       final reference = _ReferenceRepoMock();
-      when(() => reference.getMaterial(1, inspectionDate: '2026-09-05'))
-          .thenAnswer((_) async => {
-                'material_code': 'S-1',
-                'next_entry_code': 'QC-9',
-                'physical_reference': <String, dynamic>{},
-                'chemical_reference': <String, dynamic>{},
-              });
-      when(() => repo.update(any(), any(), any()))
-          .thenAnswer((_) async => <String, dynamic>{});
-      final cubit =
-          InspectionFormCubit(repo: repo, reference: reference);
+      when(
+        () => reference.getMaterial(1, inspectionDate: '2026-09-05'),
+      ).thenAnswer(
+        (_) async => {
+          'material_code': 'S-1',
+          'next_entry_code': 'QC-9',
+          'physical_reference': <String, dynamic>{},
+          'chemical_reference': <String, dynamic>{},
+        },
+      );
+      when(
+        () => repo.update(any(), any(), any()),
+      ).thenAnswer((_) async => <String, dynamic>{});
+      final cubit = InspectionFormCubit(repo: repo, reference: reference);
       await cubit.loadForEdit({
         'id': 7,
         'material_id': 1,
@@ -570,10 +726,9 @@ void main() {
         'entry_code': 'QC-3',
       });
 
-      final ok = await cubit.save(
-        {'supplier': 'Acme'},
-        const UserContext(id: 1, fullName: 'U', role: 'Admin'),
-      );
+      final ok = await cubit.save({
+        'supplier': 'Acme',
+      }, const UserContext(id: 1, fullName: 'U', role: 'Admin'));
 
       expect(ok, isTrue);
       verify(() => repo.update(7, any(), any())).called(1);
@@ -591,9 +746,14 @@ void main() {
           limit: any(named: 'limit'),
           offset: any(named: 'offset'),
         ),
-      ).thenAnswer((_) async => [{'material_name': 'Sugar'}]);
-      when(() => repo.countMaterials(query: any(named: 'query')))
-          .thenAnswer((_) async => 1);
+      ).thenAnswer(
+        (_) async => [
+          {'material_name': 'Sugar'},
+        ],
+      );
+      when(
+        () => repo.countMaterials(query: any(named: 'query')),
+      ).thenAnswer((_) async => 1);
 
       final cubit = ReferenceCubit(repo: repo);
       await cubit.load();
@@ -607,12 +767,12 @@ void main() {
   group('ReportsCubit', () {
     test('runs a daily report and records the export', () async {
       final repo = _ReportServiceMock();
-      when(() => repo.dailyReport('2026-09-05'))
-          .thenAnswer((_) async => _doc('d.pdf'));
+      when(
+        () => repo.dailyReport('2026-09-05'),
+      ).thenAnswer((_) async => _doc('d.pdf'));
       // The cubit persists the generated doc; the recorded export is the
       // saved file's path.
-      when(() => repo.saveReport(any()))
-          .thenAnswer((_) async => File('d.pdf'));
+      when(() => repo.saveReport(any())).thenAnswer((_) async => File('d.pdf'));
 
       final cubit = ReportsCubit(repo: repo);
       await cubit.runDaily('2026-09-05');
@@ -626,10 +786,10 @@ void main() {
     test('rejects concurrent runs', () async {
       final repo = _ReportServiceMock();
       final completer = Completer<ReportDoc>();
-      when(() => repo.dailyReport('2026-09-05'))
-          .thenAnswer((_) => completer.future);
-      when(() => repo.saveReport(any()))
-          .thenAnswer((_) async => File('d.pdf'));
+      when(
+        () => repo.dailyReport('2026-09-05'),
+      ).thenAnswer((_) => completer.future);
+      when(() => repo.saveReport(any())).thenAnswer((_) async => File('d.pdf'));
 
       final cubit = ReportsCubit(repo: repo);
       final first = cubit.runDaily('2026-09-05');
@@ -649,34 +809,39 @@ void main() {
       final repo = _SettingsRepoMock();
       final service = ExportRootService(repo: repo, paths: null);
 
-      when(() => repo.getSettingValue('export_root_path'))
-          .thenAnswer((_) async => r'C:\exports\ ');
+      when(
+        () => repo.getSettingValue('export_root_path'),
+      ).thenAnswer((_) async => r'C:\exports\ ');
       expect(await service.configuredPath(), r'C:\exports\');
       verify(() => repo.getSettingValue('export_root_path')).called(1);
 
-      when(() => repo.getSettingValue('export_root_path'))
-          .thenAnswer((_) async => '  ');
+      when(
+        () => repo.getSettingValue('export_root_path'),
+      ).thenAnswer((_) async => '  ');
       expect(await service.configuredPath(), isNull);
     });
 
     test('setPath persists the trimmed value', () async {
       final repo = _SettingsRepoMock();
       final service = ExportRootService(repo: repo, paths: null);
-      when(() => repo.updateSettings({'export_root_path': r'D:\reports'}))
-          .thenAnswer((_) async {});
+      when(
+        () => repo.updateSettings({'export_root_path': r'D:\reports'}),
+      ).thenAnswer((_) async {});
 
       await service.setPath(r'  D:\reports  ');
 
-      verify(() => repo.updateSettings({'export_root_path': r'D:\reports'}))
-          .called(1);
+      verify(
+        () => repo.updateSettings({'export_root_path': r'D:\reports'}),
+      ).called(1);
     });
 
     test('effectiveRoot creates and returns the configured folder', () async {
       final root = (await Directory.systemTemp.createTemp('matlab_root')).path;
       final repo = _SettingsRepoMock();
       final service = ExportRootService(repo: repo, paths: null);
-      when(() => repo.getSettingValue('export_root_path'))
-          .thenAnswer((_) async => '$root\\new\\nested');
+      when(
+        () => repo.getSettingValue('export_root_path'),
+      ).thenAnswer((_) async => '$root\\new\\nested');
 
       final dir = await service.effectiveRoot();
 
@@ -688,10 +853,12 @@ void main() {
   group('GeneralSettingsCubit', () {
     test('loads the department label', () async {
       final repo = _SettingsRepoMock();
-      when(() => repo.getSettingValue('department_label'))
-          .thenAnswer((_) async => 'QA Dept');
-      when(() => repo.getSettingValue('export_root_path'))
-          .thenAnswer((_) async => '');
+      when(
+        () => repo.getSettingValue('department_label'),
+      ).thenAnswer((_) async => 'QA Dept');
+      when(
+        () => repo.getSettingValue('export_root_path'),
+      ).thenAnswer((_) async => '');
       when(() => repo.getReportLogoPath()).thenAnswer((_) async => '');
       when(() => repo.getReportLogoDataUri()).thenAnswer((_) async => '');
 
@@ -705,8 +872,9 @@ void main() {
 
     test('saves the department label', () async {
       final repo = _SettingsRepoMock();
-      when(() => repo.updateSettings({'department_label': 'New'}))
-          .thenAnswer((_) async {});
+      when(
+        () => repo.updateSettings({'department_label': 'New'}),
+      ).thenAnswer((_) async {});
 
       final cubit = GeneralSettingsCubit(repo: repo);
       await cubit.save('New');
@@ -719,12 +887,14 @@ void main() {
 
     test('loads the export root path', () async {
       final repo = _SettingsRepoMock();
-      when(() => repo.getSettingValue('department_label'))
-          .thenAnswer((_) async => 'QA Dept');
+      when(
+        () => repo.getSettingValue('department_label'),
+      ).thenAnswer((_) async => 'QA Dept');
       when(() => repo.getReportLogoPath()).thenAnswer((_) async => '');
       when(() => repo.getReportLogoDataUri()).thenAnswer((_) async => '');
-      when(() => repo.getSettingValue('export_root_path'))
-          .thenAnswer((_) async => r'C:\exports\pdfs');
+      when(
+        () => repo.getSettingValue('export_root_path'),
+      ).thenAnswer((_) async => r'C:\exports\pdfs');
 
       final cubit = GeneralSettingsCubit(repo: repo);
       await cubit.load();
@@ -735,25 +905,26 @@ void main() {
 
     test('saves the export root path', () async {
       final repo = _SettingsRepoMock();
-      when(() =>
-              repo.updateSettings({'export_root_path': r'D:\reports'}))
-          .thenAnswer((_) async {});
+      when(
+        () => repo.updateSettings({'export_root_path': r'D:\reports'}),
+      ).thenAnswer((_) async {});
 
       final cubit = GeneralSettingsCubit(repo: repo);
       await cubit.saveExportRootPath(r'D:\reports');
 
       expect(cubit.state.saving, isFalse);
       expect(cubit.state.exportRootPath, r'D:\reports');
-      verify(() =>
-              repo.updateSettings({'export_root_path': r'D:\reports'}))
-          .called(1);
+      verify(
+        () => repo.updateSettings({'export_root_path': r'D:\reports'}),
+      ).called(1);
       await cubit.close();
     });
 
     test('clearing the export root path falls back to the default', () async {
       final repo = _SettingsRepoMock();
-      when(() => repo.updateSettings({'export_root_path': ''}))
-          .thenAnswer((_) async {});
+      when(
+        () => repo.updateSettings({'export_root_path': ''}),
+      ).thenAnswer((_) async {});
 
       final cubit = GeneralSettingsCubit(repo: repo);
       await cubit.saveExportRootPath('');
@@ -767,8 +938,9 @@ void main() {
   group('DatabaseSettingsCubit', () {
     test('exports a backup and records the path', () async {
       final backup = _BackupManagerMock();
-      when(() => backup.exportDatabaseBackup())
-          .thenAnswer((_) async => {'path': '/tmp/backup.db'});
+      when(
+        () => backup.exportDatabaseBackup(),
+      ).thenAnswer((_) async => {'path': '/tmp/backup.db'});
 
       final cubit = DatabaseSettingsCubit(backup: backup);
       await cubit.exportBackup();
@@ -780,8 +952,9 @@ void main() {
 
     test('restores a backup', () async {
       final backup = _BackupManagerMock();
-      when(() => backup.restoreDatabaseBackup('/tmp/x.db'))
-          .thenAnswer((_) async => <String, dynamic>{});
+      when(
+        () => backup.restoreDatabaseBackup('/tmp/x.db'),
+      ).thenAnswer((_) async => <String, dynamic>{});
 
       final cubit = DatabaseSettingsCubit(backup: backup);
       await cubit.restoreBackup('/tmp/x.db');
@@ -815,11 +988,7 @@ void main() {
     });
 
     test('an invited member keeps zero write permissions locally', () {
-      const invited = User(
-        email: 'i@lab.test',
-        role: 'lab',
-        status: 'invited',
-      );
+      const invited = User(email: 'i@lab.test', role: 'lab', status: 'invited');
       // The permissions matrix still lists `samples.create`, but the role and
       // the status are two different gates: inactive members (`canWriteAnything`
       // = false) get no write affordance in the UI at all — `AppSession.canDo`
@@ -860,11 +1029,14 @@ void main() {
           limit: any(named: 'limit'),
           offset: any(named: 'offset'),
         ),
-      ).thenAnswer((_) async => [
-            {'id': 1, 'name': 'Acid', 'current_qty': 5.0},
-          ]);
-      when(() => repo.countInventory(query: any(named: 'query')))
-          .thenAnswer((_) async => 1);
+      ).thenAnswer(
+        (_) async => [
+          {'id': 1, 'name': 'Acid', 'current_qty': 5.0},
+        ],
+      );
+      when(
+        () => repo.countInventory(query: any(named: 'query')),
+      ).thenAnswer((_) async => 1);
 
       final cubit = InventoryCubit(repo: repo);
       await cubit.load();
@@ -885,13 +1057,17 @@ void main() {
           limit: any(named: 'limit'),
           offset: any(named: 'offset'),
         ),
-      ).thenAnswer((_) async => [
-            {'id': 1, 'name': 'Moisture'},
-          ]);
-      when(() => repo.countAnalyses(query: any(named: 'query')))
-          .thenAnswer((_) async => 1);
-      when(() => repo.deleteAnalysis(1))
-          .thenAnswer((_) async => {'archived': true});
+      ).thenAnswer(
+        (_) async => [
+          {'id': 1, 'name': 'Moisture'},
+        ],
+      );
+      when(
+        () => repo.countAnalyses(query: any(named: 'query')),
+      ).thenAnswer((_) async => 1);
+      when(
+        () => repo.deleteAnalysis(1),
+      ).thenAnswer((_) async => {'archived': true});
 
       final cubit = AnalysesCubit(repo: repo);
       await cubit.load();
@@ -906,10 +1082,11 @@ void main() {
   group('ActivityCubit', () {
     test('loads the activity log', () async {
       final repo = _LabRepoMock();
-      when(() => repo.activityLog(limit: 300))
-          .thenAnswer((_) async => [
-                {'type': 'adjust'},
-              ]);
+      when(() => repo.activityLog(limit: 300)).thenAnswer(
+        (_) async => [
+          {'type': 'adjust'},
+        ],
+      );
 
       final cubit = ActivityCubit(repo: repo);
       await cubit.load();
@@ -924,10 +1101,11 @@ void main() {
   group('TestHistoryCubit', () {
     test('loads the sample-test history', () async {
       final repo = _LabRepoMock();
-      when(() => repo.listSampleTests())
-          .thenAnswer((_) async => [
-                {'id': 1, 'analysis_name': 'pH'},
-              ]);
+      when(() => repo.listSampleTests()).thenAnswer(
+        (_) async => [
+          {'id': 1, 'analysis_name': 'pH'},
+        ],
+      );
       when(() => repo.listConsumptionLog()).thenAnswer((_) async => []);
       when(() => repo.listAnalyses()).thenAnswer((_) async => []);
 
@@ -941,59 +1119,86 @@ void main() {
   });
 
   group('RunTestCubit', () {
-    test('loads analyses/products and default-selects the first analysis', () async {
-      final repo = _LabRepoMock();
-      when(() => repo.listAnalyses()).thenAnswer((_) async => [
-            {'id': 7, 'name': 'Moisture', 'unit': '%', 'dynamic_fields': ['Sample Name']},
-          ]);
-      when(() => repo.listProducts()).thenAnswer((_) async => [
+    test(
+      'loads analyses/products and waits for explicit analysis selection',
+      () async {
+        final repo = _LabRepoMock();
+        when(() => repo.listAnalyses()).thenAnswer(
+          (_) async => [
+            {
+              'id': 7,
+              'name': 'Moisture',
+              'unit': '%',
+              'dynamic_fields': ['Sample Name'],
+            },
+          ],
+        );
+        when(() => repo.listProducts()).thenAnswer(
+          (_) async => [
             {'id': 3, 'name': 'Gel'},
-          ]);
-      when(() => repo.listInspectionMaterials())
-          .thenAnswer((_) async => <Map<String, dynamic>>[]);
+          ],
+        );
+        when(
+          () => repo.listInspectionMaterials(),
+        ).thenAnswer((_) async => <Map<String, dynamic>>[]);
 
-      final cubit = RunTestCubit(config: repo, results: repo, local: repo);
-      await cubit.load();
+        final cubit = RunTestCubit(config: repo, results: repo, local: repo);
+        await cubit.load();
 
-      expect(cubit.state.loading, isFalse);
-      expect(cubit.state.analyses, hasLength(1));
-      expect(cubit.state.products, hasLength(1));
-      expect(cubit.state.analysisId, 7);
-      await cubit.close();
-    });
+        expect(cubit.state.loading, isFalse);
+        expect(cubit.state.analyses, hasLength(1));
+        expect(cubit.state.products, hasLength(1));
+        expect(cubit.state.analysisId, isNull);
+        await cubit.close();
+      },
+    );
 
     test('applies selection, looks up a code and runs a sample test', () async {
       final repo = _LabRepoMock();
-      when(() => repo.listAnalyses()).thenAnswer((_) async => [
-            {'id': 1, 'name': 'pH', 'unit': 'pH', 'dynamic_fields': ['Sample Name']},
-          ]);
+      when(() => repo.listAnalyses()).thenAnswer(
+        (_) async => [
+          {
+            'id': 1,
+            'name': 'pH',
+            'unit': 'pH',
+            'dynamic_fields': ['Sample Name'],
+          },
+        ],
+      );
       when(() => repo.listProducts()).thenAnswer((_) async => []);
-      when(() => repo.listInspectionMaterials())
-          .thenAnswer((_) async => <Map<String, dynamic>>[]);
-      when(() => repo.resolveInspection('QC-9'))
-          .thenAnswer((_) async => {'material_id': 4, 'material_name': 'Sugar'});
-      when(() => repo.runSampleTest(
-            analysisId: any(named: 'analysisId'),
-            sourceType: any(named: 'sourceType'),
-            sourceRefId: any(named: 'sourceRefId'),
-            sourceName: any(named: 'sourceName'),
-            sampleName: any(named: 'sampleName'),
-            resultText: any(named: 'resultText'),
-            dynamicValues: any(named: 'dynamicValues'),
-            user: any(named: 'user'),
-            entryCode: any(named: 'entryCode'),
-          )).thenAnswer((_) async => {
-            'test': {'id': 1, 'result_text': '7.0'},
-            'analysis_unit': 'pH',
-            'consumption': <dynamic>[],
-            'low_stock': <dynamic>[],
-          });
+      when(
+        () => repo.listInspectionMaterials(),
+      ).thenAnswer((_) async => <Map<String, dynamic>>[]);
+      when(
+        () => repo.resolveInspection('QC-9'),
+      ).thenAnswer((_) async => {'material_id': 4, 'material_name': 'Sugar'});
+      when(
+        () => repo.runSampleTest(
+          analysisId: any(named: 'analysisId'),
+          sourceType: any(named: 'sourceType'),
+          sourceRefId: any(named: 'sourceRefId'),
+          sourceName: any(named: 'sourceName'),
+          sampleName: any(named: 'sampleName'),
+          resultText: any(named: 'resultText'),
+          dynamicValues: any(named: 'dynamicValues'),
+          user: any(named: 'user'),
+          entryCode: any(named: 'entryCode'),
+        ),
+      ).thenAnswer(
+        (_) async => {
+          'test': {'id': 1, 'result_text': '7.0'},
+          'analysis_unit': 'pH',
+          'consumption': <dynamic>[],
+          'low_stock': <dynamic>[],
+        },
+      );
 
       final cubit = RunTestCubit(config: repo, results: repo, local: repo);
       await cubit.load();
       cubit.setSourceType('raw_material');
       expect(await cubit.lookupEntry('QC-9'), isTrue);
       expect(cubit.state.sourceName, 'Sugar');
+      cubit.selectAnalysis(1);
 
       final result = await cubit.run(
         sampleName: 'S1',
@@ -1005,48 +1210,58 @@ void main() {
 
       expect(cubit.state.running, isFalse);
       expect(result['test'], isNotNull);
-      verify(() => repo.runSampleTest(
-            analysisId: 1,
-            sourceType: 'raw_material',
-            sourceRefId: any(named: 'sourceRefId'),
-            sourceName: 'Sugar',
-            sampleName: 'S1',
-            resultText: '',
-            dynamicValues: any(named: 'dynamicValues'),
-            user: any(named: 'user'),
-            entryCode: 'QC-9',
-          )).called(1);
+      verify(
+        () => repo.runSampleTest(
+          analysisId: 1,
+          sourceType: 'raw_material',
+          sourceRefId: any(named: 'sourceRefId'),
+          sourceName: 'Sugar',
+          sampleName: 'S1',
+          resultText: '',
+          dynamicValues: any(named: 'dynamicValues'),
+          user: any(named: 'user'),
+          entryCode: 'QC-9',
+        ),
+      ).called(1);
       await cubit.close();
     });
 
     test('runs a free-text sample with no catalog source', () async {
       final repo = _LabRepoMock();
-      when(() => repo.listAnalyses()).thenAnswer((_) async => [
-            {'id': 2, 'name': 'pH', 'unit': 'pH', 'dynamic_fields': <String>[]},
-          ]);
+      when(() => repo.listAnalyses()).thenAnswer(
+        (_) async => [
+          {'id': 2, 'name': 'pH', 'unit': 'pH', 'dynamic_fields': <String>[]},
+        ],
+      );
       when(() => repo.listProducts()).thenAnswer((_) async => []);
-      when(() => repo.listInspectionMaterials())
-          .thenAnswer((_) async => <Map<String, dynamic>>[]);
-      when(() => repo.runSampleTest(
-            analysisId: any(named: 'analysisId'),
-            sourceType: any(named: 'sourceType'),
-            sourceRefId: any(named: 'sourceRefId'),
-            sourceName: any(named: 'sourceName'),
-            sampleName: any(named: 'sampleName'),
-            resultText: any(named: 'resultText'),
-            dynamicValues: any(named: 'dynamicValues'),
-            user: any(named: 'user'),
-            entryCode: any(named: 'entryCode'),
-          )).thenAnswer((_) async => {
-            'test': {'id': 1},
-            'analysis_unit': 'pH',
-            'consumption': <dynamic>[],
-            'low_stock': <dynamic>[],
-          });
+      when(
+        () => repo.listInspectionMaterials(),
+      ).thenAnswer((_) async => <Map<String, dynamic>>[]);
+      when(
+        () => repo.runSampleTest(
+          analysisId: any(named: 'analysisId'),
+          sourceType: any(named: 'sourceType'),
+          sourceRefId: any(named: 'sourceRefId'),
+          sourceName: any(named: 'sourceName'),
+          sampleName: any(named: 'sampleName'),
+          resultText: any(named: 'resultText'),
+          dynamicValues: any(named: 'dynamicValues'),
+          user: any(named: 'user'),
+          entryCode: any(named: 'entryCode'),
+        ),
+      ).thenAnswer(
+        (_) async => {
+          'test': {'id': 1},
+          'analysis_unit': 'pH',
+          'consumption': <dynamic>[],
+          'low_stock': <dynamic>[],
+        },
+      );
 
       final cubit = RunTestCubit(config: repo, results: repo, local: repo);
       await cubit.load();
       cubit.setSourceType('sample');
+      cubit.selectAnalysis(2);
       expect(cubit.state.sourceType, 'sample');
       expect(cubit.state.rawMaterialId, isNull);
       expect(cubit.state.productId, isNull);
@@ -1059,29 +1274,42 @@ void main() {
         user: const {'id': 1},
       );
 
-      verify(() => repo.runSampleTest(
-            analysisId: 2,
-            sourceType: 'sample',
-            sourceRefId: null,
-            sourceName: 'Free sample',
-            sampleName: 'Free sample',
-            resultText: '7',
-            dynamicValues: any(named: 'dynamicValues'),
-            user: any(named: 'user'),
-            entryCode: '',
-          )).called(1);
+      verify(
+        () => repo.runSampleTest(
+          analysisId: 2,
+          sourceType: 'sample',
+          sourceRefId: null,
+          sourceName: 'Free sample',
+          sampleName: 'Free sample',
+          resultText: '7',
+          dynamicValues: any(named: 'dynamicValues'),
+          user: any(named: 'user'),
+          entryCode: '',
+        ),
+      ).called(1);
       await cubit.close();
     });
 
-    test('edit mode prefills the row and saves only the fillable fields', () async {
-      final repo = _LabRepoMock();
-      when(() => repo.listAnalyses()).thenAnswer((_) async => [
-            {'id': 5, 'name': 'pH', 'unit': 'pH', 'dynamic_fields': ['Temp']},
-          ]);
-      when(() => repo.listProducts()).thenAnswer((_) async => []);
-      when(() => repo.listInspectionMaterials())
-          .thenAnswer((_) async => <Map<String, dynamic>>[]);
-      when(() => repo.listInspectionRecords(4)).thenAnswer((_) async => [
+    test(
+      'edit mode prefills the row and saves only the fillable fields',
+      () async {
+        final repo = _LabRepoMock();
+        when(() => repo.listAnalyses()).thenAnswer(
+          (_) async => [
+            {
+              'id': 5,
+              'name': 'pH',
+              'unit': 'pH',
+              'dynamic_fields': ['Temp'],
+            },
+          ],
+        );
+        when(() => repo.listProducts()).thenAnswer((_) async => []);
+        when(
+          () => repo.listInspectionMaterials(),
+        ).thenAnswer((_) async => <Map<String, dynamic>>[]);
+        when(() => repo.listInspectionRecords(4)).thenAnswer(
+          (_) async => [
             {
               'id': 9,
               'entry_code': 'QC-9',
@@ -1089,64 +1317,72 @@ void main() {
               'material_name': 'Sugar',
               'sample_names': ['S1', 'S2'],
             },
-          ]);
-      when(() => repo.updateSampleTest(
+          ],
+        );
+        when(
+          () => repo.updateSampleTest(
             any(),
             sampleName: any(named: 'sampleName'),
             resultText: any(named: 'resultText'),
             dynamicValues: any(named: 'dynamicValues'),
             user: any(named: 'user'),
-          )).thenAnswer((_) async => {'id': 1, 'result_text': '7.1'});
+          ),
+        ).thenAnswer((_) async => {'id': 1, 'result_text': '7.1'});
 
-      final cubit = RunTestCubit(
-        config: repo,
-        results: repo,
-        local: repo,
-        editRow: const {
-          'id': 1,
-          'analysis_id': 5,
-          'source_type': 'raw_material',
-          'source_ref_id': 4,
-          'source_name': 'Sugar',
-          'sample_name': 'S2',
-          'result_text': '6.5',
-          'entry_code': 'QC-9',
-        },
-      );
-      await cubit.load();
+        final cubit = RunTestCubit(
+          config: repo,
+          results: repo,
+          local: repo,
+          editRow: const {
+            'id': 1,
+            'analysis_id': 5,
+            'source_type': 'raw_material',
+            'source_ref_id': 4,
+            'source_name': 'Sugar',
+            'sample_name': 'S2',
+            'result_text': '6.5',
+            'entry_code': 'QC-9',
+          },
+        );
+        await cubit.load();
 
-      expect(cubit.isEditing, isTrue);
-      expect(cubit.state.analysisId, 5);
-      expect(cubit.state.sourceType, 'raw_material');
-      expect(cubit.state.sourceName, 'Sugar');
-      expect(cubit.state.rawMaterialId, 4);
-      expect(cubit.state.selectedSampleName, 'S2');
-      expect(cubit.state.selectedInspection['entry_code'], 'QC-9');
+        expect(cubit.isEditing, isTrue);
+        expect(cubit.state.analysisId, 5);
+        expect(cubit.state.sourceType, 'raw_material');
+        expect(cubit.state.sourceName, 'Sugar');
+        expect(cubit.state.rawMaterialId, 4);
+        expect(cubit.state.selectedSampleName, 'S2');
+        expect(cubit.state.selectedInspection['entry_code'], 'QC-9');
 
-      await cubit.saveEdit(
-        sampleName: 'S2',
-        resultText: '7.1',
-        dynamicValues: const {'Temp': '20'},
-        user: const {'id': 1},
-      );
-      verify(() => repo.updateSampleTest(
+        await cubit.saveEdit(
+          sampleName: 'S2',
+          resultText: '7.1',
+          dynamicValues: const {'Temp': '20'},
+          user: const {'id': 1},
+        );
+        verify(
+          () => repo.updateSampleTest(
             1,
             sampleName: 'S2',
             resultText: '7.1',
             dynamicValues: const {'Temp': '20'},
             user: const {'id': 1},
-          )).called(1);
-      await cubit.close();
-    });
+          ),
+        ).called(1);
+        await cubit.close();
+      },
+    );
   });
 
   group('LabReportsCubit', () {
     test('runs a daily lab report and records the export', () async {
       final reports = _ReportServiceMock();
-      when(() => reports.labReport(type: 'daily', dateStr: '2026-09-05'))
-          .thenAnswer((_) async => _doc('lab_daily.pdf'));
-      when(() => reports.saveReport(any()))
-          .thenAnswer((_) async => File('out/lab_daily.pdf'));
+      when(
+        () => reports.labReport(type: 'daily', dateStr: '2026-09-05'),
+      ).thenAnswer((_) async => _doc('lab_daily.pdf'));
+      when(
+        () => reports.saveReport(any()),
+      ).thenAnswer((_) async => File('out/lab_daily.pdf'));
 
       final cubit = LabReportsCubit(reports: reports);
       await cubit.runDaily('2026-09-05');
@@ -1160,8 +1396,9 @@ void main() {
     test('rejects concurrent runs', () async {
       final reports = _ReportServiceMock();
       final completer = Completer<ReportDoc>();
-      when(() => reports.labReport(type: 'daily', dateStr: '2026-09-05'))
-          .thenAnswer((_) => completer.future);
+      when(
+        () => reports.labReport(type: 'daily', dateStr: '2026-09-05'),
+      ).thenAnswer((_) => completer.future);
 
       final cubit = LabReportsCubit(reports: reports);
       final first = cubit.runDaily('2026-09-05');

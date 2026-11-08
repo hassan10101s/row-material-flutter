@@ -22,6 +22,7 @@ class InspectionFormState extends Equatable {
   final List<Map<String, dynamic>> sampleTakerOptions;
 
   final bool loading;
+  final bool selectingReference;
   final bool saving;
   final String? error;
   final bool pendingApproval;
@@ -38,6 +39,7 @@ class InspectionFormState extends Equatable {
     this.supplierOptions = const [],
     this.sampleTakerOptions = const [],
     this.loading = true,
+    this.selectingReference = false,
     this.saving = false,
     this.error,
     this.pendingApproval = false,
@@ -47,6 +49,7 @@ class InspectionFormState extends Equatable {
   InspectionFormState copyWith({
     List<Map<String, dynamic>>? materials,
     int? materialId,
+    bool clearMaterialId = false,
     String? materialCode,
     String? entryCode,
     Map<String, dynamic>? physicalReference,
@@ -55,13 +58,15 @@ class InspectionFormState extends Equatable {
     List<Map<String, dynamic>>? supplierOptions,
     List<Map<String, dynamic>>? sampleTakerOptions,
     bool? loading,
+    bool? selectingReference,
     bool? saving,
     String? error,
+    bool clearError = false,
     bool? pendingApproval,
     String? decision,
   }) => InspectionFormState(
     materials: materials ?? this.materials,
-    materialId: materialId ?? this.materialId,
+    materialId: clearMaterialId ? null : materialId ?? this.materialId,
     materialCode: materialCode ?? this.materialCode,
     entryCode: entryCode ?? this.entryCode,
     physicalReference: physicalReference ?? this.physicalReference,
@@ -70,8 +75,9 @@ class InspectionFormState extends Equatable {
     supplierOptions: supplierOptions ?? this.supplierOptions,
     sampleTakerOptions: sampleTakerOptions ?? this.sampleTakerOptions,
     loading: loading ?? this.loading,
+    selectingReference: selectingReference ?? this.selectingReference,
     saving: saving ?? this.saving,
-    error: error ?? this.error,
+    error: clearError ? null : error ?? this.error,
     pendingApproval: pendingApproval ?? this.pendingApproval,
     decision: decision ?? this.decision,
   );
@@ -88,6 +94,7 @@ class InspectionFormState extends Equatable {
     supplierOptions,
     sampleTakerOptions,
     loading,
+    selectingReference,
     saving,
     error,
     pendingApproval,

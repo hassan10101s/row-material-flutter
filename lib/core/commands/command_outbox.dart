@@ -298,7 +298,8 @@ class CommandOutbox {
     );
     if (existing.any(
       (row) =>
-          row['state'] != 'pending' || (row['attempts'] as num).toInt() != 0,
+          !{'pending', 'archived'}.contains(row['state']) ||
+          (row['attempts'] as num).toInt() != 0,
     )) {
       throw StateError(
         'A submitted draft cannot become a different operation; reconcile its receipt first.',
@@ -407,6 +408,7 @@ class CommandOutbox {
   /// Claim up to [limit] ready rows for sending (single-flight owner).
   Future<List<CommandOutboxEntry>> claim({
     int limit = 20,
+    String? operationId,
   }) => _withDb('outbox.claim', (db) {
     return tracedTransaction(db, 'outbox.claim', (txn) async {
       final scope = scopeProvider?.call();
@@ -415,7 +417,7 @@ class CommandOutbox {
         'command_outbox',
         where:
             "state = 'pending' AND (next_attempt_at IS NULL "
-            'OR next_attempt_at <= ?)${scope == null ? '' : ' AND organization_id = ? AND uid = ? AND device_id = ?'}',
+            'OR next_attempt_at <= ?)${scope == null ? '' : ' AND organization_id = ? AND uid = ? AND device_id = ?'}${operationId == null ? '' : ' AND operation_id = ?'}',
         whereArgs: [
           nowIso(),
           if (scope != null) ...[
@@ -423,6 +425,7 @@ class CommandOutbox {
             scope.uid,
             scope.deviceId,
           ],
+          ?operationId,
         ],
         orderBy: 'id ASC',
         limit: limit,
@@ -461,36 +464,79 @@ class CommandOutbox {
 
   /// Approved: the receipt is persisted with the operation and its effect.
   /// The row stays (receipts are never dropped while replays may exist).
-  Future<void> settleApproved(String operationId, CommandResult result) =>
-      _withDb('outbox.settleApproved', (db) {
-        return tracedTransaction(db, 'outbox.settleApproved', (txn) async {
-          if (result.operationId != operationId || !result.isApproved) {
-            throw StateError('Invalid receipt');
-          }
-          final changed = await txn.update(
-            'command_outbox',
-            {
-              'state': 'approved',
-              'result_json': jsonEncode(result.toJson()),
-              'last_error_code': null,
-              'last_error': null,
-              'next_attempt_at': null,
-              'updated_at': nowIso(),
-            },
-            where: "operation_id = ? AND state != 'approved'",
-            whereArgs: [operationId],
-          );
-          if (changed == 0) return;
-          final draftId = await _draftIdOf(txn, operationId);
-          if (draftId != null) {
-            await DraftsStore.transition(
-              txn,
-              draftId,
-              state: DraftState.approvedOnServer,
-            );
-          }
+  Future<void> settleApproved(
+    String operationId,
+    CommandResult result,
+  ) => _withDb('outbox.settleApproved', (db) {
+    return tracedTransaction(db, 'outbox.settleApproved', (txn) async {
+      if (result.operationId != operationId || !result.isApproved) {
+        throw StateError('Invalid receipt');
+      }
+      final changed = await txn.update(
+        'command_outbox',
+        {
+          'state': 'approved',
+          'result_json': jsonEncode(result.toJson()),
+          'last_error_code': null,
+          'last_error': null,
+          'next_attempt_at': null,
+          'updated_at': nowIso(),
+        },
+        where: "operation_id = ? AND state != 'approved'",
+        whereArgs: [operationId],
+      );
+      if (changed == 0) return;
+      final approved = await txn.query(
+        'command_outbox',
+        columns: ['payload'],
+        where: 'operation_id = ?',
+        whereArgs: [operationId],
+      );
+      final payload = jsonDecode(approved.single['payload'] as String) as Map;
+      if ((payload['writes'] as List? ?? const []).any(
+        (w) => w is Map && w['entityType'] == 'secureFieldSubmission',
+      )) {
+        // The verified receipt and original hash remain intact. This
+        // approved body is intentionally no longer a replayable request.
+        final redacted = jsonEncode({
+          'approvedRedacted': true,
+          'writes': [
+            for (final w in payload['writes'] as List)
+              {
+                for (final key in [
+                  'entityType',
+                  'entityId',
+                  'operation',
+                  'expectedVersion',
+                ])
+                  key: (w as Map)[key],
+              },
+          ],
         });
-      });
+        await txn.update(
+          'command_outbox',
+          {'payload': redacted},
+          where: 'operation_id = ?',
+          whereArgs: [operationId],
+        );
+        await txn.update(
+          'drafts',
+          {'payload': redacted},
+          where:
+              'id = (SELECT draft_id FROM command_outbox WHERE operation_id = ?)',
+          whereArgs: [operationId],
+        );
+      }
+      final draftId = await _draftIdOf(txn, operationId);
+      if (draftId != null) {
+        await DraftsStore.transition(
+          txn,
+          draftId,
+          state: DraftState.approvedOnServer,
+        );
+      }
+    });
+  });
 
   /// Transient transport failure → backoff, stay pending (§5 "انقطاع الشبكة
   /// أو مهلة الاستجابة يعيدان نفس العملية").
@@ -556,6 +602,16 @@ class CommandOutbox {
         whereArgs: [operationId, 'in_flight'],
       );
       if (changed == 0) return;
+      // A definitive refusal has no business effect to protect. Keep the
+      // request and its draft for inspection, but allow a corrected operation.
+      // Auth failures and transport uncertainty must retain their locks.
+      if (state == OutboxState.rejected || state == OutboxState.needsReview) {
+        await txn.delete(
+          'central_command_entities',
+          where: 'operation_id = ?',
+          whereArgs: [operationId],
+        );
+      }
       final draftId = await _draftIdOf(txn, operationId);
       if (draftId != null) {
         final draftState = switch (state) {
@@ -573,6 +629,31 @@ class CommandOutbox {
           );
         }
       }
+    });
+  });
+
+  /// Repair locks left by older clients after a definitive stop. History and
+  /// drafts survive; uncertain and unapplied approved requests stay protected.
+  Future<int> releaseSettledLocks(
+    String operationId,
+  ) => _withDb('outbox.releaseSettledLocks', (db) {
+    return tracedTransaction(db, 'outbox.releaseSettledLocks', (txn) async {
+      final scope = scopeProvider?.call();
+      if (scopeProvider != null && scope == null) return 0;
+      return txn.rawDelete(
+        'DELETE FROM central_command_entities WHERE operation_id IN '
+        '(SELECT operation_id FROM command_outbox '
+        "WHERE state IN ('rejected', 'needs_review') AND operation_id = ?"
+        '${scope == null ? '' : ' AND organization_id = ? AND uid = ? AND device_id = ?'})',
+        [
+          operationId,
+          if (scope != null) ...[
+            scope.organizationId,
+            scope.uid,
+            scope.deviceId,
+          ],
+        ],
+      );
     });
   });
 
@@ -689,6 +770,46 @@ class CommandOutbox {
         return rows.isEmpty ? null : CommandOutboxEntry.fromRow(rows.single);
       });
 
+  /// Explicit user retry only, preserving the exact previously issued request.
+  Future<int> retryQuota() => _withDb('outbox.retryQuota', (db) async {
+    final scope = scopeProvider?.call();
+    if (scope == null) return 0;
+    return db.transaction((txn) async {
+      final rows = await txn.query(
+        'command_outbox',
+        columns: ['id', 'draft_id'],
+        where:
+            'organization_id = ? AND uid = ? AND device_id = ? AND state = ? AND last_error_code = ?',
+        whereArgs: [
+          scope.organizationId,
+          scope.uid,
+          scope.deviceId,
+          OutboxState.rejected.value,
+          CommandErrorCodes.quotaExceeded,
+        ],
+      );
+      for (final row in rows) {
+        await txn.update(
+          'command_outbox',
+          {
+            'state': 'pending',
+            'next_attempt_at': null,
+            'result_json': null,
+            'updated_at': nowIso(),
+          },
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+        await DraftsStore.transition(
+          txn,
+          row['draft_id'] as String,
+          state: DraftState.waitingSend,
+        );
+      }
+      return rows.length;
+    });
+  });
+
   Future<Set<String>> approvedOperationIdsThrough(int sequence) =>
       _withDb('outbox.approvedThrough', (db) async {
         final scope = scopeProvider?.call();
@@ -752,7 +873,10 @@ class CommandOutbox {
             'updated_at': nowIso(),
           },
           where: 'id = ? AND state = ?',
-          whereArgs: [(row['id'] as num).toInt(), OutboxState.authRequired.value],
+          whereArgs: [
+            (row['id'] as num).toInt(),
+            OutboxState.authRequired.value,
+          ],
         );
         await DraftsStore.transition(
           txn,
@@ -774,6 +898,7 @@ class CommandOutbox {
   Future<bool> releaseLockAndArchive(
     String operationId, {
     String? reason,
+    bool deleteDraft = false,
   }) => _withDb('outbox.releaseLockAndArchive', (db) {
     return tracedTransaction(db, 'outbox.releaseLockAndArchive', (txn) async {
       final scope = scopeProvider?.call();
@@ -814,6 +939,9 @@ class CommandOutbox {
         where: 'operation_id = ?',
         whereArgs: [operationId],
       );
+      if (deleteDraft) {
+        await txn.delete('drafts', where: 'id = ?', whereArgs: [entry.draftId]);
+      }
       return true;
     });
   });

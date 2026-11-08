@@ -7,6 +7,8 @@
 /// deviation, a proposed slope/intercept and accuracy metrics.
 library;
 
+import 'dart:convert';
+
 /// The validation horizon: one row per reset (تصفير). The active horizon is
 /// the newest row; history (previous zero points) is preserved.
 ///
@@ -25,6 +27,13 @@ class NirValidationSettings {
   /// `''` (global), `'raw_material'` or `'product'`.
   final String scope;
   final int? entityId;
+
+  /// Typed local projections of server-validated global parent references.
+  /// [entityId] alone is legacy origin metadata and must never identify a row.
+  final int? materialId;
+  final int? productId;
+  final int? referenceVersion;
+  final NirCalibrationSnapshot? calibrationSnapshot;
   final String entityName;
   final String parameter;
 
@@ -36,6 +45,10 @@ class NirValidationSettings {
     this.createdAt = '',
     this.scope = '',
     this.entityId,
+    this.materialId,
+    this.productId,
+    this.referenceVersion,
+    this.calibrationSnapshot,
     this.entityName = '',
     this.parameter = '',
   });
@@ -49,6 +62,12 @@ class NirValidationSettings {
         createdAt: '${m['created_at'] ?? ''}',
         scope: '${m['scope'] ?? ''}'.trim(),
         entityId: (m['entity_id'] as num?)?.toInt(),
+        materialId: (m['material_id'] as num?)?.toInt(),
+        productId: (m['product_id'] as num?)?.toInt(),
+        referenceVersion: (m['reference_version'] as num?)?.toInt(),
+        calibrationSnapshot: NirCalibrationSnapshot.decode(
+          m['calibration_snapshot_json'],
+        ),
         entityName: '${m['entity_name'] ?? ''}',
         parameter: '${m['parameter'] ?? ''}',
       );
@@ -75,6 +94,71 @@ enum NirScope { rawMaterial, product }
 /// fitted slope only (raw device reading × a₀, line forced through the
 /// origin — no offset) or the full linear correction (slope + intercept).
 enum NirAdjustmentMode { slopeOnly, slopeAndIntercept }
+
+/// A device adjustment explicitly reported by the operator, independently of
+/// the software recommendation. It is never applied to stored measurements.
+class NirAppliedCorrection {
+  const NirAppliedCorrection({required this.slope, required this.intercept});
+  final double slope;
+  final double intercept;
+  Map<String, Object?> toMap() => {'slope': slope, 'intercept': intercept};
+}
+
+/// Immutable evidence captured while preparing the reset request. Legacy
+/// resets have no snapshot; their historical statistics must not be invented
+/// by recalculating today's mutable source rows.
+class NirCalibrationSnapshot {
+  const NirCalibrationSnapshot({
+    required this.capturedAt,
+    required this.summaries,
+    this.appliedCorrection,
+  });
+  final String capturedAt;
+  final List<Map<String, dynamic>> summaries;
+  final NirAppliedCorrection? appliedCorrection;
+  Map<String, Object?> toMap() => {
+    'version': 1,
+    'capturedAt': capturedAt,
+    'referencePolicy': 'latest_valid_per_sample_parameter',
+    'summaries': summaries,
+    if (appliedCorrection != null)
+      'appliedCorrection': appliedCorrection!.toMap(),
+  };
+  static NirCalibrationSnapshot? decode(Object? raw) {
+    if (raw is! String || raw.isEmpty) return null;
+    try {
+      final data = jsonDecode(raw);
+      if (data is! Map ||
+          data['version'] != 1 ||
+          data['capturedAt'] is! String ||
+          data['summaries'] is! List) {
+        return null;
+      }
+      final applied = data['appliedCorrection'];
+      return NirCalibrationSnapshot(
+        capturedAt: data['capturedAt'] as String,
+        summaries: List.unmodifiable(
+          (data['summaries'] as List).whereType<Map>().map(
+            (row) => Map<String, dynamic>.unmodifiable(
+              Map<String, dynamic>.from(row),
+            ),
+          ),
+        ),
+        appliedCorrection:
+            applied is Map &&
+                applied['slope'] is num &&
+                applied['intercept'] is num
+            ? NirAppliedCorrection(
+                slope: (applied['slope'] as num).toDouble(),
+                intercept: (applied['intercept'] as num).toDouble(),
+              )
+            : null,
+      );
+    } on FormatException {
+      return null;
+    }
+  }
+}
 
 /// One bilingual line of evidence behind [NirAdjustmentAdvice.recommended].
 class NirAdviceReason {
@@ -105,6 +189,13 @@ class NirAdjustmentAdvice {
 /// One matched pair: a NIR value read on a محضر against the laboratory
 /// reference value for the same محضر/parameter/sample.
 class NirValidationPoint {
+  /// Selection is bound to a specific source reading and lab reference using
+  /// global identities, never a device's SQLite row number.
+  final String selectionKey;
+  final int referenceId;
+  final String referenceRemoteId;
+  final int referenceVersion;
+  final bool included;
   final int inspectionId;
   final String entryCode;
   final String inspectionDate;
@@ -113,6 +204,11 @@ class NirValidationPoint {
   final double labValue;
 
   const NirValidationPoint({
+    this.selectionKey = '',
+    this.referenceId = 0,
+    this.referenceRemoteId = '',
+    this.referenceVersion = 0,
+    this.included = true,
     required this.inspectionId,
     required this.entryCode,
     required this.inspectionDate,
@@ -136,6 +232,7 @@ enum NirReliability { trusted, needsReview, insufficientData }
 class NirParameterStats {
   final NirScope scope;
   final int entityId;
+  final String entityRemoteId;
   final String entityName;
   final String parameter;
   final String unit;
@@ -148,18 +245,24 @@ class NirParameterStats {
   /// this (خامة/منتج × parameter) rather than the global horizon.
   final bool scopedHorizon;
 
-  final List<NirValidationPoint> points;
+  /// All pairs stay available for review and re-inclusion. Every calculation
+  /// below uses only [points], so No cannot leak into any fitted metric.
+  final List<NirValidationPoint> allPoints;
+  List<NirValidationPoint> get points =>
+      allPoints.where((point) => point.included).toList(growable: false);
+  int get excludedCount => allPoints.length - count;
 
   const NirParameterStats({
     required this.scope,
     required this.entityId,
+    this.entityRemoteId = '',
     required this.entityName,
     required this.parameter,
     required this.unit,
-    required this.points,
+    required List<NirValidationPoint> points,
     this.horizonStart = '',
     this.scopedHorizon = false,
-  });
+  }) : allPoints = points;
 
   int get count => points.length;
 
@@ -432,6 +535,10 @@ class NirValidationReport {
 /// Contract for reading + resetting the validation horizon and computing the
 /// NIR vs laboratory-reference validation report.
 abstract interface class NirValidationRepository {
+  /// Explicit, server-confirmed change to calibration-only metadata. Source
+  /// measurements and other pairs sharing the reference are preserved.
+  Future<void> setPointIncluded(NirValidationPoint point, bool included);
+
   /// The active **global** validation horizon (newest unscoped reset), or null
   /// when no whole-calibration reset has been recorded yet — in that case every
   /// recorded pair is considered unless a per-item horizon overrides it.
@@ -450,6 +557,7 @@ abstract interface class NirValidationRepository {
     int? entityId,
     String entityName = '',
     String parameter = '',
+    NirAppliedCorrection? appliedCorrection,
   });
 
   /// Lists the reset history (newest first), both global and per-item.

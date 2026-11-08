@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../../design_system/widgets/app_button.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -37,6 +41,9 @@ class QcNcrDetailScreen extends StatefulWidget {
 class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
   QcNcrCubit? _cubit;
   bool _busy = false;
+  bool get _canEdit =>
+      !getIt.isRegistered<AuthGate>() ||
+      getIt<AuthGate>().canWrite(Permission.qcWrite);
 
   @override
   void didChangeDependencies() {
@@ -52,7 +59,7 @@ class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
 
   Future<void> _edit(NcrReportRow row) async {
     final cubit = _cubit;
-    if (_busy || cubit == null) return;
+    if (_busy || cubit == null || !_canEdit) return;
     setState(() => _busy = true);
     try {
       // The prefilled form needs the stored finding, not the projection:
@@ -72,6 +79,7 @@ class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
         context,
         cubit,
         finding: finding,
+        productContext: row.inspectionRefId,
         assignees: cubit.state.options.assignees,
       );
       if (!mounted) return;
@@ -85,7 +93,7 @@ class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
 
   Future<void> _delete(NcrReportRow row) async {
     final cubit = _cubit;
-    if (_busy || cubit == null) return;
+    if (_busy || cubit == null || !_canEdit) return;
     final ok = await AppDeleteConfirmDialog.show(
       context,
       title: AppText.t('حذف حالة عدم المطابقة', 'Delete non-conformance'),
@@ -107,7 +115,7 @@ class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
       if (!mounted) return;
       Navigator.of(context).pop();
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
     } finally {
@@ -126,7 +134,7 @@ class _QcNcrDetailScreenState extends State<QcNcrDetailScreen> {
             title: state.detail == null
                 ? AppText.t('تفاصيل الحالة', 'Finding detail')
                 : state.detail!.reference,
-            actions: state.detail == null || _busy
+            actions: state.detail == null || _busy || !_canEdit
                 ? const []
                 : [
                     IconButton(
@@ -178,6 +186,14 @@ class _Body extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
         _Header(row: row),
+        if (row.productInspectionId != null)
+          AppButton(
+            label: AppText.t('فتح محضر المنتج', 'Open product report'),
+            icon: const Icon(Icons.open_in_new),
+            onPressed: () => context.go(
+              '/inspections?products=1&highlight=${row.productInspectionId}',
+            ),
+          ),
         const SizedBox(height: AppSpacing.md),
         _Section(
           title: AppText.t('الحالة', 'Finding'),

@@ -3,13 +3,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
-import 'package:material_lab/features/reference/data/offline_first_reference_repository.dart';
+import 'package:material_lab/features/reference/data/server_confirmed_reference_repository.dart';
 
 import '../sync/sync_test_fixture.dart';
 
 /// Same regression as `transaction_self_lock_regression_test.dart`, for the
 /// reference facade: its `super.*` calls used to run against the *database*
-/// while the offline-first wrapper held the transaction lock -> the writes
+/// while the server-confirmed wrapper held the transaction lock -> the writes
 /// queued behind their own lock ("database locked").
 class _AllowAllGuard implements WriteGuard {
   @override
@@ -30,7 +30,7 @@ class _AllowAllGuard implements WriteGuard {
 
 void main() {
   late SyncFixture fixture;
-  late OfflineFirstReferenceRepository repo;
+  late ServerConfirmedReferenceRepository repo;
 
   setUp(() async {
     fixture = await openSyncFixture();
@@ -41,7 +41,7 @@ void main() {
     audit.uid = 'uid_admin';
     audit.userName = 'Ahmed Ali';
     audit.deviceId = 'dev_1';
-    repo = OfflineFirstReferenceRepository(
+    repo = ServerConfirmedReferenceRepository(
       dbHelper: fixture.helper,
       guard: _AllowAllGuard(),
       queue: queue,
@@ -107,13 +107,18 @@ void main() {
         (await fixture.db.query('parameters')).single['deleted_at'],
         isNotNull,
       );
-      // The registry is pre-seeded with defaults on every open and accumulates
-      // every used symbol, so only the deleted unit's own absence is asserted.
-      final unitSymbols = (await fixture.db.query(
-        'lab_units',
-      )).map((r) => '${r['symbol']}').toSet();
+      final unitSymbols = (await repo.listUnits())
+          .map((r) => '${r['symbol']}')
+          .toSet();
       expect(unitSymbols, isNot(contains('kHz')));
       expect(unitSymbols, containsAll(['%', 'L', 'mL', 'kg', 'g', 'pc']));
+      final deletedUnit = (await fixture.db.query(
+        'lab_units',
+        where: 'symbol = ?',
+        whereArgs: ['kHz'],
+      )).single;
+      expect(deletedUnit['deleted_at'], isNotNull);
+      expect(deletedUnit['is_active'], 0);
     },
     timeout: const Timeout(Duration(seconds: 25)),
   );

@@ -33,6 +33,34 @@ class NotificationService implements NotificationsPort {
   final bool Function(String kind)? canReadNotification;
   Future<void>? _osInitializing;
   Future<void> _scanTail = Future.value();
+  int _sessionEpoch = 0;
+  String? _sessionKey;
+  bool Function()? _scanScope;
+
+  Future<void> bindSession(PushBinding? binding) async {
+    final key = binding == null
+        ? null
+        : '${binding.organizationId}/${binding.uid}/${binding.deviceId}/${binding.samples}/${binding.lab}';
+    if (key != _sessionKey) {
+      _sessionEpoch++;
+      _sessionKey = key;
+    }
+    await deliveryStore.bind(binding);
+  }
+
+  bool get _scanIsCurrent => _scanScope?.call() ?? true;
+
+  List<String> get _visibleTypes => [
+    if (canReadNotification?.call('inspection') != false)
+      NotificationType.inspection.storage,
+    if (canReadNotification?.call('lab') != false) ...[
+      NotificationType.labResult.storage,
+      NotificationType.productSample.storage,
+    ],
+    if (canReadNotification?.call('inspection') != false ||
+        canReadNotification?.call('lab') != false)
+      NotificationType.sync.storage,
+  ];
 
   // v3 channel: Android keeps the importance of the channel created on
   // first install, so a new id is the only way to upgrade existing installs
@@ -92,8 +120,29 @@ class NotificationService implements NotificationsPort {
     final event = PushEvent.fromPayload(payload);
     if (event == null) {
       if (payload.startsWith('mlpush:')) return null;
+      if (payload.startsWith('productSample:')) {
+        if (canReadNotification?.call('lab') == false) return null;
+        final id = int.tryParse(payload.substring('productSample:'.length));
+        if (id == null) return null;
+        final rows = await (await dbHelper.database).query(
+          'product_batch_samples',
+          columns: ['batch_id'],
+          where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: [id],
+        );
+        return rows.isEmpty
+            ? '/inspections'
+            : '/inspections?highlight=${rows.single['batch_id']}';
+      }
       final target = routeForPayload(payload);
       if (target == null) return null;
+      if (target.route != '/drafts' &&
+          canReadNotification?.call(
+                target.route == '/lab' ? 'lab' : 'inspection',
+              ) ==
+              false) {
+        return null;
+      }
       return Uri(
         path: target.route,
         queryParameters: {
@@ -200,13 +249,26 @@ class NotificationService implements NotificationsPort {
     bool labEnabled = true,
     bool showOs = false,
   }) {
-    final work = _scanTail.then(
-      (_) => _checkForNew(
-        inspectionEnabled: inspectionEnabled,
-        labEnabled: labEnabled,
-        showOs: showOs,
-      ),
-    );
+    final epoch = _sessionEpoch;
+    final databaseEpoch = dbHelper.connectionGeneration;
+    final organization = dbHelper.paths.orgId;
+    bool current() =>
+        epoch == _sessionEpoch &&
+        databaseEpoch == dbHelper.connectionGeneration &&
+        organization == dbHelper.paths.orgId;
+    final work = _scanTail.then((_) async {
+      if (!current()) return <NotificationItem>[];
+      _scanScope = current;
+      try {
+        return await _checkForNew(
+          inspectionEnabled: inspectionEnabled,
+          labEnabled: labEnabled,
+          showOs: showOs,
+        );
+      } finally {
+        _scanScope = null;
+      }
+    });
     _scanTail = work.then<void>((_) {});
     return work;
   }
@@ -257,9 +319,11 @@ class NotificationService implements NotificationsPort {
         scans.add(
           _scanLabResults(firstOverride: sharedFirst, seenOverride: seenLab),
         );
+        scans.add(_scanProductSamples());
       }
       if (scans.isEmpty) return const [];
       final groups = await Future.wait(scans);
+      if (!_scanIsCurrent) return const [];
       final found = [for (final group in groups) ...group];
       if (found.isEmpty) return const [];
       found.sort((a, b) => b.id.compareTo(a.id));
@@ -404,6 +468,43 @@ class NotificationService implements NotificationsPort {
       titleOf: _labResultTitle,
       subtitleOf: _labSubtitle,
       createdOf: (r) => '${r['created_at'] ?? r['tested_at'] ?? ''}',
+    );
+  }
+
+  Future<List<NotificationItem>> _scanProductSamples() async {
+    final db = await dbHelper.database;
+    final marker = await metadata.get(SyncMetadata.notifSeenProductSampleIdKey);
+    final first = marker.isEmpty;
+    final seen = int.tryParse(marker) ?? 0;
+    final rows = await db.rawQuery(
+      'SELECT s.id, s.sample_name, s.sample_no, s.tested_by_name, s.created_at, s.decision_status, i.entry_code, i.material_name '
+      'FROM product_batch_samples s JOIN inspections i ON i.id = s.batch_id '
+      'WHERE s.deleted_at IS NULL AND i.deleted_at IS NULL ${first ? '' : 'AND s.id > ? '} '
+      'ORDER BY s.id ${first ? 'DESC' : 'ASC'} LIMIT ?',
+      first ? [scanLimit] : [seen, scanLimit],
+    );
+    if (rows.isEmpty) {
+      if (first) {
+        await _setMaxSeen(
+          SyncMetadata.notifSeenProductSampleIdKey,
+          db,
+          'product_batch_samples',
+        );
+      }
+      return const [];
+    }
+    return _storeAndAdvance(
+      type: NotificationType.productSample,
+      rows: first ? rows.take(1).toList() : rows,
+      seenKey: SyncMetadata.notifSeenProductSampleIdKey,
+      maxId: rows
+          .map((r) => (r['id'] as num).toInt())
+          .reduce((a, b) => a > b ? a : b),
+      titleOf: (r) =>
+          'عينة منتج جديدة • New product sample: ${r['material_name']}',
+      subtitleOf: (r) =>
+          '${r['entry_code']} • ${r['sample_name']} • ${_labDecisionLabel('${r['decision_status'] ?? ''}')}',
+      createdOf: (r) => '${r['created_at'] ?? ''}',
     );
   }
 
@@ -560,8 +661,10 @@ class NotificationService implements NotificationsPort {
     required String Function(Map<String, Object?>) createdOf,
   }) async {
     final db = await dbHelper.database;
+    if (!_scanIsCurrent) return const [];
     final inserted = <NotificationItem>[];
     for (final r in rows) {
+      if (!_scanIsCurrent) return const [];
       final refId = (r['id'] as num).toInt();
       final entry = '${r['entry_code'] ?? 'row_$refId'}';
       final created = createdOf(r);
@@ -591,6 +694,7 @@ class NotificationService implements NotificationsPort {
         // Duplicate (type,entry_code,ref_id): already notified.
       }
     }
+    if (!_scanIsCurrent) return const [];
     await metadata.set(seenKey, '$maxId');
     await _trim();
     return inserted;
@@ -600,6 +704,7 @@ class NotificationService implements NotificationsPort {
     try {
       final rows = await db.rawQuery('SELECT MAX(id) AS m FROM $table');
       final m = (rows.first['m'] as num?)?.toInt() ?? 0;
+      if (!_scanIsCurrent) return;
       await metadata.set(key, '$m');
     } on Object {
       // Table missing on a legacy file: leave watermark at 0.
@@ -636,10 +741,14 @@ class NotificationService implements NotificationsPort {
 
   Future<List<NotificationItem>> unread({int limit = 30}) async {
     try {
+      final types = _visibleTypes;
+      if (types.isEmpty) return const [];
       final db = await dbHelper.database;
       final rows = await db.query(
         'notifications',
-        where: 'read = 0',
+        where:
+            'read = 0 AND type IN (${List.filled(types.length, '?').join(',')})',
+        whereArgs: types,
         orderBy: 'id DESC',
         limit: limit,
       );
@@ -652,9 +761,13 @@ class NotificationService implements NotificationsPort {
   @override
   Future<List<NotificationItem>> recent({int limit = 30}) async {
     try {
+      final types = _visibleTypes;
+      if (types.isEmpty) return const [];
       final db = await dbHelper.database;
       final rows = await db.query(
         'notifications',
+        where: 'type IN (${List.filled(types.length, '?').join(',')})',
+        whereArgs: types,
         orderBy: 'id DESC',
         limit: limit,
       );
@@ -667,9 +780,12 @@ class NotificationService implements NotificationsPort {
   @override
   Future<int> unreadCount() async {
     try {
+      final types = _visibleTypes;
+      if (types.isEmpty) return 0;
       final db = await dbHelper.database;
       final rows = await db.rawQuery(
-        'SELECT COUNT(*) AS c FROM notifications WHERE read = 0',
+        'SELECT COUNT(*) AS c FROM notifications WHERE read = 0 AND type IN (${List.filled(types.length, '?').join(',')})',
+        types,
       );
       return (rows.first['c'] as num).toInt();
     } on Object {
@@ -707,6 +823,11 @@ class NotificationService implements NotificationsPort {
         'inspections',
       );
       await _setMaxSeen(SyncMetadata.notifSeenLabIdKey, db, 'lab_sample_tests');
+      await _setMaxSeen(
+        SyncMetadata.notifSeenProductSampleIdKey,
+        db,
+        'product_batch_samples',
+      );
     } on Object {
       // Best effort.
     }
@@ -806,6 +927,8 @@ class NotificationService implements NotificationsPort {
         if (item.type != NotificationType.sync) {
           final table = item.type == NotificationType.inspection
               ? 'inspections'
+              : item.type == NotificationType.productSample
+              ? 'product_batch_samples'
               : 'lab_sample_tests';
           final rows = await (await dbHelper.database).query(
             table,
@@ -822,6 +945,8 @@ class NotificationService implements NotificationsPort {
               organizationId: org,
               kind: item.type == NotificationType.inspection
                   ? 'inspection'
+                  : item.type == NotificationType.productSample
+                  ? 'productSample'
                   : 'lab',
               remoteId: remoteId,
               sourceDeviceId: '${rows.single['device_id'] ?? ''}',
@@ -829,7 +954,9 @@ class NotificationService implements NotificationsPort {
             if (!await deliveryStore.claim(event)) continue;
           }
         }
-        final heading = item.type == NotificationType.inspection
+        final heading = item.type == NotificationType.productSample
+            ? 'عينة منتج جديدة • New product sample'
+            : item.type == NotificationType.inspection
             ? (item.title.startsWith('تحليل منتج جديد')
                   ? 'تحليل منتج جديد • New product analysis'
                   : 'فحص خامة جديد • New material inspection')
@@ -845,6 +972,7 @@ class NotificationService implements NotificationsPort {
             : item.isAccepted
             ? AppColors.info
             : null;
+        if (!_scanIsCurrent) return;
         await _os.show(
           event == null
               ? item.id
@@ -936,7 +1064,7 @@ class NotificationService implements NotificationsPort {
       return (route: '/lab', highlight: id, tab: 0);
     }
     if (parts[0] == 'sync') {
-      return (route: '/sync', highlight: null, tab: null);
+      return (route: '/drafts', highlight: null, tab: null);
     }
     return null;
   }

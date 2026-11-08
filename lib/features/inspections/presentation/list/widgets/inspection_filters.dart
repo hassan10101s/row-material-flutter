@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
+import '../../../../../core/domain/formulation_receipt_policy.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
@@ -72,8 +73,7 @@ Future<List<String>> loadInspectionSupplierOptions(
     final rows = await repo.listSupplierHistory();
     return [
       for (final r in rows)
-        if ('${r['name'] ?? ''}'.trim().isNotEmpty)
-          '${r['name'] ?? ''}'.trim(),
+        if ('${r['name'] ?? ''}'.trim().isNotEmpty) '${r['name'] ?? ''}'.trim(),
     ];
   } catch (_) {
     return const [];
@@ -438,7 +438,9 @@ class InspectionFilterGrid extends StatelessWidget {
     required this.onSupplier,
     // Products carry no header decision, so the status row is hidden.
     this.isProduct = false,
+    this.formulationReceiptsOnly = false,
   });
+  final bool formulationReceiptsOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -489,7 +491,10 @@ class InspectionFilterGrid extends StatelessWidget {
             spacing: 4,
             runSpacing: 4,
             children: [
-              for (final s in inspectionFilterStatuses)
+              for (final s
+                  in formulationReceiptsOnly
+                      ? ['', ...formulationAcceptedDecisions]
+                      : inspectionFilterStatuses)
                 ChoiceChip(
                   label: Text(
                     s.isEmpty ? AppText.t('الكل', 'All') : statusLabel(s),

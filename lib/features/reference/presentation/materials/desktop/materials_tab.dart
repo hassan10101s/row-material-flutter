@@ -10,9 +10,9 @@ import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
-import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_paginated_table.dart';
+import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
 import '../../../../../design_system/export/table_html_export.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
@@ -64,7 +64,7 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
   final _searchCtrl = TextEditingController();
   int? _confirmDeleteId;
 
-  /// Table indices (into the filtered [_filtered] list) picked with the
+  /// Table indices (into the filtered materials list) picked with the
   /// checkbox column — the same select-all + gold-bar idea as every table.
   final Set<int> _selected = <int>{};
 
@@ -83,9 +83,9 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
         materialId: materialId,
       ),
     );
-    if (saved != true || !mounted) return;
+    if (!mounted) return;
     await context.read<ReferenceCubit>().load();
-    if (mounted) {
+    if (mounted && saved == true) {
       AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved'));
     }
   }
@@ -102,21 +102,10 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
         AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       }
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
-  }
-
-  List<Map<String, dynamic>> _filtered(List<Map<String, dynamic>> all) {
-    final q = _searchCtrl.text.trim().toLowerCase();
-    if (q.isEmpty) return all;
-    return [
-      for (final m in all)
-        if ('${m['material_name'] ?? ''}'.toLowerCase().contains(q) ||
-            '${m['material_code'] ?? ''}'.toLowerCase().contains(q))
-          m,
-    ];
   }
 
   /// Export mapping shared by the desktop table and the mobile list: the
@@ -150,7 +139,7 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
   @override
   Widget build(BuildContext context) {
     final state = context.watch<ReferenceCubit>().state;
-    final rows = _filtered(state.materials);
+    final rows = state.materials;
     return AppErrorFeedback<ReferenceCubit, ReferenceState>(
       selector: (s) => s.error,
       child: Column(
@@ -161,15 +150,16 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
           Row(
             children: [
               Expanded(
-                child: AppField(
+                child: DebouncedSearchField(
                   label: AppText.t(
                     'بحث بالاسم أو الكود',
                     'Search by name or code...',
                   ),
                   controller: _searchCtrl,
-                  onChanged: (_) => setState(() {
-                    _selected.clear();
-                  }),
+                  onChanged: (query) {
+                    setState(_selected.clear);
+                    context.read<ReferenceCubit>().setQuery(query.trim());
+                  },
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
@@ -193,10 +183,10 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
           else if (rows.isEmpty)
             AppEmptyState(
               icon: Icons.book_outlined,
-              title: state.materials.isEmpty
+              title: state.query.isEmpty
                   ? AppText.t('لا توجد مواد', 'No materials found.')
                   : AppText.t('لا توجد نتائج مطابقة', 'No matching materials.'),
-              subtitle: state.materials.isEmpty
+              subtitle: state.query.isEmpty
                   ? AppText.t(
                       'أضف مادة جديدة أو استوردها من Reference.xlsx.',
                       'Add a new material or import from Reference.xlsx.',
@@ -302,7 +292,12 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
               tooltip: AppStrings.edit,
               visualDensity: VisualDensity.compact,
               icon: Icon(Icons.edit_outlined, size: 18.r),
-              onPressed: () => _openEditor((m['id'] as num).toInt()),
+              onPressed:
+                  context.watch<ReferenceCubit>().state.isBlocked(
+                    (m['id'] as num).toInt(),
+                  )
+                  ? null
+                  : () => _openEditor((m['id'] as num).toInt()),
             ),
             const SizedBox(width: AppSpacing.xs),
             if (isConfirming)
@@ -310,7 +305,12 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
                 small: true,
                 style: AppButtonStyle.danger,
                 label: AppText.t('تأكيد؟', 'Confirm?'),
-                onPressed: () => _delete(context, m),
+                onPressed:
+                    context.watch<ReferenceCubit>().state.isBlocked(
+                      (m['id'] as num).toInt(),
+                    )
+                    ? null
+                    : () => _delete(context, m),
               )
             else
               IconButton(
@@ -321,8 +321,14 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
                   size: 18.r,
                   color: AppColors.danger,
                 ),
-                onPressed: () =>
-                    setState(() => _confirmDeleteId = (m['id'] as num).toInt()),
+                onPressed:
+                    context.watch<ReferenceCubit>().state.isBlocked(
+                      (m['id'] as num).toInt(),
+                    )
+                    ? null
+                    : () => setState(
+                        () => _confirmDeleteId = (m['id'] as num).toInt(),
+                      ),
               ),
             if (isConfirming)
               AppButton(

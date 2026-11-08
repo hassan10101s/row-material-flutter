@@ -57,6 +57,29 @@ void main() {
     }
   });
 
+  test('bounded permission fast paths exactly match the role matrix', () {
+    final start = rules.indexOf('function rolePermissionGranted');
+    final block = rules.substring(start, rules.indexOf('\n    }', start));
+    final groups = RegExp(
+      r'perm in \[([^\]]+)\]\s*\? role in \[([^\]]+)\]',
+    ).allMatches(block);
+    expect(groups.length, 3);
+    List<String> strings(String value) =>
+        RegExp("'([^']+)'").allMatches(value).map((m) => m.group(1)!).toList();
+    for (final group in groups) {
+      final allowed = strings(group.group(2)!);
+      for (final permission in strings(group.group(1)!)) {
+        for (final role in AppRoles.all) {
+          expect(
+            allowed.contains(role),
+            ruleMatrix[role]!.contains(permission),
+            reason: '$role / $permission',
+          );
+        }
+      }
+    }
+  });
+
   test('an unknown role gets no permission in the rules either', () {
     expect(_roleBlockFor(rules, 'superuser'), isNull);
   });
@@ -115,10 +138,17 @@ void main() {
       'qcCustomTableFields',
       'qcCustomTableRows',
       'qcTemplates', 'qcSections', 'qcItems', 'qcInspections', 'qcResponses',
-      'qcTaskLogs', 'qcFindingsNc', 'qcCapa',
-      // Central command protocol (SYNC_ARCHITECTURE_PLAN §6): server-written
-      // only — every rule is `false` for client writes.
+      'qcTaskLogs', 'qcFindingsNc', 'qcCapa', 'qcAudits',
+      // Direct protocol metadata: independently linked to the same atomic
+      // business effects, receipts and sequence by the rules.
       'commandReceipts', 'changeEvents', 'counters', 'notifyRequests',
+      // Migration-built unique-admission index (same trust boundary).
+      'uniqueReservations',
+      'analysisDefinitionProofs',
+      // Write-only proof of all after-images in an 11/12-effect simple commit.
+      'simpleOperationProofs',
+      // Session-bound reveal and explicitly authorized privacy maintenance.
+      'secureVisibility', 'secureControl',
     };
     expect(allowedCollections.difference(expected), isEmpty);
   });

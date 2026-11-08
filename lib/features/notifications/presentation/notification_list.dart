@@ -12,12 +12,17 @@ import '../../../design_system/tokens/app_opacity.dart';
 import '../domain/notification_item.dart';
 import 'notification_controller.dart';
 
-/// Bottom-sheet list of recent new-item notifications (mobile only).
+/// Recent notifications, with a full page for mobile content navigation.
 /// Returns the tapped item so the caller can deep-link.
 class NotificationList extends StatelessWidget {
-  const NotificationList({super.key, required this.controller});
+  const NotificationList({
+    super.key,
+    required this.controller,
+    this.fullScreen = false,
+  });
 
   final NotificationController controller;
+  final bool fullScreen;
 
   @override
   Widget build(BuildContext context) {
@@ -25,7 +30,8 @@ class NotificationList extends StatelessWidget {
       listenable: controller,
       builder: (context, _) {
         final items = controller.items;
-        return AppDialog(
+        return AppWindow(
+          fullScreen: fullScreen,
           title: controller.unread > 0
               ? AppText.t(
                   'الإشعارات (${controller.unread})',
@@ -33,7 +39,7 @@ class NotificationList extends StatelessWidget {
                 )
               : AppText.t('الإشعارات', 'Notifications'),
           icon: Icons.notifications_outlined,
-          height: 500,
+          height: fullScreen ? null : 500,
           actions: [
             AppButton(
               label: AppText.t('مسح الكل', 'Clear all'),
@@ -72,6 +78,9 @@ class NotificationList extends StatelessWidget {
                         final IconData icon;
                         if (item.type == NotificationType.sync) {
                           icon = Icons.sync_problem_outlined;
+                        } else if (item.type ==
+                            NotificationType.productSample) {
+                          icon = Icons.factory_outlined;
                         } else if (item.type == NotificationType.labResult) {
                           icon = Icons.biotech_outlined;
                         } else if (item.isProductInspection) {

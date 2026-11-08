@@ -183,7 +183,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
       );
     } on AppError catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       if (token != _token) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
@@ -214,7 +214,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
       safeEmit(state.copyWith(saving: false));
       await load();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
@@ -266,7 +266,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
       await load();
       return next;
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
@@ -280,7 +280,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
       safeEmit(state.copyWith(saving: false));
       await load();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
@@ -303,7 +303,7 @@ class QcSopsCubit extends AppCubit<QcSopsState> {
       safeEmit(state.copyWith(saving: false));
       await load();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }

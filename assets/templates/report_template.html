@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="ar" dir="ltr">
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
 <head>
     <meta charset="UTF-8">
-    <title>Quality Control Report</title>
+    <title>{% if is_en %}Quality Control Report{% else %}تقرير مراقبة الجودة{% endif %}</title>
     {% if base_url %}<base href="{{ base_url }}">{% endif %}
     <link rel="stylesheet" href="fonts/fonts.css">
     <style>
@@ -661,13 +661,66 @@
         }
 
         @page { size: A4; margin: 9mm 8mm; }
-    </style>
+
+/* Institutional print layout: compact summaries, restrained decoration. */
+.sheet, .report-shell { border-radius: 8px !important; background: #fff !important; box-shadow: none !important; }
+.sheet { border: 0 !important; min-height: 0 !important; }
+.watermark, .corner-tr, .corner-bl { display: none !important; }
+.top-band, .accent-strip { height: 3px !important; background: #294961 !important; }
+.header { padding: 12px 14px !important; background: #fff !important; border-bottom: 1px solid #d7dee7 !important; }
+.header-grid { gap: 10px !important; }
+.header h1, .header .title { font-size: 18px !important; line-height: 1.35 !important; margin: 3px 0 !important; color: #172b4d !important; }
+.brand-logo, .report-logo { max-height: 42px !important; height: auto !important; max-width: 112px !important; box-shadow: none !important; }
+.organization-name { font-size: 12px !important; line-height: 1.35; margin: 4px auto 5px !important; color: #24364b; }
+.subtitle, .header-main > p { font-size: 11px !important; margin-top: 3px !important; }
+.eyebrow { border-radius: 8px !important; background: #f1f4f7 !important; color: #526171 !important; padding: 3px 7px !important; font-size: 9px !important; }
+.body { padding: 10px 12px 12px !important; }
+.meta-strip, .meta-grid, .summary-grid, .quarter-grid { gap: 6px !important; margin-top: 8px !important; margin-bottom: 8px !important; }
+.meta-card, .summary-card, .quarter-card, .material-kpi { min-height: 0 !important; height: auto !important; padding: 7px 9px !important; border-radius: 8px !important; border: 1px solid #d7dee7 !important; background: #fff !important; box-shadow: none !important; }
+.meta-card::before, .meta-card::after, .quarter-card::before, .quarter-card::after { display: none !important; }
+.meta-card .label, .summary-card .summary-label, .q-name, .kpi-label { font-size: 10px !important; margin-bottom: 3px !important; color: #64748b !important; font-weight: 600 !important; }
+.meta-card .value { font-size: 12px !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-value, .q-total { font-size: 18px !important; line-height: 1.15 !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-note { font-size: 10px !important; margin-top: 3px !important; line-height: 1.35; color: #64748b !important; font-weight: 500 !important; }
+.summary-card.success .summary-value { color: #276749 !important; }
+.summary-card.danger .summary-value { color: #9b2c2c !important; }
+.summary-card.warning .summary-value { color: #875c15 !important; }
+.section-head { margin: 10px 0 6px !important; gap: 8px !important; }
+.section-title { font-size: 13px !important; }
+.materials-list { gap: 9px !important; }
+.material-card, .source-card, .panel-card, .section { border-radius: 8px !important; border: 1px solid #d7dee7 !important; box-shadow: none !important; background: #fff !important; }
+.material-header, .source-header, .section-physical, .section-chemical { padding: 7px 9px !important; background: #edf1f5 !important; color: #24364b !important; border-bottom: 1px solid #d7dee7 !important; }
+.material-title, .source-title { font-size: 12px !important; color: #24364b !important; }
+.material-badge, .badge { border-radius: 8px !important; padding: 3px 7px !important; box-shadow: none !important; background: #f5f7f9 !important; border: 1px solid #d7dee7 !important; color: #334155 !important; }
+.material-kpis { padding: 6px 8px !important; gap: 5px !important; }
+.material-kpi { padding: 5px 6px !important; }
+.kpi-value { font-size: 14px !important; font-weight: 700 !important; }
+.table-wrap { padding: 7px 9px !important; }
+table { font-size: 11px !important; line-height: 1.35; }
+th, td { padding: 4px 6px !important; }
+th { background: #edf1f5 !important; color: #24364b !important; }
+.decision-box { padding: 8px 10px !important; border-radius: 8px !important; box-shadow: none !important; }
+.decision-box .decision-status { font-size: 14px !important; }
+.footer { padding: 8px 12px !important; background: #fff !important; border-top: 1px solid #d7dee7 !important; color: #64748b !important; }
+
+
+.sheet::before, .sheet::after { display: none !important; }
+.section-title { background: #edf1f5 !important; color: #24364b !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; padding: 6px 9px !important; }
+.section-title::after { display: none !important; }
+.material-item { background: #fff !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; margin-bottom: 9px !important; }
+.material-name { padding: 7px 9px !important; background: #f5f7f9 !important; font-size: 12px !important; }
+.material-stats { gap: 4px !important; padding: 6px !important; }
+
+
+html[dir="ltr"] body { direction:ltr; text-align:left; }
+html[dir="rtl"] body { direction:rtl; text-align:right; }
+</style>
 </head>
 <body dir="rtl">
     <div class="sheet">
         <div class="corner-tr"></div>
         <div class="corner-bl"></div>
-        <div class="watermark">QUALITY CONTROL</div>
+        <div class="watermark">{% if is_en %}QUALITY CONTROL{% else %}مراقبة الجودة{% endif %}</div>
 
         <div class="accent-strip"></div>
 
@@ -676,13 +729,14 @@
                 {% if report_logo_data_uri %}
                 <img class="report-logo" src="{{ report_logo_data_uri }}" alt="Report Logo">
                 {% endif %}
-                <h1>{% if is_product %}{% if is_en %}Product Inspection Report{% else %}محضر فحص منتجات | Product Inspection Report{% endif %}{% else %}{% if is_en %}Raw Material Inspection Report{% else %}محضر فحص خامات | Raw Material Inspection Report{% endif %}{% endif %}</h1>
+{% if organization_name %}<div class="organization-name" style="font-size:12px;font-weight:700;margin-top:6px;text-align:center;overflow-wrap:anywhere;">{{ organization_name }}</div>{% endif %}
+                <h1>{% if is_product %}{% if is_en %}Product Inspection Report{% else %}محضر فحص منتجات{% endif %}{% else %}{% if is_en %}Raw Material Inspection Report{% else %}محضر فحص خامات{% endif %}{% endif %}</h1>
                 <p>{{ department_label or "Quality Control Department" }}</p>
-                {% if form_no %}<p>{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
+                {% if form_no %}<p>{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
             </div>
             <div class="header-side">
                 <div class="badge {{ decision_class }}">
-                    <span>Version {{ decision_version }}</span>
+                    <span>{% if is_en %}Version{% else %}الإصدار{% endif %} {{ decision_version }}</span>
                     <span>|</span>
                     <span>{{ generated_at }}</span>
                 </div>
@@ -691,62 +745,62 @@
 
         <div class="meta-grid">
             <div class="meta-card">
-                <span class="label">{% if is_product %}{% if is_en %}Product{% else %}اسم المنتج | Product{% endif %}{% else %}{% if is_en %}Material{% else %}اسم الخامة | Material{% endif %}{% endif %}</span>
+                <span class="label">{% if is_product %}{% if is_en %}Product{% else %}اسم المنتج{% endif %}{% else %}{% if is_en %}Material{% else %}اسم الخامة{% endif %}{% endif %}</span>
                 <span class="value">{{ material_name }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">{% if is_en %}Entry Code{% else %}كود الدخول | Entry Code{% endif %}</span>
+                <span class="label">{% if is_en %}Entry Code{% else %}كود الدخول{% endif %}</span>
                 <span class="value">{{ sample_number }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">{% if is_en %}Date{% else %}تاريخ الفحص | Date{% endif %}</span>
+                <span class="label">{% if is_en %}Date{% else %}تاريخ الفحص{% endif %}</span>
                 <span class="value">{{ date }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">{% if is_en %}Expiry Date{% else %}تاريخ انتهاء الصلاحية | Expiry Date{% endif %}</span>
+                <span class="label">{% if is_en %}Expiry Date{% else %}تاريخ انتهاء الصلاحية{% endif %}</span>
                 <span class="value">{{ expiry_date }}</span>
             </div>
             {% if is_product %}
             <div class="meta-card">
-                <span class="label">{% if is_en %}Formula Number{% else %}رقم الفورمولا | Formula Number{% endif %}</span>
+                <span class="label">{% if is_en %}Formula Number{% else %}رقم الفورمولا{% endif %}</span>
                 <span class="value">{{ formula_number }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">{% if is_en %}Batch Number{% else %}رقم التشغيلة | Batch Number{% endif %}</span>
+                <span class="label">{% if is_en %}Batch Number{% else %}رقم التشغيلة{% endif %}</span>
                 <span class="value">{{ batch_number }}</span>
             </div>
             {% else %}
             <div class="meta-card">
-                <span class="label">{% if is_en %}Supplier{% else %}المورد | Supplier{% endif %}</span>
+                <span class="label">{% if is_en %}Supplier{% else %}المورد{% endif %}</span>
                 <span class="value">{{ supplier }}</span>
             </div>
             <div class="meta-card">
-                <span class="label">{% if is_en %}Truck Number{% else %}رقم السيارة | Truck Number{% endif %}</span>
+                <span class="label">{% if is_en %}Truck Number{% else %}رقم السيارة{% endif %}</span>
                 <span class="value">{{ truck_number }}</span>
             </div>
             {% endif %}
             <div class="meta-card">
-                <span class="label">{% if is_en %}Quantity (Ton){% else %}الكمية | Quantity (Ton){% endif %}</span>
+                <span class="label">{% if is_en %}Quantity (Ton){% else %}الكمية{% endif %}</span>
                 <span class="value">{{ quantity }}</span>
             </div>
-            <div class="meta-card">
-                <span class="label">{% if is_en %}Sample Taken By{% else %}اخذت العينة بواسطة | Sample Taken By{% endif %}</span>
+            {% if not is_product %}<div class="meta-card">
+                <span class="label">{% if is_en %}Sample Taken By{% else %}اخذت العينة بواسطة{% endif %}</span>
                 <span class="value">{{ sample_taken_by }}</span>
-            </div>
+            </div>{% endif %}
         </div>
 
         <div class="sections">
             {% if not is_product %}
             <section class="section">
-                <h2 class="section-title section-physical">{% if is_en %}Physical Aspects{% else %}Physical Aspects / الفحص الظاهري{% endif %}</h2>
+                <h2 class="section-title section-physical">{% if is_en %}Physical Aspects{% else %}الفحص الظاهري{% endif %}</h2>
                 <table>
                     <thead>
                         <tr>
-                            <th>Parameter</th>
-                            <th>Requirement</th>
+                            <th>{% if is_en %}Parameter{% else %}البارامتر{% endif %}</th>
+                            <th>{% if is_en %}Requirement{% else %}المتطلب{% endif %}</th>
                             {% for sn in sample_names %}
                             <th class="result-col">
-                                <span class="result-header-index">Result {{ loop.index }}</span>
+                                <span class="result-header-index">{% if is_en %}Result{% else %}النتيجة{% endif %} {{ loop.index }}</span>
                                 <span class="result-header-name">{{ sn }}</span>
                             </th>
                             {% endfor %}
@@ -769,19 +823,19 @@
             </section>
 
             <section class="section">
-                <h2 class="section-title section-chemical">{% if is_en %}Chemical Analysis{% else %}Chemical Analysis / التحليل الكيميائي{% endif %}</h2>
+                <h2 class="section-title section-chemical">{% if is_en %}Chemical Analysis{% else %}التحليل الكيميائي{% endif %}</h2>
                 <table>
                     <thead>
                         <tr>
-                            <th>Parameter</th>
-                            <th class="minmax-col">Min</th>
+                            <th>{% if is_en %}Parameter{% else %}البارامتر{% endif %}</th>
+                            <th class="minmax-col">{% if is_en %}Min{% else %}الحد الأدنى{% endif %}</th>
                             {% for sn in sample_names %}
                             <th class="result-col">
-                                <span class="result-header-index">Result {{ loop.index }}</span>
+                                <span class="result-header-index">{% if is_en %}Result{% else %}النتيجة{% endif %} {{ loop.index }}</span>
                                 <span class="result-header-name">{{ sn }}</span>
                             </th>
                             {% endfor %}
-                            <th class="minmax-col">Max</th>
+                            <th class="minmax-col">{% if is_en %}Max{% else %}الحد الأقصى{% endif %}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -802,11 +856,11 @@
 
             {% if show_batch_samples %}
             <section class="section">
-                <h2 class="section-title section-chemical">{% if is_en %}Operational Samples{% else %}عينات التشغيلية / Operational Samples{% endif %}</h2>
+                <h2 class="section-title section-chemical">{% if is_en %}Operational Samples{% else %}عينات التشغيلية{% endif %}</h2>
                 <table>
                     <thead>
                         <tr>
-                            <th rowspan="2">{% if is_en %}Parameter{% else %}البيان / Parameter{% endif %}</th>
+                            <th rowspan="2">{% if is_en %}Parameter{% else %}البيان{% endif %}</th>
                             {% for h in batch_merged_samples %}
                             <th colspan="2" class="result-col">
                                 <span class="result-header-index">{{ h.label }}</span>
@@ -840,48 +894,48 @@
         <div class="decision-row">
             {% if not is_product %}
             <section class="qr-box">
-                <div class="decision-label">QR Code</div>
+                <div class="decision-label">{% if is_en %}QR Code{% else %}رمز الاستجابة السريعة{% endif %}</div>
                 {% if qr_image_data_uri %}
                 <img class="qr-image" src="{{ qr_image_data_uri }}" alt="Inspection QR Code">
-                <div class="qr-caption">Scan to view report data</div>
+                <div class="qr-caption">{% if is_en %}Scan to view report data{% else %}امسح الرمز لعرض بيانات التقرير{% endif %}</div>
                 {% if qr_warning %}
                 <div class="qr-warning">{{ qr_warning }}</div>
                 {% endif %}
                 {% else %}
-                <div class="qr-warning">{{ qr_warning or "QR is unavailable." }}</div>
+                <div class="qr-warning">{% if qr_warning %}{{ qr_warning }}{% else %}{% if is_en %}QR is unavailable.{% else %}رمز الاستجابة السريعة غير متاح.{% endif %}{% endif %}</div>
                 {% endif %}
             </section>
 
             <section class="notes-box{% if not show_status_timeline %} notes-box--centered{% endif %}">
                 <div class="decision-head">
-                    <div class="decision-label">{% if is_en %}QC Decision{% else %}قرار الجودة  | QC Decision{% endif %}</div>
+                    <div class="decision-label">{% if is_en %}QC Decision{% else %}قرار الجودة{% endif %}</div>
                     <div class="decision-value {{ decision_class }}">{{ decision_label }}</div>
                 </div>
                 {% if show_decision_reason %}
-                <div class="note-line"><strong>{% if is_en %}Reason:{% else %}سبب القرار | Reason:{% endif %}</strong> {{ decision_reason }}</div>
+                <div class="note-line"><strong>{% if is_en %}Reason:{% else %}سبب القرار{% endif %}</strong> {{ decision_reason }}</div>
                 {% endif %}
                 {% if show_follow_up_note %}
-                <div class="note-line"><strong>{% if is_en %}Follow-up:{% else %}ملاحظة المتابعة | Follow-up:{% endif %}</strong> {{ follow_up_note }}</div>
+                <div class="note-line"><strong>{% if is_en %}Follow-up:{% else %}ملاحظة المتابعة{% endif %}</strong> {{ follow_up_note }}</div>
                 {% endif %}
                 {% if show_rejected_quantity %}
-                <div class="note-line"><strong>{% if is_en %}Rejected Quantity:{% else %}الكمية المرفوضة | Rejected Quantity:{% endif %}</strong> {{ rejected_quantity }} {% if is_en %}ton{% else %}طن{% endif %}</div>
+                <div class="note-line"><strong>{% if is_en %}Rejected Quantity:{% else %}الكمية المرفوضة{% endif %}</strong> {{ rejected_quantity }} {% if is_en %}ton{% else %}طن{% endif %}</div>
                 {% endif %}
                 {% if show_status_timeline %}
                 <div class="timeline-wrap">
-                    <div class="decision-label">{% if is_en %}Status Timeline{% else %}تسلسل القرارات | Status Timeline{% endif %}</div>
+                    <div class="decision-label">{% if is_en %}Status Timeline{% else %}تسلسل القرارات{% endif %}</div>
                     <div class="status-timeline{% if status_timeline|length > 4 %} is-multi-row{% endif %}">
                         {% for step in status_timeline %}
                         <div class="timeline-item">
                             <div class="timeline-node">
                                 <div class="timeline-version">v{{ step.version or loop.index }}</div>
                                 <div class="timeline-dot {{ step.css_class }}">
-                                    {{ step.label_ar }}
+                                    {% if is_en %}{{ step.label_en }}{% else %}{{ step.label_ar }}{% endif %}
                                 </div>
-                                <div class="timeline-status">{{ step.label_en }} / {{ step.label_ar }}</div>
+                                <div class="timeline-status">{% if is_en %}{{ step.label_en }}{% else %}{{ step.label_ar }}{% endif %}</div>
                                 <div class="timeline-meta">
                                     {{ step.changed_at or "-" }}
                                 </div>
-                                <div class="timeline-reason"><strong>{% if is_en %}Reason:{% else %}سبب القرار | Reason:{% endif %}</strong> {{ step.reason }}</div>
+                                <div class="timeline-reason"><strong>{% if is_en %}Reason:{% else %}سبب القرار{% endif %}</strong> {{ step.reason }}</div>
                             </div>
                             {% if not loop.last %}
                             <div class="timeline-line"></div>
@@ -897,15 +951,15 @@
 
         {% if is_product %}
         <section class="qr-box qr-footer-center">
-            <div class="decision-label">QR Code</div>
+            <div class="decision-label">{% if is_en %}QR Code{% else %}رمز الاستجابة السريعة{% endif %}</div>
             {% if qr_image_data_uri %}
             <img class="qr-image" src="{{ qr_image_data_uri }}" alt="Inspection QR Code">
-            <div class="qr-caption">Scan to view report data</div>
+            <div class="qr-caption">{% if is_en %}Scan to view report data{% else %}امسح الرمز لعرض بيانات التقرير{% endif %}</div>
             {% if qr_warning %}
             <div class="qr-warning">{{ qr_warning }}</div>
             {% endif %}
             {% else %}
-            <div class="qr-warning">{{ qr_warning or "QR is unavailable." }}</div>
+            <div class="qr-warning">{% if qr_warning %}{{ qr_warning }}{% else %}{% if is_en %}QR is unavailable.{% else %}رمز الاستجابة السريعة غير متاح.{% endif %}{% endif %}</div>
             {% endif %}
         </section>
         {% endif %}
@@ -933,25 +987,25 @@
         {% endif %}
         <div class="footer">
             <div class="signature-box">
-                {% if is_en %}Quality Specialist{% else %}Quality Specialist / أخصائي الجودة{% endif %}<br>
+                {% if is_en %}Quality Specialist{% else %}أخصائي الجودة{% endif %}<br>
                 <strong>{{ quality_specialist_name }}</strong>
             </div>
 
             <div class="audit-box">
-                <div>Created By : {{ created_by_name }}</div>
-                <div>Last Updated: {{ updated_at }}</div>
-                <div>Reference Snapshot Stored: Yes</div>
-                <div>System Record ID: {{ inspection_id }}</div>
+                <div>{% if is_en %}Created by:{% else %}أعده:{% endif %} {{ created_by_name }}</div>
+                <div>{% if is_en %}Last updated:{% else %}آخر تحديث:{% endif %} {{ updated_at }}</div>
+                <div>{% if is_en %}Reference Snapshot Stored: Yes{% else %}تم حفظ المرجع وقت الفحص{% endif %}</div>
+                <div>{% if is_en %}Record ID:{% else %}رقم السجل:{% endif %} {{ inspection_id }}</div>
             </div>
 
             <div class="signature-box">
-                Approved By<br>
-                <strong>Quality Manager</strong>
+                {% if is_en %}Approved By{% else %}اعتمد بواسطة{% endif %}<br>
+                <strong>{% if is_en %}Quality Manager{% else %}مدير الجودة{% endif %}</strong>
             </div>
         </div>
     </div>
     <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
-        Powered by Material Lab
+        {% if is_en %}Powered by Material Lab{% else %}تم الإنشاء بواسطة Material Lab{% endif %}
     </div>
 </body>
 </html>

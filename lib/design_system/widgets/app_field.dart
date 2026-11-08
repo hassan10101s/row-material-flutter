@@ -38,6 +38,7 @@ class AppField extends StatefulWidget {
   final ValueChanged<String>? onFieldSubmitted;
   final List<TextInputFormatter>? inputFormatters;
   final bool enabled;
+  final bool readOnly;
   final bool autofocus;
   final TextCapitalization textCapitalization;
 
@@ -61,6 +62,7 @@ class AppField extends StatefulWidget {
     this.onFieldSubmitted,
     this.inputFormatters,
     this.enabled = true,
+    this.readOnly = false,
     this.autofocus = false,
     this.textCapitalization = TextCapitalization.none,
   }) {
@@ -117,6 +119,7 @@ class _AppFieldState extends State<AppField> {
           onFieldSubmitted: widget.onFieldSubmitted,
           inputFormatters: widget.inputFormatters,
           enabled: widget.enabled,
+          readOnly: widget.readOnly,
           autofocus: widget.autofocus,
           textCapitalization: widget.textCapitalization,
           autovalidateMode: widget.autovalidateMode,
@@ -170,7 +173,8 @@ class Validators {
   static String? numeric(String? value, [String? message]) {
     if (value == null || value.trim().isEmpty) return null;
     final normalized = value.trim().replaceAll(',', '');
-    if (double.tryParse(normalized) == null) {
+    final number = double.tryParse(normalized);
+    if (number == null || !number.isFinite) {
       return message ?? AppText.t('رقم غير صالح', 'Invalid number.');
     }
     return null;

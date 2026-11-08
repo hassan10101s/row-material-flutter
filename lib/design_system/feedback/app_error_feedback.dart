@@ -34,7 +34,7 @@ class _AppErrorFeedbackState<C extends StateStreamable<S>, S>
   String? _shown;
 
   void _raise(String? error) {
-    if (error == null) {
+    if (error == null || error.trim().isEmpty) {
       _shown = null;
       return;
     }

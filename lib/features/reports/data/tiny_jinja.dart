@@ -23,7 +23,9 @@
 library;
 
 String tinyJinjaRender(String template, Map<String, dynamic> context) {
-  final nodes = _parse(template);
+  // Comments may contain newlines or template-like examples; remove them
+  // before parsing so implementation notes never appear in printed reports.
+  final nodes = _parse(template.replaceAll(RegExp(r'\{#[\s\S]*?#\}'), ''));
   final scope = _Scope()..vars.addAll(context);
   return _renderNodes(nodes, scope);
 }

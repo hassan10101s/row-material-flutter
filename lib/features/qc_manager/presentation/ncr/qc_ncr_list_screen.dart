@@ -2,6 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:go_router/go_router.dart';
+import '../../../../router/app_router.dart';
+import '../../../../app/auth_gate.dart';
+import '../../../../core/auth/permissions.dart';
+import '../../../../di/service_locator.dart';
+import '../../../../design_system/widgets/app_mobile_add_layout.dart';
+import 'qc_ncr_create_screen.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
@@ -39,193 +46,230 @@ class QcNcrListScreen extends StatelessWidget {
     return BlocBuilder<QcNcrCubit, QcNcrState>(
       bloc: cubit,
       builder: (context, state) {
-        return Scaffold(
-          appBar: AppTopAppBar(
-            title: AppText.t('حالات عدم المطابقة', 'Non-conformances'),
-            actions: [
-              IconButton(
-                tooltip: AppText.t('تصدير جدول', 'Export table'),
-                onPressed: cubit.state.rows.isEmpty
-                    ? null
-                    : () => TableHtmlExport.export(
-                        context,
-                        filePrefix: 'ncr',
-                        title: ncrExportTitle(),
-                        headers: ncrHeaders(),
-                        rows: ncrExportRows(cubit.state.rows),
-                      ),
-                icon: const Icon(Icons.table_view_outlined),
-              ),
-              IconButton(
-                tooltip: AppText.t('تصفية', 'Filters'),
-                onPressed: () => openNcrFilters(context, state, cubit),
-                icon: Badge(
-                  isLabelVisible: state.hasFilters,
-                  child: const Icon(Icons.filter_list),
+        bool canCreate = false;
+        try {
+          canCreate = getIt<AuthGate>().canWrite(Permission.qcWrite);
+        } catch (_) {}
+        return AppMobileAddLayout(
+          floating: FormFactor.current.isMobile,
+          tooltip: AppText.t('إنشاء عدم مطابقة', 'New non-conformance'),
+          onAdd: canCreate
+              ? () => QcNcrCreateScreen.open(
+                  context,
+                  cubit,
+                  assignees: state.options.assignees,
+                )
+              : null,
+          child: Scaffold(
+            appBar: AppTopAppBar(
+              title: AppText.t('حالات عدم المطابقة', 'Non-conformances'),
+              actions: [
+                if (canCreate && !FormFactor.current.isMobile)
+                  IconButton(
+                    tooltip: AppText.t(
+                      'إنشاء عدم مطابقة',
+                      'New non-conformance',
+                    ),
+                    icon: const Icon(Icons.add),
+                    onPressed: () => QcNcrCreateScreen.open(
+                      context,
+                      cubit,
+                      assignees: state.options.assignees,
+                    ),
+                  ),
+                IconButton(
+                  tooltip: AppText.t(
+                    'ملخص عدم المطابقة',
+                    'Non-conformance summary',
+                  ),
+                  icon: const Icon(Icons.analytics_outlined),
+                  onPressed: () => context.push(AppRoutes.qcNcr),
                 ),
-              ),
-              IconButton(
-                tooltip: AppText.t('تحديث', 'Refresh'),
-                onPressed: state.loading ? null : cubit.load,
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-          body: Column(
-            children: [
-              // Search sits above the register on every form factor. It writes
-              // the same `filters.query` the KPI cards and the list count, so
-              // the header total can never disagree with the visible rows.
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  AppSpacing.md,
-                  AppSpacing.sm,
-                  AppSpacing.md,
-                  0,
-                ),
-                child: _NcrSearchField(cubit: cubit),
-              ),
-              if (state.hasFilters) NcrActiveFilterChips(state: state),
-              Expanded(
-                child: state.error != null && state.rows.isEmpty
-                    ? AppErrorState(
-                        title: AppText.t(
-                          'تعذر تحميل التقرير',
-                          'Report unavailable',
+                IconButton(
+                  tooltip: AppText.t('تصدير جدول', 'Export table'),
+                  onPressed: cubit.state.rows.isEmpty
+                      ? null
+                      : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'ncr',
+                          title: ncrExportTitle(),
+                          headers: ncrHeaders(),
+                          rows: ncrExportRows(cubit.state.rows),
                         ),
-                        subtitle: state.error,
-                        onRetry: cubit.load,
-                      )
-                    : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // The old table carried the total in its footer;
-                          // cards have no footer, so the count sits above
-                          // the list instead of disappearing.
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              AppSpacing.md,
-                              AppSpacing.sm,
-                              AppSpacing.md,
-                              0,
-                            ),
-                            child: Text(
-                              state.total == 0
-                                  ? AppText.t('لا نتائج', 'No results')
-                                  : '${state.total}',
-                              style: TextStyle(
-                                color: AppColors.textMuted,
-                                fontSize: 12.spMax,
+                  icon: const Icon(Icons.table_view_outlined),
+                ),
+                IconButton(
+                  tooltip: AppText.t('تصفية', 'Filters'),
+                  onPressed: () => openNcrFilters(context, state, cubit),
+                  icon: Badge(
+                    isLabelVisible: state.hasFilters,
+                    child: const Icon(Icons.filter_list),
+                  ),
+                ),
+                IconButton(
+                  tooltip: AppText.t('تحديث', 'Refresh'),
+                  onPressed: state.loading ? null : cubit.load,
+                  icon: const Icon(Icons.refresh),
+                ),
+              ],
+            ),
+            body: Column(
+              children: [
+                // Search sits above the register on every form factor. It writes
+                // the same `filters.query` the KPI cards and the list count, so
+                // the header total can never disagree with the visible rows.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                    AppSpacing.md,
+                    0,
+                  ),
+                  child: _NcrSearchField(cubit: cubit),
+                ),
+                if (state.hasFilters) NcrActiveFilterChips(state: state),
+                Expanded(
+                  child: state.error != null && state.rows.isEmpty
+                      ? AppErrorState(
+                          title: AppText.t(
+                            'تعذر تحميل التقرير',
+                            'Report unavailable',
+                          ),
+                          subtitle: state.error,
+                          onRetry: cubit.load,
+                        )
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // The old table carried the total in its footer;
+                            // cards have no footer, so the count sits above
+                            // the list instead of disappearing.
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpacing.md,
+                                AppSpacing.sm,
+                                AppSpacing.md,
+                                0,
+                              ),
+                              child: Text(
+                                state.total == 0
+                                    ? AppText.t('لا نتائج', 'No results')
+                                    : '${state.total}',
+                                style: TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 12.spMax,
+                                ),
                               ),
                             ),
-                          ),
-                          Expanded(
-                            // Wide screens keep the readable card column
-                            // instead of stretching rows edge to edge.
-                            child: Center(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: FormFactor.current.isMobile
-                                      ? 720
-                                      : 960,
-                                ),
-                                child: AppAdaptiveDataView(
-                                  cardsOnly: true,
-                                  headers: ncrHeaders(),
-                                  rows: [
-                                    for (final r in state.rows)
-                                      AppDataRow(
-                                        cells: ncrCells(r),
-                                        secondary: r.description,
-                                        onTap: onOpenFinding == null
-                                            ? null
-                                            : () => onOpenFinding!(r.findingId),
-                                      ),
-                                  ],
-                                  onRowTap: onOpenFinding == null
-                                      ? null
-                                      : (index) => onOpenFinding!(
-                                          state.rows[index].findingId,
+                            Expanded(
+                              // Wide screens keep the readable card column
+                              // instead of stretching rows edge to edge.
+                              child: Center(
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxWidth: FormFactor.current.isMobile
+                                        ? 720
+                                        : 960,
+                                  ),
+                                  child: AppAdaptiveDataView(
+                                    compactMobile: true,
+                                    cardsOnly: true,
+                                    headers: ncrHeaders(),
+                                    rows: [
+                                      for (final r in state.rows)
+                                        AppDataRow(
+                                          cells: ncrCells(r),
+                                          onTap: onOpenFinding == null
+                                              ? null
+                                              : () =>
+                                                    onOpenFinding!(r.findingId),
                                         ),
-                                  loading: state.loading,
-                                  empty: AppEmptyState(
-                                    icon: Icons.inbox_outlined,
-                                    title: AppText.t(
-                                      'لا توجد حالات مطابقة',
-                                      'No non-conformances match',
+                                    ],
+                                    onRowTap: onOpenFinding == null
+                                        ? null
+                                        : (index) => onOpenFinding!(
+                                            state.rows[index].findingId,
+                                          ),
+                                    loading: state.loading,
+                                    empty: AppEmptyState(
+                                      icon: Icons.inbox_outlined,
+                                      title: AppText.t(
+                                        'لا توجد حالات مطابقة',
+                                        'No non-conformances match',
+                                      ),
+                                      subtitle: state.hasFilters
+                                          ? AppText.t(
+                                              'وسّع نطاق التاريخ أو أزل بعض عوامل التصفية',
+                                              'Widen the date range or drop a filter',
+                                            )
+                                          : null,
                                     ),
-                                    subtitle: state.hasFilters
-                                        ? AppText.t(
-                                            'وسّع نطاق التاريخ أو أزل بعض عوامل التصفية',
-                                            'Widen the date range or drop a filter',
+                                    headerTrailing: state.loading
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                            ),
                                           )
                                         : null,
                                   ),
-                                  headerTrailing: state.loading
-                                      ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : null,
                                 ),
                               ),
                             ),
-                          ),
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              AppSpacing.md,
-                              AppSpacing.sm,
-                              AppSpacing.md,
-                              AppSpacing.sm,
-                            ),
-                            child: Wrap(
-                              crossAxisAlignment: WrapCrossAlignment.center,
-                              alignment: WrapAlignment.spaceBetween,
-                              spacing: AppSpacing.sm,
-                              runSpacing: 4,
-                              children: [
-                                AppPageSizeSelector(
-                                  value: cubit.pageSize,
-                                  onChanged: (v) => cubit.setPageSize(v),
-                                ),
-                                Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    AppButton(
-                                      small: true,
-                                      style: AppButtonStyle.ghost,
-                                      label: AppText.t('السابق', 'Previous'),
-                                      onPressed: state.hasPrevious
-                                          ? cubit.previousPage
-                                          : null,
-                                    ),
-                                    Text(
-                                      '${AppText.t('صفحة', 'Page')} ${state.page} / ${state.pageCount}',
-                                      style: TextStyle(
-                                        color: AppColors.textMuted,
-                                        fontSize: 12.spMax,
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                AppSpacing.md,
+                                AppSpacing.sm,
+                                AppSpacing.md,
+                                AppSpacing.sm,
+                              ),
+                              child: Wrap(
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                alignment: WrapAlignment.spaceBetween,
+                                spacing: AppSpacing.sm,
+                                runSpacing: 4,
+                                children: [
+                                  AppPageSizeSelector(
+                                    value: cubit.pageSize,
+                                    onChanged: (v) => cubit.setPageSize(v),
+                                  ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      AppButton(
+                                        small: true,
+                                        style: AppButtonStyle.ghost,
+                                        label: AppText.t('السابق', 'Previous'),
+                                        onPressed: state.hasPrevious
+                                            ? cubit.previousPage
+                                            : null,
                                       ),
-                                    ),
-                                    AppButton(
-                                      small: true,
-                                      style: AppButtonStyle.ghost,
-                                      label: AppText.t('التالي', 'Next'),
-                                      onPressed: state.hasNext
-                                          ? cubit.nextPage
-                                          : null,
-                                    ),
-                                  ],
-                                ),
-                              ],
+                                      Text(
+                                        '${AppText.t('صفحة', 'Page')} ${state.page} / ${state.pageCount}',
+                                        style: TextStyle(
+                                          color: AppColors.textMuted,
+                                          fontSize: 12.spMax,
+                                        ),
+                                      ),
+                                      AppButton(
+                                        small: true,
+                                        style: AppButtonStyle.ghost,
+                                        label: AppText.t('التالي', 'Next'),
+                                        onPressed: state.hasNext
+                                            ? cubit.nextPage
+                                            : null,
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-              ),
-            ],
+                          ],
+                        ),
+                ),
+              ],
+            ),
           ),
         );
       },

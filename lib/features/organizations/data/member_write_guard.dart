@@ -62,7 +62,7 @@ class SessionWriteGuard implements WriteGuard {
   bool allows(String permissionId) {
     final permission = Permission.byId(permissionId);
     if (permission == null) return false;
-    return session.canDo(permission, online: online);
+    return session.canPrepareBusinessWrite(permission, online: online);
   }
 }
 

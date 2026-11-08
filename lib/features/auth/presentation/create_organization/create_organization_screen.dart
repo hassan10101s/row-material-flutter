@@ -17,7 +17,7 @@ import '../../../../design_system/widgets/app_card.dart';
 ///
 /// Two paths:
 /// * **create** — the founder names the organization; the app writes
-///   `organizations/{orgId}` + `meta` + `members/member_<uid>` + `users/{uid}`.
+///   organization, protocol, zero counter, member and profile atomically.
 /// * **invite** — an invited employee types the organization id and claims the
 ///   invitation stored at `invites/{b64url(lower(email))}`.
 class CreateOrganizationScreen extends StatefulWidget {
@@ -33,10 +33,101 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
   final _inviteCode = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // Probe `email_verified` once so the verification banner appears before
+    // the doomed submit attempt (the server refuses unverified genesis).
+    final cubit = context.read<CreateOrganizationCubit>();
+    Future<void>.microtask(cubit.loadEmailVerified);
+  }
+
+  @override
   void dispose() {
     _name.dispose();
     _inviteCode.dispose();
     super.dispose();
+  }
+
+  /// Verification gate banner: the Firestore rules refuse company creation
+  /// and invite reads for an unverified e-mail, so unverified accounts see
+  /// the resend + re-check actions instead of a server `permission-denied`.
+  Widget _verificationBanner(
+    BuildContext context,
+    CreateOrganizationCubit cubit,
+    CreateOrganizationState state,
+  ) {
+    final border = AppColors.warning.withValues(alpha: 0.30);
+    final fill = AppColors.warning.withValues(alpha: 0.08);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: fill,
+        border: Border.all(color: border),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.mark_email_unread_outlined,
+                size: 18.r,
+                color: AppColors.warning,
+              ),
+              SizedBox(width: 8.w),
+              Expanded(
+                child: Text(
+                  AppText.t(
+                    'بريدك غير موثّق. افتح بريدك الإلكتروني واضغط رابط التوثيق المرسل عند إنشاء الحساب.',
+                    'Your email is not verified. Open your inbox and click the verification link sent when the account was created.',
+                  ),
+                  style: TextStyle(
+                    color: AppColors.warning,
+                    fontSize: 12.spMax,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (state.notice != null) ...[
+            SizedBox(height: 6.h),
+            Text(
+              state.notice!,
+              style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
+            ),
+          ],
+          SizedBox(height: 10.h),
+          Row(
+            children: [
+              Expanded(
+                child: AppButton(
+                  label: AppText.t('إعادة إرسال الرابط', 'Resend the link'),
+                  small: true,
+                  style: AppButtonStyle.ghost,
+                  loading: state.verificationBusy,
+                  onPressed: state.verificationBusy
+                      ? null
+                      : cubit.resendVerificationEmail,
+                ),
+              ),
+              SizedBox(width: 8.w),
+              Expanded(
+                child: AppButton(
+                  label: AppText.t('تحققت الآن', 'I verified now'),
+                  small: true,
+                  loading: state.verificationBusy,
+                  onPressed: state.verificationBusy
+                      ? null
+                      : cubit.refreshEmailVerified,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -97,8 +188,8 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                           Text(
                             isCreate
                                 ? AppText.t(
-                                    'أنشئ شركة تجريبية وسيتم ربط كل عيّناتها ومختبراتها وحساباتها بها. الشركة الجديدة تبدأ بحالة تجريبية وصلاحيات محدودة.',
-                                    'Create a trial company; its samples, lab work and accounts will be bound to it. A new company starts in trial status with limited permissions.',
+                                    'أنشئ مؤسستك وستصبح مالكها بكامل الصلاحيات. تبدأ المؤسسة فعّالة، وترتبط بها الفحوص وأعمال المعمل والحسابات.',
+                                    'Create your organization as its full owner. It starts active, with its inspections, lab work and accounts linked to it.',
                                   )
                                 : AppText.t(
                                     'أدخل كود الشركة الذي أرسله لك مدير الشركة.',
@@ -111,6 +202,10 @@ class _CreateOrganizationScreenState extends State<CreateOrganizationScreen> {
                             ),
                           ),
                           const SizedBox(height: AppSpacing.lg),
+                          if (state.emailVerified == false) ...[
+                            _verificationBanner(context, cubit, state),
+                            SizedBox(height: AppSpacing.lg),
+                          ],
                           if (isCreate)
                             AppField(
                               label: AppText.t('اسم الشركة', 'Company name'),

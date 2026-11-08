@@ -5,10 +5,8 @@ import 'package:flutter/material.dart' show debugPrint;
 
 import '../core/firebase/firebase_bootstrap.dart';
 import '../core/network/connectivity_service.dart';
-import '../core/sync/sync_engine.dart';
-import '../core/sync/sync_queue.dart';
+import '../core/commands/central_sync_driver.dart';
 import '../di/service_locator.dart';
-import '../features/notifications/data/fcm_push_service.dart';
 import '../features/notifications/data/notification_service.dart';
 import '../features/notifications/presentation/notification_controller.dart';
 import 'headless.dart';
@@ -23,15 +21,12 @@ import '../features/auth/domain/auth_repository.dart';
 ///      → restoreSession()          (online: users/{uid} · offline: session cache)
 ///      → bindOrg(orgId)            (per-organization database, then the seeds
 ///                                   below run against it, then the sync engine)
-///      → SyncEngine.start()
+///      → startArchiveRefresh()
 /// ```
 /// Everything after [FirebaseBootstrap.initialize] is safe without Firebase: the
 /// app degrades to the cached session or to the `needsBootstrap` state.
 Future<void> appBootstrap() async {
   await initServiceLocator();
-  if (!isHeadlessBackground && getIt<FirebaseBootstrapResult>().isReady) {
-    FcmPushService.registerBackgroundHandler();
-  }
 
   final auth = getIt<AuthRepository>();
   await registerOrganizationBinder(auth);
@@ -56,7 +51,7 @@ Future<void> appBootstrap() async {
   }
 
   if (state == AuthState.ready) {
-    startSyncEngine();
+    startArchiveRefresh();
     // Notifications are deliberately NOT awaited here: plugin init plus the
     // bell scans would hold up the first frame behind the FFI lock. `main()`
     // runs [startNotifications] after the first frame; headless background
@@ -73,42 +68,23 @@ Future<void> startNotifications() async {
   if (isHeadlessBackground) return;
   try {
     final service = getIt<NotificationService>();
-    await service.initOs(requestPermission: false);
+    await service.initOs();
     final controller = getIt<NotificationController>();
-    final engine = getIt<SyncEngine>();
+    final driver = getIt<CentralSyncDriver>();
     // Remote rows (other devices) -> bell + OS notification after every pull
     // with applied rows. showOs must be true here: with false (the old code)
     // foreground pulls only updated the in-app bell and the system tray
     // stayed silent until the 15-min background poll ran.
-    engine.onPullApplied = () => controller.refresh(showOs: true);
-    // Own saves -> bell within seconds. Chains the engine's debounced push
-    // (buildSyncEngine sets onEnqueued to scheduleSync).
-    final queue = getIt<SyncQueue>();
-    queue.onEnqueued = () {
-      engine.scheduleSync();
-      unawaited(controller.refresh());
-    };
+    driver.onApplied = () => controller.refresh(showOs: true);
     // One pass, not two: `refresh` already loads `recent` + `unread` when the
     // bell starts empty, so the extra `load()` was two duplicate DB trips on
     // every mobile start.
     await controller.refresh();
-    // The 30 s tick also surfaces OS notifications: own saves are already
-    // watermarked silently by the onEnqueued hook above, so only rows from
-    // other devices reach showOs here.
+    // The 30 s tick also surfaces OS notifications from refreshed read data.
     controller.startAutoRefresh(showOs: true);
-    // Push delivery uses private registered devices. Android force-stop from
-    // settings still requires reopening the app; periodic polls are a fallback.
-    try {
-      final fcm = getIt<FcmPushService>();
-      await fcm.init();
-      final orgId = getIt<AuthRepository>().session.organizationId;
-      await fcm.setOrganization(orgId.isEmpty ? null : orgId);
-    } on Object catch (e) {
-      debugPrint('[bootstrap] fcm skipped: $e');
-    }
     // Background poll so closed-app arrivals surface as OS notifications.
     try {
-      await const AndroidNotifPollScheduler().schedule();
+      await const AndroidNotifPollScheduler().cancel();
     } on Object catch (e) {
       debugPrint('[bootstrap] notif poll schedule skipped: $e');
     }
@@ -120,11 +96,11 @@ Future<void> startNotifications() async {
 /// Runs the per-organization side effects. The callback itself lives in
 /// `registerOrganizationBinder` (service_locator) so the repository never has
 /// to import a feature module.
-void startSyncEngine() {
+void startArchiveRefresh() {
   // Workmanager owns one awaited pull/backup. Starting the foreground loop
   // here launched an unawaited extra cycle that could outlive its engine.
   if (isHeadlessBackground) return;
-  getIt<SyncEngine>().start();
+  // CentralSyncDriver is started after binding the authenticated organization.
 }
 
 /// Sign out and clear the in-memory session after a database restore.

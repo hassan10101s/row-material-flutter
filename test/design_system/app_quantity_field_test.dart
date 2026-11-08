@@ -8,7 +8,7 @@ import 'package:material_lab/design_system/widgets/app_quantity_field.dart';
 /// Behavioural cover for the app-wide quantity input.
 ///
 /// Quantities must never accept text: letters typed or pasted into any
-/// quantity field are stripped by the shared formatter, while digits and
+/// quantity field are rejected by the shared formatter, while digits and
 /// decimal separators pass through.
 void main() {
   Widget harness({TextEditingController? controller}) => ScreenUtilInit(
@@ -32,11 +32,26 @@ void main() {
     final controller = TextEditingController();
     await tester.pumpWidget(harness(controller: controller));
 
+    await tester.enterText(find.byType(TextField), '12.5');
     await tester.enterText(find.byType(TextField), 'ab12c.5d');
     await tester.pump();
 
     expect(controller.text, '12.5');
   });
+
+  testWidgets(
+    'normalizes Arabic decimals and rejects malformed or negative quantities',
+    (tester) async {
+      final controller = TextEditingController();
+      await tester.pumpWidget(harness(controller: controller));
+      await tester.enterText(find.byType(TextField), '١٢٫٥');
+      expect(controller.text, '12.5');
+      for (final bad in ['1.2.3', '1,2,3', '-5', 'NaN', 'Infinity']) {
+        await tester.enterText(find.byType(TextField), bad);
+        expect(controller.text, '12.5');
+      }
+    },
+  );
 
   testWidgets('uses the numeric keyboard', (tester) async {
     await tester.pumpWidget(harness());
@@ -55,10 +70,25 @@ void main() {
 
     // The composed numeric validator lives on the built AppField.
     final validate =
-        tester.widget<AppField>(find.byType(AppField)).validator ??
-        (_) => null;
+        tester.widget<AppField>(find.byType(AppField)).validator ?? (_) => null;
     expect(validate(''), isNull);
     expect(validate('12.5'), isNull);
     expect(validate('abc'), isNotNull);
+    expect(validate('NaN'), isNotNull);
+    expect(validate('Infinity'), isNotNull);
+    expect(validate(List.filled(400, '9').join()), isNotNull);
+  });
+
+  testWidgets('a pasted numeric overflow cannot enter the quantity field', (
+    tester,
+  ) async {
+    final controller = TextEditingController(text: '12.5');
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(harness(controller: controller));
+    await tester.enterText(
+      find.byType(TextField),
+      List.filled(400, '9').join(),
+    );
+    expect(controller.text, '12.5');
   });
 }

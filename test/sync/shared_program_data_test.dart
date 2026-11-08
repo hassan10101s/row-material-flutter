@@ -4,10 +4,10 @@ import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/security/local_secret.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/backfill_service.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/backfill_service.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/features/lab/data/lab_repo.dart';
@@ -15,10 +15,10 @@ import 'package:material_lab/core/sync/shared_data_writer.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
-import 'package:material_lab/features/qc_manager/data/offline_first_qc_repository.dart';
+import 'package:material_lab/features/qc_manager/data/server_confirmed_qc_repository.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_sop.dart';
 import 'package:material_lab/features/settings/data/settings_repo.dart';
-import 'package:material_lab/features/reference/data/offline_first_reference_repository.dart';
+import 'package:material_lab/features/reference/data/server_confirmed_reference_repository.dart';
 
 import 'sync_test_fixture.dart';
 
@@ -65,13 +65,13 @@ class _Device {
     queue: queue,
     guard: guard,
   );
-  late final reference = OfflineFirstReferenceRepository(
+  late final reference = ServerConfirmedReferenceRepository(
     dbHelper: fixture.helper,
     guard: guard,
     queue: queue,
     audit: audit,
   );
-  late final qc = QcRepositories.offlineFirst(
+  late final qc = QcRepositories.serverConfirmed(
     dbHelper: fixture.helper,
     guard: guard,
     queue: queue,

@@ -1,3 +1,8 @@
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
+import '../../../../../di/service_locator.dart';
+import '../../../../../design_system/widgets/app_adaptive.dart';
+import '../../../../../design_system/widgets/app_mobile_add_layout.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -84,6 +89,9 @@ class _RoutineListsScreenState extends State<RoutineListsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final canCreate =
+        getIt.isRegistered<AuthGate>() &&
+        getIt<AuthGate>().canWrite(Permission.qcWrite);
     return BlocConsumer<RoutineListsCubit, RoutineListsState>(
       listenWhen: (prev, curr) =>
           curr.error != null && curr.error != prev.error,
@@ -94,111 +102,122 @@ class _RoutineListsScreenState extends State<RoutineListsScreen> {
       builder: (context, state) {
         final lists = _filtered(state.lists);
         const headers = ['القائمة', 'القسم', 'التكرار', 'الإنجاز', 'إجراءات'];
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: DebouncedSearchField(
-                    hint: AppText.t(
-                      'بحث بالاسم أو القسم',
-                      'Search name or dept...',
+        return AppMobileAddLayout(
+          floating: !appUsesDesktopChrome(context),
+          tooltip: AppText.t('قائمة جديدة', 'New list'),
+          onAdd: canCreate ? () => _addList(context) : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: DebouncedSearchField(
+                      hint: AppText.t(
+                        'بحث بالاسم أو القسم',
+                        'Search name or dept...',
+                      ),
+                      onChanged: (v) => setState(() => _query = v),
                     ),
-                    onChanged: (v) => setState(() => _query = v),
                   ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                AppButton(
-                  small: true,
-                  style: AppButtonStyle.secondary,
-                  label: AppText.t('السجل', 'History'),
-                  icon: Icon(Icons.history, size: 18.r),
-                  onPressed: () => RoutineHistoryScreen.open(context),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                AppButton(
-                  small: true,
-                  label: AppText.t('قائمة جديدة', 'New list'),
-                  icon: Icon(Icons.add, size: 18.r),
-                  onPressed: () => _addList(context),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Expanded(
-              child: AppAdaptiveDataView(
-                headers: headers,
-                columnFlex: const [5, 3, 2, 2, 1],
-                loading: state.loading && state.lists.isEmpty,
-                rows: [
-                  for (final l in lists)
-                    AppDataRow(
-                      cells: [
-                        Text(
-                          l.template.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14.spMax,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.textStrong,
-                          ),
-                        ),
-                        Text(
-                          l.template.dept.trim().isEmpty
-                              ? '—'
-                              : l.template.dept,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13.spMax,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                        Text(
-                          l.isMonthly
-                              ? AppText.t('شهرية', 'Monthly')
-                              : AppText.t('يومية', 'Daily'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 13.spMax,
-                            color: AppColors.textMuted,
-                          ),
-                        ),
-                        Text(
-                          '${l.doneCount}/${l.totalItems}',
-                          style: TextStyle(
-                            fontSize: 13.spMax,
-                            fontWeight: FontWeight.w700,
-                            color: l.isComplete
-                                ? AppColors.success
-                                : AppColors.textStrong,
-                          ),
-                        ),
-                        _rowMenu(context, l),
-                      ],
+                  const SizedBox(width: AppSpacing.sm),
+                  AppButton(
+                    small: true,
+                    style: AppButtonStyle.secondary,
+                    label: AppText.t('السجل', 'History'),
+                    icon: Icon(Icons.history, size: 18.r),
+                    onPressed: () => RoutineHistoryScreen.open(context),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  if (canCreate && appUsesDesktopChrome(context))
+                    AppButton(
+                      small: true,
+                      label: AppText.t('قائمة جديدة', 'New list'),
+                      icon: Icon(Icons.add, size: 18.r),
+                      onPressed: () => _addList(context),
                     ),
                 ],
-                onRowTap: lists.isEmpty
-                    ? null
-                    : (i) => _openSheet(context, lists[i].template.templateId!),
-                empty: AppEmptyState(
-                  icon: Icons.checklist_outlined,
-                  title: state.lists.isEmpty
-                      ? AppText.t(
-                          'لا توجد قوائم بعد — أنشئ أول قائمة يومية',
-                          'No lists yet — create the first daily list',
-                        )
-                      : AppText.t(
-                          'لا توجد قوائم مطابقة للبحث',
-                          'No lists match the search',
-                        ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Expanded(
+                child: AppAdaptiveDataView(
+                  compactMobile: true,
+                  mobileTrailingColumn: 4,
+                  headers: headers,
+                  columnFlex: const [5, 3, 2, 2, 1],
+                  loading: state.loading && state.lists.isEmpty,
+                  rows: [
+                    for (final l in lists)
+                      AppDataRow(
+                        cells: [
+                          Text(
+                            l.template.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14.spMax,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textStrong,
+                            ),
+                          ),
+                          Text(
+                            l.template.dept.trim().isEmpty
+                                ? '—'
+                                : l.template.dept,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13.spMax,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          Text(
+                            l.isYearly
+                                ? AppText.t('سنوية', 'Yearly')
+                                : l.isMonthly
+                                ? AppText.t('شهرية', 'Monthly')
+                                : AppText.t('يومية', 'Daily'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 13.spMax,
+                              color: AppColors.textMuted,
+                            ),
+                          ),
+                          Text(
+                            '${l.doneCount}/${l.totalItems}',
+                            style: TextStyle(
+                              fontSize: 13.spMax,
+                              fontWeight: FontWeight.w700,
+                              color: l.isComplete
+                                  ? AppColors.success
+                                  : AppColors.textStrong,
+                            ),
+                          ),
+                          _rowMenu(context, l),
+                        ],
+                      ),
+                  ],
+                  onRowTap: lists.isEmpty
+                      ? null
+                      : (i) =>
+                            _openSheet(context, lists[i].template.templateId!),
+                  empty: AppEmptyState(
+                    icon: Icons.checklist_outlined,
+                    title: state.lists.isEmpty
+                        ? AppText.t(
+                            'لا توجد قوائم بعد — أنشئ أول قائمة جودة',
+                            'No lists yet — create the first quality list',
+                          )
+                        : AppText.t(
+                            'لا توجد قوائم مطابقة للبحث',
+                            'No lists match the search',
+                          ),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -208,7 +227,7 @@ class _RoutineListsScreenState extends State<RoutineListsScreen> {
   /// instead of a button row (the icon-only cell keeps the table compact).
   Widget _rowMenu(BuildContext context, RoutineList list) {
     return SizedBox(
-      width: 34.r,
+      width: appUsesDesktopChrome(context) ? 34.r : 48,
       child: PopupMenuButton<String>(
         tooltip: AppText.t('الإجراءات', 'Actions'),
         padding: EdgeInsets.zero,

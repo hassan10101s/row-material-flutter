@@ -92,6 +92,7 @@ class AppFeedback {
   /// providers, parser failures) is reduced to the generic "something went
   /// wrong" text. The full detail still goes to the log.
   static void errorFrom(BuildContext context, Object error, {String? summary}) {
+    if (error is BusinessActionCancelled) return;
     final detail = describeError(error);
     debugPrint('AppFeedback error: $detail');
     if (error is PendingOperation) {
@@ -188,6 +189,7 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
     duration: const Duration(milliseconds: 220),
     reverseDuration: const Duration(milliseconds: 180),
   );
+  late final CurvedAnimation _animation;
   Timer? _timer;
   Timer? _copyFeedbackTimer;
 
@@ -198,6 +200,11 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
   @override
   void initState() {
     super.initState();
+    _animation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
     _controller.forward();
     if (!widget.sticky && widget.duration > Duration.zero) {
       _timer = Timer(widget.duration, _close);
@@ -216,6 +223,7 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
   void dispose() {
     _timer?.cancel();
     _copyFeedbackTimer?.cancel();
+    _animation.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -234,12 +242,6 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
       AppFeedbackType.info => Icons.info_outline,
       AppFeedbackType.neutral => Icons.campaign_outlined,
     };
-    final animation = CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
-
     return Positioned(
       top: 0,
       left: 0,
@@ -247,12 +249,12 @@ class _FeedbackBannerState extends State<_FeedbackBanner>
       child: SafeArea(
         bottom: false,
         child: FadeTransition(
-          opacity: animation,
+          opacity: _animation,
           child: SlideTransition(
             position: Tween<Offset>(
               begin: const Offset(0, -1),
               end: Offset.zero,
-            ).animate(animation),
+            ).animate(_animation),
             child: Center(
               child: ConstrainedBox(
                 // Pernit-style: floating top overlay, never full-bleed on

@@ -276,8 +276,7 @@ Future<void> _run() async {
 
   // ── Device-scoped entry codes (two-device collision guard) ──────────
   // Without a provider the legacy global-per-day sequence is kept.
-  final legacy =
-      await _repo.generateEntryCode('M-SUGAR-01', '2026-09-01');
+  final legacy = await _repo.generateEntryCode('M-SUGAR-01', '2026-09-01');
   expect(legacy, 'M-SUGAR-01-20260901-001');
 
   // With a provider the sequence is scoped per device: two offline devices
@@ -293,7 +292,7 @@ Future<void> _run() async {
   );
   final codeA = await devA.generateEntryCode('M-SUGAR-01', '2026-09-01');
   final codeB = await devB.generateEntryCode('M-SUGAR-01', '2026-09-01');
-  expect(codeA, 'M-SUGAR-01-20260901-A1B2C3-001');
+  expect(codeA, 'M-SUGAR-01-20260901-567890-001');
   expect(codeB, 'M-SUGAR-01-20260901-FFFFFF-001');
   expect(codeA, isNot(codeB));
 

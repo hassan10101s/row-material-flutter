@@ -4,11 +4,11 @@ import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
-import 'package:material_lab/features/lab/data/offline_first_lab_repository.dart';
+import 'package:material_lab/features/lab/data/server_confirmed_lab_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 
 import 'sync_test_fixture.dart';
@@ -49,7 +49,7 @@ void main() {
   late SyncQueue queue;
   late AuditLogger audit;
   late AppSession session;
-  late OfflineFirstLabRepository repo;
+  late ServerConfirmedLabRepository repo;
   late InMemoryDataSource remote;
   late SyncMetadata metadata;
   late PushWorker pushWorker;
@@ -86,7 +86,7 @@ void main() {
       source: source,
     );
 
-    repo = OfflineFirstLabRepository(
+    repo = ServerConfirmedLabRepository(
       dbHelper: fx.helper,
       guard: _LiveGuard(session, true),
       queue: queue,

@@ -6,12 +6,17 @@ import '../database/database_helper.dart';
 import '../sync/sync_metadata.dart';
 import '../sync/sync_data_changes.dart';
 import '../sync/sync_run_scope.dart';
+import '../network/transient_network_error.dart';
+import '../utils/app_exceptions.dart';
 import 'command_outbox.dart';
+import 'command_contract.dart';
 import 'central_projection.dart';
 import 'central_sync_transport.dart';
 import 'domain_manifest.dart';
 
 class CentralSyncDriver {
+  static const defaultInterval = Duration(seconds: 30);
+
   CentralSyncDriver({
     required this.databaseHelper,
     required this.source,
@@ -19,39 +24,74 @@ class CentralSyncDriver {
     required this.transport,
     required this.outbox,
     required this.metadata,
-    this.interval = const Duration(seconds: 20),
+    this.interval = defaultInterval,
     this.onError,
-  });
+    this.onManualRequest,
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
 
   final DatabaseHelper databaseHelper;
   final SessionSource source;
   final CentralProjection projection;
-  final CentralSyncTransport transport;
+  final CentralSyncReader transport;
   final CommandOutbox outbox;
   final SyncMetadata metadata;
   final Duration interval;
+  final DateTime Function() _now;
+  int _networkFailures = 0;
+  DateTime? _nextAutomaticRead;
+  bool _reportedNetworkFailure = false;
   Timer? _timer;
   bool _running = false;
   bool _needsSnapshot = false;
   Future<int>? _flight;
   SyncRunScope? _activeScope;
+  int? _manifestGeneration;
+  Map<String, dynamic>? _manifest;
   Future<void> Function()? onApplied;
+
+  /// Fires once when a full cycle flips the local cache from `required`/
+  /// `catching_up` to `ready`: the archive is proven current and authoring
+  /// may proceed. Startup housekeeping refused by the archive gate defers
+  /// itself to this transition instead of failing the bind.
+  Future<void> Function()? onReady;
+
   void Function(Object error)? onError;
+  final void Function()? onManualRequest;
 
   void start() {
     if (_timer != null) return;
-    unawaited(_scheduledSync());
+    unawaited(refreshForeground());
     _timer = Timer.periodic(interval, (_) {
-      unawaited(_scheduledSync());
+      unawaited(refreshForeground());
     });
   }
 
-  Future<void> _scheduledSync() async {
+  /// Used on startup, reconnect and resume. Automatic triggers never resume a
+  /// quota-paused reader; only an explicit manual request may do that.
+  Future<void> refreshForeground({bool immediate = false}) async {
+    if (mayPoll != null && !mayPoll!()) return;
+    if (_quotaStopped) return;
+    if (!immediate &&
+        _nextAutomaticRead != null &&
+        _now().isBefore(_nextAutomaticRead!)) {
+      return;
+    }
     try {
-      await syncNow();
+      await syncNow(resumeQuota: false);
     } on Object {
       // _sync records the visible failure and reports it through onError.
     }
+  }
+
+  bool Function()? mayPoll;
+  bool _quotaStopped = false;
+
+  void _readRecovered() {
+    _quotaStopped = false;
+    _networkFailures = 0;
+    _nextAutomaticRead = null;
+    _reportedNetworkFailure = false;
   }
 
   void stop() {
@@ -70,12 +110,13 @@ class CentralSyncDriver {
       'central_sync_state',
       columns: const ['applied_sequence'],
       where:
-          'organization_id = ? AND uid = ? AND role = ? AND bootstrap_state = ?',
+          'organization_id = ? AND uid = ? AND role = ? AND bootstrap_state = ? AND protocol_schema = ?',
       whereArgs: [
         session.organizationId,
         session.uid,
         session.rolesKey,
         'ready',
+        commandSchemaVersion,
       ],
       limit: 1,
     );
@@ -84,7 +125,16 @@ class CentralSyncDriver {
         : (rows.single['applied_sequence'] as num).toInt();
   }
 
-  Future<int> syncNow({int? throughSequence, bool forceSnapshot = false}) {
+  Future<int> syncNow({
+    int? throughSequence,
+    bool forceSnapshot = false,
+    bool resumeQuota = true,
+  }) {
+    // A manual request is the only way to resume after quota exhaustion.
+    if (resumeQuota) {
+      _quotaStopped = false;
+      onManualRequest?.call();
+    }
     final current = _flight;
     if (current != null) {
       return current.then((sequence) {
@@ -95,6 +145,7 @@ class CentralSyncDriver {
         return syncNow(
           throughSequence: throughSequence,
           forceSnapshot: forceSnapshot,
+          resumeQuota: false,
         );
       });
     }
@@ -126,8 +177,23 @@ class CentralSyncDriver {
         throw StateError('An active organization session is required.');
       }
       final db = await databaseHelper.database;
-      final manifest = await buildDomainManifest(db);
+      if (_manifestGeneration != scope.generation) {
+        final built = await buildDomainManifest(db);
+        scope.check();
+        _manifest = built;
+        _manifestGeneration = scope.generation;
+      }
+      final manifest = _manifest!;
       scope.check();
+      if (transport is ConsistentCentralSyncReader) {
+        return await _consistentSync(
+          transport as ConsistentCentralSyncReader,
+          manifest,
+          scope,
+          forceSnapshot: forceSnapshot || _needsSnapshot,
+          throughSequence: throughSequence,
+        );
+      }
       var rebuild = forceSnapshot || _needsSnapshot;
       // One-time migration: archives materialized from pre-fix placeholder
       // events store hash-of-placeholder payloads that can never match a
@@ -221,7 +287,18 @@ class CentralSyncDriver {
       // for the next full cycle.
       if (throughSequence == null) {
         await projection.markReady(scope: scope);
+        // The archive became provably current somewhere in this run (fresh
+        // bootstrap installs `catching_up`, then this markReady promotes it,
+        // or a resumed run drained the remaining events). One hook per flip.
+        if (bootstrapState != 'ready') {
+          try {
+            await onReady?.call();
+          } on Object catch (error) {
+            onError?.call(error);
+          }
+        }
       }
+      _readRecovered();
       await metadata.markPull(DateTime.now().toUtc());
       await metadata.markError(null);
       if (cursor > initialCursor || bootstrapped) {
@@ -234,11 +311,27 @@ class CentralSyncDriver {
       _needsSnapshot = false;
       return cursor;
     } on Object catch (error) {
+      if ('$error'.contains('RESOURCE_EXHAUSTED')) _quotaStopped = true;
       if (error is CentralSyncGap) _needsSnapshot = true;
       if (error is! SyncRunCancelled) {
-        onError?.call(error);
+        if (isTransientNetworkFailure(error)) {
+          if (_networkFailures < 5) _networkFailures++;
+          final delayMs =
+              interval.inMilliseconds * (1 << (_networkFailures - 1));
+          _nextAutomaticRead = _now().add(
+            Duration(milliseconds: delayMs > 300000 ? 300000 : delayMs),
+          );
+          if (!_reportedNetworkFailure) onError?.call(error);
+          _reportedNetworkFailure = true;
+        } else {
+          onError?.call(error);
+        }
         try {
-          await metadata.markError('$error');
+          await metadata.markError(
+            isTransientNetworkFailure(error)
+                ? TransientNetworkError(error).message
+                : AppError.friendly(error),
+          );
         } on Object {
           // Preserve the original transport or projection failure.
         }
@@ -247,7 +340,99 @@ class CentralSyncDriver {
     } finally {
       if (identical(_activeScope, scope)) _activeScope = null;
       _running = false;
+      SyncDataChanges.notifyStatus();
     }
+  }
+
+  Future<int> _consistentSync(
+    ConsistentCentralSyncReader reader,
+    Map<String, dynamic> manifest,
+    SyncRunScope scope, {
+    required bool forceSnapshot,
+    int? throughSequence,
+  }) async {
+    final session = scope.session;
+    final boundary = await reader.readHead();
+    scope.check();
+    if (boundary.manifestVersion != manifest['manifestVersion']) {
+      throw StateError('Domain manifest version mismatch');
+    }
+    if (throughSequence != null && boundary.sequence < throughSequence) {
+      throw const CentralSyncGap();
+    }
+    var state = await _syncState(session.organizationId, session.uid);
+    final rebuild =
+        forceSnapshot ||
+        state == null ||
+        state['protocol_schema'] != commandSchemaVersion ||
+        state['role'] != session.rolesKey ||
+        state['bootstrap_state'] == 'required' ||
+        await projection.hasCommitTimePlaceholder();
+    if (rebuild) {
+      await projection.invalidateSnapshot();
+      await projection.beginBootstrap(
+        manifestVersion: boundary.manifestVersion,
+        h0: boundary.sequence,
+        scope: scope,
+      );
+      final definitions = manifest['entities'] as Map;
+      final types = definitions.keys.cast<String>().toList()..sort();
+      if (session.can(Permission.byId('audit.read')!)) types.add('auditLog');
+      for (final type in types) {
+        final def = type == 'auditLog'
+            ? const {'readPermission': 'audit.read'}
+            : definitions[type] as Map;
+        final permission = Permission.byId('${def['readPermission']}');
+        if (def['privateRead'] == true ||
+            permission == null ||
+            !session.can(permission)) {
+          continue;
+        }
+        String? after;
+        do {
+          final page = await reader.readSnapshotPage(
+            type,
+            boundary,
+            after: after,
+          );
+          scope.check();
+          await projection.stageRecords(page.records, scope: scope);
+          after = page.nextAfter;
+        } while (after != null);
+      }
+      await projection.installFromStaging(
+        throughSequence: boundary.sequence,
+        coveredOperationIds: await outbox.approvedOperationIdsThrough(
+          boundary.sequence,
+        ),
+        scope: scope,
+      );
+      await projection.markReady(scope: scope);
+      await onReady?.call();
+      await onApplied?.call();
+    } else {
+      final cursor = (state['applied_sequence'] as num).toInt();
+      if (cursor > boundary.sequence) throw const CentralSyncGap();
+      if (cursor < boundary.sequence) {
+        final changes = await reader.readChanges(cursor, boundary);
+        scope.check();
+        await projection.applyCycle(
+          afterSequence: cursor,
+          throughSequence: boundary.sequence,
+          records: changes.records,
+          operationIds: changes.operationIds,
+          scope: scope,
+        );
+        await onApplied?.call();
+      } else {
+        await projection.markReady(scope: scope);
+      }
+    }
+    _needsSnapshot = false;
+    _readRecovered();
+    await metadata.markPull(DateTime.now().toUtc());
+    await metadata.markError(null);
+    return boundary.sequence;
   }
 
   /// Disk-staged bootstrap (production acceptance 2). The download never
@@ -332,7 +517,11 @@ class CentralSyncDriver {
         if (type == 'auditLog') continue;
         final definition = definitions[type] as Map;
         final permission = Permission.byId('${definition['readPermission']}');
-        if (permission == null || !session.can(permission)) continue;
+        if (definition['privateRead'] == true ||
+            permission == null ||
+            !session.can(permission)) {
+          continue;
+        }
         String? after;
         do {
           scope.check();

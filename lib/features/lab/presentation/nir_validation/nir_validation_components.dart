@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../design_system/widgets/app_tooltip.dart';
 import '../../../../core/constants/app_strings.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
@@ -111,7 +112,7 @@ class NirMetricTile extends StatelessWidget {
         ],
       ),
     );
-    return tooltip == null ? child : Tooltip(message: tooltip!, child: child);
+    return tooltip == null ? child : AppTooltip(message: tooltip!, child: child);
   }
 }
 

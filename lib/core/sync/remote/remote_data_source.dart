@@ -1,7 +1,6 @@
-/// **The Django seam** (plan §5, P5): every remote call the app makes goes
-/// through these interfaces. Swapping Firestore for Django/PostgreSQL means
-/// registering different implementations in `service_locator.dart` — no
-/// repository, cubit or widget changes.
+/// Metadata and legacy adapter interfaces. Business traffic uses the direct
+/// command transport and consistent Firestore reader; the legacy business
+/// upload/download workers remain disabled.
 ///
 /// Firestore implementation: `lib/core/sync/remote/firestore_data_source.dart`.
 /// Test implementation: `lib/core/sync/remote/in_memory_data_source.dart`.
@@ -84,7 +83,7 @@ class RemotePage {
 
 /// Everything remote: data + identity + organizations.
 ///
-/// Register with GetIt as a **factory** so a Django implementation can be
+/// Register with GetIt as a **factory** so a test implementation can be
 /// swapped in later (plan §12.2).
 abstract interface class RemoteDataSource {
   bool get isConfigured;
@@ -169,7 +168,7 @@ abstract interface class RemoteDataSource {
   Future<List<RemoteDocument>> listDevices(String organizationId);
 }
 
-/// Collections used by the sync engine. Kept as an enum so a Django backend
+/// Collections used by the metadata and legacy adapters. Kept as an enum so a test backend
 /// can map it to its own table names in one `switch`.
 enum SyncCollection {
   samples('samples'),
@@ -210,6 +209,7 @@ enum SyncCollection {
   qcTaskLogs('qcTaskLogs'),
   qcFindingsNc('qcFindingsNc'),
   qcCapa('qcCapa'),
+  qcAudits('qcAudits'),
   parameters('parameters'),
   materialBounds('materialBounds'),
   organizationSettings('organizationSettings'),
@@ -254,6 +254,12 @@ abstract interface class AuthRemoteDataSource {
 
   /// Sends a Firebase password-reset email for [email].
   Future<void> sendPasswordResetEmail(String email);
+
+  /// Re-sends the Firebase email-verification link to the signed-in user.
+  /// The Firestore rules require `email_verified` before a client may create
+  /// an organization or read an invite, so an unverified account cannot
+  /// proceed without clicking the link in the mailbox.
+  Future<void> sendEmailVerification();
 
   Future<void> signOut();
 
@@ -374,12 +380,18 @@ class RemoteUser {
     required this.email,
     this.displayName,
     this.photoUrl,
+    this.emailVerified = false,
   });
 
   final String uid;
   final String email;
   final String? displayName;
   final String? photoUrl;
+
+  /// True once the account owner clicked the Firebase verification link.
+  /// The Firestore rules require `verifiedEmail()` for company genesis and
+  /// invite reads, so an unverified email can never create a company.
+  final bool emailVerified;
 }
 
 class UserProfile {
@@ -505,7 +517,8 @@ class OrganizationProfile {
   /// ISO-8601 of when the 30-day trial ends (null for legacy documents).
   final String? trialEndsAt;
 
-  /// True once the trial has expired (set by the server cron, never by hand).
+  /// Whether the stored status is suspended; rules also enforce trial expiry
+  /// at request.time without requiring a status update or scheduled function.
   /// Stays true after manual activation so the cron can never re-suspend.
   final bool trialConsumed;
 

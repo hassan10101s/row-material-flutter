@@ -234,11 +234,8 @@ class HtmlPdfExporter {
     }
   }
 
-  @visibleForTesting
-  Future<Map<String, Object>> androidRequest(
-    String html, {
-    bool noPageOverride = false,
-  }) async {
+  /// Embeds bundled fonts so a shared/printed HTML document is self-contained.
+  Future<String> standaloneHtml(String html) async {
     final fonts = await _cachedFonts();
     var css = utf8.decode(fonts['fonts.css']!);
     for (final entry in fonts.entries) {
@@ -248,7 +245,7 @@ class HtmlPdfExporter {
         'data:font/woff2;base64,${base64Encode(entry.value)}',
       );
     }
-    var document = noPageOverride ? html : _applyPageOverride(html);
+    var document = html;
     document = document.replaceAll(
       RegExp(
         r'<link\b[^>]*href=["\x27]fonts/fonts\.css["\x27][^>]*>',
@@ -259,6 +256,17 @@ class HtmlPdfExporter {
     if (!document.contains('data:font/woff2')) {
       document = document.replaceFirst('</head>', '<style>$css</style></head>');
     }
+    return document;
+  }
+
+  @visibleForTesting
+  Future<Map<String, Object>> androidRequest(
+    String html, {
+    bool noPageOverride = false,
+  }) async {
+    final document = await standaloneHtml(
+      noPageOverride ? html : _applyPageOverride(html),
+    );
     final size =
         RegExp(
           r'@page\s*\{[^}]*\bsize\s*:\s*([^;}]*)',

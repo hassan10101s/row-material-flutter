@@ -5,7 +5,7 @@ import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
-import 'package:material_lab/features/lab/data/offline_first_lab_repository.dart';
+import 'package:material_lab/features/lab/data/server_confirmed_lab_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 
 import '../sync/sync_test_fixture.dart';
@@ -37,7 +37,7 @@ class _LiveGuard implements WriteGuard {
   }
 }
 
-/// End-to-end through the offline-first facade: receiving enqueues a lot,
+/// End-to-end through the server-confirmed facade: receiving enqueues a lot,
 /// running a test draws FEFO and queues the lot updates, and deleting the
 /// test restores the pool EXACTLY (regression: the old facade restored the
 /// pool twice — once itself, once via the base call).
@@ -45,7 +45,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late SyncFixture fx;
-  late OfflineFirstLabRepository repo;
+  late ServerConfirmedLabRepository repo;
   late int invId;
   late int analysisId;
 
@@ -83,7 +83,7 @@ void main() {
     final queue = SyncQueue(fx.helper);
     final audit = AuditLogger(queue: queue, session: () => session);
     SessionSource.empty(() => session);
-    repo = OfflineFirstLabRepository(
+    repo = ServerConfirmedLabRepository(
       dbHelper: fx.helper,
       guard: _LiveGuard(session, true),
       queue: queue,
@@ -98,12 +98,24 @@ void main() {
       minQty: 0,
     );
     invId = (item['id'] as num).toInt();
+    await fx.db.update(
+      'lab_inventory',
+      {'remote_id': 'approved-reagent', 'remote_version': 1},
+      where: 'id = ?',
+      whereArgs: [invId],
+    );
     await repo.receiveLot(
       inventoryId: invId,
       qty: 100,
       expiryDate: '2027-01-01',
       supplier: 'S1',
     );
+    await fx.db.insert('central_entity_identities', {
+      'entity_type': 'inventoryItem',
+      'entity_id': 'approved-reagent',
+      'local_ref': invId,
+      'approved_version': 1,
+    });
     final created = await repo.createAnalysis(
       name: 'Acidity',
       unit: '%',
@@ -119,44 +131,55 @@ void main() {
     await fx.dispose();
   });
 
-  test('receive queues a lot; run draws FEFO; delete restores exactly',
-      () async {
-    expect(await pool(), 100.0);
-    expect(await queueCount('inventoryLot'), 1);
+  test(
+    'receive queues a lot; run draws FEFO; delete restores exactly',
+    () async {
+      expect(await pool(), 100.0);
+      expect(await queueCount('inventoryLot'), 1);
 
-    final result = await repo.runSampleTest(
-      analysisId: analysisId,
-      sourceType: 'raw_material',
-      sourceName: 'Wheat',
-      sampleName: 'Sample A',
-    );
-    expect(await pool(), 85.0);
-    final testId = (result['test'] as Map)['id'] as int;
-    // Lot update queued (remaining 85), consumption line queued with lot ref.
-    expect(await queueCount('inventoryLot'), greaterThanOrEqualTo(1));
-    expect(await queueCount('consumption'), 1);
-    final lines = await fx.db.query(
-      'lab_consumption_log',
-      where: 'sample_test_id = ?',
-      whereArgs: [testId],
-    );
-    expect(lines, hasLength(1));
-    expect(lines.single['lot_id'], isNotNull);
-    expect('${lines.single['lot_no']}', isNotEmpty);
+      final result = await repo.runSampleTest(
+        analysisId: analysisId,
+        sourceType: 'raw_material',
+        sourceName: 'Wheat',
+        sampleName: 'Sample A',
+      );
+      expect(await pool(), 85.0);
+      final testId = (result['test'] as Map)['id'] as int;
+      // Lot update queued (remaining 85), consumption line queued with lot ref.
+      expect(await queueCount('inventoryLot'), greaterThanOrEqualTo(1));
+      expect(await queueCount('consumption'), 1);
+      final lines = await fx.db.query(
+        'lab_consumption_log',
+        where: 'sample_test_id = ?',
+        whereArgs: [testId],
+      );
+      expect(lines, hasLength(1));
+      expect(lines.single['lot_id'], isNotNull);
+      expect('${lines.single['lot_no']}', isNotEmpty);
 
-    await repo.deleteSampleTest(testId);
-    // Exactly restored — not 115 (the old double-restore).
-    expect(await pool(), 100.0);
-    final lots = await repo.listInventoryLots(invId);
-    expect(lots.single['qty_remaining'], 100.0);
-    final reversals = await fx.db.query(
-      'lab_consumption_log',
-      where: 'sample_test_id = ? AND event_type = ?',
-      whereArgs: [testId, 'REVERSAL'],
-    );
-    expect(reversals, hasLength(1));
-    expect(reversals.single['lot_id'], lines.single['lot_id']);
-  });
+      await repo.deleteSampleTest(testId);
+      // Exactly restored — not 115 (the old double-restore).
+      expect(await pool(), 100.0);
+      final lots = await repo.listInventoryLots(invId);
+      expect(lots.single['qty_remaining'], 100.0);
+      final reversals = await fx.db.query(
+        'lab_consumption_log',
+        where: 'sample_test_id = ? AND event_type = ?',
+        whereArgs: [testId, 'REVERSAL'],
+      );
+      expect(reversals, hasLength(1));
+      expect(reversals.single['lot_id'], lines.single['lot_id']);
+      expect(
+        (await fx.db.query(
+          'lab_sample_tests',
+          where: 'id = ?',
+          whereArgs: [testId],
+        )).single['deleted_at'],
+        isNotNull,
+      );
+      expect(await repo.listSampleTests(), isEmpty);
+    },
+  );
 
   test('increase without expiry is refused', () async {
     expect(

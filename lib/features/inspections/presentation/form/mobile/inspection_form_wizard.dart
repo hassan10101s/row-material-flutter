@@ -92,7 +92,7 @@ class _InspectionFormWizardState extends State<InspectionFormWizard> {
     void next() {
       // No silent skips: the material/product gates everything downstream
       // (entry code, reference grids), so the wizard holds here.
-      if (step == 0 && formState.materialId == null) {
+      if (step == 0 && formState.materialId == null && !sections.editing) {
         AppFeedback.error(
           context,
           sections.isProduct
@@ -147,8 +147,8 @@ class _InspectionFormWizardState extends State<InspectionFormWizard> {
                 nextLabel: last
                     ? AppText.t('حفظ الفحص', 'Save inspection')
                     : AppText.t('التالي', 'Next'),
-                nextLoading: last && formState.saving,
-                nextEnabled: !formState.saving,
+                nextLoading: formState.loading || (last && formState.saving),
+                nextEnabled: !formState.saving && !formState.loading,
               ),
             ],
           ),

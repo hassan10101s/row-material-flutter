@@ -4,11 +4,13 @@ import 'package:uuid/uuid.dart';
 
 import '../../../core/auth/permissions.dart';
 import '../../../core/database/database_helper.dart';
+import '../../../core/domain/formulation_receipt_policy.dart';
 import '../../../core/sync/audit_logger.dart';
 import '../../../core/sync/shared_data_writer.dart';
 import '../../../core/sync/sync_queue.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../organizations/data/member_write_guard.dart';
+import '../../lab/core/lab_result_format.dart';
 import '../domain/formulation_calculator.dart';
 import '../domain/formulation_repository.dart';
 
@@ -33,7 +35,115 @@ class SqliteFormulationRepository implements FormulationRepository {
       whereArgs: [archived ? 1 : 0],
       orderBy: 'updated_at DESC, id DESC',
     );
-    return [for (final row in rows) Map<String, dynamic>.from(row)];
+    if (rows.isEmpty) return [];
+    final materials = await db.query(
+      'reference_materials',
+      columns: ['id', 'remote_id', 'material_code', 'material_name'],
+      where: 'deleted_at IS NULL',
+    );
+    final products = await db.query(
+      'lab_products',
+      columns: ['id', 'remote_id', 'name'],
+      where: 'deleted_at IS NULL',
+    );
+    final formulas = await db.query(
+      'nutrition_formulations',
+      columns: ['id', 'remote_id'],
+      where: 'deleted_at IS NULL',
+    );
+    Map<String, Object?>? uniqueMatch(
+      List<Map<String, Object?>> candidates,
+      String column,
+      Object? value, {
+      bool exact = false,
+    }) {
+      final text = '${value ?? ''}'.trim();
+      if (text.isEmpty) return null;
+      final matches = candidates
+          .where(
+            (row) => exact
+                ? '${row[column] ?? ''}'.trim() == text
+                : '${row[column] ?? ''}'.trim().toLowerCase() ==
+                      text.toLowerCase(),
+          )
+          .toList();
+      return matches.length == 1 ? matches.single : null;
+    }
+
+    final output = <Map<String, dynamic>>[];
+    for (final source in rows) {
+      final row = Map<String, dynamic>.from(source);
+      final decoded = _decode(row['items_json']);
+      var missing = false;
+      if (decoded is List) {
+        final items = <Map<String, dynamic>>[];
+        for (final raw in decoded.whereType<Map>()) {
+          final item = Map<String, dynamic>.from(raw);
+          final hasRemoteId = '${item['_material_remote_id'] ?? ''}'
+              .trim()
+              .isNotEmpty;
+          final material = hasRemoteId
+              ? uniqueMatch(
+                  materials,
+                  'remote_id',
+                  item['_material_remote_id'],
+                  exact: true,
+                )
+              : uniqueMatch(
+                      materials,
+                      'material_code',
+                      item['_material_code'],
+                    ) ??
+                    uniqueMatch(
+                      materials,
+                      'material_name',
+                      item['material_name'],
+                    );
+          // Never reuse a foreign device's numeric SQLite id for a different
+          // material. A missing reference stays visible but cannot be saved.
+          item['material_id'] = material?['id'] ?? -1;
+          if (material == null) missing = true;
+          items.add(item);
+        }
+        row['items_json'] = jsonEncode(items);
+      }
+      final settings = _decode(row['parameters_json']);
+      if (row['product_id'] != null &&
+          settings is Map &&
+          settings['_product_reference'] is Map) {
+        final reference = settings['_product_reference'] as Map;
+        final product = '${reference['remote_id'] ?? ''}'.trim().isNotEmpty
+            ? uniqueMatch(
+                products,
+                'remote_id',
+                reference['remote_id'],
+                exact: true,
+              )
+            : uniqueMatch(products, 'name', reference['name']);
+        row['product_id'] = product?['id'];
+        if (product == null) missing = true;
+      } else if (row['product_id'] != null &&
+          '${row['device_id'] ?? ''}' != guard.deviceId) {
+        row['product_id'] = null;
+        missing = true;
+      }
+      if (row['copied_from_id'] != null &&
+          settings is Map &&
+          settings['_copied_from_remote_id'] is String) {
+        row['copied_from_id'] = uniqueMatch(
+          formulas,
+          'remote_id',
+          settings['_copied_from_remote_id'],
+          exact: true,
+        )?['id'];
+      } else if (row['copied_from_id'] != null &&
+          '${row['device_id'] ?? ''}' != guard.deviceId) {
+        row['copied_from_id'] = null;
+      }
+      row['_missing_references'] = missing;
+      output.add(row);
+    }
+    return output;
   }
 
   @override
@@ -42,7 +152,7 @@ class SqliteFormulationRepository implements FormulationRepository {
     final rows = await db.query(
       'reference_materials',
       columns: ['id', 'material_name', 'material_code'],
-      where: 'active = 1 AND material_name != ?',
+      where: 'active = 1 AND deleted_at IS NULL AND material_name != ?',
       whereArgs: [DatabaseHelper.productSentinelMaterialName],
       orderBy: 'material_name COLLATE NOCASE',
     );
@@ -68,7 +178,9 @@ class SqliteFormulationRepository implements FormulationRepository {
       SELECT p.id, p.parameter_name, COALESCE(p.unit, '') AS unit
       FROM parameters p
       WHERE EXISTS (SELECT 1 FROM lab_analyses a
-        WHERE a.parameter_id = p.id AND a.active = 1)
+        WHERE a.parameter_id = p.id AND (a.active = 1 OR EXISTS (
+          SELECT 1 FROM lab_sample_tests t
+          WHERE t.analysis_id = a.id AND t.deleted_at IS NULL)))
       ORDER BY p.parameter_name COLLATE NOCASE
     ''');
     return [for (final row in rows) Map<String, dynamic>.from(row)];
@@ -92,6 +204,21 @@ class SqliteFormulationRepository implements FormulationRepository {
   }
 
   @override
+  Future<Set<int>> materialIdsWithReceipts(DateTime to) async {
+    final db = await dbHelper.readDatabase;
+    final rows = await db.rawQuery(
+      '''
+      SELECT DISTINCT material_id FROM inspections
+      WHERE inspection_kind = 'raw' AND deleted_at IS NULL
+        AND decision_status IN (${List.filled(formulationAcceptedDecisions.length, '?').join(',')})
+        AND date(inspection_date) <= date(?) AND material_id IS NOT NULL
+    ''',
+      [...formulationAcceptedDecisions, to.toIso8601String().substring(0, 10)],
+    );
+    return {for (final row in rows) (row['material_id'] as num).toInt()};
+  }
+
+  @override
   Future<List<MaterialReceipt>> receipts(
     List<int> materialIds,
     DateTime from,
@@ -108,11 +235,11 @@ class SqliteFormulationRepository implements FormulationRepository {
         i.chemical_results_json, i.physical_results_json, i.decision_status
       FROM inspections i
       WHERE i.inspection_kind = 'raw' AND i.deleted_at IS NULL
-        AND i.decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','PARTIAL_REJECTION')
+          AND i.decision_status IN (${List.filled(formulationAcceptedDecisions.length, '?').join(',')})
         AND i.material_id IN ($marks) AND date(i.inspection_date) <= date(?)
       ORDER BY date(i.inspection_date), i.id
     ''',
-      [...ids, end],
+      [...formulationAcceptedDecisions, ...ids, end],
     );
     final testRows = <Map<String, Object?>>[];
     for (var offset = 0; offset < rows.length; offset += 250) {
@@ -128,7 +255,7 @@ class SqliteFormulationRepository implements FormulationRepository {
         SELECT t.entry_code, t.sample_name, t.analysis_id, t.result_text,
           t.tested_at, a.name AS analysis_name, p.parameter_name
         FROM lab_sample_tests t
-        JOIN lab_analyses a ON a.id = t.analysis_id AND a.active = 1
+        JOIN lab_analyses a ON a.id = t.analysis_id
         LEFT JOIN parameters p ON p.id = a.parameter_id
         WHERE t.deleted_at IS NULL AND t.source_type = 'raw_material'
           AND t.entry_code IN (${List.filled(codes.length, '?').join(',')})
@@ -154,6 +281,7 @@ class SqliteFormulationRepository implements FormulationRepository {
       final history = <String, List<ParameterObservation>>{};
       final chemicalKeys = <String>{};
       for (final test in testsByCode[code] ?? const []) {
+        if (isFailedLabResult(test['result_text'])) continue;
         final parameterKey = _key(
           '${test['parameter_name'] ?? test['analysis_name'] ?? ''}',
         );
@@ -278,6 +406,7 @@ class SqliteFormulationRepository implements FormulationRepository {
         throw const ValidationError('أضف خامة واحدة على الأقل بكمية صالحة.');
       }
       final materialIds = <int>{};
+      final portableItems = <Map<String, dynamic>>[];
       for (final item in items) {
         final materialId = (item['material_id'] as num?)?.toInt();
         final quantity = FormulationCalculator.number(item['quantity_kg']);
@@ -293,7 +422,69 @@ class SqliteFormulationRepository implements FormulationRepository {
             'سعر الكيلوجرام يجب أن يكون صفرًا أو أكبر.',
           );
         }
+        final reference = await txn.query(
+          'reference_materials',
+          columns: ['remote_id', 'material_code', 'material_name'],
+          where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: [materialId],
+          limit: 1,
+        );
+        if (reference.isEmpty) {
+          throw const ValidationError(
+            'إحدى الخامات غير موجودة على هذا الجهاز.',
+          );
+        }
+        final expectedRemoteId = '${item['_material_remote_id'] ?? ''}'.trim();
+        if (expectedRemoteId.isNotEmpty &&
+            expectedRemoteId != '${reference.single['remote_id'] ?? ''}') {
+          throw const ValidationError('هوية الخامة لا تطابق المرجع المحفوظ.');
+        }
+        portableItems.add({
+          ...Map<String, dynamic>.from(item),
+          'material_name': reference.single['material_name'],
+          '_material_code': reference.single['material_code'],
+          '_material_remote_id': reference.single['remote_id'],
+        });
       }
+      values['items_json'] = jsonEncode(portableItems);
+      final settings = record['parameters'] is Map
+          ? Map<String, dynamic>.from(record['parameters'] as Map)
+          : <String, dynamic>{};
+      settings.remove('_product_reference');
+      settings.remove('_copied_from_remote_id');
+      final productId = record['product_id'];
+      if (productId != null) {
+        final products = await txn.query(
+          'lab_products',
+          columns: ['remote_id', 'name'],
+          where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: [productId],
+          limit: 1,
+        );
+        if (products.isEmpty) {
+          throw const ValidationError('المنتج المرتبط غير موجود.');
+        }
+        settings['_product_reference'] = {
+          'remote_id': products.single['remote_id'],
+          'name': products.single['name'],
+        };
+      }
+      final copiedFromId = record['copied_from_id'];
+      if (copiedFromId != null) {
+        final originals = await txn.query(
+          'nutrition_formulations',
+          columns: ['remote_id'],
+          where: 'id = ? AND deleted_at IS NULL',
+          whereArgs: [copiedFromId],
+          limit: 1,
+        );
+        if (originals.isEmpty) {
+          throw const ValidationError('التركيبة الأصلية غير موجودة.');
+        }
+        final remoteId = '${originals.single['remote_id'] ?? ''}';
+        if (remoteId.isNotEmpty) settings['_copied_from_remote_id'] = remoteId;
+      }
+      values['parameters_json'] = jsonEncode(settings);
       if (id == null) {
         values.addAll({
           'created_at': now,
@@ -309,6 +500,13 @@ class SqliteFormulationRepository implements FormulationRepository {
           limit: 1,
         );
         if (found.isEmpty) throw const ValidationError('التركيبة غير موجودة.');
+        if (found.single['product_id'] != null &&
+            record['product_id'] == null &&
+            record['_allow_product_unlink'] != true) {
+          throw const ValidationError(
+            'المنتج المرتبط غير متاح. اختر منتجًا أو أكّد فك الارتباط صراحة.',
+          );
+        }
         resultId = id;
         await txn.update(
           'nutrition_formulations',

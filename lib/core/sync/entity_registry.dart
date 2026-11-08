@@ -16,6 +16,7 @@ class SyncEntity {
     required this.mutableFields,
     this.pkColumn = 'id',
     this.appendOnly = false,
+    this.privateRead = false,
     this.permission,
     this.payloadBuilder,
     this.usesLocalIdAsRef = true,
@@ -37,7 +38,7 @@ class SyncEntity {
   /// Almost every synced table calls it `id`; the user-authored QC tables
   /// (`qc_custom_table*`) do not — their keys are `table_id`/`field_id`/
   /// `row_id`. Every place the sync stack addresses the local row (queue
-  /// settlement, pull apply, auto-rebase, backfill) must go through this
+  /// receipt application, read refresh, identity migration) must go through this
   /// instead of writing `id` verbatim: `UPDATE qc_custom_tables ... WHERE
   /// id = ?` is a "no such column" on those tables, and it would leave the
   /// local row permanently `queued` after every successful push.
@@ -53,6 +54,9 @@ class SyncEntity {
 
   /// Append-only collections are never updated or deleted remotely.
   final bool appendOnly;
+
+  /// Never downloaded by the shared read model, including privileged sessions.
+  final bool privateRead;
 
   /// Permission required to push this entity.
   final String? permission;
@@ -283,6 +287,7 @@ final List<SyncEntity> syncEntities = [
       'sampleName',
       'resultText',
       'dynamicValues',
+      'nirExclusionsJson',
       'entryCode',
       'worksheetRowId',
       'testedBy',
@@ -303,6 +308,7 @@ final List<SyncEntity> syncEntities = [
     docId: remoteIdDocId,
     permission: 'lab_results.update',
     mutableFields: {
+      'nonConformanceRemoteId',
       'batchId',
       'batchRemoteId',
       'batchEntryCode',
@@ -692,6 +698,7 @@ final List<SyncEntity> syncEntities = [
     docId: labConfigDocId('nir_validation_settings'),
     accepts: labConfigSelector('nir_validation_settings'),
     permission: 'lab_results.update',
+    appendOnly: true,
     mutableFields: {
       'payload',
       'configType',
@@ -702,6 +709,17 @@ final List<SyncEntity> syncEntities = [
       'deviceId',
       'deletedAt',
     },
+  ),
+  SyncEntity(
+    type: 'secureFieldSubmission',
+    collection: SyncCollection.labConfig,
+    localTable: 'secure_field_submissions',
+    docId: remoteIdDocId,
+    accepts: labConfigSelector('secure_field_submissions'),
+    permission: 'lab_results.create',
+    appendOnly: true,
+    privateRead: true,
+    mutableFields: const {},
   ),
   // ── QC user-authored tables (the QC settings feature). The first QC
   // family in the sync scope: `remote_id` is the doc id, parents are
@@ -1013,6 +1031,8 @@ final List<SyncEntity> syncEntities = [
     docId: remoteIdDocId,
     permission: 'qc.write',
     mutableFields: {
+      'productSampleId',
+      'productSampleRemoteId',
       'inspectionId',
       'inspectionRemoteId',
       'itemId',
@@ -1105,11 +1125,19 @@ final List<SyncEntity> syncEntities = [
       'deletedAt',
     },
   ),
+  SyncEntity(
+    type: 'qcAudit',
+    collection: SyncCollection.qcAudits,
+    localTable: 'qc_audits',
+    docId: remoteIdDocId,
+    appendOnly: true,
+    permission: 'qc.write',
+    mutableFields: const {},
+  ),
 ];
 
-/// Audit log rows are not part of `syncEntities` (the normal cycle does not walk
-/// them) but they are pushed as documents and pulled by the dedicated audit
-/// cycle of `SyncEngine`, so they get their own descriptor.
+/// Audit log rows have their own descriptor for explicit command effects and
+/// approved read projection; they are not part of the business entity list.
 final SyncEntity auditLogEntity = SyncEntity(
   type: 'auditLog',
   collection: SyncCollection.auditLogs,
@@ -1154,7 +1182,23 @@ Map<String, dynamic> buildRemotePayload(
     // local `created_at` string must never be copied through. See the note
     // where the sentinel is written for why an update must omit it entirely.
     if (camel == 'createdAt') continue;
+    // Null means this legacy measurement has no calibration selection yet.
+    if (entity.type == 'labResult' &&
+        camel == 'nirExclusionsJson' &&
+        entry.value == null) {
+      continue;
+    }
+    if (camel.startsWith('secure') &&
+        (entry.value == null || entry.value == 0)) {
+      continue;
+    }
     payload[camel] = entry.value;
+  }
+  if (entity.type == 'labAnalysis') {
+    final formula = jsonDecode('${row['formula_json'] ?? '{}'}');
+    if (formula is Map && formula['chemical_definitions'] is List) {
+      payload['chemicalDefinitions'] = formula['chemical_definitions'];
+    }
   }
   if (entity.type == 'member') {
     Object? roles;
@@ -1511,6 +1555,14 @@ const Map<String, List<QcFkSpec>> _qcChildFks = {
   ],
   'qc_findings_nc': [
     QcFkSpec(
+      refColumn: 'product_sample_id',
+      stampColumn: 'product_sample_remote_id',
+      parentTable: 'product_batch_samples',
+      parentPk: 'id',
+      parentType: 'productBatchSample',
+      isRequired: false,
+    ),
+    QcFkSpec(
       refColumn: 'inspection_id',
       stampColumn: 'inspection_remote_id',
       parentTable: 'qc_inspections',
@@ -1736,7 +1788,7 @@ Future<void> resolveRemoteRowRefs(
     if (asInt != null) {
       resolved[column] = asInt;
     } else if (value.contains('@')) {
-      // Email leaked into an id column (legacy offline_first_lab_repository
+      // Email leaked into an id column (an older laboratory repository
       // wrote guard.email): drop to null rather than poison the row.
       resolved[column] = null;
     }
@@ -2423,7 +2475,7 @@ Map<String, dynamic> remoteToLocalRow(
   for (final entry in document.entries) {
     final key = entry.key;
     if (key == 'updatedAt' || key == 'createdAt') continue;
-    if (key == 'payload') continue;
+    if (key == 'payload' || key == 'chemicalDefinitions') continue;
     if (key == 'configType') continue;
     if (key == 'localId') {
       row['id'] = entry.value;
@@ -2451,7 +2503,7 @@ Map<String, dynamic> remoteToLocalRow(
   if (entity.collection == SyncCollection.labConfig) {
     // The nested `payload` is the business content of a lab-config document,
     // and it reaches the remote in one of two shapes: a `Map`, when it was
-    // parked straight from the local row by `OfflineFirstLabRepository`
+    // parked straight from the local row by `ServerConfirmedLabRepository`
     // (`..['payload'] = Map.from(fresh)`), or a JSON `String` when it was
     // produced by a `payloadBuilder`. Unwrapping only the `String` shape meant
     // a `Map` payload was dropped whole by the `payload` skip above, and the
@@ -2477,6 +2529,16 @@ Map<String, dynamic> remoteToLocalRow(
       for (final entry in nested.entries) {
         row[camelToSnake('${entry.key}')] = entry.value;
       }
+    }
+  }
+  if (entity.type == 'labAnalysis') {
+    final formula = jsonDecode('${row['formula_json'] ?? '{}'}');
+    if (formula is Map) {
+      formula.remove('chemical_definitions');
+      if (document['chemicalDefinitions'] is List) {
+        formula['chemical_definitions'] = document['chemicalDefinitions'];
+      }
+      row['formula_json'] = jsonEncode(formula);
     }
   }
   if (entity.localTable == 'qc_templates' ||

@@ -21,10 +21,9 @@ enum AuthState {
 
 /// The authentication contract.
 ///
-/// Implementation: `data/offline_first_auth_repository.dart`
-/// (`OfflineFirstAuthRepository`). Replacing it - or the `AuthRemoteDataSource`
-/// behind it - is the only change needed to move authentication to a Django
-/// backend later.
+/// Implementation: `data/firebase_auth_repository.dart`
+/// (`FirebaseAuthRepository`). Firebase Auth supplies authenticated
+/// identity; Firestore rules independently enforce organization access.
 ///
 /// ## Why this lives in `domain/`
 ///
@@ -81,6 +80,14 @@ abstract interface class AuthRepository {
   /// in with Google or with an email/password, and never requires a recent
   /// re-authentication.
   Future<void> sendPasswordResetEmail(String email);
+
+  /// True when the signed-in Firebase account has a verified e-mail address.
+  /// The server rules refuse company genesis for unverified e-mails, so the
+  /// create-organization flow must check (and offer to re-check) this.
+  Future<bool> refreshEmailVerified();
+
+  /// Re-sends the Firebase e-mail verification link. Throws [AuthFailure].
+  Future<void> sendEmailVerification();
 
   /// Clear the cache, close the database and stop the sync engine.
   Future<void> signOut();

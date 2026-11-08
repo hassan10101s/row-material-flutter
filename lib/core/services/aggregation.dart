@@ -1,4 +1,5 @@
 import '../constants/app_strings.dart';
+import '../utils/report_language.dart';
 import '../domain/rules.dart' as rules;
 import '../utils/app_format.dart';
 
@@ -35,7 +36,9 @@ String decisionLabel(String? status) {
   if (status == null || status.isEmpty) return '-';
   final entry = rules.decisionLabels[status];
   if (entry == null) return status;
-  return AppText.t(entry['ar']!, entry['en']!);
+  return ReportText.active
+      ? ReportText.t(entry['ar']!, entry['en']!)
+      : AppText.t(entry['ar']!, entry['en']!);
 }
 
 double _safeQty(Object? value, double fallback) {
@@ -47,7 +50,9 @@ Map<String, List<Map<String, dynamic>>> groupByMaterial(
   List<Map<String, dynamic>> inspections,
 ) {
   final materials = <String, List<Map<String, dynamic>>>{};
-  final unknown = AppText.t('غير معروف', 'Unknown');
+  final unknown = ReportText.active
+      ? ReportText.t('غير معروف', 'Unknown')
+      : AppText.t('غير معروف', 'Unknown');
   for (final insp in inspections) {
     final raw = '${insp['material_name'] ?? ''}'.trim();
     final name = raw.isEmpty ? unknown : raw;

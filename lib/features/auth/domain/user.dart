@@ -70,7 +70,7 @@ class User {
 
   // ── Legacy call sites (kept so no widget/cubit had to change) ────────────
   // Read gates stay role-based, write gates also require a writable device.
-  bool get canSeeSettings => permissions.contains(Permission.usersRead);
+  bool get canSeeSettings => permissions.contains(Permission.orgUpdate);
   bool get canEditInspections =>
       canWriteAnything && permissions.contains(Permission.samplesUpdate);
   bool get canCreateInspection =>

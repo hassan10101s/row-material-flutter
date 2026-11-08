@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:material_lab/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';

@@ -4,11 +4,11 @@ import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/audit_trail.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
 import 'package:material_lab/core/sync/device_registry.dart';
 import 'package:material_lab/core/sync/entity_registry.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
@@ -34,7 +34,9 @@ class _DenyAuditLogs extends InMemoryDataSource {
   }) {
     if (collection == SyncCollection.auditLogs) {
       return Future<RemotePage>.error(
-        StateError('PERMISSION_DENIED: missing permission audit.read on auditLogs'),
+        StateError(
+          'PERMISSION_DENIED: missing permission audit.read on auditLogs',
+        ),
       );
     }
     return super.listSince(
@@ -81,38 +83,45 @@ void main() {
 
   SessionSource source() => SessionSource.empty(() => session);
   DeviceRegistry registry() => DeviceRegistry(
-        remote: remote,
-        metadata: metadata,
-        audit: audit,
-        source: source(),
-      );
-  AuditTrail trail() => AuditTrail(audit: audit, metadata: metadata, devices: registry());
+    remote: remote,
+    metadata: metadata,
+    audit: audit,
+    source: source(),
+  );
+  AuditTrail trail() =>
+      AuditTrail(audit: audit, metadata: metadata, devices: registry());
   PullWorker auditPuller() => PullWorker(
-        queue: queue,
-        metadata: metadata,
-        remote: remote,
-        conflicts: ConflictResolver(queue: queue, remote: remote),
-        source: source(),
-        entities: [auditLogEntity],
-        quietPermissionErrors: true,
-        marksPullTimestamp: false,
-      );
+    queue: queue,
+    metadata: metadata,
+    remote: remote,
+    conflicts: ConflictResolver(queue: queue, remote: remote),
+    source: source(),
+    entities: [auditLogEntity],
+    quietPermissionErrors: true,
+    marksPullTimestamp: false,
+  );
 
   // ── device registry ──────────────────────────────────────────────────────
 
   group('device registry', () {
-    test('registers this device with the identity of the live session', () async {
-      final registered = await registry().ensureRegistered();
+    test(
+      'registers this device with the identity of the live session',
+      () async {
+        final registered = await registry().ensureRegistered();
 
-      expect(registered, isTrue);
-      final doc = remote.registeredDevices.singleWhere((d) => d.id == 'dev_1');
-      expect(doc.data['uid'], 'uid_admin');
-      expect(doc.data['email'], 'admin@material-lab.test');
-      expect(doc.data['role'], 'admin');
-      expect(doc.data['readOnly'], isFalse);
-      expect(doc.data['platform'], isNotEmpty);
-      expect(doc.data['lastSeenAt'], isNotNull);
-    });
+        expect(registered, isTrue);
+        final doc = remote.registeredDevices.singleWhere(
+          (d) => d.id == 'dev_1',
+        );
+        expect(doc.data['uid'], 'uid_admin');
+        expect(doc.data['email'], 'admin@material-lab.test');
+        expect(doc.data['role'], 'admin');
+        expect(doc.data['readOnly'], isFalse);
+        expect(doc.data['status'], 'active');
+        expect(doc.data['platform'], isNotEmpty);
+        expect(doc.data['lastSeenAt'], isNotNull);
+      },
+    );
 
     test('a viewer device is registered as read-only', () async {
       session = const AppSession(
@@ -129,40 +138,65 @@ void main() {
 
       final doc = remote.registeredDevices.singleWhere((d) => d.id == 'dev_9');
       expect(doc.data['role'], 'viewer');
-      expect(doc.data['readOnly'], isTrue,
-          reason: 'plan §14-P8.3: device.readOnly = (role == viewer)');
+      expect(
+        doc.data['readOnly'],
+        isTrue,
+        reason: 'plan §14-P8.3: device.readOnly = (role == viewer)',
+      );
     });
 
-    test('registration is throttled and never duplicates the document', () async {
-      final devices = registry();
-      expect(await devices.ensureRegistered(), isTrue);
-      expect(await devices.ensureRegistered(), isFalse,
-          reason: 'inside the interval: nothing to do');
-      expect(remote.registeredDevices.where((d) => d.id == 'dev_1'), hasLength(1));
+    test(
+      'registration is throttled and never duplicates the document',
+      () async {
+        final devices = registry();
+        expect(await devices.ensureRegistered(), isTrue);
+        expect(
+          await devices.ensureRegistered(),
+          isFalse,
+          reason: 'inside the interval: nothing to do',
+        );
+        expect(
+          remote.registeredDevices.where((d) => d.id == 'dev_1'),
+          hasLength(1),
+        );
 
-      // `force` is what the organization binder uses after an org switch.
-      expect(await devices.ensureRegistered(force: true), isTrue);
-      expect(remote.registeredDevices.where((d) => d.id == 'dev_1'), hasLength(1));
-    });
+        // `force` is what the organization binder uses after an org switch.
+        expect(await devices.ensureRegistered(force: true), isTrue);
+        expect(
+          remote.registeredDevices.where((d) => d.id == 'dev_1'),
+          hasLength(1),
+        );
+      },
+    );
 
     test('the registration window is stored per organization', () async {
       await registry().ensureRegistered();
-      expect(await metadata.get(DeviceRegistry.lastRegisteredAtKey), isNotEmpty);
+      expect(
+        await metadata.get(DeviceRegistry.lastRegisteredAtKey),
+        isNotEmpty,
+      );
       expect(await metadata.get('device_registered_org'), orgId);
     });
 
-    test('a partial refresh keeps the other fields (set merge semantics)',
-        () async {
-      final devices = registry();
-      await devices.ensureRegistered();
-      await devices.touchLastSeen();
+    test(
+      'a partial refresh keeps the other fields (set merge semantics)',
+      () async {
+        final devices = registry();
+        await devices.ensureRegistered();
+        await devices.touchLastSeen();
 
-      final doc = remote.registeredDevices.singleWhere((d) => d.id == 'dev_1');
-      expect(doc.data['uid'], 'uid_admin');
-      expect(doc.data['role'], 'admin',
-          reason: 'a heartbeat only carries uid + lastSeenAt');
-      expect(doc.data['readOnly'], isFalse);
-    });
+        final doc = remote.registeredDevices.singleWhere(
+          (d) => d.id == 'dev_1',
+        );
+        expect(doc.data['uid'], 'uid_admin');
+        expect(
+          doc.data['role'],
+          'admin',
+          reason: 'a heartbeat only carries uid + lastSeenAt',
+        );
+        expect(doc.data['readOnly'], isFalse);
+      },
+    );
 
     test('lists the organization devices, newest first', () async {
       await remote.registerDevice(
@@ -171,7 +205,9 @@ void main() {
         data: {
           'uid': 'uid_other',
           'platform': 'linux',
-          'lastSeenAt': nowIsoAt(DateTime.now().subtract(const Duration(days: 3))),
+          'lastSeenAt': nowIsoAt(
+            DateTime.now().subtract(const Duration(days: 3)),
+          ),
         },
       );
       await registry().ensureRegistered();
@@ -196,23 +232,27 @@ void main() {
       expect(await registry().list(), isEmpty);
     });
 
-    test('signing out of this device revokes it and keeps the member active',
-        () async {
-      await registry().ensureRegistered();
-      final devices = registry();
-      await devices.signOutThisDevice();
+    test(
+      'signing out of this device revokes it and keeps the member active',
+      () async {
+        await registry().ensureRegistered();
+        final devices = registry();
+        await devices.signOutThisDevice();
 
-      final doc = remote.registeredDevices.singleWhere((d) => d.id == 'dev_1');
-      expect(doc.data['status'], 'revoked');
-      expect(doc.data['revokedAt'], isNotNull);
-      // The Rules forbid deleting a device document; it is part of the trail.
-      expect(remote.removedDevices, isEmpty);
-      // The member is untouched: no role change, no other device revoked.
-      expect(doc.data['role'], 'admin');
-      expect(remote.registeredDevices.where((d) => d.id != 'dev_1'), isEmpty);
-      // The next session on this device must register itself again.
-      expect(await metadata.get(DeviceRegistry.lastRegisteredAtKey), isEmpty);
-    });
+        final doc = remote.registeredDevices.singleWhere(
+          (d) => d.id == 'dev_1',
+        );
+        expect(doc.data['status'], 'revoked');
+        expect(doc.data['revokedAt'], isNotNull);
+        // The Rules forbid deleting a device document; it is part of the trail.
+        expect(remote.removedDevices, isEmpty);
+        // The member is untouched: no role change, no other device revoked.
+        expect(doc.data['role'], 'admin');
+        expect(remote.registeredDevices.where((d) => d.id != 'dev_1'), isEmpty);
+        // The next session on this device must register itself again.
+        expect(await metadata.get(DeviceRegistry.lastRegisteredAtKey), isEmpty);
+      },
+    );
 
     test('revoking another device needs devices.read', () async {
       await remote.registerDevice(
@@ -232,8 +272,11 @@ void main() {
       await registry().revoke('dev_2');
 
       final doc = remote.registeredDevices.singleWhere((d) => d.id == 'dev_2');
-      expect(doc.data['status'], isNull,
-          reason: 'a member without devices.read cannot revoke anyone');
+      expect(
+        doc.data['status'],
+        isNull,
+        reason: 'a member without devices.read cannot revoke anyone',
+      );
     });
 
     test('an offline device does not register and does not throw', () async {
@@ -248,27 +291,32 @@ void main() {
   group('audit trail', () {
     /// A row with an explicit timestamp - `AuditLogger` always stamps "now",
     /// which cannot express the date-range filters.
-    Future<int> insertAudit(String action, String entityType, DateTime occurredAt) =>
-        fixture.db.insert('audit_logs', {
-          'user_id': 'uid_admin',
-          'user_name': 'Admin',
-          'organization_id': orgId,
-          'action': action,
-          'entity_type': entityType,
-          'entity_id': 'e_$action',
-          'device_id': 'dev_1',
-          'occurred_at': nowIsoAt(occurredAt),
-          'version': 1,
-          'sync_state': 'synced',
-        });
+    Future<int> insertAudit(
+      String action,
+      String entityType,
+      DateTime occurredAt,
+    ) => fixture.db.insert('audit_logs', {
+      'user_id': 'uid_admin',
+      'user_name': 'Admin',
+      'organization_id': orgId,
+      'action': action,
+      'entity_type': entityType,
+      'entity_id': 'e_$action',
+      'device_id': 'dev_1',
+      'occurred_at': nowIsoAt(occurredAt),
+      'version': 1,
+      'sync_state': 'synced',
+    });
 
     Future<void> log(String action, String entityType) async {
-      await fixture.transaction((txn) => audit.log(
-            txn,
-            action: action,
-            entityType: entityType,
-            entityId: 'e_$action',
-          ));
+      await fixture.transaction(
+        (txn) => audit.log(
+          txn,
+          action: action,
+          entityType: entityType,
+          entityId: 'e_$action',
+        ),
+      );
     }
 
     test('the page is empty until something is written', () async {
@@ -287,15 +335,21 @@ void main() {
       expect((await trail().page(entityType: 'sample')).total, 2);
       expect((await trail().page(action: AuditAction.qcApproved)).total, 1);
       expect(
-        (await trail().page(entityType: 'sample', action: AuditAction.qcApproved)).total,
+        (await trail().page(
+          entityType: 'sample',
+          action: AuditAction.qcApproved,
+        )).total,
         0,
         reason: 'the filters combine with AND',
       );
     });
 
     test('filters by date range inclusively', () async {
-      await insertAudit(AuditAction.sampleCreated, 'sample',
-          DateTime.now().subtract(const Duration(days: 10)));
+      await insertAudit(
+        AuditAction.sampleCreated,
+        'sample',
+        DateTime.now().subtract(const Duration(days: 10)),
+      );
       await insertAudit(AuditAction.sampleCreated, 'sample', DateTime.now());
       final today = DateTime.now();
 
@@ -303,7 +357,11 @@ void main() {
         from: DateTime(today.year, today.month, today.day, 0, 0, 0),
         to: DateTime(today.year, today.month, today.day, 23, 59, 59),
       );
-      expect(page.total, 1, reason: 'only the entry written today is inside the range');
+      expect(
+        page.total,
+        1,
+        reason: 'only the entry written today is inside the range',
+      );
       expect(page.entries.single['action'], AuditAction.sampleCreated);
 
       expect((await trail().page(from: DateTime(2000))).total, 2);
@@ -315,14 +373,26 @@ void main() {
       // matches nothing.
       await insertAudit(AuditAction.sampleCreated, 'sample', DateTime.now());
       final now = DateTime.now();
-      expect((await trail().page(from: now.subtract(const Duration(minutes: 5)))).total, 1);
-      expect((await trail().page(to: now.add(const Duration(minutes: 5)))).total, 1);
+      expect(
+        (await trail().page(
+          from: now.subtract(const Duration(minutes: 5)),
+        )).total,
+        1,
+      );
+      expect(
+        (await trail().page(to: now.add(const Duration(minutes: 5)))).total,
+        1,
+      );
     });
 
     test('pages with an offset and reports whether more exist', () async {
       final base = DateTime(2026, 3, 1);
       for (var i = 0; i < 5; i++) {
-        await insertAudit('action_$i', 'sample', base.add(Duration(minutes: i)));
+        await insertAudit(
+          'action_$i',
+          'sample',
+          base.add(Duration(minutes: i)),
+        );
       }
       final t = trail();
 
@@ -345,7 +415,10 @@ void main() {
 
       final page = await trail().page();
       expect(page.entityTypes, containsAll(['sample', 'qualityCheck']));
-      expect(page.actions, containsAll([AuditAction.sampleCreated, AuditAction.qcApproved]));
+      expect(
+        page.actions,
+        containsAll([AuditAction.sampleCreated, AuditAction.qcApproved]),
+      );
     });
 
     test('a device without audit.read reads nothing at all', () async {
@@ -371,14 +444,17 @@ void main() {
   // ── retention ────────────────────────────────────────────────────────────
 
   group('retention', () {
-    Future<void> row(String state, int daysAgo) => fixture.db.insert('audit_logs', {
+    Future<void> row(String state, int daysAgo) =>
+        fixture.db.insert('audit_logs', {
           'user_id': 'uid_admin',
           'organization_id': orgId,
           'action': AuditAction.settingsUpdated,
           'entity_type': 'settings',
           'entity_id': 'org_test',
           'device_id': 'dev_1',
-          'occurred_at': nowIsoAt(DateTime.now().subtract(Duration(days: daysAgo))),
+          'occurred_at': nowIsoAt(
+            DateTime.now().subtract(Duration(days: daysAgo)),
+          ),
           'version': 1,
           'sync_state': state,
         });
@@ -411,13 +487,15 @@ void main() {
   group('audit pull', () {
     test('a second device sees the trail of the first one', () async {
       // Device 1 writes and pushes.
-      await fixture.transaction((txn) => audit.log(
-            txn,
-            action: AuditAction.qcApproved,
-            entityType: 'qualityCheck',
-            entityId: 'qc_1_1',
-            details: <String, dynamic>{'decision': 'APPROVED'},
-          ));
+      await fixture.transaction(
+        (txn) => audit.log(
+          txn,
+          action: AuditAction.qcApproved,
+          entityType: 'qualityCheck',
+          entityId: 'qc_1_1',
+          details: <String, dynamic>{'decision': 'APPROVED'},
+        ),
+      );
       await PushWorker(
         queue: queue,
         metadata: metadata,
@@ -443,7 +521,10 @@ void main() {
         queue: SyncQueue(other.helper),
         metadata: SyncMetadata(other.helper),
         remote: remote,
-        conflicts: ConflictResolver(queue: SyncQueue(other.helper), remote: remote),
+        conflicts: ConflictResolver(
+          queue: SyncQueue(other.helper),
+          remote: remote,
+        ),
         source: source(),
         entities: [auditLogEntity],
         quietPermissionErrors: true,
@@ -473,47 +554,59 @@ void main() {
       expect((await trailOnDevice2.page(entityType: 'sample')).total, 0);
     });
 
-    test('pulling the same document twice does not duplicate the row', () async {
-      await fixture.transaction((txn) => audit.log(
+    test(
+      'pulling the same document twice does not duplicate the row',
+      () async {
+        await fixture.transaction(
+          (txn) => audit.log(
             txn,
             action: AuditAction.sampleCreated,
             entityType: 'sample',
             entityId: 's_1',
-          ));
-      await PushWorker(
-        queue: queue,
-        metadata: metadata,
-        remote: remote,
-        audit: audit,
-        source: source(),
-      ).runOnce();
+          ),
+        );
+        await PushWorker(
+          queue: queue,
+          metadata: metadata,
+          remote: remote,
+          audit: audit,
+          source: source(),
+        ).runOnce();
 
-      final other = await openSyncFixture();
-      addTearDown(other.dispose);
-      final otherQueue = SyncQueue(other.helper);
-      final otherMetadata = SyncMetadata(other.helper);
-      final otherAudit = AuditLogger(queue: otherQueue, session: () => session);
+        final other = await openSyncFixture();
+        addTearDown(other.dispose);
+        final otherQueue = SyncQueue(other.helper);
+        final otherMetadata = SyncMetadata(other.helper);
+        final otherAudit = AuditLogger(
+          queue: otherQueue,
+          session: () => session,
+        );
 
-      PullWorker puller() => PullWorker(
-            queue: otherQueue,
-            metadata: otherMetadata,
-            remote: remote,
-            conflicts: ConflictResolver(queue: otherQueue, remote: remote),
-            source: source(),
-            entities: [auditLogEntity],
-            quietPermissionErrors: true,
-            marksPullTimestamp: false,
-          );
+        PullWorker puller() => PullWorker(
+          queue: otherQueue,
+          metadata: otherMetadata,
+          remote: remote,
+          conflicts: ConflictResolver(queue: otherQueue, remote: remote),
+          source: source(),
+          entities: [auditLogEntity],
+          quietPermissionErrors: true,
+          marksPullTimestamp: false,
+        );
 
-      await puller().runOnce();
-      // Rewind the cursor: the same document is offered again.
-      await otherMetadata.setCursor('auditLog', PullCursor('', ''));
-      final second = await puller().runOnce();
+        await puller().runOnce();
+        // Rewind the cursor: the same document is offered again.
+        await otherMetadata.setCursor('auditLog', PullCursor('', ''));
+        final second = await puller().runOnce();
 
-      expect(second.skipped, 1, reason: 'the natural key device_id + occurred_at matched');
-      expect(await other.db.query('audit_logs'), hasLength(1));
-      expect(otherAudit, isNotNull);
-    });
+        expect(
+          second.skipped,
+          1,
+          reason: 'the natural key device_id + occurred_at matched',
+        );
+        expect(await other.db.query('audit_logs'), hasLength(1));
+        expect(otherAudit, isNotNull);
+      },
+    );
 
     test('a permission-denied does not break the cycle', () async {
       // What the Rules answer to a member without `audit.read` on `auditLogs`.
@@ -531,7 +624,11 @@ void main() {
       final report = await puller.runOnce();
 
       expect(report.applied, 0);
-      expect(report.error, isNull, reason: 'a permission is not a sync failure');
+      expect(
+        report.error,
+        isNull,
+        reason: 'a permission is not a sync failure',
+      );
       expect(await metadata.lastError(), isEmpty);
     });
 

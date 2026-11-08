@@ -45,7 +45,7 @@ class RoutineListsCubit extends AppCubit<RoutineListsState> {
       final lists = await repo.listRoutineLists();
       safeEmit(state.copyWith(loading: false, lists: lists));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
@@ -61,7 +61,7 @@ class RoutineListsCubit extends AppCubit<RoutineListsState> {
       await load();
       return true;
     } on AppError catch (e) {
-      safeEmit(state.copyWith(error: e.message));
+      safeEmit(state.copyWith(error: AppError.friendly(e)));
       return false;
     } catch (e) {
       safeEmit(state.copyWith(error: AppError.friendly(e)));
@@ -77,7 +77,7 @@ class RoutineListsCubit extends AppCubit<RoutineListsState> {
       await load();
       return sheet.inspection.inspectionId;
     } on AppError catch (e) {
-      safeEmit(state.copyWith(error: e.message));
+      safeEmit(state.copyWith(error: AppError.friendly(e)));
       return null;
     } catch (e) {
       safeEmit(state.copyWith(error: AppError.friendly(e)));

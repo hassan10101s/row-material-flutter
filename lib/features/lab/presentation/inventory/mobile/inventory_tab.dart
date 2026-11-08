@@ -1,3 +1,4 @@
+import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'dart:async';
 
@@ -23,6 +24,7 @@ import '../../cubit/inventory_state.dart';
 import '../desktop/inventory_tab.dart' show DesktopInventoryTab;
 import '../inventory_forms.dart';
 import '../inventory_log_screen.dart';
+import '../chemical_consumption_report_screen.dart';
 import '../widgets/inventory_cards.dart';
 
 /// Mobile inventory: searchable infinite card list + full-screen editors.
@@ -122,11 +124,9 @@ class _MobileInventoryTabState extends State<MobileInventoryTab> {
       // lab tabs share one IndexedStack).
       child: Scaffold(
         backgroundColor: AppColors.background,
-        floatingActionButton: FloatingActionButton(
-          heroTag: null,
+        floatingActionButton: AppAddFloatingActionButton(
           tooltip: AppText.t('إضافة مادة', 'Add item'),
           onPressed: () => _openEditor(context),
-          child: Icon(Icons.add, size: 24.r),
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -144,16 +144,22 @@ class _MobileInventoryTabState extends State<MobileInventoryTab> {
                   ),
                   controller: _searchCtrl,
                 ),
-                export: AppExportIconButton(
-                  onPressed: state.rows.isEmpty
-                      ? null
-                      : () => TableHtmlExport.export(
-                          context,
-                          filePrefix: 'inventory',
-                          title: DesktopInventoryTab.exportTitle(),
-                          headers: DesktopInventoryTab.exportHeaders(),
-                          rows: DesktopInventoryTab.exportRows(state.rows),
-                        ),
+                export: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const ChemicalConsumptionReportButton(),
+                    AppExportIconButton(
+                      onPressed: state.rows.isEmpty
+                          ? null
+                          : () => TableHtmlExport.export(
+                              context,
+                              filePrefix: 'inventory',
+                              title: DesktopInventoryTab.exportTitle(),
+                              headers: DesktopInventoryTab.exportHeaders(),
+                              rows: DesktopInventoryTab.exportRows(state.rows),
+                            ),
+                    ),
+                  ],
                 ),
               ),
             ),

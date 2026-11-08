@@ -33,6 +33,7 @@ const List<String> decisionCodes = [
 
 /// Labels bilingual by status code.
 const Map<String, Map<String, String>> decisionLabels = {
+  'NON_CONFORMANCE': {'ar': 'عدم مطابقة', 'en': 'Non-conformance', 'css': 'Partial'},
   'APPROVED': {'ar': 'قبول نهائي', 'en': 'Final Approval', 'css': 'Approved'},
   'CONDITIONAL_APPROVAL': {
     'ar': 'قبول مبدئي مع المتابعة',

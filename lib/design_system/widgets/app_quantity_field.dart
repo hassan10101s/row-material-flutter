@@ -2,17 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'app_field.dart';
+import '../../core/utils/decimal_input.dart';
 
 /// Single source of truth for every quantity input in the program.
 ///
 /// A quantity never accepts text: the soft keyboard is numeric AND an input
-/// formatter strips any non-numeric character (letters, symbols) even when
+/// formatter rejects non-numeric input (letters, symbols) even when
 /// pasted or typed from a hardware keyboard — `keyboardType` alone only
 /// changes the on-screen keyboard and never blocks text.
 ///
-/// Allowed characters are digits plus `.` / `,` as decimal separators, which
-/// matches [Validators.numeric] (it strips commas before `double.tryParse`)
-/// and every `double.tryParse` save path in the app.
+/// Arabic/Persian digits and decimal separators normalize to ASCII digits and
+/// one dot. Multiple separators, negative quantities and mixed text are rejected.
 ///
 /// Any quantity field anywhere (inspection quantity / rejected quantity,
 /// inventory stock / minimum / adjustments, consumed-chemical amounts) must
@@ -21,9 +21,7 @@ import 'app_field.dart';
 /// only a numeric keyboard.
 class AppQuantityField extends StatelessWidget {
   /// Formatter shared by [AppQuantityField] and raw quantity `TextField`s.
-  static final TextInputFormatter formatter = FilteringTextInputFormatter.allow(
-    RegExp(r'[0-9.,]'),
-  );
+  static final TextInputFormatter formatter = DecimalInputFormatter();
 
   /// Numeric soft keyboard shared by [AppQuantityField] and raw quantity
   /// `TextField`s.

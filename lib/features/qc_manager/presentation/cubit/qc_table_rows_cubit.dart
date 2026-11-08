@@ -281,7 +281,7 @@ class QcTableRowsCubit extends AppCubit<QcTableRowsState> {
       _pruneSelection();
     } on AppError catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       if (token != _token) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
@@ -312,7 +312,7 @@ class QcTableRowsCubit extends AppCubit<QcTableRowsState> {
       );
       _pruneSelection();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loadingMore: false, error: e.message));
+      safeEmit(state.copyWith(loadingMore: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loadingMore: false, error: AppError.friendly(e)));
     }
@@ -385,7 +385,7 @@ class QcTableRowsCubit extends AppCubit<QcTableRowsState> {
       safeEmit(state.copyWith(saving: false, saved: true));
       await load();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }

@@ -20,28 +20,48 @@ import 'routine_sheet_cubit.dart';
 /// One routine sheet: tap a box to check it (stamps who/when), tap again to
 /// uncheck while the period is current. Past sheets are read-only history.
 class RoutineSheetScreen extends StatelessWidget {
-  const RoutineSheetScreen({super.key, required this.inspectionId});
+  const RoutineSheetScreen({
+    super.key,
+    required this.inspectionId,
+    this.windowed = false,
+  });
 
   final int inspectionId;
+  final bool windowed;
 
   static Future<void> open(BuildContext context, {required int inspectionId}) {
-    return Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => BlocProvider(
+    return showAppContentSurface<void>(
+      context,
+      builder: (_, fullScreen) {
+        final screen = BlocProvider(
           create: (_) => RoutineSheetCubit(
             repo: getIt<RoutineListsRepository>(),
             inspectionId: inspectionId,
           )..load(),
-          child: RoutineSheetScreen(inspectionId: inspectionId),
-        ),
-      ),
+          child: RoutineSheetScreen(
+            inspectionId: inspectionId,
+            windowed: !fullScreen,
+          ),
+        );
+        return fullScreen
+            ? screen
+            : AppWindow(
+                title: AppText.t('القائمة', 'Checklist'),
+                size: AppWindowSize.lg,
+                scrollBody: false,
+                child: screen,
+              );
+      },
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppTopAppBar(title: AppText.t('القائمة', 'Checklist')),
+      resizeToAvoidBottomInset: !windowed,
+      appBar: windowed
+          ? null
+          : AppTopAppBar(title: AppText.t('القائمة', 'Checklist')),
       body: SafeArea(
         child: BlocConsumer<RoutineSheetCubit, RoutineSheetState>(
           listenWhen: (prev, curr) =>
@@ -144,7 +164,12 @@ class _SheetHeader extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text(
-            sheet.template.recurrence == 'monthly'
+            sheet.template.recurrence == 'yearly'
+                ? AppText.t(
+                    'سنة ${day.length >= 4 ? day.substring(0, 4) : day}',
+                    'Year ${day.length >= 4 ? day.substring(0, 4) : day}',
+                  )
+                : sheet.template.recurrence == 'monthly'
                 ? AppText.t(
                     'شهر ${day.length >= 7 ? day.substring(0, 7) : day}',
                     'Month ${day.length >= 7 ? day.substring(0, 7) : day}',
@@ -245,68 +270,37 @@ class _CheckRow extends StatelessWidget {
     final repo = context.read<RoutineSheetCubit>().repo;
     final logs = await repo.taskLogs(sheetId, itemId: itemId);
     if (logs.isEmpty || !context.mounted) return;
-    await showAppDialog<void>(
+    await showAppContent<void>(
       context,
-      builder: (ctx) => AppDialog(
-        icon: Icons.task_alt,
-        title: AppText.t(
-          'سجل إنجاز: ${row.item.label}',
-          'Done log: ${row.item.label}',
+      icon: Icons.task_alt,
+      title: AppText.t(
+        'سجل إنجاز: ${row.item.label}',
+        'Done log: ${row.item.label}',
+      ),
+      scrollBody: false,
+      actionsBuilder: (_, close) => [
+        AppButton(
+          style: AppButtonStyle.secondary,
+          small: true,
+          label: AppText.t('إغلاق', 'Close'),
+          onPressed: () => close(),
         ),
-        actions: [
-          AppButton(
-            style: AppButtonStyle.secondary,
-            small: true,
-            label: AppText.t('إغلاق', 'Close'),
-            onPressed: () => Navigator.of(ctx).pop(),
-          ),
-        ],
-        child: SizedBox(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 420),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final log in logs)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 4),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Icon(Icons.task_alt, size: 16),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${log.stamp} · ${log.loggedByName}',
-                                  style: TextStyle(
-                                    fontSize: 13.spMax,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                if (log.note.trim().isNotEmpty)
-                                  Text(
-                                    log.note,
-                                    style: TextStyle(
-                                      fontSize: 12.spMax,
-                                      color: AppColors.textMuted,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                ],
-              ),
+      ],
+      builder: (_, _) => ListView.separated(
+        itemCount: logs.length,
+        separatorBuilder: (_, _) => const Divider(),
+        itemBuilder: (context, index) {
+          final log = logs[index];
+          return ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.task_alt, size: 20),
+            title: Text(
+              '${log.stamp} · ${log.loggedByName}',
+              style: TextStyle(fontSize: 13.spMax, fontWeight: FontWeight.w600),
             ),
-          ),
-        ),
+            subtitle: log.note.trim().isEmpty ? null : Text(log.note),
+          );
+        },
       ),
     );
   }

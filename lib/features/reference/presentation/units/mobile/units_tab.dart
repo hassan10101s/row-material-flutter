@@ -1,3 +1,5 @@
+import '../../../../../design_system/widgets/app_export_button.dart';
+import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'dart:async';
 
@@ -16,9 +18,8 @@ import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
-import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_text_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
-import '../../../../../design_system/widgets/app_page_header.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/export/table_html_export.dart';
 import '../../cubit/units_cubit.dart';
@@ -90,7 +91,7 @@ class _MobileUnitsTabState extends State<MobileUnitsTab> {
       }
       await cubit.load();
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -100,60 +101,46 @@ class _MobileUnitsTabState extends State<MobileUnitsTab> {
   Widget build(BuildContext context) {
     final cubit = context.read<UnitsCubit>();
     final state = context.watch<UnitsCubit>().state;
-    final countLabel = state.hasMore
-        ? '${state.rows.length}+'
-        : '${state.rows.length}';
     return AppErrorFeedback<UnitsCubit, UnitsState>(
       selector: (s) => s.error,
       // Add floats like the raw-material register (heroTag null: sibling
       // tabs share one IndexedStack).
       child: Scaffold(
-        floatingActionButton: FloatingActionButton(
-          heroTag: null,
+        floatingActionButton: AppAddFloatingActionButton(
           tooltip: AppText.t('وحدة جديدة', 'New Unit'),
           onPressed: () => _openEditor(context),
-          child: Icon(Icons.add, size: 24.r),
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header entrance only (see params_tab for the rationale).
             AppEntrance(
-              child: AppPageHeader(
-                title: AppText.t('إعدادات الوحدات', 'Units Settings'),
-                subtitle: '$countLabel ${AppText.t('وحدة', 'units')}',
-                icon: Icons.straighten_outlined,
-                actions: [
-                  IconButton(
-                    tooltip: AppText.t('تصدير جدول', 'Export table'),
-                    constraints: const BoxConstraints(
-                      minWidth: 48,
-                      minHeight: 48,
+              child: AppSearchRow(
+                search: AppTextField(
+                  controller: _searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: AppText.t(
+                      'بحث بالرمز أو الاسم',
+                      'Search symbol or name...',
                     ),
-                    onPressed: state.rows.isEmpty
-                        ? null
-                        : () => TableHtmlExport.export(
-                            context,
-                            filePrefix: 'units',
-                            title: DesktopUnitsTab.exportTitle(),
-                            headers: DesktopUnitsTab.exportHeaders(),
-                            rows: DesktopUnitsTab.exportRows(
-                              state.rows,
-                              state.usage,
-                            ),
-                          ),
-                    icon: const Icon(Icons.table_view_outlined),
+                    prefixIcon: const Icon(Icons.search),
                   ),
-                ],
+                ),
+                export: AppExportIconButton(
+                  onPressed: state.rows.isEmpty
+                      ? null
+                      : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'units',
+                          title: DesktopUnitsTab.exportTitle(),
+                          headers: DesktopUnitsTab.exportHeaders(),
+                          rows: DesktopUnitsTab.exportRows(
+                            state.rows,
+                            state.usage,
+                          ),
+                        ),
+                ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            AppField(
-              label: AppText.t(
-                'بحث بالرمز أو الاسم',
-                'Search symbol or name...',
-              ),
-              controller: _searchCtrl,
             ),
             const SizedBox(height: AppSpacing.sm),
             if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),

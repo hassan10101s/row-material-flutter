@@ -5,9 +5,11 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../app/auth_gate.dart';
+import '../core/constants/app_strings.dart';
 import '../core/auth/app_session.dart';
 import '../core/auth/permissions.dart';
 import '../core/commands/command_outbox.dart';
+import '../core/commands/central_sync_driver.dart';
 import '../core/locale/locale_service.dart';
 import '../core/network/connectivity_service.dart';
 import '../core/responsive/form_factor.dart';
@@ -15,6 +17,7 @@ import '../core/sync/sync_metadata.dart';
 import '../core/sync/sync_queue.dart';
 import '../core/theme/theme_service.dart';
 import '../design_system/animations/app_animations.dart';
+import '../design_system/widgets/app_top_app_bar.dart';
 import '../design_system/widgets/app_page_size.dart' show kMobileMaxPageSize;
 import '../di/platform_ports.dart';
 import '../di/service_locator.dart';
@@ -58,8 +61,10 @@ import '../features/reports/domain/report_repository.dart';
 import '../features/reports/presentation/cubit/reports_cubit.dart';
 import '../features/settings/domain/export_root_service.dart';
 import '../features/settings/presentation/settings/settings_screen.dart';
+import '../features/audit/presentation/audit/audit_screen.dart';
+import '../features/audit/presentation/audit_controller.dart';
 import '../features/shell/presentation/app_shell.dart';
-import '../features/sync/presentation/sync/sync_screen.dart';
+import '../features/drafts/presentation/drafts_screen.dart';
 
 /// Route names used for navigation.
 abstract final class AppRoutes {
@@ -73,9 +78,11 @@ abstract final class AppRoutes {
   static const String lab = '/lab';
   static const String formulations = '/formulations';
   static const String reference = '/reference';
+  static const String audit = '/audit';
+  static const String account = '/account';
   static const String settings = '/settings';
   static const String members = '/members';
-  static const String sync = '/sync';
+  static const String drafts = '/drafts';
 
   /// QC Manager (plan V6_ENHANCED §22.7, §12.2).
   static const String qcNcr = '/qc-ncr';
@@ -152,6 +159,27 @@ class AppRouter {
           builder: (c) => const WaitingActivationScreen(),
         ),
       ),
+      GoRoute(
+        path: AppRoutes.drafts,
+        pageBuilder: (c, s) => AppPage<void>(
+          name: s.uri.path,
+          builder: (context) => Scaffold(
+            appBar: AppTopAppBar(
+              title: AppText.t('المسودات', 'Drafts'),
+              leading: BackButton(
+                onPressed: () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    context.go(AppRoutes.dashboard);
+                  }
+                },
+              ),
+            ),
+            body: const DraftsScreen(showTitle: false),
+          ),
+        ),
+      ),
       ShellRoute(
         builder: (context, state, child) => AppShell(
           // The shell is the one widget that needs the whole graph, so the
@@ -163,6 +191,7 @@ class AppRouter {
           syncQueue: getIt<SyncQueue>(),
           syncMetadata: getIt<SyncMetadata>(),
           commandOutbox: getIt<CommandOutbox>(),
+          centralSync: getIt<CentralSyncDriver>(),
           connectivity: getIt<ConnectivityService>(),
           exportRoot: getIt<ExportRootService>(),
           fileDelivery: fileDelivery(),
@@ -217,6 +246,8 @@ class AppRouter {
                     create: (c) => InspectionsCubit(
                       repo: getIt<InspectionRepository>(),
                       reports: getIt<ReportRepository>(),
+                      formulationReceiptsOnly:
+                          s.uri.queryParameters['formulation'] == '1',
                       // Phones page through cards, not a table: cap at 50.
                       initialPageSize: FormFactor.current.isMobile
                           ? kMobileMaxPageSize
@@ -332,18 +363,26 @@ class AppRouter {
             ),
           ),
           GoRoute(
-            path: AppRoutes.sync,
-            pageBuilder: (c, s) => AppPage<SyncScreen>(
+            path: AppRoutes.account,
+            pageBuilder: (c, s) => AppPage<AccountScreen>(
               name: s.uri.path,
-              builder: (c) => const SyncScreen(),
+              builder: (c) => const AccountScreen(),
+            ),
+          ),
+          GoRoute(
+            path: AppRoutes.audit,
+            pageBuilder: (c, s) => AppPage<AuditScreen>(
+              name: s.uri.path,
+              builder: (c) => AuditScreen(
+                controller: getIt<AuditController>(),
+                embedded: true,
+              ),
             ),
           ),
           GoRoute(
             path: AppRoutes.settings,
             pageBuilder: (c, s) => AppPage<SettingsScreen>(
               name: s.uri.path,
-              // `/settings?tab=sync` — the sidebar no longer lists Sync or
-              // Members, so the shell badge deep-links into the section instead.
               builder: (c) => SettingsScreen(
                 initialTab: SettingsTab.fromKey(s.uri.queryParameters['tab']),
               ),
@@ -503,6 +542,15 @@ class AppRouter {
         return AppRoutes.waitingActivation;
       case AuthState.ready:
         if (isPublic) return AppRoutes.dashboard;
+        if (path == AppRoutes.settings) {
+          final tab = state.uri.queryParameters['tab'];
+          if (tab == 'account') return AppRoutes.account;
+          if (tab == 'sync') return AppRoutes.drafts;
+          if (!_gate.session.permissions.contains(Permission.orgUpdate)) {
+            if (tab == 'members') return AppRoutes.members;
+            if (tab == 'audit') return AppRoutes.audit;
+          }
+        }
         return _guardRoute(path);
     }
   }
@@ -519,11 +567,18 @@ class AppRouter {
   /// layers; this one only keeps the user away from a dead end.
   static String? guardRoute(String path, AppSession session) {
     switch (path) {
+      case AppRoutes.audit:
+        if (!session.permissions.contains(Permission.auditRead)) {
+          return AppRoutes.dashboard;
+        }
       case AppRoutes.members:
         if (!session.permissions.contains(Permission.usersRead)) {
           return AppRoutes.dashboard;
         }
       case AppRoutes.settings:
+        if (!session.permissions.contains(Permission.orgUpdate)) {
+          return AppRoutes.dashboard;
+        }
       case AppRoutes.reference:
         if (!session.permissions.contains(Permission.orgRead)) {
           return AppRoutes.dashboard;

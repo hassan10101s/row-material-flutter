@@ -163,8 +163,9 @@ abstract final class QcRecurrence {
   static const String daily = 'daily';
   static const String weekly = 'weekly';
   static const String monthly = 'monthly';
+  static const String yearly = 'yearly';
 
-  static const List<String> all = [once, daily, weekly, monthly];
+  static const List<String> all = [once, daily, weekly, monthly, yearly];
 
   static String normalize(String? v) => all.contains(v) ? v as String : once;
 

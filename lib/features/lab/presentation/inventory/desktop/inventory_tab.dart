@@ -18,6 +18,7 @@ import '../../cubit/inventory_cubit.dart';
 import '../../cubit/inventory_state.dart';
 import '../inventory_forms.dart';
 import '../inventory_log_screen.dart';
+import '../chemical_consumption_report_screen.dart';
 
 /// Desktop inventory: the pre-split table verbatim (1280x720 grid).
 class DesktopInventoryTab extends StatefulWidget {
@@ -159,6 +160,7 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
                 ),
               ),
               const SizedBox(width: AppSpacing.sm),
+              const ChemicalConsumptionReportButton(),
               IconButton(
                 tooltip: AppText.t('تصدير جدول', 'Export table'),
                 visualDensity: VisualDensity.compact,

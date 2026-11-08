@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
+import '../../../../../design_system/widgets/app_tooltip.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
-import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_field.dart';
-import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
 import '../../domain/qc_custom_table.dart';
@@ -40,37 +39,15 @@ Future<bool> showQcTableEditor(
   ({QcCustomTable table, List<QcCustomTableField> fields})? bundle,
 ]) async {
   final form = _QcTableForm(bundle: bundle);
-  if (FormFactor.current.isDesktop) {
-    final saved =
-        await showAppWindow<bool>(
-          context,
-          title: bundle == null
-              ? AppText.t('جدول جديد', 'New table')
-              : AppText.t('تعديل الجدول', 'Edit table'),
-          icon: Icons.tune,
-          maxWidth: 560,
-          child: form,
-        ) ??
-        false;
-    return saved;
-  }
   final saved =
-      await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (_) => Scaffold(
-            appBar: AppTopAppBar(
-              title: bundle == null
-                  ? AppText.t('جدول جديد', 'New table')
-                  : AppText.t('تعديل الجدول', 'Edit table'),
-            ),
-            body: SafeArea(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(AppSpacing.pageMobile),
-                child: form,
-              ),
-            ),
-          ),
-        ),
+      await showAppContent<bool>(
+        context,
+        title: bundle == null
+            ? AppText.t('جدول جديد', 'New table')
+            : AppText.t('تعديل الجدول', 'Edit table'),
+        icon: Icons.tune,
+        maxWidth: 560,
+        builder: (_, _) => form,
       ) ??
       false;
   return saved;
@@ -176,9 +153,11 @@ class _QcTableFormState extends State<_QcTableForm> {
         Navigator.of(context).pop(true); // the pop is the confirmation
       }
     } on AppError catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -268,7 +247,7 @@ class _QcTableFormState extends State<_QcTableForm> {
                   const SizedBox(width: AppSpacing.xs),
                   // `required` flips the column from nice-to-have to
                   // blocking: a record missing it is rejected on write.
-                  Tooltip(
+                  AppTooltip(
                     message: AppText.t(
                       'مطلوب في كل تسجيل',
                       'Required on every record',
@@ -307,9 +286,15 @@ class _QcTableFormState extends State<_QcTableForm> {
           small: true,
           label: AppText.t('إضافة عمود', 'Add column'),
           icon: Icon(Icons.add, size: 18.r),
-          onPressed: _saving
+          onPressed: _saving || _drafts.length >= maxQcCustomTableColumns
               ? null
               : () => setState(() => _drafts.add(_FieldDraft())),
+        ),
+        Text(
+          AppText.t(
+            '${_drafts.length} من $maxQcCustomTableColumns أعمدة كحد أقصى',
+            '${_drafts.length} of $maxQcCustomTableColumns columns maximum',
+          ),
         ),
         const SizedBox(height: AppSpacing.lg),
         Row(

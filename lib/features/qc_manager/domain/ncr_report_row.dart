@@ -17,6 +17,8 @@ class NcrReportRow extends Equatable {
   const NcrReportRow({
     required this.findingId,
     required this.inspectionId,
+    this.productSampleId,
+    this.productInspectionId,
     this.itemId,
     this.respId,
     this.code = '',
@@ -77,6 +79,8 @@ class NcrReportRow extends Equatable {
 
   final int findingId;
   final int inspectionId;
+  final int? productSampleId;
+  final int? productInspectionId;
   final int? itemId;
   final int? respId;
   final String code;
@@ -199,6 +203,8 @@ class NcrReportRow extends Equatable {
   factory NcrReportRow.fromMap(Map<String, dynamic> map) => NcrReportRow(
     findingId: _int(map['finding_id']) ?? 0,
     inspectionId: _int(map['inspection_id']) ?? 0,
+    productSampleId: _int(map['product_sample_id']),
+    productInspectionId: _int(map['product_inspection_id']),
     itemId: _int(map['item_id']),
     respId: _int(map['resp_id']),
     code: _str(map['code']),
@@ -258,6 +264,8 @@ class NcrReportRow extends Equatable {
   @override
   List<Object?> get props => [
     findingId,
+    productSampleId,
+    productInspectionId,
     inspectionId,
     code,
     severity,
@@ -281,7 +289,12 @@ int _daysBetween(String from, String to) {
   final a = DateTime.tryParse(from.replaceFirst(' ', 'T'));
   final b = DateTime.tryParse(to.replaceFirst(' ', 'T'));
   if (a == null || b == null) return 0;
-  final days = _midnight(b).difference(_midnight(a)).inDays;
+  // Calendar days, independent of 23/25-hour daylight-saving transitions.
+  final days = DateTime.utc(
+    b.year,
+    b.month,
+    b.day,
+  ).difference(DateTime.utc(a.year, a.month, a.day)).inDays;
   // A negative span means the data is inconsistent (closed before it was
   // raised). Clamped to zero so it cannot quietly drag MTTC down and flatter
   // the process; the inconsistency itself is visible in the timeline instead.

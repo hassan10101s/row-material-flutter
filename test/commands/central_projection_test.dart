@@ -3,6 +3,8 @@ import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/commands/central_projection.dart';
 import 'package:material_lab/core/sync/entity_registry.dart';
+import 'package:material_lab/core/sync/shared_settings.dart';
+import 'package:material_lab/core/sync/sync_run_scope.dart';
 
 import '../sync/sync_test_fixture.dart';
 
@@ -44,10 +46,65 @@ void main() {
       'uid': 'uid_admin',
       'role': 'admin',
       'bootstrap_state': 'ready',
+      'protocol_schema': 3,
       'applied_sequence': 0,
     });
   });
   tearDown(() async => fixture.dispose());
+
+  test(
+    'approved command audits are visible once and remain permission scoped',
+    () async {
+      const record = ApprovedRecord(
+        entityType: 'auditLog',
+        entityId: 'cmd_op',
+        version: 1,
+        data: {
+          'organizationId': 'org_test',
+          'version': 1,
+          'userId': 'uid_admin',
+          'userName': 'Admin',
+          'action': 'DOMAIN_COMMITTED',
+          'entityType': 'domainTransaction',
+          'entityId': 'op',
+          'detailsJson': '{}',
+          'deviceId': 'other-device',
+          'occurredAt': '2026-10-27T10:00:00Z',
+        },
+      );
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'op',
+        records: [record],
+      );
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'op',
+        records: [record],
+      );
+      final rows = await fixture.db.query('audit_logs');
+      expect(rows, hasLength(1));
+      expect(rows.single['user_id'], 'uid_admin');
+      expect(rows.single['action'], 'DOMAIN_COMMITTED');
+      final viewer = CentralProjection(
+        databaseHelper: fixture.helper,
+        source: SessionSource(
+          () => const AppSession(
+            uid: 'uid_admin',
+            organizationId: 'org_test',
+            deviceId: 'device',
+            memberId: 'member',
+            role: 'viewer',
+            status: 'active',
+          ),
+        ),
+      );
+      await expectLater(
+        viewer.installSnapshot(throughSequence: 1, records: [record]),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
 
   Map<String, dynamic> approved(
     Map<String, dynamic> data,
@@ -125,6 +182,492 @@ void main() {
   Future<int> sequence() async =>
       (await fixture.db.query('central_sync_state')).single['applied_sequence']
           as int;
+
+  ApprovedRecord setting(
+    String id,
+    String key,
+    String value, {
+    int version = 1,
+  }) => ApprovedRecord(
+    entityType: 'organizationSetting',
+    entityId: id,
+    version: version,
+    data: approved(
+      {
+        'key': key,
+        'value': value,
+        'localId': 217,
+        'deviceId': 'foreign-android',
+      },
+      id,
+      version: version,
+    ),
+  );
+
+  test(
+    'approved setting replaces only its unapproved local shadow and replays once',
+    () async {
+      const key = 'inspection_label_form_no';
+      await fixture.db.rawInsert(
+        'INSERT INTO organization_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+        [key, 'local-default'],
+      );
+      await fixture.db.insert('drafts', {
+        'id': 'keep-draft',
+        'organization_id': 'org_test',
+        'uid': 'uid_admin',
+        'entity_type': 'organizationSetting',
+        'operation': 'update',
+        'payload': '{"value":"draft-value"}',
+      });
+      final record = setting('remote-setting', key, 'form2');
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'setting-op',
+        records: [record],
+      );
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'setting-op',
+        records: [record],
+      );
+      final rows = await fixture.db.query(
+        'organization_settings',
+        where: 'key = ?',
+        whereArgs: [key],
+      );
+      expect(rows, hasLength(1));
+      expect(rows.single['remote_id'], 'remote-setting');
+      expect(rows.single['value'], 'form2');
+      expect(rows.single['id'], isNot(217));
+      expect(
+        (await fixture.db.query(
+          'settings',
+          where: 'key = ?',
+          whereArgs: [key],
+        )).single['value'],
+        'form2',
+      );
+      expect(
+        (await fixture.db.query('drafts')).single['payload'],
+        '{"value":"draft-value"}',
+      );
+      expect(await sequence(), 1);
+      expect(
+        await fixture.db.query(
+          'legacy_sync_archive',
+          where: 'source_table = ?',
+          whereArgs: ['organization_settings'],
+        ),
+        hasLength(1),
+      );
+    },
+  );
+
+  for (final type in ['member', 'labUnit']) {
+    test(
+      'existing local $type uses its stable key without a duplicate insert',
+      () async {
+        final entity = SyncEntity.byType(type)!;
+        if (type == 'labUnit') {
+          await fixture.db.rawInsert(
+            "INSERT OR IGNORE INTO lab_units(symbol, is_active, created_at) VALUES ('g', 1, '2026-01-01')",
+          );
+        }
+        final column = type == 'member' ? 'uid' : 'symbol';
+        final value = type == 'member' ? 'uid_admin' : 'g';
+        final original = Map<String, dynamic>.from(
+          (await fixture.db.query(
+            entity.localTable,
+            where: '$column = ?',
+            whereArgs: [value],
+          )).single,
+        );
+        final local = original['id'];
+        original['id'] = 913;
+        final payload = buildRemotePayload(
+          entity,
+          original,
+          context,
+          asCreate: true,
+        );
+        await projection.applyEvent(
+          sequence: 1,
+          operationId: 'adopt-$type',
+          records: [
+            ApprovedRecord(
+              entityType: type,
+              entityId: 'global-$type',
+              version: 1,
+              data: approved(payload, 'global-$type'),
+            ),
+          ],
+        );
+        final rows = await fixture.db.query(
+          entity.localTable,
+          where: '$column = ?',
+          whereArgs: [value],
+        );
+        expect(rows, hasLength(1));
+        expect(rows.single['id'], local);
+        expect(rows.single['remote_id'], 'global-$type');
+        expect(await sequence(), 1);
+      },
+    );
+  }
+
+  test(
+    'known setting identity can update into a key occupied by a local shadow',
+    () async {
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'first-key',
+        records: [setting('known-setting', 'custom_previous_key', 'old')],
+      );
+      final oldId = (await fixture.db.query(
+        'organization_settings',
+        where: 'remote_id = ?',
+        whereArgs: ['known-setting'],
+      )).single['id'];
+      await fixture.db.insert('organization_settings', {
+        'key': 'custom_next_key',
+        'value': 'local',
+      });
+      await projection.applyEvent(
+        sequence: 2,
+        operationId: 'next-key',
+        records: [
+          setting('known-setting', 'custom_next_key', 'server', version: 2),
+        ],
+      );
+      final rows = await fixture.db.query(
+        'organization_settings',
+        where: 'key = ?',
+        whereArgs: ['custom_next_key'],
+      );
+      expect(rows, hasLength(1));
+      expect(rows.single['id'], oldId);
+      expect(rows.single['value'], 'server');
+      expect(await sequence(), 2);
+    },
+  );
+
+  test(
+    'every shared settings key reconciles in the incremental cycle path',
+    () async {
+      final records = <ApprovedRecord>[];
+      for (final key in sharedSettingKeys) {
+        await fixture.db.rawInsert(
+          'INSERT INTO organization_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+          [key, 'default'],
+        );
+        records.add(setting('global-$key', key, 'server-$key'));
+      }
+      await projection.applyCycle(
+        afterSequence: 0,
+        throughSequence: 1,
+        records: records,
+        operationIds: {'settings-cycle'},
+        scope: SyncRunScope(SessionSource(() => session), fixture.helper),
+      );
+      for (final key in sharedSettingKeys) {
+        final row = (await fixture.db.query(
+          'organization_settings',
+          where: 'key = ?',
+          whereArgs: [key],
+        )).single;
+        expect(row['value'], 'server-$key');
+        expect(row['remote_id'], 'global-$key');
+        expect(
+          (await fixture.db.query(
+            'settings',
+            where: 'key = ?',
+            whereArgs: [key],
+          )).single['value'],
+          'server-$key',
+        );
+      }
+      expect(await sequence(), 1);
+      expect(
+        await fixture.db.query(
+          'legacy_sync_archive',
+          where: 'source_table = ?',
+          whereArgs: ['organization_settings'],
+        ),
+        hasLength(sharedSettingKeys.length),
+      );
+    },
+  );
+
+  test(
+    'setting shadow reconciliation rolls back with a rejected companion',
+    () async {
+      await fixture.db.insert('organization_settings', {
+        'key': 'rollback-key',
+        'value': 'keep-local',
+      });
+      await expectLater(
+        projection.applyEvent(
+          sequence: 1,
+          operationId: 'rollback-setting',
+          records: [
+            setting('rollback-setting', 'rollback-key', 'new'),
+            ApprovedRecord(
+              entityType: 'sample',
+              entityId: 'missing-parent',
+              version: 1,
+              data: approved({
+                'entryCode': 'MISSING',
+                'inspectionKind': 'raw',
+              }, 'missing-parent'),
+            ),
+          ],
+        ),
+        throwsStateError,
+      );
+      expect(
+        (await fixture.db.query(
+          'organization_settings',
+          where: 'key = ?',
+          whereArgs: ['rollback-key'],
+        )).single['value'],
+        'keep-local',
+      );
+      expect(await sequence(), 0);
+      expect(
+        await fixture.db.query(
+          'legacy_sync_archive',
+          where: 'source_table = ?',
+          whereArgs: ['organization_settings'],
+        ),
+        isEmpty,
+      );
+      expect(
+        await fixture.db.query(
+          'central_entity_identities',
+          where: 'entity_type = ?',
+          whereArgs: ['organizationSetting'],
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'different approved setting identities cannot silently replace each other',
+    () async {
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'first-setting',
+        records: [setting('first-setting', 'collision-key', 'approved')],
+      );
+      await expectLater(
+        projection.applyEvent(
+          sequence: 2,
+          operationId: 'invalid-setting',
+          records: [setting('second-setting', 'collision-key', 'wrong')],
+        ),
+        throwsStateError,
+      );
+      final rows = await fixture.db.query(
+        'organization_settings',
+        where: 'key = ?',
+        whereArgs: ['collision-key'],
+      );
+      expect(rows.single['remote_id'], 'first-setting');
+      expect(rows.single['value'], 'approved');
+      expect(await sequence(), 1);
+      expect(
+        await fixture.db.query(
+          'legacy_sync_archive',
+          where: 'source_table = ?',
+          whereArgs: ['organization_settings'],
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'NIR reset remaps its typed parent instead of reusing a foreign local id',
+    () async {
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'material',
+        records: await aggregate(),
+      );
+      final payload = buildRemotePayload(
+        SyncEntity.byType('nirValidationSettings')!,
+        {
+          'id': 913,
+          'scope': 'raw_material',
+          'entity_id': 913,
+          'material_id': 913,
+          'product_id': null,
+          'reference_version': 1,
+          'entity_name': 'New server material',
+          'parameter': 'Protein',
+          'start_date': '2026-10-01',
+          'created_at': '2026-10-26',
+          'updated_at': '2026-10-26',
+        },
+        context,
+        asCreate: true,
+      );
+      await projection.applyEvent(
+        sequence: 2,
+        operationId: 'reset',
+        records: [
+          ApprovedRecord(
+            entityType: 'nirValidationSettings',
+            entityId: 'global-reset',
+            version: 1,
+            data: approved(
+              payload,
+              'global-reset',
+              refs: {
+                'materialId': {
+                  'entityType': 'referenceMaterial',
+                  'entityId': 'new-material',
+                  'version': 1,
+                },
+              },
+            ),
+          ),
+        ],
+      );
+      final material = (await fixture.db.query(
+        'reference_materials',
+        where: 'remote_id = ?',
+        whereArgs: ['new-material'],
+      )).single;
+      final reset = (await fixture.db.query('nir_validation_settings')).single;
+      expect(material['id'], isNot(913));
+      expect(material['id'], isNot(1));
+      expect(reset['material_id'], material['id']);
+      expect(reset['entity_id'], 913);
+      expect(reset['reference_version'], 1);
+      expect(reset['product_id'], isNull);
+    },
+  );
+
+  test(
+    'actor cache respects member reservations and repeated historical actors',
+    () async {
+      final records = await aggregate();
+      final base =
+          (await fixture.db.rawQuery(
+                'SELECT MAX(id) AS n FROM users',
+              )).single['n']
+              as int;
+      final user =
+          Map<String, dynamic>.from(
+              (await fixture.db.query(
+                'users',
+                where: 'uid = ?',
+                whereArgs: ['uid_admin'],
+              )).single,
+            )
+            ..['uid'] = 'reserved_actor'
+            ..['email'] = 'reserved@example.test';
+      final member = ApprovedRecord(
+        entityType: 'member',
+        entityId: 'member-reserved',
+        version: 1,
+        data: approved(
+          buildRemotePayload(
+            SyncEntity.byType('member')!,
+            user,
+            context,
+            asCreate: true,
+          ),
+          'member-reserved',
+        ),
+      );
+      ApprovedRecord inspection(String id, String actor) => ApprovedRecord(
+        entityType: 'sample',
+        entityId: id,
+        version: 1,
+        data: {
+          ...records.first.data,
+          'remoteId': id,
+          'entryCode': id,
+          'createdBy': actor,
+        },
+      );
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'actors',
+        records: [
+          inspection('a', 'historical_actor'),
+          inspection('b', 'reserved_actor'),
+          member,
+          inspection('c', 'historical_actor'),
+          inspection('d', 'another_actor'),
+          records.last,
+        ],
+      );
+      final users = {
+        for (final row in await fixture.db.query('users'))
+          row['uid']: row['id'],
+      };
+      expect(users['reserved_actor'], base + 1);
+      expect(users['historical_actor'], base + 2);
+      expect(users['another_actor'], base + 3);
+      final rows = {
+        for (final row in await fixture.db.query('inspections'))
+          row['entry_code']: row['created_by'],
+      };
+      expect(rows, {
+        'a': base + 2,
+        'b': base + 1,
+        'c': base + 2,
+        'd': base + 3,
+      });
+    },
+  );
+
+  test(
+    'mixed newer and skipped records retain targets for child references',
+    () async {
+      final records = await aggregate();
+      await projection.applyEvent(
+        sequence: 1,
+        operationId: 'initial',
+        records: records,
+      );
+      final original = (await fixture.db.query(
+        'reference_materials',
+        where: 'remote_id = ?',
+        whereArgs: ['new-material'],
+      )).single;
+      await projection.applyEvent(
+        sequence: 2,
+        operationId: 'mixed',
+        records: [
+          ApprovedRecord(
+            entityType: 'sample',
+            entityId: records.first.entityId,
+            version: 2,
+            data: {...records.first.data, 'version': 2, 'supplier': 'updated'},
+          ),
+          records.last,
+        ],
+      );
+      final row = (await fixture.db.query('inspections')).single;
+      expect(row['material_id'], original['id']);
+      expect(row['supplier'], 'updated');
+      expect(
+        (await fixture.db.query(
+          'reference_materials',
+          where: 'id = ?',
+          whereArgs: [original['id']],
+        )).single,
+        original,
+      );
+      expect(await sequence(), 2);
+    },
+  );
 
   test(
     'an entire after-image event commits with its checkpoint and remaps global parents',
@@ -244,7 +787,9 @@ void main() {
       // Authoring stays blocked until the post-snapshot event feed is proven
       // drained; the driver promotes the state explicitly.
       expect(
-        (await fixture.db.query('central_sync_state')).single['bootstrap_state'],
+        (await fixture.db.query(
+          'central_sync_state',
+        )).single['bootstrap_state'],
         'catching_up',
       );
       await projection.markReady();

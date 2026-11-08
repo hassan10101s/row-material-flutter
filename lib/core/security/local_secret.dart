@@ -30,8 +30,10 @@ class LocalSecretException implements Exception {
 ///   OS-level ACLs of `%APPDATA%` already restrict it to the current user;
 ///   DPAPI-encryption would require an async plugin at every sync-codec call,
 ///   so the file stays plaintext by design (same as the Python port).
-/// - Writes are atomic (temp + rename) so a crash/AV lock never leaves a
-///   half-written secret.
+/// - Creation stages and flushes a temporary file, then exclusively claims
+///   the final path before publishing it. A concurrent creator must read the
+///   winner's key. A crash between claim and publication fails closed on the
+///   empty reservation; an existing key is never overwritten or regenerated.
 /// - A corrupt/unreadable/too-short file fails **closed** with a
 ///   [LocalSecretException]. It is never replaced by a derived
 ///   (`sha256(fileBytes)`) or a fresh key, because either would silently
@@ -41,6 +43,7 @@ class LocalSecret {
 
   final String _directory;
   static const String _fileName = '.secret';
+  static final Map<String, Future<(Uint8List, String)>> _loads = {};
 
   // Process-lifetime cache of the secret file contents. The secret is
   // immutable once created (re-keying would invalidate every stored password
@@ -54,8 +57,11 @@ class LocalSecret {
   Future<String> get path async {
     final cached = _cachedPath;
     if (cached != null) return cached;
-    await Directory(_directory).create(recursive: true);
-    return _cachedPath = p.join(_directory, _fileName);
+    final directory = await Directory(_directory).create(recursive: true);
+    return _cachedPath = p.join(
+      await directory.resolveSymbolicLinks(),
+      _fileName,
+    );
   }
 
   /// Reads the local secret, creating a fresh 32-byte one on first run.
@@ -66,27 +72,49 @@ class LocalSecret {
     final cached = _cachedBytes;
     if (cached != null) return cached;
     final filePath = await path;
-    final file = File(filePath);
-    if (await file.exists()) {
-      final (bytes, rawText) = await _readExisting(file);
+    // Coalesce all instances in this isolate, not just calls on this object.
+    // File.create(exclusive: true) below arbitrates other isolates/processes.
+    final pending = _loads.putIfAbsent(filePath, () => _loadFromDisk(filePath));
+    try {
+      final (bytes, rawText) = await pending;
       _cachedBytes = bytes;
       _cachedText = rawText;
       return bytes;
+    } finally {
+      if (identical(_loads[filePath], pending)) _loads.remove(filePath);
     }
-    final bytes = await _createNew(file, filePath);
-    _cachedBytes = bytes;
-    _cachedText = b64UrlNoPad(bytes);
-    return bytes;
+  }
+
+  Future<(Uint8List, String)> _loadFromDisk(String filePath) async {
+    final file = File(filePath);
+    return await file.exists()
+        ? _readExisting(file)
+        : _createNew(file, filePath);
   }
 
   Future<(Uint8List, String)> _readExisting(File file) async {
-    String raw;
-    try {
-      raw = (await file.readAsString()).trim();
-    } catch (_) {
-      throw LocalSecretException(
-        'the local secret file could not be read: ${file.path}',
-      );
+    var raw = '';
+    // Windows may briefly refuse a read while another isolate atomically
+    // publishes the winning key. Retry reads only; never replace an existing
+    // reservation, regenerate a key or derive one from corrupt bytes.
+    for (var attempt = 0; attempt <= 50; attempt++) {
+      try {
+        raw = (await file.readAsString()).trim();
+        if (raw.isNotEmpty) break;
+      } on FileSystemException {
+        if (attempt == 50) {
+          throw LocalSecretException(
+            'the local secret file could not be read: ${file.path}',
+          );
+        }
+      } on Object {
+        throw LocalSecretException(
+          'the local secret file could not be read: ${file.path}',
+        );
+      }
+      if (attempt < 50) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
     }
     if (raw.isEmpty) {
       throw LocalSecretException(
@@ -110,24 +138,38 @@ class LocalSecret {
     return (decoded, raw);
   }
 
-  Future<Uint8List> _createNew(File file, String filePath) async {
+  Future<(Uint8List, String)> _createNew(File file, String filePath) async {
     final secret = secureRandomBytes(32);
-    // Atomic write: temp + rename so a killed process never leaves a truncated
-    // `.secret` (which would silently re-key every QR seal on next boot).
-    final tmp = File('$filePath.tmp-${DateTime.now().microsecondsSinceEpoch}');
-    await tmp.writeAsString(b64UrlNoPad(secret), flush: true);
+    final text = b64UrlNoPad(secret);
+    final tmp = File(
+      '$filePath.tmp-$pid-${b64UrlNoPad(secureRandomBytes(12))}',
+    );
+    await tmp.create(exclusive: true);
     try {
-      await tmp.rename(filePath);
-    } catch (_) {
-      // Cross-volume or locked (AV): copy fallback, best effort.
+      await tmp.writeAsString(text, flush: true);
       try {
-        await tmp.copy(filePath);
-        await tmp.delete();
-      } catch (_) {
-        await file.writeAsString(b64UrlNoPad(secret), flush: true);
+        // Keep claim/publication contiguous. Unlike rename alone, exclusive
+        // creation cannot replace another creator's already-published key.
+        file.createSync(exclusive: true);
+      } on FileSystemException {
+        if (!await file.exists()) rethrow;
+        return await _readExisting(file);
+      }
+      try {
+        tmp.renameSync(filePath);
+      } on FileSystemException {
+        throw LocalSecretException(
+          'the local secret could not be published: $filePath',
+        );
+      }
+      return (secret, text);
+    } finally {
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } on FileSystemException {
+        // An AV-held temporary file must not replace the original error/key.
       }
     }
-    return secret;
   }
 
   /// Read the stored secret as utf8 text (used for display pepper checks).

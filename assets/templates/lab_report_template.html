@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
   <head>
     <meta charset="UTF-8" />
     <title>{{ title }}</title>
@@ -385,7 +385,60 @@
         color: var(--white);
         font-size: 12px;
       }
-    </style>
+
+/* Institutional print layout: compact summaries, restrained decoration. */
+.sheet, .report-shell { border-radius: 8px !important; background: #fff !important; box-shadow: none !important; }
+.sheet { border: 0 !important; min-height: 0 !important; }
+.watermark, .corner-tr, .corner-bl { display: none !important; }
+.top-band, .accent-strip { height: 3px !important; background: #294961 !important; }
+.header { padding: 12px 14px !important; background: #fff !important; border-bottom: 1px solid #d7dee7 !important; }
+.header-grid { gap: 10px !important; }
+.header h1, .header .title { font-size: 18px !important; line-height: 1.35 !important; margin: 3px 0 !important; color: #172b4d !important; }
+.brand-logo, .report-logo { max-height: 42px !important; height: auto !important; max-width: 112px !important; box-shadow: none !important; }
+.organization-name { font-size: 12px !important; line-height: 1.35; margin: 4px auto 5px !important; color: #24364b; }
+.subtitle, .header-main > p { font-size: 11px !important; margin-top: 3px !important; }
+.eyebrow { border-radius: 8px !important; background: #f1f4f7 !important; color: #526171 !important; padding: 3px 7px !important; font-size: 9px !important; }
+.body { padding: 10px 12px 12px !important; }
+.meta-strip, .meta-grid, .summary-grid, .quarter-grid { gap: 6px !important; margin-top: 8px !important; margin-bottom: 8px !important; }
+.meta-card, .summary-card, .quarter-card, .material-kpi { min-height: 0 !important; height: auto !important; padding: 7px 9px !important; border-radius: 8px !important; border: 1px solid #d7dee7 !important; background: #fff !important; box-shadow: none !important; }
+.meta-card::before, .meta-card::after, .quarter-card::before, .quarter-card::after { display: none !important; }
+.meta-card .label, .summary-card .summary-label, .q-name, .kpi-label { font-size: 10px !important; margin-bottom: 3px !important; color: #64748b !important; font-weight: 600 !important; }
+.meta-card .value { font-size: 12px !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-value, .q-total { font-size: 18px !important; line-height: 1.15 !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-note { font-size: 10px !important; margin-top: 3px !important; line-height: 1.35; color: #64748b !important; font-weight: 500 !important; }
+.summary-card.success .summary-value { color: #276749 !important; }
+.summary-card.danger .summary-value { color: #9b2c2c !important; }
+.summary-card.warning .summary-value { color: #875c15 !important; }
+.section-head { margin: 10px 0 6px !important; gap: 8px !important; }
+.section-title { font-size: 13px !important; }
+.materials-list { gap: 9px !important; }
+.material-card, .source-card, .panel-card, .section { border-radius: 8px !important; border: 1px solid #d7dee7 !important; box-shadow: none !important; background: #fff !important; }
+.material-header, .source-header, .section-physical, .section-chemical { padding: 7px 9px !important; background: #edf1f5 !important; color: #24364b !important; border-bottom: 1px solid #d7dee7 !important; }
+.material-title, .source-title { font-size: 12px !important; color: #24364b !important; }
+.material-badge, .badge { border-radius: 8px !important; padding: 3px 7px !important; box-shadow: none !important; background: #f5f7f9 !important; border: 1px solid #d7dee7 !important; color: #334155 !important; }
+.material-kpis { padding: 6px 8px !important; gap: 5px !important; }
+.material-kpi { padding: 5px 6px !important; }
+.kpi-value { font-size: 14px !important; font-weight: 700 !important; }
+.table-wrap { padding: 7px 9px !important; }
+table { font-size: 11px !important; line-height: 1.35; }
+th, td { padding: 4px 6px !important; }
+th { background: #edf1f5 !important; color: #24364b !important; }
+.decision-box { padding: 8px 10px !important; border-radius: 8px !important; box-shadow: none !important; }
+.decision-box .decision-status { font-size: 14px !important; }
+.footer { padding: 8px 12px !important; background: #fff !important; border-top: 1px solid #d7dee7 !important; color: #64748b !important; }
+
+
+.sheet::before, .sheet::after { display: none !important; }
+.section-title { background: #edf1f5 !important; color: #24364b !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; padding: 6px 9px !important; }
+.section-title::after { display: none !important; }
+.material-item { background: #fff !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; margin-bottom: 9px !important; }
+.material-name { padding: 7px 9px !important; background: #f5f7f9 !important; font-size: 12px !important; }
+.material-stats { gap: 4px !important; padding: 6px !important; }
+
+
+html[dir="ltr"] body { direction:ltr; text-align:left; }
+html[dir="rtl"] body { direction:rtl; text-align:right; }
+</style>
   </head>
   <body>
     <div class="page">
@@ -399,10 +452,11 @@
               {% if report_logo_data_uri %}
               <img src="{{ report_logo_data_uri }}" class="brand-logo" alt="Material Lab" />
               {% endif %}
-              <span class="eyebrow">{% if is_en %}Lab Tests{% else %}Lab Tests | تحاليل المعمل{% endif %}</span>
+{% if organization_name %}<div class="organization-name" style="font-size:12px;font-weight:700;margin-top:6px;text-align:center;overflow-wrap:anywhere;">{{ organization_name }}</div>{% endif %}
+              <span class="eyebrow">{% if is_en %}Lab Tests{% else %}تحاليل المعمل{% endif %}</span>
               <h1 class="title">{{ title }}</h1>
               <p class="subtitle">{{ period_label }}</p>
-              {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
+              {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
             </div>
             <div class="header-side"></div>
           </div>
@@ -411,27 +465,27 @@
         <div class="body">
           <div class="summary-grid">
             <div class="summary-card primary">
-              <span class="summary-label">Total Tests</span>
+              <span class="summary-label">{% if is_en %}Total Tests{% else %}إجمالي التحاليل{% endif %}</span>
               <span class="summary-value">{{ total }}</span>
               <span class="summary-note">{% if is_en %}Total Tests{% else %}إجمالي التحاليل{% endif %}</span>
             </div>
             <div class="summary-card success">
-              <span class="summary-label">Within Range</span>
+              <span class="summary-label">{% if is_en %}Within Range{% else %}ضمن الحدود{% endif %}</span>
               <span class="summary-value">{{ in_count }}</span>
               <span class="summary-note">{% if is_en %}Within Range{% else %}ضمن النطاق{% endif %}</span>
             </div>
             <div class="summary-card danger">
-              <span class="summary-label">Out of Range</span>
+              <span class="summary-label">{% if is_en %}Out of Range{% else %}خارج الحدود{% endif %}</span>
               <span class="summary-value">{{ out_count }}</span>
               <span class="summary-note">{% if is_en %}Out of Range{% else %}خارج النطاق{% endif %}</span>
             </div>
             <div class="summary-card warning">
-              <span class="summary-label">No Range</span>
+              <span class="summary-label">{% if is_en %}No Range{% else %}دون حدود{% endif %}</span>
               <span class="summary-value">{{ no_range_count }}</span>
               <span class="summary-note">{% if is_en %}No Range{% else %}بدون نطاق محدد{% endif %}</span>
             </div>
             <div class="summary-card">
-              <span class="summary-label">Sources</span>
+              <span class="summary-label">{% if is_en %}Sources{% else %}المصادر{% endif %}</span>
               <span class="summary-value">{{ unique_sources }}</span>
               <span class="summary-note">{% if is_en %}Materials / Products{% else %}خامات / منتجات{% endif %}</span>
             </div>
@@ -439,7 +493,7 @@
 
           <div class="section-head">
             <h2 class="section-title">{% if is_en %}Tests Details{% else %}تفاصيل التحاليل{% endif %}</h2>
-            <div class="section-caption">Per-Source Test Details</div>
+            <div class="section-caption">{% if is_en %}Per-Source Test Details{% else %}تفاصيل التحاليل حسب المصدر{% endif %}</div>
           </div>
 
           {% if sections %}
@@ -506,12 +560,12 @@
 
         <div class="footer">
           <div><strong>Material Lab</strong> | {% if is_en %}Internal lab system{% else %}نظام المعمل الداخلي{% endif %}</div>
-          <div>Prepared Automatically by {{ department_label }}</div>
+          <div>{% if is_en %}Prepared automatically by{% else %}أُعد تلقائيًا بواسطة{% endif %} {{ department_label }}</div>
         </div>
       </div>
     </div>
     <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
-        Powered by Material Lab
+        {% if is_en %}Powered by Material Lab{% else %}تم الإنشاء بواسطة Material Lab{% endif %}
     </div>
   </body>
 </html>

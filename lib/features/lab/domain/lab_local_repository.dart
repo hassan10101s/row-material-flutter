@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import 'chemical_consumption_report.dart';
 
 /// Canonical values used by the equipment event log. Kept in the domain
 /// contract so presentation does not depend on the concrete SQL repository.
@@ -17,25 +18,11 @@ abstract final class EquipmentEventType {
   }
 }
 
-/// The lab concerns that stay **on the device**.
-///
-/// ## Why a third contract
-///
-/// [LabResultRepository] and [LabConfigurationRepository] cover the two tables
-/// that replicate (`lab_sample_tests` and the products/analyses/links). The rest
-/// of the lab module is deliberately local: inventory levels, global constants,
-/// consumption logs and the activity feed are *consequences* of running a test
-/// on this machine. Replicating them would let two devices fight over a stock
-/// quantity that only one of them can measure, so plan §6.3 keeps them out of
-/// the sync queue entirely.
-///
-/// That is exactly the property that makes them a separate contract. They do not
-/// need the `user`/queue/audit machinery the replicating repositories carry, and
-/// presentation should be able to depend on them without dragging `LabRepo` -
-/// which is the 2400-line concrete class - along for the ride.
-///
-/// The optional [DatabaseExecutor] parameters exist only so a caller already
-/// inside a transaction (a test run) can join it. Presentation never passes one.
+/// Inventory, constants and equipment operations in the shared laboratory.
+/// Production implementations use the same server-confirmed authoring gateway
+/// as laboratory results. SQLite is an approved read cache; these methods do
+/// not authorize local-only writes or automatic submission.
+/// Executors are an internal transaction-composition seam, never a UI handle.
 abstract interface class LabLocalRepository {
   // ── Inventory ──────────────────────────────────────────────────
 
@@ -129,6 +116,14 @@ abstract interface class LabLocalRepository {
   Future<List<Map<String, dynamic>>> activityLog({int limit = 300});
 
   Future<List<Map<String, dynamic>>> listConsumptionLog();
+
+  /// Actual consumption and returns in an inclusive local-calendar period.
+  /// Detailed consumption lines are counted once; stock ledger mirrors,
+  /// receipts, opening balances and adjustments are excluded.
+  Future<ChemicalConsumptionReport> chemicalConsumptionReport({
+    required ConsumptionPeriod period,
+    int? inventoryId,
+  });
 
   /// The sample behind a scanned `entry_code`, or null when it is unknown.
   Future<Map<String, dynamic>?> resolveInspection(String entryCode);

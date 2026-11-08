@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-import 'package:material_lab/core/sync/backfill_service.dart';
+import '../support/retired/core/sync/backfill_service.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 

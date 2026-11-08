@@ -13,7 +13,7 @@ import '../domain/qc_enums.dart';
 import '../domain/qc_inspection.dart';
 import '../domain/qc_template.dart';
 import '../domain/routine_repository.dart';
-import 'offline_first_qc_repository.dart' show QcAuditAction;
+import 'server_confirmed_qc_repository.dart' show QcAuditAction;
 import 'qc_audit_repo.dart';
 import 'qc_repo.dart';
 import 'qc_sync_writer.dart';
@@ -22,20 +22,21 @@ import 'qc_sync_writer.dart';
 // (tests, utilities) keep seeing them under the old path.
 export '../domain/routine_repository.dart';
 
-/// Simple daily/monthly routine lists over the existing QC checklist tables.
+/// Daily/monthly/yearly quality lists over the existing QC checklist tables.
 ///
-/// What is intentionally gone compared with the old template flow: versions,
+/// What is intentionally gone compared with the old template flow: version UI,
 /// publish/approve/archive lifecycles, scoring and NC generation. A list is
 /// edited in place; opening it resolves this period's sheet (auto-created);
 /// checking a box stamps who did it; past periods are immutable history.
+/// An internal revision separates periods only if their recurrence is edited.
 ///
 /// ## The sync seam (plan P8)
 /// When a [SyncQueue] is handed in, every write here also queues the touched
 /// rows through the same [QcSyncWriter] the QC facades use (checklist
 /// templates/items, sheets, checkbox responses and `qc_task_log` entries —
 /// the log is append-only remote-side as well). Without a queue the class
-/// keeps its old purely-local behavior; the doc comment above about
-/// "QC stays offline-local" describes that legacy mode only.
+/// can run against isolated SQL fixtures in tests. Production writes pass
+/// through the server-confirmed business gateway; queue rows never auto-send.
 ///
 /// The domain surface lives in `../domain/routine_repository.dart`
 /// ([RoutineListsRepository]); presentation never imports this file.
@@ -101,6 +102,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     required String entityType,
     required String where,
     List<Object?> whereArgs = const [],
+    bool onlyChangedInOperation = false,
   }) async {
     if (sync == null) return;
     await sync!.queueChildRows(
@@ -110,6 +112,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
       entityType: entityType,
       where: where,
       whereArgs: whereArgs,
+      onlyChangedInOperation: onlyChangedInOperation,
     );
   }
 
@@ -180,7 +183,12 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
       final template = QcTemplate.fromMap(Map<String, dynamic>.from(r));
       final id = template.templateId!;
       final total = await _itemCount(db, id);
-      final sheetId = await _periodSheetId(db, id, template.recurrence);
+      final sheetId = await _periodSheetId(
+        db,
+        id,
+        template.recurrence,
+        template.version,
+      );
       var done = 0;
       if (sheetId != null) {
         done = await _doneCount(db, sheetId);
@@ -232,11 +240,12 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
         AppText.t('القائمة تحتاج إلى اسم', 'A list needs a name'),
       );
     }
-    final cleanRecurrence = recurrence == QcRecurrence.monthly
-        ? QcRecurrence.monthly
-        : QcRecurrence.daily;
-    final db = await dbHelper.database;
-    return db.transaction((txn) async {
+    final cleanRecurrence = switch (recurrence) {
+      QcRecurrence.yearly => QcRecurrence.yearly,
+      QcRecurrence.monthly => QcRecurrence.monthly,
+      _ => QcRecurrence.daily,
+    };
+    return dbHelper.businessTransaction((txn) async {
       final stamp = nowIso();
       int id;
       if (templateId == null) {
@@ -277,6 +286,9 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
             'name': cleanName,
             'dept': dept.trim(),
             'recurrence': cleanRecurrence,
+            'version':
+                ((existing.first['version'] as num?)?.toInt() ?? 1) +
+                (existing.first['recurrence'] == cleanRecurrence ? 0 : 1),
             'updated_at': stamp,
             'updated_by': _uid,
           },
@@ -316,6 +328,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
         entityType: 'qcSection',
         where: 'template_id = ?',
         whereArgs: [id],
+        onlyChangedInOperation: true,
       );
       await _queueChildRows(
         txn,
@@ -324,6 +337,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
         entityType: 'qcItem',
         where: 'template_id = ?',
         whereArgs: [id],
+        onlyChangedInOperation: true,
       );
       return id;
     });
@@ -370,11 +384,13 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
       for (final l in labels)
         if (l.trim().isNotEmpty) l.trim(),
     ];
-    final seen = <int>{};
     for (var i = 0; i < clean.length; i++) {
       if (i < existing.length) {
         final id = (existing[i]['item_id'] as num).toInt();
-        seen.add(id);
+        if (existing[i]['label'] == clean[i] &&
+            existing[i]['order_index'] == i) {
+          continue;
+        }
         await txn.update(
           'qc_items',
           {'label': clean[i], 'order_index': i},
@@ -434,8 +450,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
   @override
   Future<void> deleteRoutineList(int templateId) async {
     _check();
-    final db = await dbHelper.database;
-    await db.transaction((txn) async {
+    await dbHelper.businessTransaction((txn) async {
       final existing = await txn.query(
         'qc_templates',
         where: qcAlive('template_id = ?'),
@@ -487,14 +502,18 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     DatabaseExecutor txn,
     int templateId,
     String recurrence,
+    int templateVersion,
   ) async {
-    if (recurrence == QcRecurrence.monthly) {
+    if (recurrence == QcRecurrence.monthly ||
+        recurrence == QcRecurrence.yearly) {
+      final length = recurrence == QcRecurrence.yearly ? 4 : 7;
       final rows = await txn.rawQuery(
         'SELECT inspection_id AS id FROM qc_inspections '
         'WHERE ${qcAlive('template_id = ?')} '
-        "AND substr(COALESCE(inspection_date,created_at,''),1,7) = ? "
+        'AND template_version = ? '
+        "AND substr(COALESCE(inspection_date,created_at,''),1,$length) = ? "
         'ORDER BY inspection_date DESC, inspection_id DESC LIMIT 1',
-        [templateId, monthKey()],
+        [templateId, templateVersion, todayKey().substring(0, length)],
       );
       if (rows.isEmpty) return null;
       return (rows.first['id'] as num).toInt();
@@ -502,9 +521,10 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     final rows = await txn.rawQuery(
       'SELECT inspection_id AS id FROM qc_inspections '
       'WHERE ${qcAlive('template_id = ?')} '
+      'AND template_version = ? '
       "AND substr(COALESCE(inspection_date,created_at,''),1,10) = ? "
       'ORDER BY inspection_id DESC LIMIT 1',
-      [templateId, todayKey()],
+      [templateId, templateVersion, todayKey()],
     );
     if (rows.isEmpty) return null;
     return (rows.first['id'] as num).toInt();
@@ -516,8 +536,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
   @override
   Future<RoutineSheet> openPeriodSheet(int templateId) async {
     _check();
-    final db = await dbHelper.database;
-    return db.transaction((txn) async {
+    return dbHelper.businessTransaction((txn) async {
       final tplRows = await txn.query(
         'qc_templates',
         where: qcAlive('template_id = ?'),
@@ -530,11 +549,17 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
       final template = QcTemplate.fromMap(
         Map<String, dynamic>.from(tplRows.first),
       );
-      var sheetId = await _periodSheetId(txn, templateId, template.recurrence);
+      var sheetId = await _periodSheetId(
+        txn,
+        templateId,
+        template.recurrence,
+        template.version,
+      );
       if (sheetId == null) {
         final stamp = nowIso();
         final inspection = QcInspection(
           templateId: templateId,
+          templateVersion: template.version,
           inspectionDate: todayKey(),
           createdAt: stamp,
           updatedAt: stamp,
@@ -542,7 +567,13 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
           inspectorId: _uid,
           inspectorName: _displayName(),
         );
-        sheetId = await inspections.createInspection(inspection, exec: txn);
+        // Routine rows are visible from the template. An unanswered item does
+        // not need an empty shared response; its first check creates one.
+        sheetId = await inspections.createInspection(
+          inspection,
+          exec: txn,
+          initializeResponses: false,
+        );
         await audit.append(
           entityType: QcAuditEntity.inspection,
           entityId: '$sheetId',
@@ -672,14 +703,16 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     final day = inspection.inspectionDate.length >= 10
         ? inspection.inspectionDate.substring(0, 10)
         : inspection.inspectionDate;
-    final current = template.recurrence == QcRecurrence.monthly
+    final current = template.recurrence == QcRecurrence.yearly
+        ? day.length >= 4 && day.substring(0, 4) == todayKey().substring(0, 4)
+        : template.recurrence == QcRecurrence.monthly
         ? day.length >= 7 && day.substring(0, 7) == monthKey()
         : day == todayKey();
     return RoutineSheet(
       inspection: inspection,
       template: template,
       rows: out,
-      current: current,
+      current: current && inspection.templateVersion == template.version,
     );
   }
 
@@ -695,8 +728,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     String note = '',
   }) async {
     _check();
-    final db = await dbHelper.database;
-    return db.transaction((txn) async {
+    return dbHelper.businessTransaction((txn) async {
       final sheet = await _loadSheet(txn, inspectionId);
       if (!sheet.current) {
         throw ValidationError(
@@ -827,8 +859,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     String note = '',
   }) async {
     _check();
-    final db = await dbHelper.database;
-    return db.transaction((txn) async {
+    return dbHelper.businessTransaction((txn) async {
       final sheet = await _loadSheet(txn, inspectionId);
       if (!sheet.current) {
         throw ValidationError(
@@ -967,6 +998,20 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     final db = await dbHelper.database;
     final clauses = <String>['i.deleted_at IS NULL'];
     final values = <Object?>[];
+    // Empty answers are synthesized when opening a sheet. Include unanswered
+    // template items in its totals, and retain answered retired items in history.
+    const expectedItems = '''
+      SELECT it.item_id FROM qc_items it
+      WHERE it.template_id = i.template_id AND
+        (it.deleted_at IS NULL OR EXISTS
+          (SELECT 1 FROM qc_responses old WHERE old.inspection_id = i.inspection_id
+            AND old.item_id = it.item_id))
+    ''';
+    const totalCount = '(SELECT COUNT(*) FROM ($expectedItems))';
+    const doneCount =
+        '''(SELECT COUNT(*) FROM qc_responses r
+      WHERE r.inspection_id = i.inspection_id AND r.item_id IN ($expectedItems)
+        AND r.measured_at IS NOT NULL AND r.measured_at != '')''';
     if (filters.templateId != null) {
       clauses.add('i.template_id = ?');
       values.add(filters.templateId);
@@ -995,31 +1040,21 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     final query = filters.itemQuery.trim();
     if (query.isNotEmpty) {
       clauses.add(
-        'EXISTS (SELECT 1 FROM qc_responses r JOIN qc_items it ON it.item_id = r.item_id '
-        "WHERE r.inspection_id = i.inspection_id AND it.label LIKE '%' || ? || '%')",
+        'EXISTS (SELECT 1 FROM qc_items it WHERE it.item_id IN ($expectedItems) '
+        "AND it.label LIKE '%' || ? || '%')",
       );
       values.add(query);
     }
     if (filters.completion == 'complete') {
-      clauses.add(
-        '(SELECT COUNT(*) FROM qc_responses r WHERE r.inspection_id = i.inspection_id) > 0 '
-        'AND (SELECT COUNT(*) FROM qc_responses r WHERE r.inspection_id = i.inspection_id '
-        "AND (r.measured_at IS NULL OR r.measured_at = '')) = 0",
-      );
+      clauses.add('$totalCount > 0 AND $doneCount = $totalCount');
     } else if (filters.completion == 'incomplete') {
-      clauses.add(
-        '(SELECT COUNT(*) FROM qc_responses r WHERE r.inspection_id = i.inspection_id '
-        "AND (r.measured_at IS NULL OR r.measured_at = '')) > 0",
-      );
+      clauses.add('$doneCount < $totalCount');
     }
     final rows = await db.rawQuery(
       '''
       SELECT i.*, t.name AS template_name, t.recurrence AS recurrence,
-        (SELECT COUNT(*) FROM qc_responses r
-          WHERE r.inspection_id = i.inspection_id) AS total_count,
-        (SELECT COUNT(*) FROM qc_responses r
-          WHERE r.inspection_id = i.inspection_id
-          AND r.measured_at IS NOT NULL AND r.measured_at != '') AS done_count
+        $totalCount AS total_count,
+        $doneCount AS done_count
       FROM qc_inspections i
       LEFT JOIN qc_templates t ON t.template_id = i.template_id
       WHERE ${clauses.join(' AND ')}

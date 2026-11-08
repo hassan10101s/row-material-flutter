@@ -191,7 +191,7 @@ void main() {
         isFalse,
         reason:
             'qc_repositories.dart mentions "$needle" in code. The transaction '
-            'belongs to OfflineFirstQc*Repository, not to the contract: a '
+            'belongs to ServerConfirmedQc*Repository, not to the contract: a '
             'caller holding an executor can write without writing the audit row '
             'that records it.',
       );
@@ -211,7 +211,7 @@ void main() {
       final source = file.readAsStringSync();
       for (final needle in const [
         'qc_repo.dart',
-        'offline_first_qc_repository.dart',
+        'server_confirmed_qc_repository.dart',
         'DatabaseHelper',
       ]) {
         if (source.contains(needle)) {

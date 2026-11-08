@@ -1,4 +1,5 @@
 import 'package:sqflite/sqflite.dart';
+import '../../../core/database/business_transaction.dart';
 
 import '../../../core/sync/audit_logger.dart';
 import '../../../core/sync/entity_registry.dart';
@@ -27,10 +28,10 @@ class ParentLinkRef {
   final String linkColumn;
 }
 
-/// The sync seam of the QC facades (plan P8).
+/// Captures QC changes for explicit server-confirmed commands.
 ///
 /// Every enqueue helper the QC write paths need in one class, mirroring the
-/// contract [OfflineFirstQcCustomTablesRepository] already runs under:
+/// contract [ServerConfirmedQcCustomTablesRepository] already runs under:
 ///
 ///  * [stampedRow] — fresh row from disk with a guaranteed cross-device
 ///    identity (`remote_id`: UUID for new writes, `legacy_<table>_<pk>`
@@ -39,10 +40,10 @@ class ParentLinkRef {
 ///  * [parentRemoteId] — the parent's cross-device identity for the child
 ///    stamp columns (`template_remote_id`, `inspection_remote_id`, ...); the
 ///    parent row gets its identity stamped here too, because a legacy
-///    parent that never pushed would leave the child unpullable.
+///    parent without a shared identity cannot be referenced across devices.
 ///  * [enqueue] — `sync_write.enqueueLocalChange` inside the caller's
-///    transaction, best-effort: the business write never rolls back because
-///    the outbox hiccuped (the backfill repairs the bookkeeping later).
+///    candidate transaction. The authoring gateway verifies the complete
+///    command and rolls back the candidate before explicit server submission.
 ///
 /// Sync is **guarded by default**: [enabled] requires a bound organization
 /// and a signed-in uid (the same `WriteGuard` the facades authorise with).
@@ -106,6 +107,12 @@ class QcSyncWriter {
       _inspectionLink,
       _itemLink,
       _respLink,
+      ParentLinkRef(
+        'product_sample_remote_id',
+        'product_batch_samples',
+        'id',
+        'product_sample_id',
+      ),
       // `capa_id` mirrors a CAPA created afterwards; the writer of the CAPA
       // does not update stale findings, so the stamp stays empty there and
       // the pull side drops the nullable pointer.
@@ -113,9 +120,9 @@ class QcSyncWriter {
     'qcCapa': [_findingLink],
   };
 
-  /// True when the row may be queued: organization bound + signed in. On a
-  /// false return the facades skip synchronisation entirely (the backfill
-  /// service re-queues the rows once an account binds).
+  /// True when command capture has a bound organization and signed-in user.
+  /// Production authoring rejects shared writes without this identity; signing
+  /// in later never uploads local rows automatically.
   bool get enabled => guard.organizationId.isNotEmpty && guard.uid.isNotEmpty;
 
   /// Sentinel key [stampedRow] sets on the returned row when it had to mint
@@ -218,6 +225,27 @@ class QcSyncWriter {
     if (row == null) return;
     await stampParents(txn, row, _parentLinks[entityType] ?? const []);
     await enqueue(txn, entityType: entityType, row: row, operation: operation);
+    // QC quantity fields can register a unit in the same SQL transaction.
+    // That new catalogue row is a shared effect too; otherwise the central
+    // capture rejects the entire finding as an undeclared business mutation.
+    if (entityType != 'labUnit') {
+      final changedUnits = await BusinessAuthoringContext.changedRows(
+        txn,
+        'labUnit',
+      );
+      final unitFloor = BusinessAuthoringContext.newRowFloor('lab_units');
+      for (final unitId in changedUnits ?? const <int>{}) {
+        if (unitFloor == null || unitId <= unitFloor) continue;
+        await queueRow(
+          txn,
+          entityType: 'labUnit',
+          table: 'lab_units',
+          pk: 'id',
+          id: unitId,
+          operation: 'create',
+        );
+      }
+    }
   }
 
   /// Syncs every row of [table] matching [where] — the children of a
@@ -232,7 +260,11 @@ class QcSyncWriter {
     required String entityType,
     required String where,
     List<Object?> whereArgs = const [],
+    bool onlyChangedInOperation = false,
   }) async {
+    final changed = onlyChangedInOperation
+        ? await BusinessAuthoringContext.changedRows(txn, entityType)
+        : null;
     final rows = await txn.query(
       table,
       columns: [pk],
@@ -241,13 +273,9 @@ class QcSyncWriter {
       orderBy: '$pk ASC',
     );
     for (final r in rows) {
-      await queueRow(
-        txn,
-        entityType: entityType,
-        table: table,
-        pk: pk,
-        id: (r[pk] as num?)?.toInt(),
-      );
+      final id = (r[pk] as num?)?.toInt();
+      if (changed != null && !changed.contains(id)) continue;
+      await queueRow(txn, entityType: entityType, table: table, pk: pk, id: id);
     }
   }
 
@@ -266,9 +294,9 @@ class QcSyncWriter {
     return hasRemote ? 'update' : 'create';
   }
 
-  /// Enqueues one row for the push; best-effort — a transient outbox failure
-  /// leaves the row flagged `queued` for the backfill instead of failing the
-  /// business write. `operationFor` filtered rows skip on a null purpose.
+  /// Captures one command effect in the caller's candidate transaction.
+  /// An enqueue error propagates so the operation cannot report success with
+  /// incomplete effects. `operationFor` filtered rows skip on a null purpose.
   Future<void> enqueue(
     DatabaseExecutor txn, {
     required String entityType,

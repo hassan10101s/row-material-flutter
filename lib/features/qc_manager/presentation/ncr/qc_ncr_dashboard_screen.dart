@@ -1,3 +1,5 @@
+import '../../../../../design_system/widgets/app_adaptive.dart';
+import '../../../../../design_system/widgets/app_mobile_add_layout.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -92,7 +94,23 @@ class QcNcrDashboardScreen extends StatelessWidget {
                   ],
                 ),
               );
-        if (embedded) return body;
+        bool canCreate = false;
+        try {
+          canCreate = getIt<AuthGate>().canWrite(Permission.qcWrite);
+        } catch (_) {}
+        final content = AppMobileAddLayout(
+          floating: !appUsesDesktopChrome(context),
+          tooltip: AppText.t('إنشاء عدم مطابقة', 'New non-conformance'),
+          onAdd: canCreate
+              ? () => QcNcrCreateScreen.open(
+                  context,
+                  cubit,
+                  assignees: cubit.state.options.assignees,
+                )
+              : null,
+          child: body,
+        );
+        if (embedded) return content;
         return Scaffold(
           appBar: AppTopAppBar(
             title: AppText.t('تقرير عدم المطابقة', 'Non-conformance report'),
@@ -104,7 +122,7 @@ class QcNcrDashboardScreen extends StatelessWidget {
               ),
             ],
           ),
-          body: body,
+          body: content,
         );
       },
     );
@@ -131,7 +149,9 @@ class _CreateActionRow extends StatelessWidget {
       // button that always fails.
       canCreate = false;
     }
-    if (!canCreate) return const SizedBox.shrink();
+    if (!canCreate || !appUsesDesktopChrome(context)) {
+      return const SizedBox.shrink();
+    }
     return Align(
       alignment: AlignmentDirectional.centerEnd,
       child: Padding(

@@ -14,6 +14,9 @@ import 'package:material_lab/di/service_locator.dart';
 import 'package:material_lab/features/auth/domain/user.dart';
 import 'package:material_lab/features/inspections/domain/inspection_repository.dart';
 import 'package:material_lab/features/inspections/presentation/cubit/inspection_detail_cubit.dart';
+import 'package:material_lab/features/inspections/presentation/cubit/inspection_form_cubit.dart';
+import 'package:material_lab/features/inspections/presentation/form/inspection_form_screen.dart';
+import 'package:material_lab/features/inspections/presentation/form/widgets/inspection_form_sections.dart';
 import 'package:material_lab/features/inspections/presentation/detail/desktop/inspection_detail_screen.dart';
 import 'package:material_lab/features/inspections/presentation/detail/mobile/inspection_detail_screen.dart';
 import 'package:material_lab/features/reference/domain/reference_repository.dart';
@@ -161,6 +164,39 @@ void main() {
     (w) => w is TextField && w.controller?.text == value,
   );
 
+  testWidgets(
+    'new mobile inspection keeps entered results when code refreshes',
+    (tester) async {
+      final form = InspectionFormCubit(repo: repo, reference: reference);
+      addTearDown(form.close);
+      await form.loadMaterials();
+      await form.selectMaterial(1, date: '2026-09-05');
+      when(
+        () => reference.generateEntryCode('SUG', '2026-09-06'),
+      ).thenAnswer((_) async => 'QC-10');
+      await pumpAs(
+        tester,
+        AppFormFactor.mobile,
+        BlocProvider.value(
+          value: form,
+          child: const InspectionFormScreen(wizard: true),
+        ),
+      );
+      await tester.tap(find.text('Next'));
+      await tester.pumpAndSettle();
+      final input = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.hintText == 'Moisture result',
+      );
+      expect(input, findsOneWidget);
+      await tester.enterText(input, '11.5');
+      await form.regenerateEntryCode('2026-09-06');
+      await tester.pumpAndSettle();
+      expect(resultField('11.5'), findsOneWidget);
+      expect(form.state.entryCode, 'QC-10');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   group('desktop edit', () {
     testWidgets('opens the prefilled design-system dialog and updates', (
       tester,
@@ -181,9 +217,19 @@ void main() {
       // Windows design-system chrome, prefilled from the stored row.
       expect(find.byType(AppWindow), findsOneWidget);
       expect(supplierField(), findsOneWidget);
+      final codeField = tester.widget<TextField>(
+        find.byWidgetPredicate(
+          (widget) => widget is TextField && widget.controller?.text == 'QC-3',
+        ),
+      );
+      expect(codeField.readOnly, isTrue);
+      expect(find.byTooltip('Regenerate'), findsNothing);
       // The stored physical result is restored into its grid cell, not lost
       // when the reference grid rebuilds.
       expect(resultField('12'), findsOneWidget);
+      await tester.enterText(resultField('12'), '30');
+      await tester.pumpAndSettle();
+      expect(find.text('Are you sure about Moisture: 30?'), findsOneWidget);
 
       // The full form scrolls inside the window: drive to Save first.
       await tester.ensureVisible(find.text('Save'));
@@ -191,13 +237,112 @@ void main() {
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
 
-      verify(() => repo.update(7, any(), any())).called(1);
+      final saved =
+          verify(() => repo.update(7, captureAny(), any())).captured.single
+              as Map;
+      expect(saved['physical_results']['Moisture'], '30');
       verifyNever(() => repo.create(any(), any()));
       expect(find.byType(AppWindow), findsNothing);
     });
   });
 
   group('mobile edit', () {
+    testWidgets(
+      'retains stored material and results when catalogue loading is unavailable',
+      (tester) async {
+        when(
+          reference.listMaterials,
+        ).thenThrow(StateError('catalogue unavailable'));
+        when(
+          () => reference.getMaterial(1, inspectionDate: '2026-09-05'),
+        ).thenThrow(StateError('archived catalogue lookup failed'));
+        final detail = await loadedDetailCubit();
+        await pumpAs(
+          tester,
+          AppFormFactor.mobile,
+          BlocProvider.value(
+            value: detail,
+            child: const MobileInspectionDetailScreen(inspectionId: 7),
+          ),
+        );
+        await tester.tap(find.text('Edit record'));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Change material'), findsNothing);
+        final material = tester.widget<TextField>(
+          find.byWidgetPredicate(
+            (w) => w is TextField && w.controller?.text == 'Sugar (SUG)',
+          ),
+        );
+        expect(material.readOnly, isTrue);
+        await tester.tap(find.text('Next'));
+        await tester.pumpAndSettle();
+        expect(resultField('12'), findsOneWidget);
+        await tester.enterText(resultField('12'), '30');
+        await tester.pumpAndSettle();
+        expect(find.text('Are you sure about Moisture: 30?'), findsOneWidget);
+        await tester.tap(find.text('Next'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Save inspection'));
+        await tester.pumpAndSettle();
+        final payload =
+            verify(() => repo.update(7, captureAny(), any())).captured.single
+                as Map;
+        expect(payload['material_id'], 1);
+        expect(payload['entry_code'], 'QC-3');
+        expect(payload['physical_results']['Moisture'], '30');
+        verifyNever(() => repo.create(any(), any()));
+        verifyNever(reference.listMaterials);
+        verifyNever(
+          () => reference.getMaterial(1, inspectionDate: '2026-09-05'),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    for (final width in [320.0, 390.0, 760.0]) {
+      testWidgets(
+        'prefilled mobile results fit $width without sideways scrolling and show range below the field',
+        (tester) async {
+          final inspection = _inspection();
+          final form = InspectionFormCubit(repo: repo, reference: reference);
+          addTearDown(form.close);
+          await form.loadForEdit(
+            inspection,
+          ); // Selection is ready before widget listeners attach.
+          await pumpAs(
+            tester,
+            AppFormFactor.mobile,
+            BlocProvider.value(
+              value: form,
+              child: InspectionFormScreen(inspection: inspection, wizard: true),
+            ),
+          );
+          tester.view.physicalSize = Size(width, 860);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Next'));
+          await tester.pumpAndSettle();
+          final input = resultField('12');
+          final range = find.textContaining('Reference range:');
+          expect(input, findsOneWidget);
+          expect(range, findsOneWidget);
+          expect(
+            tester.getTopLeft(range).dy,
+            greaterThan(tester.getBottomLeft(input).dy),
+          );
+          final sideways = find.descendant(
+            of: find.byType(FormSectionCard),
+            matching: find.byWidgetPredicate(
+              (w) =>
+                  w is SingleChildScrollView &&
+                  w.scrollDirection == Axis.horizontal,
+            ),
+          );
+          expect(sideways, findsNothing);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
     testWidgets('opens the prefilled wizard route, no dialog', (tester) async {
       final cubit = await loadedDetailCubit();
       await pumpAs(

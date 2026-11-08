@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
+<head><meta charset="UTF-8"><title>{{ title }} - {{ period }}</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<style>
+@page { size: A4; margin: 9mm 8mm; }
+* { box-sizing: border-box; }
+body { margin:0; color:#182537; background:#fff; font:11px 'Inter','IBM Plex Sans Arabic','Segoe UI',sans-serif; line-height:1.55; }
+.header { display:grid; grid-template-columns:145px 1fr 100px; gap:12px; align-items:center; border:1px solid #d7dee7; border-radius:12px; padding:10px 12px; margin-bottom:10px; }
+.brand { text-align:center; overflow-wrap:anywhere; } .logo { max-width:90px; max-height:42px; object-fit:contain; }
+.organization-name { font-size:11px; font-weight:700; margin-top:4px; } .department { font-size:10px; color:#526171; }
+h1 { font-size:17px; line-height:1.5; margin:4px 0; } .period { font-size:12px; color:#43566d; } .form { font-size:10px; text-align:end; }
+.summary { display:grid; grid-template-columns:repeat(4,1fr); gap:7px; margin:9px 0; }
+.metric { border:1px solid #d7dee7; border-radius:8px; padding:7px 9px; background:#f8fafc; }
+.metric span { display:block; color:#526171; font-size:10px; } .metric strong { font-size:14px; }
+.note { padding:7px 9px; border:1px solid #dde5ef; border-radius:8px; color:#43566d; background:#f8fafc; margin:9px 0; font-size:10px; }
+.section { border:1px solid #d7dee7; border-radius:12px; margin:10px 0; padding:9px; }
+.section-title { background:#edf1f5; border-radius:8px; padding:6px 9px; margin:0 0 6px; font-size:12px; font-weight:700; break-after:avoid; }
+.meta { display:flex; flex-wrap:wrap; gap:5px 16px; color:#43566d; font-size:10px; padding:2px 3px 7px; }
+.sample-label { display:block; font-weight:700; }
+.vertical .sample-label { display:inline-block; writing-mode:vertical-rl; text-orientation:sideways; transform:rotate(180deg); max-height:110px; }
+.sample-table th, .sample-table td { text-align:center; padding:5px 4px; }
+.sample-table th:first-child, .sample-table td:first-child { text-align:start; }
+.table-frame { border:1px solid #dde5ef; border-radius:8px; margin:6px 0; }
+table { width:100%; border-collapse:collapse; table-layout:fixed; }
+thead { display:table-header-group; } th,td { text-align:start; padding:5px 7px; border-bottom:1px solid #e8edf3; overflow-wrap:anywhere; }
+th { background:#eef2f6; color:#43566d; font-size:10px; font-weight:700; }
+tbody tr:nth-child(even) { background:#f8fafc; } tr { break-inside:avoid; } tr:last-child td { border-bottom:0; }
+.number { font-variant-numeric:tabular-nums; direction:ltr; unicode-bidi:isolate; }
+.muted { color:#6d7f93; font-size:10px; } .empty { text-align:center; padding:18px; color:#526171; }
+</style></head>
+<body>
+<header class="header">
+ <div class="brand">{% if report_logo_data_uri %}<img class="logo" src="{{ report_logo_data_uri }}" alt="">{% endif %}
+ {% if organization_name %}<div class="organization-name">{{ organization_name }}</div>{% endif %}</div>
+ <div><div class="department">{{ department_label }}</div><h1>{{ title }}</h1><div class="period"><bdi>{{ period }}</bdi></div></div>
+ <div class="form">{% if is_en %}Form no.{% else %}رقم النموذج{% endif %}<br><bdi>{{ form_no }}</bdi></div>
+</header>
+<div class="summary">
+ <div class="metric"><span>{% if is_en %}Reports{% else %}المحاضر{% endif %}</span><strong>{{ report_count }}</strong></div>
+ <div class="metric"><span>{% if is_en %}Samples{% else %}العينات{% endif %}</span><strong>{{ sample_count }}</strong></div>
+ <div class="metric"><span>{% if is_en %}Batches{% else %}التشغيلات{% endif %}</span><strong>{{ batch_count }}</strong></div>
+ <div class="metric"><span>{% if is_en %}Quantity (tons){% else %}الكمية (طن){% endif %}</span><strong class="number">{{ total_quantity }}</strong></div>
+</div>
+<div class="note">{{ note }}</div>
+{% if not sections %}<div class="empty">{% if is_en %}No product inspections in this period.{% else %}لا توجد فحوص منتجات خلال هذه الفترة.{% endif %}</div>{% endif %}
+{% for section in sections %}
+<section class="section">
+ <h2 class="section-title">{{ section.material_name }} | {% if yearly %}{% if is_en %}Batch{% else %}التشغيلة{% endif %}: <bdi>{{ section.batch }}</bdi>{% else %}<bdi>{{ section.entry_code }}</bdi>{% endif %}</h2>
+ <div class="meta">
+  {% if not yearly %}<span>{% if is_en %}Date{% else %}التاريخ{% endif %}: <bdi>{{ section.date }}</bdi></span><span>{% if is_en %}Batch{% else %}التشغيلة{% endif %}: <bdi>{{ section.batch }}</bdi></span>{% endif %}
+  <span>{% if is_en %}Reports{% else %}المحاضر{% endif %}: {{ section.report_count }}</span>
+  <span>{% if is_en %}Samples{% else %}العينات{% endif %}: {{ section.sample_count }}</span>
+  <span>{% if is_en %}Quantity (tons){% else %}الكمية (طن){% endif %}: <bdi>{{ section.quantity }}</bdi></span>
+ </div>
+ {% if daily %}
+  {% if not section.samples %}<p class="muted">{% if is_en %}No samples recorded.{% else %}لم تُسجل عينات.{% endif %}</p>{% endif %}
+  {% for table in section.sample_tables %}<div class="table-frame"><table class="sample-table {% if table.rotate %}vertical{% endif %}">
+   <colgroup><col style="width:24%"><col style="width:8%">{% for sample in table.headers %}<col style="width:{{ table.sample_width }}%">{% endfor %}</colgroup>
+   <thead><tr><th>{% if is_en %}Analysis{% else %}التحليل{% endif %}</th><th>{% if is_en %}Unit{% else %}الوحدة{% endif %}</th>{% for sample in table.headers %}<th><span class="sample-label">{{ sample.name }}</span></th>{% endfor %}</tr>
+   <tr><th colspan="2">{% if is_en %}Decision{% else %}القرار{% endif %}</th>{% for sample in table.headers %}<td>{{ sample.decision }}{% if sample.reason %}<div class="muted">{{ sample.reason }}</div>{% endif %}</td>{% endfor %}</tr></thead>
+   <tbody>{% for row in table.rows %}<tr><td>{{ row.analysis_name }}</td><td>{{ row.unit }}</td>{% for cell in row.cells %}<td>{{ cell }}</td>{% endfor %}</tr>{% endfor %}
+   <tr><th colspan="2">{% if is_en %}Sample taker{% else %}ساحب العينة{% endif %}</th>{% for sample in table.headers %}<td class="muted">{{ sample.taker }}</td>{% endfor %}</tr>
+   </tbody></table></div>{% endfor %}
+ {% else %}
+  {% if section.results %}<div class="table-frame"><table><thead><tr>
+   <th>{% if is_en %}Analysis{% else %}التحليل{% endif %}</th><th>{% if is_en %}Mean / description{% else %}المتوسط / الوصف{% endif %}</th><th>{% if is_en %}Unit{% else %}الوحدة{% endif %}</th><th>{% if yearly %}{% if is_en %}Reports with values{% else %}محاضر بقيم{% endif %}{% else %}{% if is_en %}Samples with values{% else %}عينات بقيم{% endif %}{% endif %}</th>
+   </tr></thead><tbody>{% for result in section.results %}<tr><td>{{ result.analysis_name }}</td><td>{{ result.value }}{% if result.descriptive %}<div class="muted">{{ result.descriptive }}</div>{% endif %}</td><td>{{ result.unit }}</td><td>{{ result.count }}</td></tr>{% endfor %}</tbody></table></div>
+  {% else %}<p class="muted">{% if is_en %}No results recorded.{% else %}لم تُسجل نتائج.{% endif %}</p>{% endif %}
+  {% if yearly %}<div class="table-frame"><table><thead><tr><th>{% if is_en %}Report{% else %}المحضر{% endif %}</th><th>{% if is_en %}Date{% else %}التاريخ{% endif %}</th><th>{% if is_en %}Samples{% else %}العينات{% endif %}</th><th>{% if is_en %}Quantity (tons){% else %}الكمية (طن){% endif %}</th></tr></thead><tbody>
+  {% for report in section.reports %}<tr><td><bdi>{{ report.entry_code }}</bdi></td><td class="number">{{ report.date }}</td><td>{{ report.sample_count }}</td><td class="number">{{ report.quantity }}</td></tr>{% endfor %}
+  </tbody></table></div>{% endif %}
+ {% endif %}
+</section>
+{% endfor %}
+</body></html>

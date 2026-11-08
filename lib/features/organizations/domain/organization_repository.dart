@@ -1,3 +1,4 @@
+import '../../../core/utils/app_exceptions.dart';
 import '../../members/domain/member_repository.dart';
 
 /// Organization lifecycle (plan §8.5): only the first founder calls this, once.
@@ -65,11 +66,14 @@ class OrganizationProfile {
 /// it is part of what a caller has to handle: the members screen catches it by
 /// type, and importing the data layer to name an exception would be exactly the
 /// dependency inversion the boundary test exists to prevent.
-class OrganizationFailure implements Exception {
+class OrganizationFailure implements Exception, UserFacingError {
   const OrganizationFailure(this.message, {this.code = 'failed'});
 
   final String message;
   final String code;
+
+  @override
+  String get userMessage => message;
 
   @override
   String toString() => message;

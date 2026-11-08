@@ -6,7 +6,7 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/locale/locale_service.dart';
-import 'package:material_lab/core/sync/sync_engine.dart';
+import '../../support/retired/core/sync/sync_engine.dart';
 import 'package:material_lab/core/theme/theme_service.dart';
 import 'package:material_lab/di/service_locator.dart';
 import 'package:material_lab/features/backup/domain/backup_service.dart';

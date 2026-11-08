@@ -1,3 +1,4 @@
+import '../../../../core/security/secure_field_access.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -13,7 +14,6 @@ import '../../../../core/security/local_secret.dart';
 import '../../../../core/security/qr_payload.dart';
 import '../../../../core/security/seal_codec.dart';
 import '../../../../design_system/animations/app_animations.dart';
-import '../../../../design_system/tokens/app_breakpoints.dart';
 import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
@@ -344,39 +344,29 @@ class _QrScanScreenState extends State<QrScanScreen> {
   }
 
   Future<void> _openInspection(int id) async {
-    final wide = MediaQuery.of(context).size.width >= AppBreakpoints.medium;
-    if (wide) {
-      await showAppWindow<bool>(
-        context,
-        title: AppText.t('تفاصيل الفحص', 'Inspection Details'),
-        icon: Icons.fact_check_outlined,
-        size: AppWindowSize.lg,
-        scrollBody: false,
-        child: BlocProvider(
-          create: (c) => InspectionDetailCubit(
+    await showAppContentSurface<bool>(
+      context,
+      builder: (_, fullScreen) {
+        final detail = BlocProvider(
+          create: (_) => InspectionDetailCubit(secureAccess: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null,
             inspectionId: id,
             repo: getIt<InspectionRepository>(),
             reports: getIt<ReportRepository>(),
             labResults: getIt<LabResultRepository>(),
           )..load(),
           child: InspectionDetailScreen(inspectionId: id),
-        ),
-      );
-    } else {
-      await Navigator.of(context).push<bool>(
-        AppPageRoute(
-          builder: (_) => BlocProvider(
-            create: (c) => InspectionDetailCubit(
-              inspectionId: id,
-              repo: getIt<InspectionRepository>(),
-              reports: getIt<ReportRepository>(),
-              labResults: getIt<LabResultRepository>(),
-            )..load(),
-            child: InspectionDetailScreen(inspectionId: id),
-          ),
-        ),
-      );
-    }
+        );
+        return fullScreen
+            ? detail
+            : AppWindow(
+                title: AppText.t('تفاصيل الفحص', 'Inspection Details'),
+                icon: Icons.fact_check_outlined,
+                size: AppWindowSize.lg,
+                scrollBody: false,
+                child: detail,
+              );
+      },
+    );
   }
 
   @override

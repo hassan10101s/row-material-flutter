@@ -8,7 +8,7 @@ import 'package:material_lab/core/security/local_secret.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/inspections/data/inspection_repo.dart';
-import 'package:material_lab/features/inspections/data/offline_first_inspection_repository.dart';
+import 'package:material_lab/features/inspections/data/server_confirmed_inspection_repository.dart';
 import 'package:material_lab/features/lab/data/lab_repo.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 import 'package:material_lab/features/reference/data/reference_repo.dart';
@@ -20,7 +20,7 @@ import '../../sync/sync_test_fixture.dart';
 /// Saving an inspection used to freeze for ten seconds and silently leave
 /// `report_html` stale.
 ///
-/// `OfflineFirstInspectionRepository` opens a write transaction and, inside it,
+/// `ServerConfirmedInspectionRepository` opens a write transaction and, inside it,
 /// `InspectionRepo.create` called `_refreshReportHtml`. That reached
 /// `ReportHtmlBuilder.buildContext`, whose first act is `SettingsRepo.getSettings()`
 /// — a read on the **root** handle. `sqflite_common_ffi` does not run a
@@ -100,7 +100,7 @@ void main() {
   DatabaseHelper.ensureDesktopFactory();
 
   late SyncFixture fx;
-  late OfflineFirstInspectionRepository repo;
+  late ServerConfirmedInspectionRepository repo;
   late _RootHandleReadingBuilder builder;
 
   const user = UserContext(id: 1, fullName: 'Hassan el sayed', role: 'admin');
@@ -124,7 +124,7 @@ void main() {
     final queue = SyncQueue(fx.helper);
     final audit = AuditLogger(queue: queue);
     builder = _RootHandleReadingBuilder(fx.helper);
-    repo = OfflineFirstInspectionRepository(
+    repo = ServerConfirmedInspectionRepository(
       dbHelper: fx.helper,
       referenceRepo: ReferenceRepo(dbHelper: fx.helper),
       htmlBuilder: builder,

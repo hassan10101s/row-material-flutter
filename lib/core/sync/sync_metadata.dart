@@ -86,6 +86,7 @@ class SyncMetadata {
   /// local ids and `lab_sample_tests` predates `created_at`.
   static String notifSeenInspectionIdKey = 'notif_seen_inspection_id';
   static String notifSeenLabIdKey = 'notif_seen_lab_id';
+  static String notifSeenProductSampleIdKey = 'notif_seen_product_sample_id';
 
   static String cursorKey(String entityType) => 'pull_cursor_$entityType';
 

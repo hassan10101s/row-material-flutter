@@ -15,6 +15,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../../design_system/widgets/app_tooltip.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
@@ -27,9 +28,10 @@ import '../../../design_system/widgets/app_window.dart';
 import '../../../design_system/widgets/app_support.dart';
 import '../../../design_system/widgets/app_user_avatar.dart';
 import '../../auth/domain/user.dart';
+import '../../drafts/presentation/drafts_screen.dart';
 import '../../notifications/presentation/notification_bell.dart';
-import '../../sync/presentation/sync_badge.dart';
-import '../../sync/presentation/sync_status_controller.dart';
+import '../../connection/presentation/connection_badge.dart';
+import '../../connection/presentation/connection_status_controller.dart';
 
 /// The bar across the top of both experiences: menu button, language toggle,
 /// theme toggle, optional read-only chip, and the sync badge.
@@ -44,7 +46,7 @@ class ShellTopBar extends StatelessWidget {
     required this.locale,
     required this.theme,
     required this.syncStatus,
-    required this.onOpenSync,
+    required this.onRefreshData,
     this.title,
     this.onMenu,
     this.showRoleChip = true,
@@ -54,8 +56,8 @@ class ShellTopBar extends StatelessWidget {
   final User user;
   final LocaleService locale;
   final ThemeService theme;
-  final SyncStatusController syncStatus;
-  final VoidCallback onOpenSync;
+  final ConnectionStatusController syncStatus;
+  final VoidCallback onRefreshData;
   final String? title;
 
   /// Null on desktop, where the sidebar is always visible and there is nothing
@@ -96,9 +98,10 @@ class ShellTopBar extends StatelessWidget {
             SizedBox(
               width: 48,
               height: 48,
-              child: SyncBadge(
+              child: ConnectionBadge(
                 status: syncStatus.status,
-                onTap: onOpenSync,
+                onTap: () =>
+                    DraftsScreen.open(context, onRefreshData: onRefreshData),
                 compact: true,
               ),
             ),
@@ -233,9 +236,13 @@ class ShellTopBar extends StatelessWidget {
             // Mobile-only new-item bell (inspections + lab results).
             const NotificationBell(),
             const SizedBox(width: 6),
-            // The badge is the visible proof of the offline-first state:
+            // The badge is the visible proof of the server-confirmed state:
             // connection, work waiting, last exchange.
-            SyncBadge(status: syncStatus.status, onTap: onOpenSync),
+            ConnectionBadge(
+              status: syncStatus.status,
+              onTap: () =>
+                  DraftsScreen.open(context, onRefreshData: onRefreshData),
+            ),
           ],
         ),
       ),
@@ -258,7 +265,7 @@ class ShellFloatingRound extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
+    return AppTooltip(
       message: tooltip,
       child: Material(
         color: AppColors.surfaceSoft,
@@ -414,7 +421,7 @@ class ShellIdentityCard extends StatelessWidget {
     required this.user,
     required this.onLogout,
     required this.onLogoutThisDevice,
-    required this.onOpenSettings,
+    required this.onOpenAccount,
   });
 
   final User user;
@@ -424,12 +431,11 @@ class ShellIdentityCard extends StatelessWidget {
   final VoidCallback onLogout;
   final VoidCallback onLogoutThisDevice;
 
-  /// Opens the Settings screen (its account section holds name + password).
-  final VoidCallback onOpenSettings;
+  /// Opens the standalone account page, without organization settings.
+  final VoidCallback onOpenAccount;
 
-  /// Tapping the member row opens a small account sheet: the two sign-outs live
-  /// in there now (they used to be two icon buttons crowding the row), and the
-  /// gear button beside the name jumps straight to Settings.
+  /// The identity row opens the account page; its options arrow keeps the
+  /// sign-out actions available without exposing organization settings.
   Future<void> _openAccountSheet(BuildContext context) {
     final label = user.label.isNotEmpty ? user.label : user.email;
     return showAppOverlay<void>(
@@ -473,11 +479,11 @@ class ShellIdentityCard extends StatelessWidget {
           ),
           const Divider(height: 1),
           ListTile(
-            leading: const Icon(Icons.settings_outlined),
-            title: Text(AppText.t('الإعدادات', 'Settings')),
+            leading: const Icon(Icons.person_outline),
+            title: Text(AppText.t('الحساب', 'Account')),
             onTap: () {
               Navigator.of(sheetContext).pop();
-              onOpenSettings();
+              onOpenAccount();
             },
           ),
           ListTile(
@@ -522,14 +528,6 @@ class ShellIdentityCard extends StatelessWidget {
                 width: 46.r,
                 height: 46.r,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topRight,
-                    end: Alignment.bottomLeft,
-                    colors: [
-                      AppColors.primary,
-                      AppColors.primary.withValues(alpha: 0.65),
-                    ],
-                  ),
                   borderRadius: BorderRadius.circular(14.r),
                   boxShadow: [
                     BoxShadow(
@@ -538,8 +536,11 @@ class ShellIdentityCard extends StatelessWidget {
                       offset: const Offset(0, 4),
                     ),
                   ],
+                  image: const DecorationImage(
+                    image: AssetImage('assets/images/Material-Lab.png'),
+                    fit: BoxFit.cover,
+                  ),
                 ),
-                child: Icon(Icons.science, size: 24.r, color: Colors.white),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -587,12 +588,12 @@ class ShellIdentityCard extends StatelessWidget {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final narrow = constraints.maxWidth < 168;
-                // The whole row opens the account sheet (name, Settings and the
-                // two sign-outs); the gear is a shortcut straight to Settings.
+                // The identity opens the personal account. The options arrow
+                // offers sign-out without revealing administrative settings.
                 // The rail can be collapsed to roughly 90px - in that state the
                 // avatar alone is the affordance, so the name and buttons drop.
                 return InkWell(
-                  onTap: () => _openAccountSheet(context),
+                  onTap: onOpenAccount,
                   borderRadius: BorderRadius.circular(14.r),
                   child: Padding(
                     padding: const EdgeInsetsDirectional.only(
@@ -642,15 +643,23 @@ class ShellIdentityCard extends StatelessWidget {
                                 ),
                               ),
                               IconButton(
-                                tooltip: AppText.t('الإعدادات', 'Settings'),
+                                tooltip: AppText.t('الحساب', 'Account'),
                                 visualDensity: VisualDensity.compact,
-                                onPressed: onOpenSettings,
-                                icon: Icon(Icons.settings_outlined, size: 18.r),
+                                onPressed: onOpenAccount,
+                                icon: Icon(Icons.person_outline, size: 18.r),
                               ),
-                              Icon(
-                                Icons.keyboard_arrow_down,
-                                size: 18.r,
-                                color: AppColors.textMuted,
+                              IconButton(
+                                tooltip: AppText.t(
+                                  'خيارات الحساب',
+                                  'Account options',
+                                ),
+                                visualDensity: VisualDensity.compact,
+                                onPressed: () => _openAccountSheet(context),
+                                icon: Icon(
+                                  Icons.keyboard_arrow_down,
+                                  size: 18.r,
+                                  color: AppColors.textMuted,
+                                ),
                               ),
                             ],
                           ),

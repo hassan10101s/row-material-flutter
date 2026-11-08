@@ -14,6 +14,7 @@ class AppSession {
     this.displayName = '',
     this.photoUrl,
     this.organizationId = '',
+    this.organizationName = '',
     this.memberId = '',
     this.role = AppRoles.viewer,
     this.roles = const [],
@@ -21,6 +22,7 @@ class AppSession {
     this.deviceId = '',
     this.readOnlyDevice = false,
     this.signedInAt,
+    this.authenticationPolicyVersion = 0,
     this.idToken,
     this.idTokenExpiresAt,
     this.offline = false,
@@ -34,6 +36,7 @@ class AppSession {
   final String displayName;
   final String? photoUrl;
   final String organizationId;
+  final String organizationName;
   final String memberId;
   final String role;
 
@@ -47,6 +50,7 @@ class AppSession {
   final bool readOnlyDevice;
 
   final DateTime? signedInAt;
+  final int authenticationPolicyVersion;
   final String? idToken;
   final DateTime? idTokenExpiresAt;
 
@@ -62,7 +66,7 @@ class AppSession {
   final String? trialEndsAt;
 
   /// True once support manually activated the company. Permanent: such a
-  /// session must never be treated as expired.
+  /// organization must never be suspended by the trial policy. Login expiry still applies.
   final bool manuallyActivated;
 
   bool get isSignedIn => uid.isNotEmpty;
@@ -127,6 +131,17 @@ class AppSession {
   bool can(Permission permission) =>
       isActiveMember && !isOrgSuspended && permissions.contains(permission);
 
+  /// Permission to prepare a business request or a local draft. Quality
+  /// decisions are still authorized by the server on explicit submission;
+  /// preparing one must not depend on a transient cached ID token expiry.
+  bool canPrepareBusinessWrite(Permission permission, {bool online = true}) {
+    if (permission == Permission.qcApprove ||
+        permission == Permission.qcReject) {
+      return !readOnlyDevice && can(permission);
+    }
+    return canDo(permission, online: online);
+  }
+
   /// Guard used before every write (plan §9.4). [online] comes from
   /// `ConnectivityService.isOnline`.
   ///
@@ -136,7 +151,7 @@ class AppSession {
   /// The read-only-device and active-member checks above are not part of that
   /// exemption and still refuse.
   bool canDo(Permission permission, {bool online = true}) {
-    if (readOnlyDevice) return false;
+    if (readOnlyDevice && permission.writes) return false;
     if (!isActiveMember) return false;
     if (isOrgSuspended) return false;
     if (!permissions.contains(permission)) return false;
@@ -164,6 +179,7 @@ class AppSession {
     String? displayName,
     String? photoUrl,
     String? organizationId,
+    String? organizationName,
     String? memberId,
     String? role,
     List<String>? roles,
@@ -171,6 +187,7 @@ class AppSession {
     String? deviceId,
     bool? readOnlyDevice,
     DateTime? signedInAt,
+    int? authenticationPolicyVersion,
     String? idToken,
     DateTime? idTokenExpiresAt,
     bool? offline,
@@ -185,6 +202,11 @@ class AppSession {
     displayName: displayName ?? this.displayName,
     photoUrl: photoUrl ?? this.photoUrl,
     organizationId: organizationId ?? this.organizationId,
+    organizationName:
+        organizationName ??
+        (organizationId != null && organizationId != this.organizationId
+            ? ''
+            : this.organizationName),
     memberId: memberId ?? this.memberId,
     role: role ?? this.role,
     roles: roles ?? this.roles,
@@ -192,6 +214,8 @@ class AppSession {
     deviceId: deviceId ?? this.deviceId,
     readOnlyDevice: readOnlyDevice ?? this.readOnlyDevice,
     signedInAt: signedInAt ?? this.signedInAt,
+    authenticationPolicyVersion:
+        authenticationPolicyVersion ?? this.authenticationPolicyVersion,
     idToken: clearToken ? null : (idToken ?? this.idToken),
     idTokenExpiresAt: clearToken
         ? null
@@ -208,6 +232,7 @@ class AppSession {
     'displayName': displayName,
     'photoUrl': photoUrl,
     'organizationId': organizationId,
+    'organizationName': organizationName,
     'memberId': memberId,
     'role': role,
     'roles': effectiveRoles,
@@ -215,6 +240,7 @@ class AppSession {
     'deviceId': deviceId,
     'readOnlyDevice': readOnlyDevice,
     'signedInAt': signedInAt?.toIso8601String(),
+    'authenticationPolicyVersion': authenticationPolicyVersion,
     'idTokenExpiresAt': idTokenExpiresAt?.toIso8601String(),
     'organizationStatus': organizationStatus,
     'trialEndsAt': trialEndsAt,
@@ -243,6 +269,7 @@ class AppSession {
       displayName: '${json['displayName'] ?? ''}',
       photoUrl: json['photoUrl'] as String?,
       organizationId: '${json['organizationId'] ?? ''}',
+      organizationName: '${json['organizationName'] ?? ''}',
       memberId: '${json['memberId'] ?? ''}',
       role: role,
       roles: roles,
@@ -250,6 +277,8 @@ class AppSession {
       deviceId: '${json['deviceId'] ?? ''}',
       readOnlyDevice: rolesAreReadOnly(roles) || json['readOnlyDevice'] == true,
       signedInAt: _parseDate(json['signedInAt']),
+      authenticationPolicyVersion:
+          (json['authenticationPolicyVersion'] as num?)?.toInt() ?? 0,
       idToken: json['idToken'] as String?,
       idTokenExpiresAt: _parseDate(json['idTokenExpiresAt']),
       organizationStatus: '${json['organizationStatus'] ?? ''}',

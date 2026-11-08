@@ -14,11 +14,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "603169053186-at9vt5ptgvl4mp8a24ea3gulce9jpq66.apps.googleusercontent.com",
+          "client_id": "603169053186-g2ehmd70l39midkln3fk8brn7b9mjupu.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.materiallab",
-            "certificate_hash": "f3b4bf7d7f5be94d85bbbae5f1a9b828696efbeb"
+            "certificate_hash": "2abcb1ea95da3842c1e0aa36a3f31ac1e0797daa"
           }
         },
         {

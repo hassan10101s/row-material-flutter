@@ -10,8 +10,8 @@ import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/entity_registry.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/inspections/data/inspection_repo.dart';
-import 'package:material_lab/features/inspections/data/offline_first_inspection_repository.dart';
-import 'package:material_lab/features/lab/data/offline_first_lab_repository.dart';
+import 'package:material_lab/features/inspections/data/server_confirmed_inspection_repository.dart';
+import 'package:material_lab/features/lab/data/server_confirmed_lab_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 import 'package:material_lab/features/reference/data/reference_repo.dart';
 
@@ -44,6 +44,7 @@ Future<void> generateDomainWireVectors(SyncFixture fixture) async {
     'uid': session.uid,
     'role': session.rolesKey,
     'bootstrap_state': 'ready',
+      'protocol_schema': 3,
     'applied_sequence': 1,
   });
   final guard = SessionWriteGuard(source: source, isOnline: () => true);
@@ -58,7 +59,7 @@ Future<void> generateDomainWireVectors(SyncFixture fixture) async {
     source: source,
     outbox: outbox,
   );
-  final inspections = OfflineFirstInspectionRepository(
+  final inspections = ServerConfirmedInspectionRepository(
     dbHelper: fixture.helper,
     referenceRepo: ReferenceRepo(
       dbHelper: fixture.helper,
@@ -68,7 +69,7 @@ Future<void> generateDomainWireVectors(SyncFixture fixture) async {
     queue: queue,
     audit: audit,
   );
-  final lab = OfflineFirstLabRepository(
+  final lab = ServerConfirmedLabRepository(
     dbHelper: fixture.helper,
     guard: guard,
     queue: queue,
@@ -169,6 +170,6 @@ Future<void> generateDomainWireVectors(SyncFixture fixture) async {
   );
   vectors['qualityDecision']['current'] = original;
   await File(
-    'functions/test/fixtures/domain_wire_vectors.json',
+    'test/fixtures/domain_wire_vectors.json',
   ).writeAsString('${const JsonEncoder.withIndent('  ').convert(vectors)}\n');
 }

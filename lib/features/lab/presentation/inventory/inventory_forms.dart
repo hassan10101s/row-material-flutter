@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -34,11 +36,16 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
   @override
   void initState() {
     super.initState();
+    unawaited(_loadUnitSymbols());
+  }
+
+  Future<void> _loadUnitSymbols() async {
     try {
-      _repo.listUnitSymbols().then((symbols) {
-        if (mounted) setState(() => _unitSymbols = symbols);
-      });
-    } catch (_) {}
+      final symbols = await _repo.listUnitSymbols();
+      if (mounted) setState(() => _unitSymbols = symbols);
+    } catch (error) {
+      debugPrint('Inventory unit suggestions unavailable: $error');
+    }
   }
 
   late final TextEditingController _name = TextEditingController(
@@ -59,6 +66,7 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
   );
   late final TextEditingController _expiry = TextEditingController();
   bool _saving = false;
+  bool _pending = false;
   @override
   void dispose() {
     _name.dispose();
@@ -94,9 +102,15 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
       }
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pending = e is PendingOperation;
+        });
+        AppFeedback.errorFrom(context, e);
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -150,7 +164,7 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
               'Opening balance expiry',
             ),
             controller: _expiry,
-            enabled: !_saving,
+            enabled: !_saving && !_pending,
           ),
         ],
         const SizedBox(height: AppSpacing.md),
@@ -185,7 +199,7 @@ class InventoryItemDialogState extends State<InventoryItemDialog> {
         AppButton(
           label: AppStrings.save,
           loading: _saving,
-          onPressed: _saving ? null : save,
+          onPressed: _saving || _pending ? null : save,
         ),
       ],
       child: buildFields(),
@@ -210,11 +224,16 @@ class InventoryItemFormState extends State<InventoryItemForm> {
   @override
   void initState() {
     super.initState();
+    unawaited(_loadUnitSymbols());
+  }
+
+  Future<void> _loadUnitSymbols() async {
     try {
-      _repo.listUnitSymbols().then((symbols) {
-        if (mounted) setState(() => _unitSymbols = symbols);
-      });
-    } catch (_) {}
+      final symbols = await _repo.listUnitSymbols();
+      if (mounted) setState(() => _unitSymbols = symbols);
+    } catch (error) {
+      debugPrint('Inventory unit suggestions unavailable: $error');
+    }
   }
 
   late final TextEditingController _name = TextEditingController(
@@ -235,6 +254,7 @@ class InventoryItemFormState extends State<InventoryItemForm> {
   );
   late final TextEditingController _expiry = TextEditingController();
   bool _saving = false;
+  bool _pending = false;
 
   @override
   void dispose() {
@@ -248,7 +268,7 @@ class InventoryItemFormState extends State<InventoryItemForm> {
   }
 
   Future<void> save() async {
-    if (_saving) return;
+    if (_saving || _pending) return;
     setState(() => _saving = true);
     try {
       if (widget.item == null) {
@@ -272,9 +292,15 @@ class InventoryItemFormState extends State<InventoryItemForm> {
       }
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pending = e is PendingOperation;
+        });
+        AppFeedback.errorFrom(context, e);
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -326,7 +352,7 @@ class InventoryItemFormState extends State<InventoryItemForm> {
               'Opening balance expiry',
             ),
             controller: _expiry,
-            enabled: !_saving,
+            enabled: !_saving && !_pending,
           ),
         ],
         const SizedBox(height: AppSpacing.md),
@@ -365,6 +391,7 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
   final _reason = TextEditingController();
   late final TextEditingController _expiry = TextEditingController();
   bool _saving = false;
+  bool _pending = false;
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
     if (user == null) return null;
@@ -396,9 +423,15 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pending = e is PendingOperation;
+        });
+        AppFeedback.errorFrom(context, e);
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -431,7 +464,7 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
             'Expiry (required when increasing)',
           ),
           controller: _expiry,
-          enabled: !_saving,
+          enabled: !_saving && !_pending,
         ),
         const SizedBox(height: AppSpacing.md),
         AppField(label: AppText.t('السبب', 'Reason'), controller: _reason),
@@ -454,7 +487,7 @@ class InventoryAdjustDialogState extends State<InventoryAdjustDialog> {
         AppButton(
           label: AppStrings.save,
           loading: _saving,
-          onPressed: _saving ? null : save,
+          onPressed: _saving || _pending ? null : save,
         ),
       ],
       child: buildFields(),
@@ -478,6 +511,7 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
   final _reason = TextEditingController();
   late final TextEditingController _expiry = TextEditingController();
   bool _saving = false;
+  bool _pending = false;
 
   @override
   void dispose() {
@@ -488,7 +522,7 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || _pending) return;
     setState(() => _saving = true);
     try {
       final user = getIt<AuthGate>().currentUser;
@@ -508,9 +542,15 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pending = e is PendingOperation;
+        });
+        AppFeedback.errorFrom(context, e);
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -541,7 +581,7 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
             'Expiry (required when increasing)',
           ),
           controller: _expiry,
-          enabled: !_saving,
+          enabled: !_saving && !_pending,
         ),
         const SizedBox(height: AppSpacing.md),
         AppField(label: AppText.t('السبب', 'Reason'), controller: _reason),
@@ -552,7 +592,7 @@ class InventoryAdjustFormState extends State<InventoryAdjustForm> {
             label: AppText.t('حفظ', 'Save'),
             expanded: true,
             loading: _saving,
-            onPressed: _saving ? null : _save,
+            onPressed: _saving || _pending ? null : _save,
           ),
         ),
       ],
@@ -576,6 +616,7 @@ class InventoryReceiveDialogState extends State<InventoryReceiveDialog> {
   final _supplier = TextEditingController();
   final _note = TextEditingController();
   bool _saving = false;
+  bool _pending = false;
 
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
@@ -610,9 +651,15 @@ class InventoryReceiveDialogState extends State<InventoryReceiveDialog> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pending = e is PendingOperation;
+        });
+        AppFeedback.errorFrom(context, e);
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -641,7 +688,7 @@ class InventoryReceiveDialogState extends State<InventoryReceiveDialog> {
         AppDateField(
           label: AppText.t('تاريخ الصلاحية *', 'Expiry date *'),
           controller: _expiry,
-          enabled: !_saving,
+          enabled: !_saving && !_pending,
         ),
         const SizedBox(height: AppSpacing.md),
         AppField(
@@ -672,7 +719,7 @@ class InventoryReceiveDialogState extends State<InventoryReceiveDialog> {
         AppButton(
           label: AppStrings.save,
           loading: _saving,
-          onPressed: _saving ? null : save,
+          onPressed: _saving || _pending ? null : save,
         ),
       ],
       child: buildFields(),
@@ -695,6 +742,7 @@ class InventoryReceiveFormState extends State<InventoryReceiveForm> {
   final _supplier = TextEditingController();
   final _note = TextEditingController();
   bool _saving = false;
+  bool _pending = false;
 
   @override
   void dispose() {
@@ -706,7 +754,7 @@ class InventoryReceiveFormState extends State<InventoryReceiveForm> {
   }
 
   Future<void> _save() async {
-    if (_saving) return;
+    if (_saving || _pending) return;
     setState(() => _saving = true);
     try {
       final user = getIt<AuthGate>().currentUser;
@@ -727,9 +775,15 @@ class InventoryReceiveFormState extends State<InventoryReceiveForm> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) {
+        setState(() {
+          _saving = false;
+          _pending = e is PendingOperation;
+        });
+        AppFeedback.errorFrom(context, e);
+      }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -757,7 +811,7 @@ class InventoryReceiveFormState extends State<InventoryReceiveForm> {
         AppDateField(
           label: AppText.t('تاريخ الصلاحية *', 'Expiry date *'),
           controller: _expiry,
-          enabled: !_saving,
+          enabled: !_saving && !_pending,
         ),
         const SizedBox(height: AppSpacing.md),
         AppField(
@@ -776,7 +830,7 @@ class InventoryReceiveFormState extends State<InventoryReceiveForm> {
             label: AppText.t('حفظ', 'Save'),
             expanded: true,
             loading: _saving,
-            onPressed: _saving ? null : _save,
+            onPressed: _saving || _pending ? null : _save,
           ),
         ),
       ],

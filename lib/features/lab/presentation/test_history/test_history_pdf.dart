@@ -33,7 +33,7 @@ class TestHistoryPdf {
   ];
 
   static List<List<String>> rows(List<Map<String, dynamic>> source) => [
-    for (final r in source) _cells(r),
+    for (final r in source) if (r['secure_result'] != 1) _cells(r),
   ];
 
   static List<String> _cells(Map<String, dynamic> r) {
@@ -52,7 +52,7 @@ class TestHistoryPdf {
       '${r['sample_name'] ?? '-'}',
       source,
       '${r['entry_code'] ?? '-'}',
-      '${formatLabResult(r['result_text'])} $unit',
+      formatLabResultWithUnit(r['result_text'], unit),
       range,
       thRangeLabel('${r['range_state'] ?? 'none'}'),
       '${r['tested_by_name'] ?? '-'}',
@@ -65,6 +65,7 @@ class TestHistoryPdf {
     BuildContext context,
     List<Map<String, dynamic>> source,
   ) async {
+    source = source.where((r) => r['secure_result'] != 1).toList();
     if (source.isEmpty) {
       AppFeedback.info(
         context,
@@ -88,7 +89,7 @@ class TestHistoryPdf {
         documentName: doc.title,
       );
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }

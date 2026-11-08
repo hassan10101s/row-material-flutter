@@ -6,11 +6,11 @@ import 'qc_enums.dart';
 
 /// A non-conformance raised against an inspection (qc_manager/domain).
 ///
-/// A finding is never created directly by the inspector: it is raised by the
-/// submit transaction from a failing [QcResponse], which is why [inspectionId]
-/// is non-nullable and [respId] points at the answer that caused it.
+/// May be standalone, raised by a failing QC response, or linked to an
+/// individual product sample. Product links are preserved when editing.
 class QcFindingNc extends Equatable {
   final int? findingId;
+  final int? productSampleId;
   final int inspectionId;
   final int? itemId;
   final int? respId;
@@ -47,6 +47,7 @@ class QcFindingNc extends Equatable {
 
   const QcFindingNc({
     this.findingId,
+    this.productSampleId,
     required this.inspectionId,
     this.itemId,
     this.respId,
@@ -110,6 +111,7 @@ class QcFindingNc extends Equatable {
   @override
   List<Object?> get props => [
     findingId,
+    productSampleId,
     inspectionId,
     itemId,
     respId,
@@ -147,6 +149,7 @@ class QcFindingNc extends Equatable {
 
   factory QcFindingNc.fromMap(Map<String, dynamic> m) => QcFindingNc(
     findingId: (m['finding_id'] as num?)?.toInt(),
+    productSampleId: (m['product_sample_id'] as num?)?.toInt(),
     inspectionId: (m['inspection_id'] as num?)?.toInt() ?? 0,
     itemId: (m['item_id'] as num?)?.toInt(),
     respId: (m['resp_id'] as num?)?.toInt(),
@@ -184,6 +187,7 @@ class QcFindingNc extends Equatable {
 
   Map<String, dynamic> toMap({bool withId = true}) => {
     if (withId && findingId != null) 'finding_id': findingId,
+    if (productSampleId != null) 'product_sample_id': productSampleId,
     'inspection_id': inspectionId,
     if (itemId != null) 'item_id': itemId,
     if (respId != null) 'resp_id': respId,
@@ -243,6 +247,7 @@ class QcFindingNc extends Equatable {
     String? updatedBy,
   }) => QcFindingNc(
     findingId: findingId,
+    productSampleId: productSampleId,
     inspectionId: inspectionId,
     itemId: itemId,
     respId: respId,

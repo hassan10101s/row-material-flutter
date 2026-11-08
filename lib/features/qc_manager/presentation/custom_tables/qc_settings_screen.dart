@@ -1,3 +1,8 @@
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
+import '../../../../../di/service_locator.dart';
+import '../../../../../design_system/widgets/app_adaptive.dart';
+import '../../../../../design_system/widgets/app_mobile_add_layout.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -13,7 +18,7 @@ import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../../di/service_locator.dart';
+import '../../../../../design_system/widgets/app_window.dart';
 import '../../domain/qc_custom_table.dart';
 import '../../domain/qc_repositories.dart';
 import '../cubit/qc_custom_tables_cubit.dart';
@@ -28,12 +33,22 @@ import 'qc_table_records_screen.dart';
 /// creates one) and the hub refetches its defs when this closes, so the two
 /// never drift apart.
 class QcSettingsScreen extends StatelessWidget {
-  const QcSettingsScreen._();
+  const QcSettingsScreen._({this.windowed = false});
+
+  final bool windowed;
 
   static Future<void> open(BuildContext context) {
-    return Navigator.of(
+    return showAppContentSurface<void>(
       context,
-    ).push(MaterialPageRoute(builder: (_) => const QcSettingsScreen._()));
+      builder: (_, fullScreen) => fullScreen
+          ? const QcSettingsScreen._()
+          : AppWindow(
+              title: AppText.t('إعدادات الجودة', 'Quality settings'),
+              size: AppWindowSize.lg,
+              scrollBody: false,
+              child: const QcSettingsScreen._(windowed: true),
+            ),
+    );
   }
 
   @override
@@ -41,9 +56,12 @@ class QcSettingsScreen extends StatelessWidget {
     return BlocProvider<QcCustomTablesCubit>(
       create: (_) => getIt<QcCustomTablesCubit>()..load(),
       child: Scaffold(
-        appBar: AppTopAppBar(
-          title: AppText.t('إعدادات الجودة', 'Quality settings'),
-        ),
+        resizeToAvoidBottomInset: !windowed,
+        appBar: windowed
+            ? null
+            : AppTopAppBar(
+                title: AppText.t('إعدادات الجودة', 'Quality settings'),
+              ),
         body: const SafeArea(child: _SettingsBody()),
       ),
     );
@@ -119,6 +137,9 @@ class _SettingsBodyState extends State<_SettingsBody> {
 
   @override
   Widget build(BuildContext context) {
+    final canCreate =
+        getIt.isRegistered<AuthGate>() &&
+        getIt<AuthGate>().canWrite(Permission.qcWrite);
     return BlocConsumer<QcCustomTablesCubit, QcCustomTablesState>(
       listenWhen: (prev, curr) =>
           curr.error != null && curr.error != prev.error,
@@ -128,95 +149,103 @@ class _SettingsBodyState extends State<_SettingsBody> {
       },
       builder: (context, state) {
         final tables = _filtered(state.tables);
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.pageMobile),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      AppText.t(
-                        'جداول المستخدم — سجلات مخصوصة من إعدادك',
-                        'User tables — registers of your own design',
+        return AppMobileAddLayout(
+          floating: !appUsesDesktopChrome(context),
+          tooltip: AppText.t('جدول جديد', 'New table'),
+          onAdd: canCreate ? () => _create(context) : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(AppSpacing.pageMobile),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        AppText.t(
+                          'جداول المستخدم — سجلات مخصوصة من إعدادك',
+                          'User tables — registers of your own design',
+                        ),
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
-                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (canCreate && appUsesDesktopChrome(context))
+                      AppButton(
+                        small: true,
+                        label: AppText.t('جدول جديد', 'New table'),
+                        icon: Icon(Icons.add, size: 18.r),
+                        onPressed: () => _create(context),
+                      ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.pageMobile,
+                ),
+                child: DebouncedSearchField(
+                  hint: AppText.t('بحث بالاسم أو الوصف', 'Search name or...'),
+                  onChanged: (v) => setState(() => _query = v),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              if (state.loading && state.tables.isEmpty)
+                const Expanded(
+                  child: AppSkeletonList(rows: 4, lines: 2, height: 120),
+                )
+              else if (state.tables.isEmpty)
+                Expanded(
+                  child: AppEmptyState(
+                    icon: Icons.tune,
+                    title: AppText.t(
+                      'لا توجد جداول بعد — أنشئ أول جدول',
+                      'No tables yet — create the first one',
+                    ),
+                    action: !canCreate || !appUsesDesktopChrome(context)
+                        ? null
+                        : AppButton(
+                            label: AppText.t('جدول جديد', 'New table'),
+                            onPressed: () => _create(context),
+                          ),
+                  ),
+                )
+              else if (tables.isEmpty)
+                Expanded(
+                  child: AppEmptyState(
+                    icon: Icons.search_off_outlined,
+                    title: AppText.t(
+                      'لا توجد جداول مطابقة للبحث',
+                      'No tables match the search',
                     ),
                   ),
-                  AppButton(
-                    small: true,
-                    label: AppText.t('جدول جديد', 'New table'),
-                    icon: Icon(Icons.add, size: 18.r),
-                    onPressed: () => _create(context),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.pageMobile,
-              ),
-              child: DebouncedSearchField(
-                hint: AppText.t('بحث بالاسم أو الوصف', 'Search name or...'),
-                onChanged: (v) => setState(() => _query = v),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            if (state.loading && state.tables.isEmpty)
-              const Expanded(
-                child: AppSkeletonList(rows: 4, lines: 2, height: 120),
-              )
-            else if (state.tables.isEmpty)
-              Expanded(
-                child: AppEmptyState(
-                  icon: Icons.tune,
-                  title: AppText.t(
-                    'لا توجد جداول بعد — أنشئ أول جدول',
-                    'No tables yet — create the first one',
-                  ),
-                  action: AppButton(
-                    label: AppText.t('جدول جديد', 'New table'),
-                    onPressed: () => _create(context),
-                  ),
-                ),
-              )
-            else if (tables.isEmpty)
-              Expanded(
-                child: AppEmptyState(
-                  icon: Icons.search_off_outlined,
-                  title: AppText.t(
-                    'لا توجد جداول مطابقة للبحث',
-                    'No tables match the search',
-                  ),
-                ),
-              )
-            else
-              Expanded(
-                child: RefreshIndicator(
-                  onRefresh: () =>
-                      context.read<QcCustomTablesCubit>().refresh(),
-                  child: ListView.separated(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.pageMobile,
-                      vertical: AppSpacing.xs,
+                )
+              else
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: () =>
+                        context.read<QcCustomTablesCubit>().refresh(),
+                    child: ListView.separated(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.pageMobile,
+                        vertical: AppSpacing.xs,
+                      ),
+                      itemCount: tables.length,
+                      separatorBuilder: (_, _) =>
+                          const SizedBox(height: AppSpacing.sm),
+                      itemBuilder: (context, i) {
+                        final table = tables[i];
+                        return _TableCard(
+                          table: table,
+                          onOpen: () => _openRecords(context, table),
+                          onEdit: () => _edit(context, table),
+                          onDelete: () => _delete(context, table),
+                        );
+                      },
                     ),
-                    itemCount: tables.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: AppSpacing.sm),
-                    itemBuilder: (context, i) {
-                      final table = tables[i];
-                      return _TableCard(
-                        table: table,
-                        onOpen: () => _openRecords(context, table),
-                        onEdit: () => _edit(context, table),
-                        onDelete: () => _delete(context, table),
-                      );
-                    },
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         );
       },
     );
@@ -239,7 +268,9 @@ class _TableCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
+      padding: EdgeInsets.all(
+        appUsesDesktopChrome(context) ? AppSpacing.md : 8,
+      ),
       child: InkWell(
         onTap: onOpen,
         borderRadius: BorderRadius.circular(12.r),

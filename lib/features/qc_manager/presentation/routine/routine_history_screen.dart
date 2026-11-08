@@ -17,6 +17,7 @@ import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
 import '../../domain/routine_repository.dart';
 import 'routine_history_cubit.dart';
@@ -28,18 +29,29 @@ import 'routine_sheet_screen.dart';
 /// defaulting to **today's** range — each day starts empty, the same way the
 /// daily lists reset — and widening the range is one chip away.
 class RoutineHistoryScreen extends StatefulWidget {
-  const RoutineHistoryScreen({super.key});
+  const RoutineHistoryScreen({super.key, this.windowed = false});
+
+  final bool windowed;
 
   static Future<void> open(BuildContext context) {
-    return Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => BlocProvider(
+    return showAppContentSurface<void>(
+      context,
+      builder: (_, fullScreen) {
+        final screen = BlocProvider(
           create: (_) =>
               RoutineHistoryCubit(repo: getIt<RoutineListsRepository>())
                 ..load(),
-          child: const RoutineHistoryScreen(),
-        ),
-      ),
+          child: RoutineHistoryScreen(windowed: !fullScreen),
+        );
+        return fullScreen
+            ? screen
+            : AppWindow(
+                title: AppText.t('سجل الإنجاز', 'Completion history'),
+                size: AppWindowSize.lg,
+                scrollBody: false,
+                child: screen,
+              );
+      },
     );
   }
 
@@ -122,7 +134,10 @@ class _RoutineHistoryScreenState extends State<RoutineHistoryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppTopAppBar(title: AppText.t('السجل', 'History')),
+      resizeToAvoidBottomInset: !widget.windowed,
+      appBar: widget.windowed
+          ? null
+          : AppTopAppBar(title: AppText.t('السجل', 'History')),
       body: SafeArea(
         child: BlocConsumer<RoutineHistoryCubit, RoutineHistoryState>(
           listenWhen: (prev, curr) =>
@@ -174,6 +189,7 @@ class _RoutineHistoryScreenState extends State<RoutineHistoryScreen> {
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 1020),
                     child: AppAdaptiveDataView(
+                      compactMobile: true,
                       headers: ['الوقت', 'القائمة', 'البند', 'الشخص', 'ملاحظة'],
                       columnFlex: const [3, 3, 4, 2, 4],
                       loading: state.loading && state.log.isEmpty,
@@ -461,15 +477,25 @@ class _FiltersBar extends StatelessWidget {
 /// The per-sheet scorecards (list × period, progress, who) live behind one
 /// entry, since the visible surface is the flat per-item log.
 void _showSheetsWindow(BuildContext context) {
-  Navigator.of(
+  showAppContentSurface<void>(
     context,
-  ).push<void>(MaterialPageRoute<void>(builder: (_) => const _SheetsScreen()));
+    builder: (_, fullScreen) => fullScreen
+        ? const _SheetsScreen()
+        : AppWindow(
+            title: AppText.t('سجل القوائم الكامل', 'Full sheet history'),
+            size: AppWindowSize.lg,
+            scrollBody: false,
+            child: const _SheetsScreen(windowed: true),
+          ),
+  );
 }
 
 /// Full sheet history: every list × period page with its scorecard and the
 /// people who recorded on it. Tapping one opens the sheet read-only.
 class _SheetsScreen extends StatefulWidget {
-  const _SheetsScreen();
+  const _SheetsScreen({this.windowed = false});
+
+  final bool windowed;
 
   @override
   State<_SheetsScreen> createState() => _SheetsScreenState();
@@ -502,9 +528,12 @@ class _SheetsScreenState extends State<_SheetsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppTopAppBar(
-        title: AppText.t('سجل القوائم الكامل', 'Full sheet history'),
-      ),
+      resizeToAvoidBottomInset: !widget.windowed,
+      appBar: widget.windowed
+          ? null
+          : AppTopAppBar(
+              title: AppText.t('سجل القوائم الكامل', 'Full sheet history'),
+            ),
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () => _load(),

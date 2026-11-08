@@ -39,7 +39,7 @@ void main() {
     test('a viewer keeps org.read screens, read-only', () {
       final s = session();
       expect(s.permissions.contains(Permission.orgRead), isTrue);
-      expect(AppRouter.guardRoute(AppRoutes.settings, s), isNull);
+      expect(AppRouter.guardRoute(AppRoutes.settings, s), AppRoutes.dashboard);
       expect(
         AppRouter.guardRoute(AppRoutes.reference, s),
         isNull,
@@ -48,34 +48,33 @@ void main() {
       );
     });
 
-    test(
-      'the audit trail has no route of its own; audit.read gates content',
-      () {
-        // The trail lives only inside Settings (`/settings?tab=audit`): there
-        // is no standalone route to guard, so an unknown audit path falls
-        // through and `audit.read` is enforced by the settings-tab content
-        // (`AuditController.canRead`) instead.
-        expect(AppRouter.guardRoute('/audit', session()), isNull);
-        expect(
-          session().permissions.contains(Permission.auditRead),
-          isFalse,
-          reason: 'a viewer is not in the audit.read matrix',
-        );
+    test('the standalone audit route requires audit.read', () {
+      expect(AppRouter.guardRoute('/audit', session()), AppRoutes.dashboard);
+      expect(
+        session().permissions.contains(Permission.auditRead),
+        isFalse,
+        reason: 'a viewer is not in the audit.read matrix',
+      );
 
-        final admin = session(role: AppRoles.admin);
-        expect(admin.permissions.contains(Permission.auditRead), isTrue);
+      final admin = session(role: AppRoles.admin);
+      expect(admin.permissions.contains(Permission.auditRead), isTrue);
+      expect(AppRouter.guardRoute('/audit', admin), isNull);
+      expect(
+        AppRouter.guardRoute('/audit', session(role: AppRoles.qualityManager)),
+        isNull,
+      );
 
-        final qualityManager = session(role: AppRoles.qualityManager);
-        expect(
-          qualityManager.permissions.contains(Permission.auditRead),
-          isTrue,
-          reason: 'the quality manager reviews the trail',
-        );
+      final qualityManager = session(role: AppRoles.qualityManager);
+      expect(
+        qualityManager.permissions.contains(Permission.auditRead),
+        isTrue,
+        reason: 'the quality manager reviews the trail',
+      );
 
-        final lab = session(role: AppRoles.lab);
-        expect(lab.permissions.contains(Permission.auditRead), isFalse);
-      },
-    );
+      final lab = session(role: AppRoles.lab);
+      expect(lab.permissions.contains(Permission.auditRead), isTrue);
+      expect(AppRouter.guardRoute('/audit', lab), isNull);
+    });
 
     test('a viewer keeps the read-only screens', () {
       final s = session();
@@ -84,7 +83,7 @@ void main() {
         AppRoutes.inspections,
         AppRoutes.reports,
         AppRoutes.lab,
-        AppRoutes.sync,
+        AppRoutes.drafts,
       ]) {
         expect(
           AppRouter.guardRoute(path, s),
@@ -123,8 +122,8 @@ void main() {
         AppRoutes.qcSops,
       ];
 
-      // `qc.read` is not granted to every built-in role: a lab user is outside the
-      // matrix. Pin the condition the guard is actually enforcing so the routes close
+      // QC access follows the role matrix, including quality specialists and
+      // viewers. Pin the guard condition so the routes close
       // and open with the matrix, not with whatever the shell happens to show.
       for (final role in AppRoles.all) {
         final s = session(role: role);
@@ -168,7 +167,7 @@ void main() {
         AppRoutes.settings,
         AppRoutes.reference,
         AppRoutes.lab,
-        AppRoutes.sync,
+        AppRoutes.drafts,
       ]) {
         expect(
           AppRouter.guardRoute(path, s),

@@ -65,18 +65,18 @@ class LoginScreen extends StatelessWidget {
                                   width: 64.r,
                                   height: 64.r,
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.18),
                                     borderRadius: BorderRadius.circular(18.r),
                                     border: Border.all(
                                       color: Colors.white.withValues(
                                         alpha: 0.35,
                                       ),
                                     ),
-                                  ),
-                                  child: Icon(
-                                    Icons.science,
-                                    size: 32.r,
-                                    color: Colors.white,
+                                    image: const DecorationImage(
+                                      image: AssetImage(
+                                        'assets/images/Material-Lab.png',
+                                      ),
+                                      fit: BoxFit.cover,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(height: AppSpacing.md),
@@ -259,7 +259,6 @@ class _MobileLoginViewState extends State<_MobileLoginView> {
                   width: 76,
                   height: 76,
                   decoration: BoxDecoration(
-                    color: AppColors.primary,
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
@@ -268,11 +267,10 @@ class _MobileLoginViewState extends State<_MobileLoginView> {
                         offset: const Offset(0, 10),
                       ),
                     ],
-                  ),
-                  child: const Icon(
-                    Icons.science_outlined,
-                    color: Colors.white,
-                    size: 40,
+                    image: const DecorationImage(
+                      image: AssetImage('assets/images/Material-Lab.png'),
+                      fit: BoxFit.cover,
+                    ),
                   ),
                 ),
               ),

@@ -1,3 +1,4 @@
+import 'lab_unit_registry.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:sqflite/sqflite.dart';
 
@@ -8,8 +9,11 @@ import '../../../core/database/db_trace.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
+import '../../../core/utils/decimal_input.dart';
 import '../core/formula_engine.dart';
 import '../core/lab_result_format.dart';
+import '../core/measurement_fields.dart';
+import '../domain/chemical_consumption_report.dart';
 import '../domain/product_batch_repository.dart'
     show encodeBatchChemical, encodeBatchPhysical;
 
@@ -21,6 +25,32 @@ class LabRepo {
   LabRepo({required this.dbHelper});
 
   Future<Database> get _db => dbHelper.database;
+
+  Map<String, dynamic> _validatedMeasurementValues(
+    Map<String, dynamic> analysis,
+    Map<String, dynamic> values,
+  ) {
+    final result = Map<String, dynamic>.from(values);
+    for (final entry in values.entries) {
+      if (!isNumericMeasurementField(analysis, entry.key)) continue;
+      final text = normalizeDecimalInput('${entry.value ?? ''}');
+      if (text.isEmpty) {
+        result.remove(entry.key);
+        continue;
+      }
+      final number = double.tryParse(text);
+      if (number == null || !number.isFinite || number < 0) {
+        throw ValidationError(
+          AppText.t(
+            'أدخل رقمًا صحيحًا غير سالب في «${entry.key}».',
+            'Enter a valid non-negative number for "${entry.key}".',
+          ),
+        );
+      }
+      result[entry.key] = entry.value is num ? entry.value : text;
+    }
+    return result;
+  }
 
   // ── Low-level helpers ─────────────────────────────────────────
 
@@ -68,60 +98,14 @@ class LabRepo {
     return (executor ?? await _db).rawInsert(sql, args);
   }
 
-  /// Units registry: every unit string written anywhere is registered into
-  /// `lab_units` (INSERT OR IGNORE) so the Units table holds all program
-  /// units and every picker inherits from it. Never throws: a missing table
-  /// on a hand-built test database simply skips.
-  static Future<void> registerUnit(
-    DatabaseExecutor exec,
-    String? symbol,
-  ) async {
-    final s = (symbol ?? '').trim();
-    if (s.isEmpty) return;
-    try {
-      await exec.rawInsert(
-        'INSERT OR IGNORE INTO lab_units (symbol, is_active, created_at) '
-        'VALUES (?, 1, ?)',
-        [s, nowIso()],
-      );
-    } catch (_) {}
-  }
+  static Future<void> registerUnit(DatabaseExecutor exec, String? symbol) =>
+      LabUnitRegistry.registerUnit(exec, symbol);
 
-  /// A unit is acceptable when the `lab_units` registry holds it. On a
-  /// database whose registry is still empty (or a hand-built test database
-  /// without the table) the legacy hardcoded list applies as fallback, so
-  /// fresh installs and old tests keep working.
-  static Future<bool> unitAllowed(DatabaseExecutor exec, String unit) async {
-    final clean = unit.trim();
-    if (clean.isEmpty) return false;
-    try {
-      final rows = await exec.rawQuery(
-        'SELECT symbol FROM lab_units WHERE is_active = 1',
-      );
-      if (rows.isEmpty) return inventoryUnits.contains(clean);
-      return rows.any((r) => '${r['symbol']}' == clean);
-    } catch (_) {
-      return inventoryUnits.contains(clean);
-    }
-  }
+  static Future<bool> unitAllowed(DatabaseExecutor exec, String unit) =>
+      LabUnitRegistry.unitAllowed(exec, unit);
 
-  /// Registry symbols for every unit picker in the lab surfaces. Falls back
-  /// to the legacy hardcoded list when the registry is empty/missing.
-  Future<List<String>> listUnitSymbols([DatabaseExecutor? executor]) async {
-    try {
-      final rows = await (executor ?? await _db).rawQuery(
-        'SELECT symbol FROM lab_units WHERE is_active = 1 '
-        'ORDER BY symbol COLLATE NOCASE ASC',
-      );
-      final out = [
-        for (final r in rows)
-          if ('${r['symbol'] ?? ''}'.trim().isNotEmpty) '${r['symbol']}'.trim(),
-      ];
-      return out.isEmpty ? List<String>.from(inventoryUnits) : out;
-    } catch (_) {
-      return List<String>.from(inventoryUnits);
-    }
-  }
+  Future<List<String>> listUnitSymbols([DatabaseExecutor? executor]) async =>
+      LabUnitRegistry.listSymbols(executor ?? await _db);
 
   // ── Inspection resolution ─────────────────────────────────────
 
@@ -131,7 +115,8 @@ class LabRepo {
     return fetchOne(
       null,
       'SELECT id, material_id, product_id, material_name, material_code, '
-      'inspection_kind, formula_number, batch_number, inspection_date '
+      'inspection_kind, formula_number, batch_number, inspection_date, '
+      'physical_reference_json, chemical_reference_json '
       'FROM inspections WHERE entry_code = ?',
       [code],
     );
@@ -158,7 +143,7 @@ class LabRepo {
       '''
       SELECT id, entry_code, material_id, material_name, material_code,
              inspection_kind, inspection_date, supplier, truck_number, quantity,
-             decision_status, sample_names_json
+             decision_status, sample_names_json, physical_reference_json, chemical_reference_json
       FROM inspections
       WHERE material_id = ? AND inspection_kind = 'raw' AND deleted_at IS NULL
       ORDER BY inspection_date DESC, id DESC
@@ -199,7 +184,7 @@ class LabRepo {
       SELECT id, entry_code, product_id, material_name, material_code,
              inspection_kind, formula_number, batch_number,
              inspection_date, quantity,
-             decision_status, sample_names_json
+             decision_status, sample_names_json, physical_reference_json, chemical_reference_json
       FROM inspections
       WHERE product_id = ? AND inspection_kind = 'product'
         AND deleted_at IS NULL
@@ -762,9 +747,9 @@ class LabRepo {
 
   /// Returns [qty] to the lots one test drew from, newest draw first (so the
   /// oldest consumption stays intact). Lines without a lot (pre-lot rows)
-  /// resolve to the oldest lot. A remainder beyond everything the test took
-  /// (caller bug — deltas are diffs) lands on the oldest lot so the books
-  /// still balance. Returns takes in the same shape as [drawLotsFefo].
+  /// resolve to the oldest lot. Prior returns are subtracted before allocation;
+  /// a return beyond the outstanding draws is rejected instead of adding stock.
+  /// Returns takes in the same shape as [drawLotsFefo].
   Future<List<Map<String, dynamic>>> returnLotsToSource(
     DatabaseExecutor txn,
     int sampleTestId,
@@ -773,55 +758,91 @@ class LabRepo {
   ) async {
     var need = (safeFloat(qty) ?? 0.0);
     if (need <= 1e-9) return const [];
-    final lines = await fetchAll(
+    final lines = await _remainingConsumption(
       txn,
-      '''
-        SELECT l.*, c.applied_qty AS took FROM lab_consumption_log c
-        JOIN inventory_lots l ON l.id = c.lot_id
-        WHERE c.sample_test_id = ? AND c.inventory_id = ?
-          AND c.event_type = 'CONSUMPTION' AND c.lot_id IS NOT NULL
-        ORDER BY c.id DESC
-      ''',
-      [sampleTestId, inventoryId],
+      sampleTestId,
+      inventoryId: inventoryId,
     );
     final takes = <Map<String, dynamic>>[];
     for (final line in lines) {
       if (need <= 1e-9) break;
-      final lotId = (line['id'] as num).toInt();
-      final took = ((line['took'] as num?)?.toDouble() ?? 0.0);
+      final lotId = (line['source_lot_id'] as num?)?.toInt();
+      if (lotId == null) continue;
+      final took = (line['unreturned_qty'] as num).toDouble();
       if (took <= 1e-9) continue;
       final back = took < need ? took : need;
+      final lot = (await txn.query(
+        'inventory_lots',
+        where: 'id = ?',
+        whereArgs: [lotId],
+      )).single;
       await creditLot(txn, lotId, back);
       takes.add({
         'lot_id': lotId,
-        'lot_no': '${line['lot_no'] ?? ''}',
-        'lot_remote_id': '${line['remote_id'] ?? ''}',
+        'lot_no': '${lot['lot_no'] ?? ''}',
+        'lot_remote_id': '${lot['remote_id'] ?? ''}',
+        'consumption_log_id': line['id'],
         'qty': back,
-        'expired': lotIsExpired('${line['expiry_date'] ?? ''}'),
+        'expired': lotIsExpired('${lot['expiry_date'] ?? ''}'),
       });
       need -= back;
     }
     if (need > 1e-9) {
-      final oldest = await fetchOne(
-        txn,
-        'SELECT id, lot_no, COALESCE(remote_id,\'\') AS remote_id, '
-        'expiry_date FROM inventory_lots WHERE inventory_id = ? '
-        'ORDER BY received_at ASC, id ASC LIMIT 1',
-        [inventoryId],
+      throw ValidationError(
+        AppText.t(
+          'كمية المرتجع تتجاوز الاستهلاك المتبقي لهذا السجل.',
+          'The return exceeds this record’s remaining consumption.',
+        ),
       );
-      if (oldest != null) {
-        final lotId = (oldest['id'] as num).toInt();
-        await creditLot(txn, lotId, need);
-        takes.add({
-          'lot_id': lotId,
-          'lot_no': '${oldest['lot_no'] ?? ''}',
-          'lot_remote_id': '${oldest['remote_id'] ?? ''}',
-          'qty': need,
-          'expired': lotIsExpired('${oldest['expiry_date'] ?? ''}'),
-        });
-      }
     }
     return takes;
+  }
+
+  /// Remaining draws, after both linked reversals and legacy unlinked edit
+  /// returns. Allocate unlinked returns newest-first, matching the edit flow.
+  Future<List<Map<String, dynamic>>> _remainingConsumption(
+    DatabaseExecutor txn,
+    int testId, {
+    int? inventoryId,
+  }) async {
+    final rows = await fetchAll(
+      txn,
+      '''
+      SELECT c.*, COALESCE(c.lot_id, (SELECT l.id FROM inventory_lots l
+        WHERE l.inventory_id = c.inventory_id ORDER BY l.received_at, l.id LIMIT 1)) AS source_lot_id
+      FROM lab_consumption_log c WHERE c.sample_test_id = ?
+      ${inventoryId == null ? '' : 'AND c.inventory_id = ?'} ORDER BY c.id DESC
+    ''',
+      [testId, ?inventoryId],
+    );
+    final linked = <int, double>{}, unlinked = <String, double>{};
+    String lotKey(Map row) => '${row['inventory_id']}/${row['source_lot_id']}';
+    for (final row in rows) {
+      if (row['event_type'] != 'REVERSAL') continue;
+      final qty = (safeFloat(row['applied_qty'] ?? row['qty_used']) ?? 0).abs();
+      final original = (row['reversal_of_log_id'] as num?)?.toInt();
+      if (original != null) {
+        linked[original] = (linked[original] ?? 0) + qty;
+      } else {
+        final key = lotKey(row);
+        unlinked[key] = (unlinked[key] ?? 0) + qty;
+      }
+    }
+    final remaining = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      if (row['event_type'] != 'CONSUMPTION') continue;
+      var qty =
+          ((safeFloat(row['applied_qty'] ?? row['qty_used']) ?? 0) -
+                  (linked[row['id']] ?? 0))
+              .clamp(0.0, double.infinity)
+              .toDouble();
+      final key = lotKey(row);
+      final returned = (unlinked[key] ?? 0).clamp(0.0, qty).toDouble();
+      unlinked[key] = (unlinked[key] ?? 0) - returned;
+      qty -= returned;
+      if (qty > 1e-9) remaining.add({...row, 'unreturned_qty': qty});
+    }
+    return remaining;
   }
 
   /// One consumption detail row carrying its lot pointer (nullable for
@@ -876,26 +897,11 @@ class LabRepo {
     int testId, {
     required String timestamp,
   }) async {
-    final logs = await fetchAll(
-      txn,
-      '''
-        SELECT * FROM lab_consumption_log
-        WHERE sample_test_id = ? AND event_type = 'CONSUMPTION'
-      ''',
-      [testId],
-    );
+    final logs = await _remainingConsumption(txn, testId);
     var reversedCount = 0;
     for (final log in logs) {
       final logId = (log['id'] as num).toInt();
-      final alreadyReversed = await fetchOne(
-        txn,
-        'SELECT id FROM lab_consumption_log WHERE reversal_of_log_id = ?',
-        [logId],
-      );
-      if (alreadyReversed != null) continue;
-      final applied = (safeFloat(log['applied_qty'] ?? log['qty_used']) ?? 0.0)
-          .clamp(0.0, double.infinity)
-          .toDouble();
+      final applied = (log['unreturned_qty'] as num).toDouble();
       if (applied <= 0) continue;
       final inventoryId = (log['inventory_id'] as num).toInt();
       var lotId = (log['lot_id'] as num?)?.toInt();
@@ -1013,7 +1019,7 @@ class LabRepo {
     return fetchAll(null, '''
         SELECT e.*,
                (SELECT COUNT(*) FROM lab_equipment_events v
-                WHERE v.equipment_id = e.id) AS events_count
+                WHERE v.equipment_id = e.id AND v.deleted_at IS NULL) AS events_count
         FROM lab_equipment e
         WHERE e.deleted_at IS NULL
         ORDER BY e.name COLLATE NOCASE ASC
@@ -1146,7 +1152,7 @@ class LabRepo {
       null,
       '''
         SELECT * FROM lab_equipment_events
-        WHERE equipment_id = ?
+        WHERE equipment_id = ? AND deleted_at IS NULL
         ORDER BY event_date DESC, id DESC
         ''',
       [equipmentId],
@@ -1268,6 +1274,7 @@ class LabRepo {
   static Map<String, dynamic> _withProductReferences(
     Map<String, dynamic> product,
   ) {
+    effectiveSecureDefinition(product);
     product['physical_reference'] = jsonLoads(
       '${product['physical_reference_json'] ?? ''}',
     );
@@ -1440,7 +1447,7 @@ class LabRepo {
             FROM lab_product_analyses lpa
             JOIN lab_analyses a ON a.id = lpa.analysis_id
             LEFT JOIN parameters p ON p.id = a.parameter_id
-            WHERE lpa.product_id = ?
+            WHERE lpa.product_id = ? AND lpa.deleted_at IS NULL
             ORDER BY a.name ASC
             ''',
       [productId],
@@ -1458,6 +1465,7 @@ class LabRepo {
             FROM lab_product_analyses lpa
             JOIN lab_analyses a ON a.id = lpa.analysis_id
             LEFT JOIN parameters p ON p.id = a.parameter_id
+            WHERE lpa.deleted_at IS NULL
             ORDER BY lpa.product_id ASC, a.name ASC
             ''');
   }
@@ -1755,6 +1763,28 @@ class LabRepo {
       byName['${p['parameter_name']}'.trim().toLowerCase()] =
           Map<String, dynamic>.from(p);
     }
+    final deletedBounds = await db.query(
+      'material_parameter_bounds',
+      columns: ['parameter_id'],
+      where: 'material_id = ? AND deleted_at IS NOT NULL',
+      whereArgs: [materialId],
+    );
+    final deletedParameterIds = deletedBounds
+        .map((row) => row['parameter_id'])
+        .toSet();
+    for (final spec in specs ?? const <Map<String, dynamic>>[]) {
+      final type = '${spec['parameter_type'] ?? ''}'.trim();
+      final name = '${spec['parameter_name'] ?? ''}'.trim();
+      if (name.isEmpty || (type != 'physical' && type != 'chemical')) continue;
+      if (deletedParameterIds.contains(byName[name.toLowerCase()]?['id'])) {
+        throw ValidationError(
+          AppText.t(
+            'لا يمكن إعادة إضافة حد «$name» لأنه محذوف من تعريف هذه الخامة.',
+            'The "$name" limit was deleted and cannot be added back to this material definition.',
+          ),
+        );
+      }
+    }
     final analysisRows = await db.rawQuery(
       'SELECT id, name, parameter_id FROM lab_analyses',
     );
@@ -1825,7 +1855,15 @@ class LabRepo {
         'max_value = excluded.max_value, '
         'precision = excluded.precision, '
         'is_required = excluded.is_required, '
-        'active = 1',
+        'active = 1, deleted_at = NULL '
+        'WHERE material_parameter_bounds.parameter_type IS NOT excluded.parameter_type '
+        'OR material_parameter_bounds.unit IS NOT excluded.unit '
+        'OR material_parameter_bounds.min_value IS NOT excluded.min_value '
+        'OR material_parameter_bounds.max_value IS NOT excluded.max_value '
+        'OR material_parameter_bounds.precision IS NOT excluded.precision '
+        'OR material_parameter_bounds.is_required IS NOT excluded.is_required '
+        'OR material_parameter_bounds.active IS NOT 1 '
+        'OR material_parameter_bounds.deleted_at IS NOT NULL',
         [
           materialId,
           pid,
@@ -2000,10 +2038,19 @@ class LabRepo {
     if (cleanName.isEmpty) throw ValidationError(AppErrors.productNameRequired);
     final dup = await fetchOne(
       executor,
-      'SELECT id FROM lab_products WHERE name = ?',
+      'SELECT id, active FROM lab_products WHERE name = ?',
       [cleanName],
     );
-    if (dup != null) throw ValidationError(AppErrors.productExists);
+    if (dup != null) {
+      throw ValidationError(
+        dup['active'] == 0
+            ? AppText.t(
+                'هذا الاسم يخص منتجًا مؤرشفًا. استخدم اسمًا مختلفًا؛ الفحوص السابقة ما زالت مرتبطة بالمنتج الأصلي.',
+                'This name belongs to an archived product. Use a different name; existing inspections still reference the original product.',
+              )
+            : AppErrors.productExists,
+      );
+    }
     final db = executor ?? await _db;
     final productId = await executeReturnId(
       executor,
@@ -2055,6 +2102,10 @@ class LabRepo {
                       max_value = excluded.max_value,
                       unit = excluded.unit,
                       is_required = excluded.is_required
+                    WHERE lab_product_analyses.min_value IS NOT excluded.min_value
+                       OR lab_product_analyses.max_value IS NOT excluded.max_value
+                       OR lab_product_analyses.unit IS NOT excluded.unit
+                       OR lab_product_analyses.is_required IS NOT excluded.is_required
                   ''',
           [
             productId,
@@ -2084,11 +2135,6 @@ class LabRepo {
     int productId,
     Map<String, dynamic> chemicalReference,
   ) async {
-    await db.rawDelete(
-      'DELETE FROM lab_product_analyses WHERE product_id = ?',
-      [productId],
-    );
-    if (chemicalReference.isEmpty) return;
     final analyses = await db.rawQuery('''
         SELECT a.id, a.name, a.unit,
                p.parameter_name AS canonical_name
@@ -2104,6 +2150,11 @@ class LabRepo {
       final canonical = '${row['canonical_name'] ?? ''}'.trim().toLowerCase();
       if (canonical.isNotEmpty) byName.putIfAbsent(canonical, () => row);
     }
+    await _retireMissingProductRanges(db, productId, {
+      for (final key in chemicalReference.keys)
+        if (byName[key.trim().toLowerCase()] case final analysis?)
+          (analysis['id'] as num).toInt(),
+    });
     for (final entry in chemicalReference.entries) {
       final key = entry.key.trim();
       if (key.isEmpty) continue;
@@ -2124,6 +2175,10 @@ class LabRepo {
               max_value = excluded.max_value,
               unit = excluded.unit,
               is_required = excluded.is_required
+                    WHERE lab_product_analyses.min_value IS NOT excluded.min_value
+                       OR lab_product_analyses.max_value IS NOT excluded.max_value
+                       OR lab_product_analyses.unit IS NOT excluded.unit
+                       OR lab_product_analyses.is_required IS NOT excluded.is_required
           ''',
         [
           productId,
@@ -2137,12 +2192,46 @@ class LabRepo {
     }
   }
 
+  Future<void> _retireMissingProductRanges(
+    DatabaseExecutor db,
+    int productId,
+    Set<int> desired,
+  ) async {
+    final existing = await db.query(
+      'lab_product_analyses',
+      where: 'product_id = ?',
+      whereArgs: [productId],
+    );
+    for (final row in existing) {
+      final analysisId = (row['analysis_id'] as num).toInt();
+      if (desired.contains(analysisId) && row['deleted_at'] != null) {
+        throw ValidationError(
+          AppText.t(
+            'هذا الربط محذوف نهائيًا من تعريف المنتج. أنشئ تعريف منتج جديد لإعادة استخدامه.',
+            'This product analysis link is deleted. Create a new product definition to reuse it.',
+          ),
+        );
+      }
+    }
+    for (final row in existing) {
+      if (!desired.contains((row['analysis_id'] as num).toInt()) &&
+          row['deleted_at'] == null) {
+        await db.update(
+          'lab_product_analyses',
+          {'deleted_at': nowIso(), 'updated_at': nowIso()},
+          where: 'id = ?',
+          whereArgs: [row['id']],
+        );
+      }
+    }
+  }
+
   Future<Map<String, dynamic>> updateProduct(
     int productId,
     Map<String, dynamic> fields, [
     DatabaseExecutor? executor,
   ]) async {
-    await getProduct(productId, executor);
+    final existing = await getProduct(productId, executor);
     final updates = <String, Object?>{};
     for (final key in ['name', 'category', 'description']) {
       if (fields.containsKey(key)) {
@@ -2160,6 +2249,7 @@ class LabRepo {
       );
       if (dup != null) throw ValidationError(AppErrors.productExists);
     }
+    updates.removeWhere((key, value) => existing[key] == value);
     if (updates.isNotEmpty) {
       final sets = updates.keys.map((key) => '$key = ?').join(', ');
       final params = <Object?>[...updates.values, productId];
@@ -2184,20 +2274,24 @@ class LabRepo {
           ref is Map ? Map<String, dynamic>.from(ref) : {},
         );
       }
-      final sets = refUpdates.keys.map((key) => '$key = ?').join(', ');
-      final params = <Object?>[...refUpdates.values, productId];
-      await execute(
-        executor,
-        'UPDATE lab_products SET $sets WHERE id = ?',
-        params,
-      );
+      refUpdates.removeWhere((key, value) => existing[key] == value);
+      if (refUpdates.isNotEmpty) {
+        final sets = refUpdates.keys.map((key) => '$key = ?').join(', ');
+        final params = <Object?>[...refUpdates.values, productId];
+        await execute(
+          executor,
+          'UPDATE lab_products SET $sets WHERE id = ?',
+          params,
+        );
+      }
     }
     if (fields.containsKey('ranges')) {
-      await execute(
-        executor,
-        'DELETE FROM lab_product_analyses WHERE product_id = ?',
-        [productId],
-      );
+      await _retireMissingProductRanges(executor ?? await _db, productId, {
+        for (final item in (fields['ranges'] as List? ?? []))
+          if (int.tryParse('${(item as Map)['analysis_id'] ?? 0}')
+              case final id? when id > 0)
+            id,
+      });
       for (final item in (fields['ranges'] as List? ?? [])) {
         final m = item as Map<String, dynamic>;
         final analysisId = int.tryParse('${m['analysis_id'] ?? 0}') ?? 0;
@@ -2218,6 +2312,15 @@ class LabRepo {
                     INSERT INTO lab_product_analyses (
                         product_id, analysis_id, min_value, max_value, unit, is_required
                     ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(product_id, analysis_id) DO UPDATE SET
+                        min_value = excluded.min_value,
+                        max_value = excluded.max_value,
+                        unit = excluded.unit,
+                        is_required = excluded.is_required
+                    WHERE lab_product_analyses.min_value IS NOT excluded.min_value
+                       OR lab_product_analyses.max_value IS NOT excluded.max_value
+                       OR lab_product_analyses.unit IS NOT excluded.unit
+                       OR lab_product_analyses.is_required IS NOT excluded.is_required
                     ''',
           [
             productId,
@@ -2410,10 +2513,75 @@ class LabRepo {
       for (final link in links) {
         link['list_values'] = jsonLoadsList('${link['list_values'] ?? ''}');
       }
-      analysis['field_chemical_links'] = links;
+      analysis['field_chemical_links'] = mergeAnalysisFieldConfigurations(
+        analysis,
+        links,
+      );
       out.add(analysis);
     }
+    await _applyChemicalDefinitions(out, executor);
     return out;
+  }
+
+  /// Packed definitions use global inventory identities; local numeric ids
+  /// are resolved on each device, never copied from the originating device.
+  Future<void> _applyChemicalDefinitions(
+    Iterable<Map<String, dynamic>> analyses,
+    DatabaseExecutor? executor,
+  ) async {
+    final packed = analyses
+        .where(
+          (a) =>
+              a['formula'] is Map &&
+              (a['formula'] as Map)['chemical_definitions'] is List,
+        )
+        .toList();
+    if (packed.isEmpty) return;
+    final keys = <String>{
+      for (final a in packed)
+        for (final d in (a['formula'] as Map)['chemical_definitions'] as List)
+          '${(d as Map)['inventoryId']}',
+    };
+    final inventory = keys.isEmpty
+        ? <Map<String, dynamic>>[]
+        : await fetchAll(
+            executor,
+            '''SELECT inv.*, ids.entity_id AS shared_id FROM lab_inventory inv
+         JOIN central_entity_identities ids ON ids.entity_type = 'inventoryItem'
+           AND ids.local_ref = inv.id
+         WHERE ids.entity_id IN (${List.filled(keys.length, '?').join(',')})''',
+            keys.toList(),
+          );
+    final byKey = {for (final r in inventory) '${r['shared_id']}': r};
+    for (final a in packed) {
+      final items = <Map<String, dynamic>>[];
+      final links = <Map<String, dynamic>>[];
+      for (final raw in (a['formula'] as Map)['chemical_definitions'] as List) {
+        final d = raw as Map;
+        final stock = byKey['${d['inventoryId']}'];
+        if (stock == null) {
+          throw const ValidationError(
+            'بيانات كيماويات التحليل غير مكتملة؛ حدّث المخزون أولًا.',
+          );
+        }
+        final row = <String, dynamic>{
+          'analysis_id': a['id'],
+          'inventory_id': stock['id'],
+          'inventory_name': stock['name'],
+          'inventory_category': stock['category'],
+          'inventory_unit': stock['unit'],
+          'current_qty': stock['current_qty'],
+          'unit': d['unit'],
+        };
+        if (d['kind'] == 'fixed') {
+          items.add({...row, 'qty_per_sample': d['quantity']});
+        } else {
+          links.add({...row, 'kind': 'link', 'dynamic_field': d['field']});
+        }
+      }
+      a['items'] = items;
+      a['field_chemical_links'] = mergeAnalysisFieldConfigurations(a, links);
+    }
   }
 
   Future<List<Map<String, dynamic>>> getFieldChemicalLinks(
@@ -2434,7 +2602,22 @@ class LabRepo {
     for (final link in links) {
       link['list_values'] = jsonLoadsList('${link['list_values'] ?? ''}');
     }
-    return links;
+    final raw = await fetchOne(
+      executor,
+      'SELECT id, formula_json FROM lab_analyses WHERE id = ?',
+      [analysisId],
+    );
+    if (raw == null) return links;
+    final analysis = <String, dynamic>{
+      'id': analysisId,
+      'formula': loadFormula('${raw['formula_json'] ?? '{}'}'),
+      'field_chemical_links': links,
+    };
+    await _applyChemicalDefinitions([analysis], executor);
+    return mergeAnalysisFieldConfigurations(
+      analysis,
+      (analysis['field_chemical_links'] as List).cast<Map<String, dynamic>>(),
+    );
   }
 
   Future<void> saveFieldChemicalLinks(
@@ -2508,7 +2691,7 @@ class LabRepo {
     int analysisId, [
     DatabaseExecutor? executor,
   ]) async {
-    return fetchAll(
+    final items = await fetchAll(
       executor,
       '''
             SELECT 
@@ -2521,6 +2704,18 @@ class LabRepo {
             ''',
       [analysisId],
     );
+    final raw = await fetchOne(
+      executor,
+      'SELECT formula_json FROM lab_analyses WHERE id = ?',
+      [analysisId],
+    );
+    final analysis = <String, dynamic>{
+      'id': analysisId,
+      'items': items,
+      'formula': loadFormula('${raw?['formula_json'] ?? '{}'}'),
+    };
+    await _applyChemicalDefinitions([analysis], executor);
+    return (analysis['items'] as List).cast<Map<String, dynamic>>();
   }
 
   Future<Map<String, dynamic>> createAnalysis({
@@ -2633,7 +2828,7 @@ class LabRepo {
     List<Map<String, dynamic>>? fieldChemicalLinks,
     DatabaseExecutor? executor,
   }) async {
-    await getAnalysis(analysisId, executor);
+    final existingAnalysis = await getAnalysis(analysisId, executor);
     if (clearParameter) {
       // Manual mode: drop the reference link and keep the hand-typed name.
       final clean = (name ?? '').trim();
@@ -2723,6 +2918,17 @@ class LabRepo {
     }
     if (formula != null) {
       final formulaData = normalizeFormulaValue(formula);
+      final storedFormula = existingAnalysis['formula'];
+      if (!formulaData.containsKey('field_configs') &&
+          storedFormula is Map &&
+          storedFormula.containsKey('field_configs')) {
+        formulaData['field_configs'] = storedFormula['field_configs'];
+      }
+      if (storedFormula is Map &&
+          storedFormula.containsKey('chemical_definitions')) {
+        formulaData['chemical_definitions'] =
+            storedFormula['chemical_definitions'];
+      }
       if ('${formulaData['expression'] ?? ''}'.trim().isNotEmpty) {
         validateFormula('${formulaData['expression']}');
         resolveConstants(
@@ -2739,19 +2945,36 @@ class LabRepo {
       );
     }
     if (items != null) {
-      await execute(
-        executor,
-        'DELETE FROM lab_analysis_items WHERE analysis_id = ?',
-        [analysisId],
-      );
       final db = executor ?? await _db;
+      final before = await db.query(
+        'lab_analysis_items',
+        where: 'analysis_id = ?',
+        whereArgs: [analysisId],
+      );
+      final byInventory = {
+        for (final row in before) (row['inventory_id'] as num).toInt(): row,
+      };
+      final retained = <int>{};
       for (final item in items) {
         final inventoryId = int.tryParse('${item['inventory_id'] ?? 0}') ?? 0;
-        if (inventoryId == 0) continue;
+        if (inventoryId == 0 || !retained.add(inventoryId)) continue;
         final qtyPerSample = safeFloat(item['qty_per_sample']);
         final itemUnit = '${item['unit'] ?? ''}'.trim();
         await _checkConsumedUnit(executor, inventoryId, itemUnit);
         await registerUnit(db, itemUnit);
+        final old = byInventory[inventoryId];
+        if (old != null) {
+          if (old['qty_per_sample'] != qtyPerSample ||
+              old['unit'] != itemUnit) {
+            await db.update(
+              'lab_analysis_items',
+              {'qty_per_sample': qtyPerSample, 'unit': itemUnit},
+              where: 'id = ?',
+              whereArgs: [old['id']],
+            );
+          }
+          continue;
+        }
         await execute(
           executor,
           '''
@@ -2760,6 +2983,15 @@ class LabRepo {
                     ''',
           [analysisId, inventoryId, qtyPerSample, itemUnit],
         );
+      }
+      for (final old in before) {
+        if (!retained.contains((old['inventory_id'] as num).toInt())) {
+          await db.delete(
+            'lab_analysis_items',
+            where: 'id = ?',
+            whereArgs: [old['id']],
+          );
+        }
       }
     }
     if (fieldChemicalLinks != null) {
@@ -2784,7 +3016,7 @@ class LabRepo {
   Future<List<Map<String, dynamic>>> listGlobalConstants() async {
     return fetchAll(
       null,
-      'SELECT * FROM lab_constants WHERE is_global = 1 ORDER BY name ASC',
+      'SELECT * FROM lab_constants WHERE is_global = 1 AND deleted_at IS NULL ORDER BY name ASC',
     );
   }
 
@@ -3128,7 +3360,7 @@ class LabRepo {
 
   // ── Sample tests ──────────────────────────────────────────────
 
-  /// [exec] lets the offline-first facade (P7.3) run the very same SQL inside
+  /// [exec] lets the server-confirmed facade (P7.3) run the very same SQL inside
   /// the transaction that also writes `sync_queue` and `audit_logs`; when it is
   /// null this method owns its transaction, exactly as before.
   Future<Map<String, dynamic>> runSampleTest({
@@ -3239,11 +3471,16 @@ class LabRepo {
         throw ValidationError(AppErrors.sampleAndSourceRequired);
       }
 
-      final safeDynamics = dynamicValues ?? {};
+      final safeDynamics = _validatedMeasurementValues(
+        analysis,
+        dynamicValues ?? {},
+      );
+      final failed = isFailedLabResult(resultText);
+      if (failed) resultText = labFailureResult;
       final formulaData = _mapOf(analysis['formula']);
       final formulaExpr = '${formulaData['expression'] ?? ''}'.trim();
       Map<String, dynamic>? computed;
-      if (formulaExpr.isNotEmpty && !manualResult) {
+      if (formulaExpr.isNotEmpty && !manualResult && !failed) {
         final values = <String, Object?>{};
         for (final item in analysis['items'] as List? ?? []) {
           final m = item as Map<String, dynamic>;
@@ -3478,10 +3715,10 @@ class LabRepo {
       }
 
       Map<String, dynamic>? rangeCheck;
-      if (sourceType == 'product' && resolvedSourceRefId != null) {
+      if (!failed && sourceType == 'product' && resolvedSourceRefId != null) {
         final ranges = await fetchAll(
           txn,
-          'SELECT lpa.* FROM lab_product_analyses lpa WHERE lpa.product_id = ?',
+          'SELECT lpa.* FROM lab_product_analyses lpa WHERE lpa.product_id = ? AND lpa.deleted_at IS NULL',
           [resolvedSourceRefId],
         );
         for (final row in ranges) {
@@ -3501,7 +3738,9 @@ class LabRepo {
             break;
           }
         }
-      } else if (sourceType == 'raw_material' && resolvedSourceRefId != null) {
+      } else if (!failed &&
+          sourceType == 'raw_material' &&
+          resolvedSourceRefId != null) {
         final paramLink = await fetchOne(
           txn,
           'SELECT id, parameter_id FROM lab_analyses WHERE id = ?',
@@ -3599,6 +3838,11 @@ class LabRepo {
     for (final link in analysis['field_chemical_links'] as List) {
       link['list_values'] = jsonLoadsList('${link['list_values'] ?? ''}');
     }
+    analysis['field_chemical_links'] = mergeAnalysisFieldConfigurations(
+      analysis,
+      (analysis['field_chemical_links'] as List).cast<Map<String, dynamic>>(),
+    );
+    await _applyChemicalDefinitions([analysis], txn);
     return analysis;
   }
 
@@ -3673,7 +3917,7 @@ class LabRepo {
     final db = executor ?? await _db;
     final existing = await fetchOne(
       db,
-      'SELECT * FROM lab_sample_tests WHERE id = ?',
+      'SELECT * FROM lab_sample_tests WHERE id = ? AND deleted_at IS NULL',
       [testId],
     );
     if (existing == null) throw NotFoundError(AppErrors.testNotFound);
@@ -3713,6 +3957,12 @@ class LabRepo {
       );
     }
     if (dynamicValues != null) {
+      try {
+        final analysis = await getAnalysis(existing['analysis_id'] as int, db);
+        dynamicValues = _validatedMeasurementValues(analysis, dynamicValues);
+      } on NotFoundError {
+        // Legacy textual corrections remain possible if the definition is gone.
+      }
       patch['dynamic_values_json'] = jsonDumps(dynamicValues);
     }
     if (entryCode != null) {
@@ -3778,8 +4028,24 @@ class LabRepo {
     // saves. Anything else (shortage, driver failure) aborts the edit.
     try {
       final oldDynamics = jsonLoads('${existing['dynamic_values_json'] ?? ''}');
-      final oldMap = await worksheetConsumptionMap(analysis, oldDynamics, null);
-      final newMap = await worksheetConsumptionMap(analysis, newDynamics, null);
+      // An edit is captured inside the authoring transaction. Loading through
+      // the database connection here would wait for this same transaction,
+      // deadlocking the edit and every queued cache/sync read behind it.
+      final inventoryMap = await _consumptionInventoryMap(
+        analysis,
+        oldDynamics,
+        executor: db,
+      );
+      final oldMap = await worksheetConsumptionMap(
+        analysis,
+        oldDynamics,
+        inventoryMap,
+      );
+      final newMap = await worksheetConsumptionMap(
+        analysis,
+        newDynamics,
+        inventoryMap,
+      );
       final need = <int, double>{};
       for (final id in <int>{...oldMap.keys, ...newMap.keys}) {
         final delta = (newMap[id] ?? 0.0) - (oldMap[id] ?? 0.0);
@@ -3892,8 +4158,8 @@ class LabRepo {
   Future<List<Map<String, dynamic>>> listSampleTestsForEntryCode(
     String entryCode,
   ) async {
-    final code = entryCode.trim();
-    if (code.isEmpty) return [];
+    final code = entryCode;
+    if (code.trim().isEmpty) return [];
     return fetchAll(
       null,
       '''
@@ -3903,7 +4169,7 @@ class LabRepo {
       FROM lab_sample_tests t
       JOIN lab_analyses a ON a.id = t.analysis_id
       LEFT JOIN parameters p ON p.id = a.parameter_id
-      WHERE t.entry_code = ? AND t.deleted_at IS NULL
+      WHERE t.entry_code = ? AND t.deleted_at IS NULL AND COALESCE(t.secure_result, 0) = 0
         AND (p.parameter_type = 'chemical' OR a.parameter_id IS NULL)
       ORDER BY t.tested_at DESC, t.id DESC
       ''',
@@ -3959,6 +4225,15 @@ class LabRepo {
 
   void _applyRangeToTest(Map<String, dynamic> test, Map<String, Object?>? rng) {
     final resultText = '${test['result_text'] ?? ''}'.trim();
+    if (isFailedLabResult(resultText)) {
+      test['value'] = null;
+      test['failed'] = true;
+      test['min'] = rng?['min'];
+      test['max'] = rng?['max'];
+      test['range_unit'] = '${rng?['unit'] ?? test['analysis_unit'] ?? '%'}';
+      test['range_state'] = 'failed';
+      return;
+    }
     if (rng != null) {
       final minimum = _numOf(rng['min']);
       final maximum = _numOf(rng['max']);
@@ -4265,6 +4540,56 @@ class LabRepo {
             ''');
   }
 
+  Future<ChemicalConsumptionReport> chemicalConsumptionReport({
+    required ConsumptionPeriod period,
+    int? inventoryId,
+  }) async {
+    final db = await dbHelper.readDatabase;
+    // Legacy wall-clock timestamps have no zone. Offset-aware timestamps
+    // arriving from another device are converted to local calendar time.
+    const localTimestamp =
+        "CASE WHEN substr(lc.created_at, -1) IN ('Z','z') "
+        "OR (length(lc.created_at) >= 20 AND substr(lc.created_at, -6, 1) IN ('+','-')) "
+        "THEN datetime(lc.created_at, 'localtime') ELSE datetime(lc.created_at) END";
+    final rows = await db.rawQuery(
+      '''
+      SELECT i.id, i.name, i.unit,
+        COALESCE(SUM(CASE WHEN lc.event_type = 'CONSUMPTION'
+          THEN ABS(COALESCE(lc.applied_qty, lc.qty_used, 0)) ELSE 0 END), 0) AS consumed,
+        COALESCE(SUM(CASE WHEN lc.event_type = 'REVERSAL'
+          THEN ABS(COALESCE(lc.applied_qty, lc.qty_used, 0)) ELSE 0 END), 0) AS returned
+      FROM lab_inventory i
+      LEFT JOIN lab_consumption_log lc ON lc.inventory_id = i.id
+        AND lc.deleted_at IS NULL
+        AND lc.event_type IN ('CONSUMPTION', 'REVERSAL')
+        AND ($localTimestamp) >= datetime(?)
+        AND ($localTimestamp) < datetime(?)
+      GROUP BY i.id, i.name, i.unit
+      HAVING i.deleted_at IS NULL OR COUNT(lc.id) > 0 OR i.id = ?
+      ORDER BY i.name COLLATE NOCASE, i.id
+    ''',
+      [
+        period.from.toIso8601String(),
+        period.exclusiveEnd.toIso8601String(),
+        inventoryId,
+      ],
+    );
+    return ChemicalConsumptionReport(
+      period: period,
+      inventoryId: inventoryId,
+      chemicals: [
+        for (final row in rows)
+          ChemicalConsumptionRow(
+            inventoryId: (row['id'] as num).toInt(),
+            name: '${row['name'] ?? ''}',
+            unit: '${row['unit'] ?? ''}',
+            consumed: (row['consumed'] as num).toDouble(),
+            returned: (row['returned'] as num).toDouble(),
+          ),
+      ],
+    );
+  }
+
   Future<List<Map<String, dynamic>>> listStockAdjustments({
     int limit = 500,
   }) async {
@@ -4386,7 +4711,7 @@ class LabRepo {
       SELECT t.id, t.source_type, t.source_ref_id, t.analysis_id,
              t.result_text, t.tested_at
       FROM lab_sample_tests t
-      ${cutoffKey == null ? '' : 'WHERE t.tested_at >= ?'}
+      WHERE t.deleted_at IS NULL AND COALESCE(t.secure_result, 0) = 0 ${cutoffKey == null ? '' : 'AND t.tested_at >= ?'}
       ''', cutoffKey == null ? const <Object?>[] : <Object?>[cutoffKey]);
     await buildRangesCache();
     return [
@@ -4492,7 +4817,7 @@ class LabRepo {
                 t.*, a.name AS analysis_name, a.unit AS analysis_unit
             FROM lab_sample_tests t
             JOIN lab_analyses a ON a.id = t.analysis_id
-            WHERE t.analysis_id = ? AND t.source_type = ? AND t.source_ref_id = ?
+            WHERE t.deleted_at IS NULL AND t.analysis_id = ? AND t.source_type = ? AND t.source_ref_id = ?
             ORDER BY t.tested_at DESC, t.id DESC
             ''',
       [analysisId, sourceType, sourceRefId],
@@ -4502,10 +4827,15 @@ class LabRepo {
   Future<Map<String, dynamic>> injectLabTests(
     Map<String, dynamic> inspection,
   ) async {
-    final entryCode = '${inspection['entry_code'] ?? ''}'.trim();
-    final materialName = '${inspection['material_name'] ?? ''}'.trim();
-    final inspectionDate = '${inspection['inspection_date'] ?? ''}'.trim();
-    if (entryCode.isNotEmpty) {
+    final entryCode = inspection['entry_code'] is String
+        ? inspection['entry_code'] as String
+        : '';
+    // A laboratory result belongs to this report only through its explicit
+    // inspection code. Material identity/name and test date cannot identify
+    // a receipt: several receipts of the same material can share a day.
+    // Always replace previously enriched data, including when no link exists.
+    inspection['lab_tests'] = <Map<String, dynamic>>[];
+    if (entryCode.trim().isNotEmpty) {
       // `entry_code` is UNIQUE across raw and product inspections, so it
       // identifies the record regardless of kind.
       final rows = await fetchAll(
@@ -4515,44 +4845,15 @@ class LabRepo {
                     t.*, a.name AS analysis_name, a.unit AS analysis_unit, a.reference AS analysis_reference
                 FROM lab_sample_tests t
                 JOIN lab_analyses a ON a.id = t.analysis_id
-                WHERE t.entry_code = ? AND t.deleted_at IS NULL
+                WHERE t.entry_code = ? AND t.deleted_at IS NULL AND COALESCE(t.secure_result, 0) = 0
                 ORDER BY t.tested_at DESC, t.id DESC
                 ''',
         [entryCode],
       );
-      final tests = [for (final r in rows) Map<String, dynamic>.from(r)];
-      if (tests.isNotEmpty) {
-        inspection['lab_tests'] = tests;
-        return inspection;
-      }
+      inspection['lab_tests'] = [
+        for (final r in rows) Map<String, dynamic>.from(r),
+      ];
     }
-    if (materialName.isEmpty) {
-      inspection['lab_tests'] = <Map<String, dynamic>>[];
-      return inspection;
-    }
-    final params = <Object?>[materialName];
-    var query = '''
-            SELECT
-                t.*, a.name AS analysis_name, a.unit AS analysis_unit, a.reference AS analysis_reference
-            FROM lab_sample_tests t
-            JOIN lab_analyses a ON a.id = t.analysis_id
-            WHERE t.deleted_at IS NULL AND t.source_type = 'raw_material'
-              AND t.source_name = ?
-        ''';
-    if (inspectionDate.isNotEmpty) {
-      query += ' AND date(t.tested_at) = ?';
-      params.add(
-        inspectionDate.substring(
-          0,
-          inspectionDate.length > 10 ? 10 : inspectionDate.length,
-        ),
-      );
-    }
-    query += ' ORDER BY t.tested_at DESC, t.id DESC';
-    final rows = await fetchAll(null, query, params);
-    inspection['lab_tests'] = [
-      for (final r in rows) Map<String, dynamic>.from(r),
-    ];
     return inspection;
   }
 
@@ -4605,8 +4906,9 @@ class LabRepo {
   /// links) in one query. Raises the same error the per-row fallback raised.
   Future<Map<int, Map<String, dynamic>>> _consumptionInventoryMap(
     Map<String, dynamic> analysis,
-    Map<String, dynamic>? dynamicValues,
-  ) async {
+    Map<String, dynamic>? dynamicValues, {
+    DatabaseExecutor? executor,
+  }) async {
     final ids = <int>{};
     for (final item in analysis['items'] as List? ?? []) {
       ids.add(int.parse('${(item as Map<String, dynamic>)['inventory_id']}'));
@@ -4617,7 +4919,7 @@ class LabRepo {
       if (id != 0) ids.add(id);
     }
     if (ids.isEmpty) return {};
-    return loadInventoryMap(null, ids);
+    return loadInventoryMap(executor, ids);
   }
 
   /// Map-backed [inventoryForConsumption]; the map is pre-resolved, so this
@@ -4745,11 +5047,14 @@ class LabRepo {
           sampleTestId: sampleTestId,
           inventoryId: inventoryId,
           qtyUsed: isReversal ? -takeQty : takeQty,
-          requestedQty: requestedQty,
+          requestedQty: takeQty + (i == takes.length - 1 ? shortfallQty : 0.0),
           appliedQty: takeQty,
           // The unmet tail is recorded once, on the last lot line.
           shortfallQty: i == takes.length - 1 ? shortfallQty : 0.0,
           eventType: isReversal ? 'REVERSAL' : 'CONSUMPTION',
+          reversalOfLogId: isReversal
+              ? (take['consumption_log_id'] as num?)?.toInt()
+              : null,
           lotId: (take['lot_id'] as num?)?.toInt(),
           lotNo: '${take['lot_no'] ?? ''}',
           lotRemoteId: '${take['lot_remote_id'] ?? ''}',
@@ -4864,9 +5169,12 @@ class LabRepo {
     }
     for (final id in ids) {
       analyses[id]!['items'] = itemsByAnalysis[id] ?? <Map<String, dynamic>>[];
-      analyses[id]!['field_chemical_links'] =
-          linksByAnalysis[id] ?? <Map<String, dynamic>>[];
+      analyses[id]!['field_chemical_links'] = mergeAnalysisFieldConfigurations(
+        analyses[id]!,
+        linksByAnalysis[id] ?? <Map<String, dynamic>>[],
+      );
     }
+    await _applyChemicalDefinitions(analyses.values, txn);
     return analyses;
   }
 
@@ -4905,7 +5213,7 @@ class LabRepo {
     final qmarks = List.filled(rowIds.length, '?').join(',');
     final testRows = await exec.rawQuery('''
             SELECT * FROM lab_sample_tests
-            WHERE worksheet_row_id IN ($qmarks)
+            WHERE deleted_at IS NULL AND worksheet_row_id IN ($qmarks)
             ORDER BY worksheet_row_id ASC, analysis_id ASC
             ''', rowIds);
     final testsByRow = <int, List<Map<String, dynamic>>>{};
@@ -4969,7 +5277,7 @@ class LabRepo {
     return _serializeWorksheet(null);
   }
 
-  /// [exec] lets the offline-first facade (P7.3) run the very same SQL inside
+  /// [exec] lets the server-confirmed facade (P7.3) run the very same SQL inside
   /// the transaction that also writes `sync_queue` and `audit_logs`; when it is
   /// null this method owns its transaction, exactly as before.
   Future<Map<String, dynamic>> saveWorksheet(
@@ -5062,7 +5370,7 @@ class LabRepo {
           for (final w in wsRows) (w['id'] as num).toInt(),
         ]);
         final testRows = await txn.rawQuery(
-          'SELECT * FROM lab_sample_tests WHERE worksheet_row_id IN '
+          'SELECT * FROM lab_sample_tests WHERE deleted_at IS NULL AND worksheet_row_id IN '
           '($placeholders)',
           ids,
         );
@@ -5489,11 +5797,19 @@ class LabRepo {
     String reason = '',
     DatabaseExecutor? executor,
   }) async {
+    if (status.trim() == 'NON_CONFORMANCE') {
+      throw ValidationError(
+        AppText.t(
+          'احفظ نموذج عدم المطابقة المرتبط أولًا.',
+          'Save the linked non-conformance form first.',
+        ),
+      );
+    }
     Future<void> update(DatabaseExecutor exec) async {
       await getBatchSample(sampleId, exec);
       await exec.rawUpdate(
         'UPDATE product_batch_samples SET decision_status = ?, '
-        'decision_reason = ?, updated_at = ? WHERE id = ?',
+        "decision_reason = ?, non_conformance_remote_id = '', updated_at = ? WHERE id = ?",
         [status.trim(), reason.trim(), nowIso(), sampleId],
       );
     }
@@ -5546,7 +5862,7 @@ class LabRepo {
     );
     final rows = await fetchAll(
       null,
-      'SELECT id FROM lab_sample_tests WHERE source_type = ? AND '
+      'SELECT id FROM lab_sample_tests WHERE deleted_at IS NULL AND source_type = ? AND '
       'source_ref_id = ? AND entry_code = ?',
       ['product', sampleId, '${batch?['entry_code'] ?? ''}'],
     );
@@ -5556,7 +5872,7 @@ class LabRepo {
   /// One sample's analysis results with per-row tester attribution
   /// (بواسطة من) — the "table inside the report" for that sample.
   Future<List<Map<String, dynamic>>> listSampleResults(int sampleId) async {
-    await getBatchSample(sampleId);
+    final sample = await getBatchSample(sampleId);
     return fetchAll(
       null,
       '''
@@ -5568,12 +5884,14 @@ class LabRepo {
              ) AS tested_by_name
       FROM lab_sample_tests t
       JOIN lab_analyses a ON a.id = t.analysis_id
+      JOIN inspections batch ON batch.id = ? AND batch.entry_code = t.entry_code
       LEFT JOIN users ut ON ut.id = t.tested_by OR ut.uid = t.tested_by
       LEFT JOIN users uc ON uc.id = t.created_by OR uc.uid = t.created_by
-      WHERE t.source_type = 'product' AND t.source_ref_id = ?
+      WHERE t.deleted_at IS NULL AND COALESCE(t.secure_result, 0) = 0
+        AND t.source_type = 'product' AND t.source_ref_id = ?
       ORDER BY t.tested_at DESC, t.id DESC
       ''',
-      [sampleId],
+      [sample['batch_id'], sampleId],
     );
   }
 }

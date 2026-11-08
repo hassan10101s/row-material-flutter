@@ -4,6 +4,7 @@ import '../../features/organizations/data/member_write_guard.dart';
 import 'entity_registry.dart';
 import 'sync_queue.dart';
 import 'sync_write.dart';
+import '../database/business_transaction.dart';
 
 /// Reuses the business transaction: an outbox failure must roll back the edit
 /// so a successful save always means the change can reach the other devices.
@@ -15,6 +16,7 @@ Future<void> queueSharedRows(
   String? where,
   List<Object?>? whereArgs,
   bool onlyUnsynced = false,
+  bool onlyChangedInOperation = false,
 }) async {
   final entity = SyncEntity.byType(type)!;
   if (entity.permission != null && !guard.allows(entity.permission!)) {
@@ -27,7 +29,11 @@ Future<void> queueSharedRows(
         : where,
     whereArgs: whereArgs,
   );
+  final changed = onlyChangedInOperation
+      ? await BusinessAuthoringContext.changedRows(txn, type)
+      : null;
   for (final raw in rows) {
+    if (changed != null && !changed.contains(raw[entity.pkColumn])) continue;
     final row = Map<String, dynamic>.from(raw);
     if ('${row['remote_id'] ?? ''}'.isEmpty) row['remote_id'] = newRemoteId();
     final first = ((row['remote_version'] as num?)?.toInt() ?? 0) == 0;

@@ -2,9 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
 import 'package:material_lab/core/sync/entity_registry.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/pull_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
@@ -123,22 +123,25 @@ void main() {
     },
   );
 
-  test('a lab member does not request the roster or QC collections', () async {
-    session = session.copyWith(role: 'lab');
-    final tracking = _TrackingRemote();
-    await PullWorker(
-      queue: queue,
-      metadata: metadata,
-      remote: tracking,
-      conflicts: ConflictResolver(queue: queue, remote: tracking),
-      source: SessionSource(() => session),
-    ).runOnce();
-    expect(tracking.collections, contains(SyncCollection.samples));
-    expect(tracking.collections, contains(SyncCollection.labResults));
-    expect(tracking.collections, isNot(contains(SyncCollection.members)));
-    expect(tracking.collections, isNot(contains(SyncCollection.qcInspections)));
-    expect(tracking.collections, isNot(contains(SyncCollection.qualityChecks)));
-  });
+  test(
+    'a lab member reads the roster and QC collections under current permissions',
+    () async {
+      session = session.copyWith(role: 'lab');
+      final tracking = _TrackingRemote();
+      await PullWorker(
+        queue: queue,
+        metadata: metadata,
+        remote: tracking,
+        conflicts: ConflictResolver(queue: queue, remote: tracking),
+        source: SessionSource(() => session),
+      ).runOnce();
+      expect(tracking.collections, contains(SyncCollection.samples));
+      expect(tracking.collections, contains(SyncCollection.labResults));
+      expect(tracking.collections, contains(SyncCollection.members));
+      expect(tracking.collections, contains(SyncCollection.qcInspections));
+      expect(tracking.collections, contains(SyncCollection.qualityChecks));
+    },
+  );
 
   test(
     'a document from another device is inserted locally as synced',

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
 <head>
     <meta charset="UTF-8">
     <title>Equipment Batch Labels</title>
@@ -221,7 +221,10 @@
             min-height: 54mm;
             background: #f8fafc;
         }
-    </style>
+
+html[dir="ltr"] body { direction:ltr; text-align:left; }
+html[dir="rtl"] body { direction:rtl; text-align:right; }
+</style>
 </head>
 <body>
     {% for page_start in range(0, labels|length, 10) %}
@@ -256,7 +259,7 @@
                                     <div class="info-value {{ 'overdue' if lbl.overdue else '' }}">{{ lbl.next_calibration_date or '-' }}</div>
                                 </div>
                             </div>
-                            <div class="label-footer">{{ department_label }}{% if form_no %} | {% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}{% endif %}</div>
+                            <div class="label-footer">{{ department_label }}{% if form_no %} | {% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}{% endif %}</div>
                         </div>
                     </div>
                     <div class="label-qr-col">

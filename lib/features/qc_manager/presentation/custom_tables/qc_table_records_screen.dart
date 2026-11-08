@@ -1,3 +1,4 @@
+import '../../../../design_system/widgets/app_add_floating_action_button.dart';
 import 'dart:convert' as convert;
 
 import 'package:flutter/material.dart';
@@ -10,6 +11,8 @@ import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/export/table_html_export.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
+import '../../../../../design_system/animations/app_animations.dart';
+import '../../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_adaptive_list.dart';
@@ -84,7 +87,7 @@ class QcTableRecordsScreen extends StatelessWidget {
       return window.whenComplete(() async => cubit.close());
     }
     return Navigator.of(context).push(
-      MaterialPageRoute(
+      appMaterialPageRoute<void>(
         builder: (context) {
           return BlocProvider<QcTableRowsCubit>(
             create: (_) => getIt<QcTableRowsCubit>(param1: tableId)..load(),
@@ -145,10 +148,7 @@ class QcTableRecordsScreen extends StatelessWidget {
         buildWhen: (a, b) => a.fields != b.fields || a.saving != b.saving,
         builder: (context, state) {
           if (state.fields.isEmpty || state.saving) return const SizedBox();
-          return FloatingActionButton(
-            onPressed: () => _record(context),
-            child: Icon(Icons.add, size: 24.r),
-          );
+          return AppAddFloatingActionButton(onPressed: () => _record(context));
         },
       ),
       body: body,
@@ -302,7 +302,7 @@ Future<void> exportRowsTable(BuildContext context) async {
       ],
     );
   } on AppError catch (e) {
-    if (context.mounted) AppFeedback.error(context, e.message);
+    if (context.mounted) AppFeedback.errorFrom(context, e);
   } catch (e) {
     if (context.mounted) AppFeedback.errorFrom(context, e);
   }
@@ -586,7 +586,9 @@ class _RecordTile extends StatelessWidget {
     }
 
     return AppCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
+      padding: EdgeInsets.all(
+        appUsesDesktopChrome(context) ? AppSpacing.md : 8,
+      ),
       onLongPress: onLongPress,
       color: selected ? AppColors.primary.withValues(alpha: 0.06) : null,
       child: Column(
@@ -666,6 +668,12 @@ class _ValueChip extends StatelessWidget {
     final text = field.colType == QcCustomColType.date
         ? (('$value').length >= 10 ? ('$value').substring(0, 10) : '$value')
         : '$value';
+    if (!appUsesDesktopChrome(context)) {
+      return Text(
+        '${field.label}: $text',
+        style: const TextStyle(fontSize: 12),
+      );
+    }
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.sm,
@@ -929,7 +937,7 @@ Future<bool?> showRecordForm(
     );
   }
   return Navigator.of(context).push<bool>(
-    MaterialPageRoute(
+    appMaterialPageRoute<bool>(
       builder: (_) => Scaffold(
         appBar: AppTopAppBar(title: title),
         body: SafeArea(

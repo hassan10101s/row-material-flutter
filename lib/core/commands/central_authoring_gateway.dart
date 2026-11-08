@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:uuid/uuid.dart';
 
@@ -10,16 +8,35 @@ import '../sync/sync_run_scope.dart';
 import '../sync/entity_registry.dart';
 import '../utils/app_exceptions.dart';
 import 'command_outbox.dart';
+import 'command_contract.dart';
 import 'drafts_store.dart';
 import 'domain_manifest.dart';
+import 'local_domain_permissions.dart';
+import 'qc_audit_contract.dart';
+import '../audit/audit_hasher.dart';
+import '../security/secure_payload_compiler.dart';
 
 /// A saved request is not an approved business write. Callers retain their
 /// authoring input while the request is waiting for a server receipt.
 class CentralDraftPending extends AppError implements PendingOperation {
-  CentralDraftPending(this.draftId)
-    : super('تم حفظ الطلب؛ بانتظار تأكيد الاعتماد وتحديث الأرشيف المركزي.');
+  CentralDraftPending(this.draftId, {bool unsent = false, bool tooLarge = false})
+    : super(
+        tooLarge
+            ? largeOperationMessage
+            : unsent
+            ? 'حُفظت مسودة على هذا الجهاز. راجعها وأرسلها من المسودات عند توفر الاتصال.'
+            : 'بانتظار تأكيد نتيجة العملية. يمكنك التحقق منها من المسودات دون تكرارها.',
+      );
 
   final String draftId;
+}
+
+/// The central archive is not proven `ready` yet (`central_sync_state`), so a
+/// write would base itself on an unproven archive version. Startup
+/// housekeeping catches this specific type and defers the step to the sync
+/// driver's `ready` transition instead of failing the bind.
+class ArchiveNotReadyError extends AppError {
+  const ArchiveNotReadyError(super.message);
 }
 
 /// Executes the existing domain calculation under a savepoint, captures its
@@ -36,6 +53,10 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
     required this.source,
     required this.outbox,
     this.complete,
+    this.isOnline,
+    this.chooseOfflineDraft,
+    this.onPending,
+    this.prepareSecureDefinitions,
   });
 
   static const commandType = 'domain.commit';
@@ -43,8 +64,64 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
   final SessionSource source;
   final CommandOutbox outbox;
   final Future<bool> Function(CommandOutboxEntry entry)? complete;
+  final bool Function()? isOnline;
+
+  /// Offline writes require explicit consent to retain a local manual draft.
+  final Future<bool> Function()? chooseOfflineDraft;
+  final void Function(String message)? onPending;
+  final Future<Future<void> Function()?> Function(List<Map<String, Object?>> writes)? prepareSecureDefinitions;
+
+  Never _pending(CentralDraftPending pending) {
+    onPending?.call(pending.userMessage);
+    throw pending;
+  }
+
   Map<String, dynamic>? _manifest;
   int? _manifestGeneration;
+  int? _captureGeneration;
+
+  Future<void> _ensureCapture(
+    Database db,
+    Map definitions,
+    int generation,
+  ) async {
+    if (_captureGeneration == generation) return;
+    await db.execute(
+      'CREATE TABLE IF NOT EXISTS central_capture_flag (enabled INTEGER NOT NULL)',
+    );
+    await db.execute(
+      'INSERT INTO central_capture_flag(enabled) SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM central_capture_flag)',
+    );
+    await db.execute('''CREATE TABLE IF NOT EXISTS central_capture_changes (
+      entity_type TEXT NOT NULL, local_ref TEXT NOT NULL,
+      first_operation TEXT NOT NULL, last_operation TEXT NOT NULL,
+      PRIMARY KEY(entity_type, local_ref))''');
+    for (final entry in definitions.entries) {
+      final definition = entry.value as Map;
+      final table = definition['table'] as String;
+      final pk = definition['primaryKey'] as String;
+      if (![
+        table,
+        pk,
+        '${entry.key}',
+      ].every((v) => RegExp(r'^[a-zA-Z_][a-zA-Z_0-9]*$').hasMatch(v))) {
+        throw StateError('Unsafe capture identifier');
+      }
+      for (final operation in const ['INSERT', 'UPDATE', 'DELETE']) {
+        final row = operation == 'DELETE' ? 'OLD' : 'NEW';
+        await db.execute(
+          '''CREATE TRIGGER IF NOT EXISTS central_capture_${table}_${operation.toLowerCase()}
+          AFTER $operation ON $table WHEN (SELECT enabled FROM central_capture_flag LIMIT 1) = 1
+          BEGIN
+            INSERT OR IGNORE INTO central_capture_changes VALUES ('${entry.key}', CAST($row.$pk AS TEXT), '$operation', '$operation');
+            UPDATE central_capture_changes SET last_operation = '$operation'
+              WHERE entity_type = '${entry.key}' AND local_ref = CAST($row.$pk AS TEXT);
+          END''',
+        );
+      }
+    }
+    _captureGeneration = generation;
+  }
 
   @override
   Future<T> run<T>(
@@ -56,12 +133,25 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
     if (!actor.canWrite || !actor.isSignedIn || !actor.hasOrganization) {
       throw const AuthorizationError('ليس لديك صلاحية إنشاء طلب اعتماد.');
     }
+    var offlineDraft = false;
+    if (isOnline != null && !isOnline!()) {
+      if (chooseOfflineDraft == null || !await chooseOfflineDraft!()) {
+        throw const BusinessActionCancelled();
+      }
+      scope.check();
+      offlineDraft = true;
+    }
     final draftId = const Uuid().v4();
     if (_manifestGeneration != scope.generation) {
       _manifest = await buildDomainManifest(database);
       _manifestGeneration = scope.generation;
     }
     scope.check();
+    await _ensureCapture(
+      database,
+      _manifest!['entities'] as Map,
+      scope.generation,
+    );
     late T value;
     CommandDraft? preparedDraft;
     final preparedWrites = <Map<String, Object?>>[];
@@ -75,11 +165,12 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
     );
     if (canonicalState.length != 1 ||
         canonicalState.single['role'] != actor.rolesKey ||
+        canonicalState.single['protocol_schema'] != commandSchemaVersion ||
         canonicalState.single['bootstrap_state'] != 'ready') {
       // `catching_up` means the snapshot is in place but the change events the
       // server committed during its download are not fully applied yet: a save
       // here would base itself on an unproven archive version.
-      throw const ValidationError(
+      throw const ArchiveNotReadyError(
         'الأرشيف المعتمد لم يكتمل تنزيله بعد؛ بانتظار استكمال أحداث التغيير. '
         'أعد المحاولة عند ظهور حالة المزامنة جاهزة.',
       );
@@ -104,15 +195,63 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
       // A fixed, non-user-controlled savepoint name; SQLite transactions are
       // serialized and this gateway is entered only at an authoring boundary.
       await txn.execute('SAVEPOINT central_authoring');
+      await txn.delete('central_capture_changes');
+      await txn.update('central_capture_flag', {'enabled': 1});
       final before = (await txn.rawQuery(
         'SELECT total_changes() AS n',
       )).single['n'];
+      final aggregateEffects = <String, String>{};
       value = await BusinessAuthoringContext.run(
         initialSequences,
         () => operation(txn),
+        aggregateEffects: aggregateEffects,
       );
       scope.check();
-      final captured = await txn.query('sync_queue', orderBy: 'id');
+      final captured = [...await txn.query('sync_queue', orderBy: 'id')];
+      // QC audits are captured directly from the append-only SQL journal.
+      // They never enter or reactivate the legacy upload queue.
+      final auditRows = await txn.query(
+        'qc_audits',
+        where: 'id > ?',
+        whereArgs: [initialSequences['qc_audits'] ?? 0],
+        orderBy: 'id',
+      );
+      for (final audit in auditRows) {
+        if (audit['by_user_id'] != actor.uid ||
+            AuditHasher.hash(audit) != audit['hash']) {
+          throw const AuthorizationError('هوية سجل الجودة أو بصمته غير صالحة.');
+        }
+        captured.add({
+          'entity_type': 'qcAudit',
+          'local_ref': audit['id'],
+          'owner_uid': actor.uid,
+          'status': 'pending',
+          'operation': 'create',
+          'base_version': 0,
+        });
+      }
+      final declared = {
+        for (final row in captured) '${row['entity_type']}/${row['local_ref']}',
+      };
+      final changes = await txn.query('central_capture_changes');
+      for (final change in changes) {
+        if (change['first_operation'] == 'INSERT' &&
+            change['last_operation'] == 'DELETE') {
+          continue;
+        }
+        final key = '${change['entity_type']}/${change['local_ref']}';
+        if (const {
+              'labAnalysisItem',
+              'labFieldLink',
+              'labUnit',
+            }.contains(change['entity_type']) &&
+            declared.contains(aggregateEffects[key])) {
+          continue;
+        }
+        if (!declared.contains(key)) {
+          throw StateError('Business mutation omitted its remote effect: $key');
+        }
+      }
       final after = (await txn.rawQuery(
         'SELECT total_changes() AS n',
       )).single['n'];
@@ -144,8 +283,19 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
           where: 'entity_type = ? AND local_ref = ?',
           whereArgs: [entity.type, localRef],
         );
-        final payload = Map<String, dynamic>.from(
-          jsonDecode(row['payload'] as String) as Map,
+        // Serialize the final transactional image, rather than a queue snapshot
+        // captured before later updates within the same business operation.
+        final payload = buildRemotePayload(
+          entity,
+          Map<String, dynamic>.from(rows.single),
+          SyncPayloadContext(
+            organizationId: actor.organizationId,
+            uid: actor.uid,
+            deviceId: actor.deviceId,
+            version: (row['base_version'] as int) + 1,
+            versionField: 'version',
+          ),
+          asCreate: row['base_version'] == 0,
         );
         final String id;
         var operationKind = row['operation'] as String;
@@ -202,6 +352,46 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
             sources['${write['entityType']}/${write['entityId']}']!;
         final definition = definitions[write['entityType']] as Map;
         final payload = write['payload'] as Map<String, dynamic>;
+        if (sourceRow.entity.type == 'qcAudit') {
+          final targetType = qcAuditTargets[payload['entityType']];
+          final target =
+              localTargets['$targetType/${sourceRow.row['entity_id']}'];
+          if (targetType == null || target == null) {
+            throw const ValidationError(
+              'سجل الجودة يجب أن يرتبط بالتغيير نفسه داخل عملية الاعتماد.',
+            );
+          }
+          payload['targetEntityType'] = targetType;
+          payload['targetGlobalId'] = target.id;
+          final previousHash = payload['prevHash'];
+          String? previousId;
+          if (previousHash is String && previousHash.isNotEmpty) {
+            for (final candidate in writes) {
+              if (candidate['entityType'] == 'qcAudit' &&
+                  (candidate['payload'] as Map)['hash'] == previousHash) {
+                previousId = candidate['entityId'] as String;
+              }
+            }
+            if (previousId == null) {
+              final previous = await txn.query(
+                'central_qc_audits',
+                columns: ['entity_id'],
+                where: 'origin_hash = ?',
+                whereArgs: [previousHash],
+                limit: 1,
+              );
+              if (previous.isNotEmpty) {
+                previousId = previous.single['entity_id'] as String;
+              }
+            }
+            if (previousId == null) {
+              throw const ValidationError(
+                'سلسلة تدقيق الجودة غير مكتملة؛ أعد التحديث أولًا.',
+              );
+            }
+          }
+          payload['previousAuditId'] = previousId;
+        }
         if (sourceRow.entity.type == 'qualityCheck') {
           payload['businessVersion'] = sourceRow.row['version'];
         }
@@ -277,10 +467,16 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
         }
         write['relations'] = relations;
       }
+      await compileSecurePayloads(db: txn, session: actor, writes: writes);
+      validateLocalDomainPermissions(
+        session: actor,
+        definitions: definitions,
+        writes: writes,
+      );
       final sequences = await txn.query('sqlite_sequence');
       // Restore values AND domain side effects (balances, history and audit)
       // before writing the protocol stores. An exception rolls back everything.
-      await txn.execute('ROLLBACK TO SAVEPOINT central_authoring');
+      await txn.execute(';ROLLBACK TO SAVEPOINT central_authoring');
       await txn.execute('RELEASE SAVEPOINT central_authoring');
       if (writes.isEmpty) {
         if (before != after) {
@@ -336,7 +532,21 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
     final draft = preparedDraft;
     if (draft == null) return value;
     scope.check();
-    final entry = await protocolDb.transaction((txn) async {
+    if (!offlineDraft && isOnline != null && !isOnline!()) {
+      if (chooseOfflineDraft == null || !await chooseOfflineDraft!()) {
+        throw const BusinessActionCancelled();
+      }
+      scope.check();
+      offlineDraft = true;
+    }
+    Future<void> Function()? finishSecureDefinition;
+    if (!offlineDraft && preparedWrites.length <= businessEffectLimit(preparedWrites)) {
+      finishSecureDefinition = await prepareSecureDefinitions?.call(preparedWrites);
+      scope.check();
+    }
+    final entry = await protocolDb.transaction<CommandOutboxEntry?>((
+      txn,
+    ) async {
       scope.check();
       if (outbox.dbHelper.connectionGeneration != protocolGeneration) {
         throw const SyncRunCancelled();
@@ -355,6 +565,12 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
         }
       }
       await txn.insert('drafts', draft.toRow());
+      // Offline and oversized work stays a local draft. Only an explicit
+      // online action creates a send request.
+      if (preparedWrites.length > businessEffectLimit(preparedWrites) ||
+          offlineDraft) {
+        return null;
+      }
       final staged = await outbox.enqueueDraftSubmit(
         txn,
         draft: draft,
@@ -374,11 +590,28 @@ class CentralAuthoringGateway implements BusinessTransactionGateway {
       scope.check();
       return staged;
     });
+    if (entry == null) {
+      _pending(
+        CentralDraftPending(
+          draftId,
+          unsent: true,
+          tooLarge: preparedWrites.length > businessEffectLimit(preparedWrites),
+        ),
+      );
+    }
     final completion = complete;
     if (completion != null && await completion(entry)) {
       scope.check();
-      return value;
+      await finishSecureDefinition?.call();
+      return publicAuthoringValue(value, preparedWrites) as T;
     }
-    throw CentralDraftPending(draftId);
+    final current = await outbox.getByOperationId(entry.operationId);
+    _pending(
+      CentralDraftPending(
+        draftId,
+        unsent:
+            current?.state == OutboxState.archived && current?.attempts == 0,
+      ),
+    );
   }
 }

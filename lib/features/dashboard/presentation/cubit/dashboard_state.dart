@@ -7,6 +7,7 @@ import '../../domain/dashboard_repository.dart';
 /// filter values. The four KPI cards live in [DashboardKpisState].
 @immutable
 class DashboardState extends Equatable {
+  static const _unchanged = Object();
   final bool loading;
   final String? error;
   final Map<String, dynamic>? summary;
@@ -29,7 +30,7 @@ class DashboardState extends Equatable {
 
   DashboardState copyWith({
     bool? loading,
-    String? error,
+    Object? error = _unchanged,
     Map<String, dynamic>? summary,
     DashboardFilterOptions? filterOptions,
     String? period,
@@ -38,7 +39,7 @@ class DashboardState extends Equatable {
     String? selectedStatus,
   }) => DashboardState(
     loading: loading ?? this.loading,
-    error: error ?? this.error,
+    error: identical(error, _unchanged) ? this.error : error as String?,
     summary: summary ?? this.summary,
     filterOptions: filterOptions ?? this.filterOptions,
     period: period ?? this.period,

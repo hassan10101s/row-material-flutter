@@ -24,7 +24,7 @@ class InventorySection extends StatelessWidget {
         DashboardSectionTitle(
           icon: Icons.inventory_2_outlined,
           color: AppColors.info,
-          title: AppText.t('المخزون', 'Inventory'),
+          title: AppText.t('مخزون كيميائيات', 'Chemicals inventory'),
           subtitle: AppText.t('لقطة حالية', 'Snapshot'),
         ),
         LayoutBuilder(

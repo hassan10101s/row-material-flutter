@@ -40,7 +40,8 @@ class DesktopAnalysesTab extends StatelessWidget {
         AppButton(
           label: AppStrings.cancel,
           style: AppButtonStyle.secondary,
-          onPressed: () => Navigator.of(context).pop(false),
+          onPressed: () =>
+              Navigator.of(context, rootNavigator: true).pop(false),
         ),
         AppButton(
           label: AppStrings.save,
@@ -72,7 +73,7 @@ class DesktopAnalysesTab extends StatelessWidget {
       AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       await cubit.load();
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }

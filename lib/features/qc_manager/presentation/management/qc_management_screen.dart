@@ -15,7 +15,7 @@ import '../cubit/qc_ncr_cubit.dart';
 import '../cubit/qc_sops_cubit.dart';
 import '../custom_tables/qc_settings_screen.dart';
 import '../custom_tables/qc_table_records_screen.dart';
-import '../ncr/qc_ncr_dashboard_screen.dart';
+import '../ncr/qc_ncr_list_screen.dart';
 import '../routine/routine_lists_cubit.dart';
 import '../routine/routine_lists_screen.dart';
 import '../sops/qc_sops_screen.dart';
@@ -86,7 +86,7 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
   Widget build(BuildContext context) {
     final tabs = <_QualityTab>[
       _QualityTab(
-        label: AppText.t('القوائم اليومية', 'Routine lists'),
+        label: AppText.t('قوائم الجودة', 'Quality lists'),
         icon: Icons.checklist_rtl_outlined,
         builder: (_) => BlocProvider(
           create: (_) => getIt<RoutineListsCubit>()..load(),
@@ -100,9 +100,7 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
           create: (_) => getIt<QcNcrCubit>()
             ..loadOptions()
             ..load(),
-          child: QcNcrDashboardScreen(
-            embedded: true,
-            onOpenList: () => context.push(AppRoutes.qcNcrList),
+          child: QcNcrListScreen(
             onOpenFinding: (id) =>
                 context.push('${AppRoutes.qcNcrDetail}?findingId=$id'),
           ),
@@ -140,13 +138,17 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: AppSpacing.page),
+              SizedBox(
+                height: appUsesDesktopChrome(context) ? AppSpacing.page : 8,
+              ),
               SizedBox(
                 height: appUsesDesktopChrome(context) ? 46.h : 56,
                 child: SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.page,
+                  padding: EdgeInsets.symmetric(
+                    horizontal: appUsesDesktopChrome(context)
+                        ? AppSpacing.page
+                        : 12,
                   ),
                   child: Row(
                     children: [
@@ -201,14 +203,16 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
                           final velocity = details.primaryVelocity ?? 0;
                           if (velocity.abs() < 350) return;
                           setState(() {
-                            _selectedTab = (_selectedTab +
-                                    (velocity < 0 ? 1 : -1))
-                                .clamp(0, allTabs.length - 1)
-                                .toInt();
+                            _selectedTab =
+                                (_selectedTab + (velocity < 0 ? 1 : -1))
+                                    .clamp(0, allTabs.length - 1)
+                                    .toInt();
                           });
                         },
                   child: Padding(
-                    padding: const EdgeInsets.all(AppSpacing.page),
+                    padding: EdgeInsets.all(
+                      appUsesDesktopChrome(context) ? AppSpacing.page : 12,
+                    ),
                     child: IndexedStack(
                       index: _selectedTab,
                       children: [

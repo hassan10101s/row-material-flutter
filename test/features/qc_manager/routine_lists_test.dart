@@ -80,6 +80,110 @@ void main() {
     items: const ['Floor swept', 'Bins emptied'],
   );
 
+  test(
+    'opening a large list stores no empty responses and first check creates one',
+    () async {
+      final id = await repo.saveRoutineList(
+        name: 'Large routine',
+        items: List.generate(100, (i) => 'Check $i'),
+      );
+      final sheet = await repo.openPeriodSheet(id);
+      final db = await helper.database;
+      expect(sheet.rows, hasLength(100));
+      expect(await db.query('qc_responses'), isEmpty);
+      await repo.toggleCheck(
+        inspectionId: sheet.inspection.inspectionId!,
+        itemId: sheet.rows.first.item.itemId!,
+      );
+      expect(await db.query('qc_responses'), hasLength(1));
+      expect((await repo.openPeriodSheet(id)).doneCount, 1);
+    },
+  );
+
+  test(
+    'yearly quality lists share one sheet across months and retain previous years',
+    () async {
+      final id = await repo.saveRoutineList(
+        name: 'Annual quality review',
+        recurrence: QcRecurrence.yearly,
+        items: const ['Review quality records'],
+      );
+      final first = await repo.openPeriodSheet(id);
+      final firstId = first.inspection.inspectionId!;
+      final itemId = first.rows.single.item.itemId!;
+      expect(first.template.recurrence, QcRecurrence.yearly);
+      expect((await repo.listRoutineLists()).single.isYearly, isTrue);
+      await repo.toggleCheck(inspectionId: firstId, itemId: itemId);
+      final year = DateTime.now().year;
+      final db = await helper.database;
+      await db.update(
+        'qc_inspections',
+        {'inspection_date': '$year-01-01'},
+        where: 'inspection_id = ?',
+        whereArgs: [firstId],
+      );
+      final sameYear = await repo.openPeriodSheet(id);
+      expect(sameYear.inspection.inspectionId, firstId);
+      expect(sameYear.current, isTrue);
+      expect(sameYear.doneCount, 1);
+      await db.update(
+        'qc_inspections',
+        {'inspection_date': '${year - 1}-12-31'},
+        where: 'inspection_id = ?',
+        whereArgs: [firstId],
+      );
+      expect((await repo.loadSheet(firstId)).current, isFalse);
+      await expectLater(
+        repo.toggleCheck(inspectionId: firstId, itemId: itemId),
+        throwsA(isA<Exception>()),
+      );
+      final nextYear = await repo.openPeriodSheet(id);
+      expect(nextYear.inspection.inspectionId, isNot(firstId));
+      expect(nextYear.doneCount, 0);
+      expect(nextYear.current, isTrue);
+      expect((await repo.loadSheet(firstId)).doneCount, 1);
+      expect(
+        (await repo.sheetHistory()).map((row) => row.inspection.inspectionId),
+        containsAll([firstId, nextYear.inspection.inspectionId]),
+      );
+    },
+  );
+
+  test(
+    'changing recurrence preserves completed sheets as read-only history',
+    () async {
+      final id = await dailyList();
+      final original = await repo.openPeriodSheet(id);
+      final oldId = original.inspection.inspectionId!;
+      await repo.toggleCheck(
+        inspectionId: oldId,
+        itemId: original.rows.first.item.itemId!,
+      );
+      await repo.saveRoutineList(
+        templateId: id,
+        name: 'Annual quality',
+        recurrence: QcRecurrence.yearly,
+        items: const ['First', 'Second'],
+      );
+      expect((await repo.listRoutineLists()).single.doneCount, 0);
+      final annual = await repo.openPeriodSheet(id);
+      expect(annual.inspection.inspectionId, isNot(oldId));
+      expect(annual.inspection.templateVersion, 2);
+      expect(annual.doneCount, 0);
+      expect(annual.current, isTrue);
+      final history = await repo.loadSheet(oldId);
+      expect(history.current, isFalse);
+      expect(history.doneCount, 1);
+      await expectLater(
+        repo.toggleCheck(
+          inspectionId: oldId,
+          itemId: original.rows.first.item.itemId!,
+        ),
+        throwsA(isA<Exception>()),
+      );
+    },
+  );
+
   test('save + open seeds blank rows; check stamps who/when', () async {
     final id = await dailyList();
     final lists = await repo.listRoutineLists();
@@ -115,10 +219,7 @@ void main() {
       itemId: first.rows.first.item.itemId!,
     );
     final second = await repo.openPeriodSheet(id);
-    expect(
-      second.inspection.inspectionId,
-      first.inspection.inspectionId,
-    );
+    expect(second.inspection.inspectionId, first.inspection.inspectionId);
     expect(second.doneCount, 1);
   });
 
@@ -177,10 +278,7 @@ void main() {
     );
     final first = await repo.openPeriodSheet(id);
     final second = await repo.openPeriodSheet(id);
-    expect(
-      second.inspection.inspectionId,
-      first.inspection.inspectionId,
-    );
+    expect(second.inspection.inspectionId, first.inspection.inspectionId);
   });
 
   test('history filters: person, completion, item text', () async {
@@ -222,58 +320,61 @@ void main() {
     expect(byTemplate, isEmpty);
   });
 
-  test('done button: two presses → two log entries + row marked done', () async {
-    final id = await dailyList();
-    final sheet = await repo.openPeriodSheet(id);
-    final inspectionId = sheet.inspection.inspectionId!;
-    final itemId = sheet.rows.first.item.itemId!;
+  test(
+    'done button: two presses → two log entries + row marked done',
+    () async {
+      final id = await dailyList();
+      final sheet = await repo.openPeriodSheet(id);
+      final inspectionId = sheet.inspection.inspectionId!;
+      final itemId = sheet.rows.first.item.itemId!;
 
-    await repo.recordDone(inspectionId: inspectionId, itemId: itemId);
-    final afterSecond = await repo.recordDone(
-      inspectionId: inspectionId,
-      itemId: itemId,
-      note: 'second press',
-    );
+      await repo.recordDone(inspectionId: inspectionId, itemId: itemId);
+      final afterSecond = await repo.recordDone(
+        inspectionId: inspectionId,
+        itemId: itemId,
+        note: 'second press',
+      );
 
-    // Scorecard stays consistent: the row reads as done once, despite two
-    // presses (the response row is stamped, not duplicated).
-    expect(afterSecond.doneCount, 1);
-    final row = afterSecond.rows.firstWhere((r) => r.item.itemId == itemId);
-    expect(row.recorded, isTrue);
-    expect(row.response.answeredBy, 'u1');
-    expect(row.response.answeredByName, 'Checker');
-    expect(row.response.measuredAt, isNotEmpty);
-    // But EVERY press is logged (time + user each).
-    expect(row.taskLogCount, 2);
-    expect(row.hasTaskLogs, isTrue);
-    expect(row.lastTaskLogByName, 'Checker');
-    // Other rows untouched so far.
-    expect(
-      afterSecond.rows
-          .firstWhere((r) => r.item.itemId != itemId)
-          .taskLogCount,
-      0,
-    );
+      // Scorecard stays consistent: the row reads as done once, despite two
+      // presses (the response row is stamped, not duplicated).
+      expect(afterSecond.doneCount, 1);
+      final row = afterSecond.rows.firstWhere((r) => r.item.itemId == itemId);
+      expect(row.recorded, isTrue);
+      expect(row.response.answeredBy, 'u1');
+      expect(row.response.answeredByName, 'Checker');
+      expect(row.response.measuredAt, isNotEmpty);
+      // But EVERY press is logged (time + user each).
+      expect(row.taskLogCount, 2);
+      expect(row.hasTaskLogs, isTrue);
+      expect(row.lastTaskLogByName, 'Checker');
+      // Other rows untouched so far.
+      expect(
+        afterSecond.rows
+            .firstWhere((r) => r.item.itemId != itemId)
+            .taskLogCount,
+        0,
+      );
 
-    final logs = await repo.taskLogs(inspectionId, itemId: itemId);
-    expect(logs, hasLength(2));
-    expect(logs.first.loggedBy, 'u1');
-    expect(logs.first.loggedByName, 'Checker');
-    expect(logs.first.loggedAt, isNotEmpty);
-    expect(logs.first.note, 'second press');
-    expect(logs.first.logId, greaterThan(logs.last.logId));
-    expect(row.lastTaskLogAt, logs.first.loggedAt);
-    expect(await repo.taskLogs(inspectionId), hasLength(2));
+      final logs = await repo.taskLogs(inspectionId, itemId: itemId);
+      expect(logs, hasLength(2));
+      expect(logs.first.loggedBy, 'u1');
+      expect(logs.first.loggedByName, 'Checker');
+      expect(logs.first.loggedAt, isNotEmpty);
+      expect(logs.first.note, 'second press');
+      expect(logs.first.logId, greaterThan(logs.last.logId));
+      expect(row.lastTaskLogAt, logs.first.loggedAt);
+      expect(await repo.taskLogs(inspectionId), hasLength(2));
 
-    // Unchecking the box does not erase the completion history.
-    final unchecked = await repo.toggleCheck(
-      inspectionId: inspectionId,
-      itemId: itemId,
-    );
-    final row2 = unchecked.rows.firstWhere((r) => r.item.itemId == itemId);
-    expect(row2.recorded, isFalse);
-    expect(row2.taskLogCount, 2);
-  });
+      // Unchecking the box does not erase the completion history.
+      final unchecked = await repo.toggleCheck(
+        inspectionId: inspectionId,
+        itemId: itemId,
+      );
+      final row2 = unchecked.rows.firstWhere((r) => r.item.itemId == itemId);
+      expect(row2.recorded, isFalse);
+      expect(row2.taskLogCount, 2);
+    },
+  );
 
   test('done button on a past sheet throws (immutability)', () async {
     final id = await dailyList();

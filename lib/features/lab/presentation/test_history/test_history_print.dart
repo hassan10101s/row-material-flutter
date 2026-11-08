@@ -16,6 +16,7 @@ class TestHistoryPrinter {
 
   /// Pure builder (unit-testable): one HTML document for [rows].
   static String buildHtml(List<Map<String, dynamic>> rows) {
+    rows = rows.where((r) => r['secure_result'] != 1).toList();
     final arabic = AppText.arabic;
     final esc = _esc;
     final ths = <String>[];
@@ -53,7 +54,7 @@ class TestHistoryPrinter {
         '<td>${esc('${r['sample_name'] ?? '-'}')}</td>'
         '<td>$source</td>'
         '<td dir="ltr">${esc('${r['entry_code'] ?? '-'}')}</td>'
-        '<td><b>${esc('${formatLabResult(r['result_text'])} ${r['range_unit'] ?? r['analysis_unit'] ?? '%'}')}</b></td>'
+        '<td><b>${esc(formatLabResultWithUnit(r['result_text'], '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}'))}</b></td>'
         '<td>${esc(range)}</td>'
         '<td>${esc(thRangeLabel('${r['range_state'] ?? 'none'}'))}</td>'
         '<td>${esc('${r['tested_by_name'] ?? '-'}')}</td></tr>',

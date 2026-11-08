@@ -11,6 +11,9 @@ class ReferenceState extends Equatable {
   final String? error;
   final String? errorMore;
   final List<Map<String, dynamic>> materials;
+  final Set<int> busyIds;
+  final Set<int> pendingIds;
+  bool isBlocked(int id) => busyIds.contains(id) || pendingIds.contains(id);
 
   const ReferenceState({
     this.loading = true,
@@ -21,6 +24,8 @@ class ReferenceState extends Equatable {
     this.error,
     this.errorMore,
     this.materials = const [],
+    this.busyIds = const {},
+    this.pendingIds = const {},
   });
 
   ReferenceState copyWith({
@@ -34,6 +39,8 @@ class ReferenceState extends Equatable {
     List<Map<String, dynamic>>? materials,
     bool clearError = false,
     bool clearErrorMore = false,
+    Set<int>? busyIds,
+    Set<int>? pendingIds,
   }) => ReferenceState(
     loading: loading ?? this.loading,
     loadingMore: loadingMore ?? this.loadingMore,
@@ -43,6 +50,8 @@ class ReferenceState extends Equatable {
     error: clearError ? null : error ?? this.error,
     errorMore: clearErrorMore ? null : errorMore ?? this.errorMore,
     materials: materials ?? this.materials,
+    busyIds: busyIds ?? this.busyIds,
+    pendingIds: pendingIds ?? this.pendingIds,
   );
 
   @override
@@ -55,5 +64,7 @@ class ReferenceState extends Equatable {
     error,
     errorMore,
     materials,
+    busyIds,
+    pendingIds,
   ];
 }

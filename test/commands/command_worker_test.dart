@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/commands/command_contract.dart';
 import 'package:material_lab/core/commands/command_outbox.dart';
 import 'package:material_lab/core/commands/command_transport.dart';
-import 'package:material_lab/core/commands/command_worker.dart';
+import '../support/retired/core/commands/command_worker.dart';
 import 'package:material_lab/core/commands/drafts_store.dart';
 
 import '../sync/sync_test_fixture.dart';

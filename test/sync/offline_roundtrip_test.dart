@@ -4,19 +4,19 @@ import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/inspections/data/inspection_repo.dart';
-import 'package:material_lab/features/inspections/data/offline_first_inspection_repository.dart';
+import 'package:material_lab/features/inspections/data/server_confirmed_inspection_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 import 'package:material_lab/features/reference/data/reference_repo.dart';
 
 import 'sync_test_fixture.dart';
 
 /// Plan P7.5 / §42-6 + §42-7, automated: the Internet is off, an inspection is
-/// created through the offline-first facade, it is visible immediately and the
+/// created through the server-confirmed facade, it is visible immediately and the
 /// change sits in the queue; the Internet comes back and the same push
 /// synchronises it. No user-visible action is lost in between.
 class _Guard implements WriteGuard {
@@ -60,7 +60,7 @@ void main() {
   late AuditLogger audit;
   late InMemoryDataSource remote;
   late _Guard guard;
-  late OfflineFirstInspectionRepository repo;
+  late ServerConfirmedInspectionRepository repo;
   late AppSession session;
   late UserContext user;
 
@@ -87,7 +87,7 @@ void main() {
       ..userName = 'Ahmed Ali';
     guard = _Guard(false);
     user = const UserContext(id: 1, fullName: 'Ahmed Ali', role: 'admin');
-    repo = OfflineFirstInspectionRepository(
+    repo = ServerConfirmedInspectionRepository(
       dbHelper: fixture.helper,
       referenceRepo: ReferenceRepo(dbHelper: fixture.helper),
       guard: guard,

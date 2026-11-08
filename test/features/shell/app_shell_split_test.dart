@@ -6,8 +6,14 @@ import 'package:go_router/go_router.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/app/auth_gate.dart';
+import 'package:material_lab/di/service_locator.dart';
+import 'package:material_lab/features/drafts/presentation/drafts_screen.dart';
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/permissions.dart';
+import 'package:material_lab/core/commands/central_sync_driver.dart';
+import 'package:material_lab/core/commands/command_outbox.dart';
+import 'package:material_lab/core/commands/direct_write_service.dart';
+import 'package:material_lab/core/commands/drafts_store.dart';
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/locale/locale_service.dart';
 import 'package:material_lab/core/network/connectivity_service.dart';
@@ -26,7 +32,7 @@ import 'package:material_lab/features/shell/presentation/desktop/app_shell.dart'
 import 'package:material_lab/features/shell/presentation/mobile/app_shell.dart';
 import 'package:material_lab/features/shell/presentation/shell_chrome.dart';
 import 'package:material_lab/features/shell/presentation/shell_nav.dart';
-import 'package:material_lab/features/sync/presentation/sync_status_controller.dart';
+import 'package:material_lab/features/connection/presentation/connection_status_controller.dart';
 
 class _QueueMock extends Mock implements SyncQueue {}
 
@@ -34,7 +40,71 @@ class _MetadataMock extends Mock implements SyncMetadata {}
 
 class _AuthMock extends Mock implements AuthRepository {}
 
+class _GateMock extends Mock implements AuthGate {}
+
 class _SettingsMock extends Mock implements SettingsRepo {}
+
+class _DraftsMock extends Mock implements DraftsStore {}
+
+class _SyncLifecycle extends Fake implements CentralSyncDriver {
+  @override
+  bool Function()? mayPoll;
+  bool running = false;
+  int manualRefreshes = 0;
+
+  @override
+  Future<int> syncNow({
+    int? throughSequence,
+    bool forceSnapshot = false,
+    bool resumeQuota = true,
+  }) async {
+    manualRefreshes++;
+    return 1;
+  }
+
+  @override
+  void start() => running = true;
+
+  @override
+  void stop() => running = false;
+
+  @override
+  void cancelActive() {}
+}
+
+class _RecoveringConnectivity extends Fake implements ConnectivityService {
+  @override
+  bool isOnline = false;
+  int probes = 0;
+
+  @override
+  Stream<bool> get onStatusChange => const Stream.empty();
+
+  @override
+  Future<void> refresh() async {
+    probes++;
+    isOnline = true;
+  }
+}
+
+class _ReceiptMonitor extends Fake implements DirectWriteService {
+  @override
+  Future<bool> Function(CommandOutboxEntry, bool)? onOutcome;
+  @override
+  bool Function()? mayMonitor;
+
+  @override
+  void startOutcomeMonitor() {}
+
+  @override
+  void stopOutcomeMonitor() => onOutcome = null;
+
+  @override
+  Future<List<CommandOutboxEntry>> openRequests({
+    bool includeDismissed = false,
+    bool includeCompleted = false,
+  }) async => [];
+}
 
 /// A delivery port whose answer is chosen by the test.
 ///
@@ -114,24 +184,22 @@ void main() {
   /// The destinations for [role], resolved through the same permission matrix the
   /// shell uses.
   List<ShellNavEntry> entriesFor(String role) => shellNavEntries(
-    canSeeSettings: rolePermissions(role).contains(Permission.usersRead),
+    canSeeSettings: rolePermissions(role).contains(Permission.orgUpdate),
+    canReadReference: rolePermissions(role).contains(Permission.usersRead),
+    canReadMembers: rolePermissions(role).contains(Permission.usersRead),
   );
 
   /// A badge that has never been started, so nothing here touches a database.
   ///
-  /// [SyncStatusController.refresh] swallows every failure by design - a badge
+  /// [ConnectionStatusController.refresh] swallows every failure by design - a badge
   /// must never break the shell - so a stubbed queue is belt and braces rather
   /// than a requirement.
-  SyncStatusController badge() {
+  ConnectionStatusController badge() {
     when(queue.countPending).thenAnswer((_) async => 0);
     when(queue.countBlocked).thenAnswer((_) async => 0);
     when(metadata.lastPushAt).thenAnswer((_) async => null);
     when(metadata.lastPullAt).thenAnswer((_) async => null);
-    return SyncStatusController(
-      queue: queue,
-      metadata: metadata,
-      isOnline: () => true,
-    );
+    return ConnectionStatusController(metadata: metadata, isOnline: () => true);
   }
 
   /// A router whose shell builder is whatever the test needs, with one route per
@@ -687,13 +755,14 @@ void main() {
     });
 
     testWidgets('the drawer closes on the system back gesture', (tester) async {
+      final navigated = <String>[];
       await pumpMobile(
         tester,
         routerWith(
           (child) => mobileShell(
             user: _userFor(AppRoles.admin),
             entries: entriesFor(AppRoles.admin),
-            onNavigate: (_) {},
+            onNavigate: navigated.add,
             child: child,
           ),
         ),
@@ -702,18 +771,15 @@ void main() {
       final guard = tester.widget<PopScope>(
         find.byKey(const Key('shell-back-guard')),
       );
-      expect(guard.canPop, isTrue);
+      expect(
+        guard.canPop,
+        isFalse,
+        reason: 'the shell never pops its route: back is intercepted',
+      );
 
       await tester.tap(find.byTooltip('Menu'));
       await tester.pumpAndSettle();
       expect(find.byType(Drawer), findsOneWidget);
-      expect(
-        tester
-            .widget<PopScope>(find.byKey(const Key('shell-back-guard')))
-            .canPop,
-        isFalse,
-        reason: 'while the drawer is up, back must not leave the page',
-      );
 
       await systemBack(tester);
 
@@ -722,15 +788,104 @@ void main() {
         findsNothing,
         reason: 'back closes the drawer instead of popping the route',
       );
-      // Still inside the shell, on the same page.
+      // Still inside the shell, on the same page; closing the drawer is not
+      // navigation.
       expect(find.text('page /dashboard'), findsOneWidget);
-      expect(
-        tester
-            .widget<PopScope>(find.byKey(const Key('shell-back-guard')))
-            .canPop,
-        isTrue,
-        reason: 'a second back must be allowed through once the drawer is gone',
+      expect(navigated, isEmpty);
+    });
+
+    testWidgets('back goes to the dashboard, and a second press exits', (
+      tester,
+    ) async {
+      final navigated = <String>[];
+      final exits = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMessageHandler(
+        'flutter/platform',
+        (message) async {
+          final call = const JSONMethodCodec().decodeMethodCall(message);
+          if (call.method == 'SystemNavigator.pop') exits.add(call);
+          return null;
+        },
       );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMessageHandler(
+          'flutter/platform',
+          null,
+        ),
+      );
+      await pumpMobile(
+        tester,
+        routerWith(
+          (child) => mobileShell(
+            user: _userFor(AppRoles.admin),
+            entries: entriesFor(AppRoles.admin),
+            onNavigate: navigated.add,
+            child: child,
+          ),
+        ),
+      );
+
+      // A back on the dashboard does not leave the app at once: the first
+      // press warns, the second closes it.
+      await systemBack(tester);
+      expect(navigated, isEmpty);
+      expect(exits, isEmpty);
+      expect(find.text('Press back again to exit now'), findsOneWidget);
+
+      // The warning press is the last one: now the app closes.
+      await systemBack(tester);
+      expect(exits.length, 1);
+      // The snack's dismiss timer must not outlive the test.
+      await tester.pump(const Duration(seconds: 3));
+    });
+
+    testWidgets('back from another destination is redirected home first', (
+      tester,
+    ) async {
+      final navigated = <String>[];
+      final exits = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMessageHandler(
+        'flutter/platform',
+        (message) async {
+          final call = const JSONMethodCodec().decodeMethodCall(message);
+          if (call.method == 'SystemNavigator.pop') exits.add(call);
+          return null;
+        },
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMessageHandler(
+          'flutter/platform',
+          null,
+        ),
+      );
+      await pumpMobile(
+        tester,
+        routerWith(
+          (child) => mobileShell(
+            user: _userFor(AppRoles.admin),
+            entries: entriesFor(AppRoles.admin),
+            onNavigate: navigated.add,
+            child: child,
+          ),
+        ),
+      );
+
+      // Reach the lab the way a member does: the bottom bar.
+      final labEntry = entriesFor(
+        AppRoles.admin,
+      ).firstWhere((e) => e.path == '/lab');
+      await tester.tap(bottomBarIcon(tester, labEntry));
+      await tester.pumpAndSettle();
+
+      await systemBack(tester);
+      expect(navigated.last, '/dashboard');
+      expect(exits, isEmpty, reason: 'the first escape is to the dashboard');
+
+      // The redirection counts as the first press: the next one exits.
+      await systemBack(tester);
+      expect(exits.length, 1);
+      // The snack's dismiss timer must not outlive the test.
+      await tester.pump(const Duration(seconds: 3));
     });
   });
 
@@ -799,15 +954,53 @@ void main() {
       await pumpRole(tester, AppRoles.viewer);
     });
 
-    testWidgets('a lab user gets neither gated destination', (tester) async {
-      // `lab` holds no `users.read`, so both gated destinations stay hidden.
-      // Reference is gated on the same flag as Settings: they are the two
-      // pages inside the settings area.
-      final lab = entriesFor(AppRoles.lab);
-      expect(lab.map((e) => e.path), isNot(contains('/reference')));
-      expect(lab.map((e) => e.path), isNot(contains('/settings')));
-      await pumpRole(tester, AppRoles.lab);
-    });
+    testWidgets(
+      'a lab user reads reference and members without organization settings',
+      (tester) async {
+        // The current lab role reads the roster and reference data; organization
+        // administration still requires org.update.
+        final lab = entriesFor(AppRoles.lab);
+        expect(lab.map((e) => e.path), contains('/reference'));
+        expect(lab.map((e) => e.path), contains('/members'));
+        expect(lab.map((e) => e.path), isNot(contains('/settings')));
+        await pumpRole(tester, AppRoles.lab);
+      },
+    );
+
+    testWidgets(
+      'account avatar and sync badge open independent pages for a viewer',
+      (tester) async {
+        final gate = _GateMock();
+        when(() => gate.online).thenReturn(true);
+        getIt.registerSingleton<AuthGate>(gate);
+        addTearDown(() => getIt.unregister<AuthGate>());
+        final taps = <String>[];
+        final user = _userFor(AppRoles.viewer);
+        await pumpDesktop(
+          tester,
+          routerWith(
+            (child) => desktopShell(
+              user: user,
+              entries: entriesFor(AppRoles.viewer),
+              onNavigate: taps.add,
+              child: child,
+            ),
+          ),
+        );
+        await tester.tap(find.text(user.fullName));
+        await tester.pumpAndSettle();
+        expect(taps, ['/account']);
+        await tester.tap(find.byKey(const Key('sync-badge')));
+        await tester.pumpAndSettle();
+        expect(taps, ['/account']);
+        expect(find.byType(DraftsScreen), findsOneWidget);
+        await tester.binding.handlePopRoute();
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Account options'));
+        await tester.pumpAndSettle();
+        expect(find.text('Settings'), findsNothing);
+      },
+    );
 
     testWidgets('both offer the language toggle, theme toggle and badge', (
       tester,
@@ -1002,7 +1195,7 @@ void main() {
           ),
         ),
       );
-      await tester.tap(find.text(user.fullName));
+      await tester.tap(find.byTooltip('Account options'));
       await tester.pumpAndSettle();
       expect(find.text(signOutDevice), findsOneWidget);
       expect(find.text(signOut), findsOneWidget);
@@ -1022,7 +1215,10 @@ void main() {
       await tester.pumpAndSettle();
       final drawer = find.byType(Drawer);
       await tester.tap(
-        find.descendant(of: drawer, matching: find.text(user.fullName)),
+        find.descendant(
+          of: drawer,
+          matching: find.byTooltip('Account options'),
+        ),
       );
       await tester.pumpAndSettle();
       expect(find.text(signOutDevice), findsOneWidget);
@@ -1094,13 +1290,19 @@ void main() {
       return AuthGate(auth);
     }
 
-    Widget host(AuthGate gate, Widget child) => AppShell(
+    Widget host(
+      AuthGate gate,
+      Widget child, {
+      CentralSyncDriver? centralSync,
+      ConnectivityService? connectivity,
+    }) => AppShell(
       gate: gate,
       locale: locale,
       theme: theme,
       syncQueue: queue,
       syncMetadata: metadata,
-      connectivity: ConnectivityService(),
+      connectivity: connectivity ?? ConnectivityService(),
+      centralSync: centralSync,
       exportRoot: exportRoot,
       fileDelivery: const _FakeDelivery(canReveal: true),
       folderPicker: const UnsupportedFolderPicker(),
@@ -1119,6 +1321,71 @@ void main() {
         grid: factor.isMobile ? mobileGrid : desktopGrid,
       );
     }
+
+    testWidgets(
+      'closing and reopening the shell detaches singleton callbacks',
+      (tester) async {
+        final sync = _SyncLifecycle();
+        final monitor = _ReceiptMonitor();
+        getIt.registerSingleton<DirectWriteService>(monitor);
+        addTearDown(() => getIt.unregister<DirectWriteService>());
+        for (final factor in [AppFormFactor.desktop, AppFormFactor.mobile]) {
+          final gate = gateFor(AppRoles.admin);
+          addTearDown(gate.dispose);
+          final router = routerWith(
+            (child) => host(gate, child, centralSync: sync),
+          );
+          await pumpAs(tester, factor, router);
+          expect(sync.mayPoll, isNotNull);
+          expect(sync.running, isTrue);
+          expect(monitor.onOutcome, isNotNull);
+          expect(monitor.mayMonitor, isNotNull);
+
+          await tester.pumpWidget(const SizedBox.shrink());
+          expect(sync.mayPoll, isNull);
+          expect(sync.running, isFalse);
+          expect(monitor.onOutcome, isNull);
+          expect(monitor.mayMonitor, isNull);
+          expect(tester.takeException(), isNull);
+        }
+      },
+    );
+
+    testWidgets('Refresh data retries a stale offline probe before syncing', (
+      tester,
+    ) async {
+      final gate = gateFor(AppRoles.admin);
+      addTearDown(gate.dispose);
+      final drafts = _DraftsMock();
+      when(() => drafts.listOpen(limit: 100000)).thenAnswer((_) async => []);
+      getIt.registerSingleton<AuthGate>(gate);
+      getIt.registerSingleton<DraftsStore>(drafts);
+      getIt.registerSingleton<DirectWriteService>(_ReceiptMonitor());
+      addTearDown(() => getIt.unregister<AuthGate>());
+      addTearDown(() => getIt.unregister<DraftsStore>());
+      addTearDown(() => getIt.unregister<DirectWriteService>());
+      final connectivity = _RecoveringConnectivity();
+      final sync = _SyncLifecycle();
+      await pumpAs(
+        tester,
+        AppFormFactor.desktop,
+        routerWith(
+          (child) =>
+              host(gate, child, centralSync: sync, connectivity: connectivity),
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('sync-badge')));
+      await tester.pumpAndSettle();
+      expect(find.byType(DraftsScreen), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Refresh data'));
+      await tester.pumpAndSettle();
+      expect(connectivity.probes, 1);
+      expect(sync.manualRefreshes, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
 
     testWidgets('the desktop form factor builds the sidebar', (tester) async {
       await pumpAs(

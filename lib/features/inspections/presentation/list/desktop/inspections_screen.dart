@@ -1,3 +1,4 @@
+import '../../../../../core/security/secure_field_access.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -119,7 +120,7 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
       size: AppWindowSize.lg,
       scrollBody: false,
       child: BlocProvider(
-        create: (c) => InspectionDetailCubit(
+        create: (c) => InspectionDetailCubit(secureAccess: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null,
           inspectionId: id,
           repo: getIt<InspectionRepository>(),
           reports: getIt<ReportRepository>(),
@@ -189,6 +190,7 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
               Expanded(
                 child: SingleChildScrollView(
                   child: InspectionFilterGrid(
+                    formulationReceiptsOnly: cubit.formulationReceiptsOnly,
                     isProduct: isProduct,
                     status: dStatus,
                     reason: dReason,
@@ -293,7 +295,7 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
       }
       await AppFeedbackExport.actions(context, filePath: path);
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -321,7 +323,7 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
             : file.uri.pathSegments.last,
       );
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -396,7 +398,12 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
                           value: '',
                           label: AppText.t('الكل', 'All'),
                         ),
-                        for (final s in _allStatuses)
+                        for (final s in _allStatuses.where(
+                          (status) =>
+                              !cubit.formulationReceiptsOnly ||
+                              status == 'APPROVED' ||
+                              status == 'CONDITIONAL_APPROVAL',
+                        ))
                           AppDropdownItem(value: s, label: statusLabel(s)),
                       ],
                       onChanged: (v) => cubit.setStatus(v ?? ''),

@@ -12,7 +12,7 @@ import 'package:material_lab/core/sync/sync_run_scope.dart';
 
 import '../sync/sync_test_fixture.dart';
 
-class FakeCentralTransport implements CentralSyncTransport {
+class FakeCentralTransport implements CentralSyncReader {
   FakeCentralTransport(this.onCall);
 
   final Future<Map<String, dynamic>> Function(Map<String, Object?> data) onCall;
@@ -24,9 +24,6 @@ class FakeCentralTransport implements CentralSyncTransport {
     if (response.remove('switchSession') == true) sessionSwitch?.call();
     return response;
   }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
 void main() {
@@ -65,6 +62,7 @@ void main() {
       'uid': 'uid_admin',
       'role': 'admin',
       'bootstrap_state': 'ready',
+      'protocol_schema': 3,
       'applied_sequence': 0,
     });
     projection = CentralProjection(
@@ -179,28 +177,30 @@ void main() {
       expect(() => normalizeApprovedPayload(data, ''), throwsStateError);
     });
 
-    test('the projection refuses to store a raw placeholder after-image',
-        () async {
-      final records = [
-        for (final record in await aggregate())
-          ApprovedRecord(
-            entityType: record.entityType,
-            entityId: record.entityId,
-            version: record.version,
-            data: withPlaceholder(record.data),
+    test(
+      'the projection refuses to store a raw placeholder after-image',
+      () async {
+        final records = [
+          for (final record in await aggregate())
+            ApprovedRecord(
+              entityType: record.entityType,
+              entityId: record.entityId,
+              version: record.version,
+              data: withPlaceholder(record.data),
+            ),
+        ];
+        await expectLater(
+          projection.applyEvent(
+            sequence: 1,
+            operationId: 'poisoned',
+            records: records,
           ),
-      ];
-      await expectLater(
-        projection.applyEvent(
-          sequence: 1,
-          operationId: 'poisoned',
-          records: records,
-        ),
-        throwsStateError,
-      );
-      expect(await fixture.db.query('inspections'), isEmpty);
-      expect(await fixture.db.query('central_approved_records'), isEmpty);
-    });
+          throwsStateError,
+        );
+        expect(await fixture.db.query('inspections'), isEmpty);
+        expect(await fixture.db.query('central_approved_records'), isEmpty);
+      },
+    );
 
     test(
       'a placeholder event applied through the projection lands with the real approval time',
@@ -305,8 +305,10 @@ void main() {
       );
     }
 
-    Map<String, dynamic> beginFrame(int through) =>
-        {'throughSequence': through, 'manifestVersion': 1};
+    Map<String, dynamic> beginFrame(int through) => {
+      'throughSequence': through,
+      'manifestVersion': 1,
+    };
 
     Map<String, dynamic> eventFrame(
       int sequence,
@@ -348,9 +350,7 @@ void main() {
         ];
         final cursor = await driver.syncNow();
         expect(cursor, 1);
-        final state = (await fixture.db.query(
-          'central_sync_state',
-        )).single;
+        final state = (await fixture.db.query('central_sync_state')).single;
         expect(state['bootstrap_state'], 'ready');
         expect(state['applied_sequence'], 1);
         expect(calls.first, 'beginSnapshot/');
@@ -408,10 +408,7 @@ void main() {
           // The head moved during the download; the next page finds a gap.
           {'throughSequence': 2, 'events': [], 'hasMore': false},
         ];
-        await expectLater(
-          driver.syncNow(),
-          throwsA(isA<CentralSyncGap>()),
-        );
+        await expectLater(driver.syncNow(), throwsA(isA<CentralSyncGap>()));
         expect(
           (await fixture.db.query(
             'central_sync_state',
@@ -422,7 +419,7 @@ void main() {
       },
     );
 
-      test(
+    test(
       'an account switch between pages cancels the run instead of mixing sessions',
       () async {
         await pump();
@@ -459,10 +456,7 @@ void main() {
           metadata: SyncMetadata(fixture.helper),
           onError: reported.add,
         );
-        await expectLater(
-          driver.syncNow(),
-          throwsA(isA<SyncRunCancelled>()),
-        );
+        await expectLater(driver.syncNow(), throwsA(isA<SyncRunCancelled>()));
         // Nothing was materialized and no checkpoint exists for either account.
         expect(await fixture.db.query('central_approved_records'), isEmpty);
         expect(await fixture.db.query('central_sync_state'), isEmpty);
@@ -480,6 +474,7 @@ void main() {
           'uid': 'uid_admin',
           'role': 'admin',
           'bootstrap_state': 'ready',
+      'protocol_schema': 3,
           'applied_sequence': 5,
         });
         await fixture.db.insert('central_approved_records', {
@@ -497,9 +492,7 @@ void main() {
         await driver.syncNow();
         // Despite the ready state, the migration forced a full re-download.
         expect(calls.first, 'beginSnapshot/');
-        final state = (await fixture.db.query(
-          'central_sync_state',
-        )).single;
+        final state = (await fixture.db.query('central_sync_state')).single;
         expect(state['bootstrap_state'], 'ready');
         expect(await projection.hasCommitTimePlaceholder(), isFalse);
       },

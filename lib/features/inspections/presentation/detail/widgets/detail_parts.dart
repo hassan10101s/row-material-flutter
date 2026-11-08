@@ -9,6 +9,7 @@ import '../../../../../core/auth/permissions.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/constants/report_form_keys.dart';
 import '../../../../../core/utils/app_exceptions.dart';
+import '../../../../../core/utils/app_format.dart' show referenceValueText;
 import '../../../../../core/utils/reference_range.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback_export.dart';
@@ -248,10 +249,11 @@ class DetailInfo extends StatelessWidget {
               label: AppText.t('الكمية', 'Qty'),
               value: '${inspection['quantity']}',
             ),
-            InfoItem(
-              label: AppText.t('آخذ العينة', 'Sample taker'),
-              value: '${inspection['sample_taken_by']}',
-            ),
+            if (!isProduct)
+              InfoItem(
+                label: AppText.t('آخذ العينة', 'Sample taker'),
+                value: '${inspection['sample_taken_by']}',
+              ),
             InfoItem(
               label: AppText.t('الأخصائي', 'Specialist'),
               value: '${inspection['specialist_name']}',
@@ -456,7 +458,12 @@ class HistoryCard extends StatelessWidget {
 }
 
 /// Pass/fail icon for one reference bound + measured values.
-Widget resultStatusIcon(String ref, List<dynamic> values, bool numeric) {
+Widget resultStatusIcon(
+  Object? rawReference,
+  List<dynamic> values,
+  bool numeric,
+) {
+  final ref = referenceValueText(rawReference);
   if (!numeric || ref.trim().isEmpty || values.isEmpty) {
     return const SizedBox();
   }
@@ -496,8 +503,8 @@ class ResultsTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (reference.isEmpty) return const SizedBox.shrink();
-    final params = reference.keys.toList();
+    if (reference.isEmpty && results.isEmpty) return const SizedBox.shrink();
+    final params = {...reference.keys, ...results.keys}.toList();
     Widget cell(String text, {Color? color, bool strong = false}) => Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Text(
@@ -554,7 +561,7 @@ class ResultsTable extends StatelessWidget {
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 6),
                         child: resultStatusIcon(
-                          '${reference[param] ?? ''}',
+                          reference[param],
                           resultValues(results, param),
                           numeric,
                         ),
@@ -622,8 +629,8 @@ class ResultsCards extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (reference.isEmpty) return const SizedBox.shrink();
-    final params = reference.keys.toList();
+    if (reference.isEmpty && results.isEmpty) return const SizedBox.shrink();
+    final params = {...reference.keys, ...results.keys}.toList();
     return AppCard(
       padding: EdgeInsets.zero,
       child: Padding(
@@ -637,7 +644,7 @@ class ResultsCards extends StatelessWidget {
               if (p > 0) const Divider(height: AppSpacing.lg),
               _ParamCard(
                 param: params[p],
-                ref: '${reference[params[p]] ?? ''}',
+                ref: reference[params[p]],
                 values: resultValues(results, params[p]),
                 samples: samples,
                 numeric: numeric,
@@ -658,17 +665,17 @@ class _ParamCard extends StatelessWidget {
     required this.samples,
     required this.numeric,
   });
-
   final String param;
-  final String ref;
+  final Object? ref;
   final List<dynamic> values;
   final List<String> samples;
   final bool numeric;
 
   @override
   Widget build(BuildContext context) {
+    final range = formatReferenceRange(ref);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
@@ -676,7 +683,7 @@ class _ParamCard extends StatelessWidget {
               child: Text(
                 param,
                 style: TextStyle(
-                  fontSize: 13.spMax,
+                  fontSize: 16.spMax,
                   fontWeight: FontWeight.w700,
                   color: AppColors.textStrong,
                 ),
@@ -685,53 +692,48 @@ class _ParamCard extends StatelessWidget {
             resultStatusIcon(ref, values, numeric),
           ],
         ),
-        Row(
-          children: [
+        const SizedBox(height: AppSpacing.sm),
+        for (var i = 0; i < (values.isEmpty ? 1 : values.length); i++) ...[
+          if (values.length > 1)
             Text(
-              '${AppText.t('النطاق', 'Range')}: ',
+              i < samples.length
+                  ? samples[i]
+                  : AppText.t('عينة ${i + 1}', 'Sample ${i + 1}'),
               style: TextStyle(fontSize: 12.spMax, color: AppColors.textMuted),
             ),
-            Expanded(child: ReferenceRangeView(raw: ref)),
-          ],
-        ),
-        const SizedBox(height: 4),
-        if (values.isEmpty)
-          Text(
-            '—',
-            style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
-          )
-        else
-          for (var i = 0; i < values.length; i++)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Row(
-                children: [
-                  if (values.length > 1)
-                    SizedBox(
-                      width: 88,
-                      child: Text(
-                        samples[i],
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12.spMax,
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: Text(
-                      '${values[i]}',
-                      style: TextStyle(
-                        fontSize: 14.spMax,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textStrong,
-                      ),
-                    ),
-                  ),
-                ],
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(
+              top: AppSpacing.xxs,
+              bottom: AppSpacing.xs,
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceSoft,
+              border: Border.all(color: AppColors.borderMuted),
+              borderRadius: BorderRadius.circular(AppRadii.sm),
+            ),
+            child: Text(
+              values.isEmpty ? '—' : '${values[i]}',
+              style: TextStyle(
+                fontSize: 17.spMax,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textStrong,
               ),
             ),
+          ),
+        ],
+        Text(
+          '${AppText.t('المدى المرجعي', 'Reference range')}: ${range.withUnit}',
+          style: TextStyle(
+            fontSize: 12.spMax,
+            fontWeight: FontWeight.w400,
+            color: AppColors.textMuted,
+          ),
+        ),
       ],
     );
   }
@@ -751,7 +753,7 @@ Future<void> exportInspectionPdf(BuildContext context, String kind) async {
       documentName: path.split(RegExp(r'[/\\]')).last,
     );
   } on AppError catch (e) {
-    if (context.mounted) AppFeedback.error(context, e.message);
+    if (context.mounted) AppFeedback.errorFrom(context, e);
   } catch (e) {
     if (context.mounted) AppFeedback.errorFrom(context, e);
   }
@@ -778,7 +780,7 @@ Future<void> deleteInspection(BuildContext context) async {
     // the confirmation; a "Deleted." toast before the pop was noise.
     Navigator.of(context).pop(true);
   } on AppError catch (e) {
-    if (context.mounted) AppFeedback.error(context, e.message);
+    if (context.mounted) AppFeedback.errorFrom(context, e);
   } catch (e) {
     if (context.mounted) AppFeedback.errorFrom(context, e);
   }

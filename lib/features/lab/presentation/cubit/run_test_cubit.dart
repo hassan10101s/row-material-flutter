@@ -1,5 +1,6 @@
 import '../../../../core/state/app_cubit.dart';
 import '../../../../core/utils/app_exceptions.dart';
+import '../../../../core/constants/app_strings.dart';
 import '../../domain/lab_local_repository.dart';
 import '../../domain/lab_result_repository.dart';
 import 'run_test_state.dart';
@@ -31,6 +32,10 @@ class RunTestCubit extends AppCubit<RunTestState> {
   /// history and stay fixed, only sample/result/dynamic values are re-saved.
   final Map<String, dynamic>? editRow;
 
+  // Invalidate both successful and failed reads when the source changes.
+  int _selectionRequest = 0;
+  int _entryLookup = 0;
+
   bool get isEditing => editRow != null;
 
   Future<void> load() async {
@@ -45,9 +50,6 @@ class RunTestCubit extends AppCubit<RunTestState> {
       final products = loaded[1] as List<Map<String, dynamic>>;
       final rawMaterials = loaded[2] as List<Map<String, dynamic>>;
       int? analysisId = state.analysisId;
-      if (analysisId == null && analyses.isNotEmpty) {
-        analysisId = (analyses.first['id'] as num).toInt();
-      }
       final row = editRow;
       if (row == null) {
         safeEmit(
@@ -104,7 +106,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
@@ -143,6 +145,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
 
   void clearRawMaterial() {
     if (state.rawMaterialId == null) return;
+    _selectionRequest++;
     safeEmit(
       RunTestState(
         loading: state.loading,
@@ -155,7 +158,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
         selectedSampleName: '',
         productId: state.productId,
         analysisId: state.analysisId,
-        loadingInspections: state.loadingInspections,
+        loadingInspections: false,
         running: state.running,
       ),
     );
@@ -163,6 +166,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
 
   void clearProduct() {
     if (state.productId == null) return;
+    _selectionRequest++;
     safeEmit(
       RunTestState(
         loading: state.loading,
@@ -175,7 +179,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
         rawMaterialId: state.rawMaterialId,
         selectedSampleName: '',
         analysisId: state.analysisId,
-        loadingInspections: state.loadingInspections,
+        loadingInspections: false,
         running: state.running,
       ),
     );
@@ -183,6 +187,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
 
   void clearInspection() {
     if (state.selectedInspection.isEmpty) return;
+    _selectionRequest++;
     safeEmit(
       state.copyWith(selectedInspection: const {}, selectedSampleName: ''),
     );
@@ -195,30 +200,25 @@ class RunTestCubit extends AppCubit<RunTestState> {
 
   void setSourceType(String type) {
     if (type == state.sourceType) return;
-    if (type == 'sample') {
-      // Free-text sample: no catalog entity and no inspection linkage, so
-      // drop anything carried over from a raw-material/product source.
-      safeEmit(
-        RunTestState(
-          loading: state.loading,
-          error: state.error,
-          analyses: state.analyses,
-          products: state.products,
-          rawMaterials: state.rawMaterials,
-          analysisId: state.analysisId,
-          sourceType: type,
-          running: state.running,
-        ),
-      );
-      return;
-    }
-    safeEmit(state.copyWith(sourceType: type));
+    _selectionRequest++;
+    safeEmit(
+      RunTestState(
+        loading: state.loading,
+        analyses: state.analyses,
+        products: state.products,
+        rawMaterials: state.rawMaterials,
+        analysisId: state.analysisId,
+        sourceType: type,
+        running: state.running,
+      ),
+    );
   }
 
   /// Product path mirrors the raw-material path: picking a product loads
   /// its product-inspection records, then a record and one of its samples.
   Future<void> selectProduct(int id) async {
     if (id == state.productId && state.inspections.isNotEmpty) return;
+    final request = ++_selectionRequest;
     safeEmit(
       state.copyWith(
         productId: id,
@@ -232,13 +232,17 @@ class RunTestCubit extends AppCubit<RunTestState> {
     );
     try {
       final inspections = await local.listProductInspectionRecords(id);
-      if (state.productId != id) return;
+      if (request != _selectionRequest) return;
       safeEmit(
         state.copyWith(inspections: inspections, loadingInspections: false),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loadingInspections: false, error: e.message));
+      if (request != _selectionRequest) return;
+      safeEmit(
+        state.copyWith(loadingInspections: false, error: AppError.friendly(e)),
+      );
     } catch (e) {
+      if (request != _selectionRequest) return;
       safeEmit(
         state.copyWith(loadingInspections: false, error: AppError.friendly(e)),
       );
@@ -246,6 +250,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
   }
 
   Future<void> selectRawMaterial(int materialId) async {
+    final request = ++_selectionRequest;
     safeEmit(
       state.copyWith(
         rawMaterialId: materialId,
@@ -259,13 +264,17 @@ class RunTestCubit extends AppCubit<RunTestState> {
     );
     try {
       final inspections = await local.listInspectionRecords(materialId);
-      if (state.rawMaterialId != materialId) return;
+      if (request != _selectionRequest) return;
       safeEmit(
         state.copyWith(inspections: inspections, loadingInspections: false),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loadingInspections: false, error: e.message));
+      if (request != _selectionRequest) return;
+      safeEmit(
+        state.copyWith(loadingInspections: false, error: AppError.friendly(e)),
+      );
     } catch (e) {
+      if (request != _selectionRequest) return;
       safeEmit(
         state.copyWith(loadingInspections: false, error: AppError.friendly(e)),
       );
@@ -277,6 +286,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
         .where((row) => '${row['id']}' == '$inspectionId')
         .firstOrNull;
     if (inspection == null) return;
+    _selectionRequest++;
     final sampleNames = _sampleNamesOf(inspection);
     safeEmit(
       state.copyWith(
@@ -298,25 +308,29 @@ class RunTestCubit extends AppCubit<RunTestState> {
   /// (source name, material and inspection); false leaves state untouched
   /// so the caller can report "unknown code".
   Future<bool> lookupEntry(String code) async {
+    final request = _selectionRequest;
+    final lookup = ++_entryLookup;
     final row = await local.resolveInspection(code.trim());
+    if (request != _selectionRequest || lookup != _entryLookup) return false;
     if (row == null) return false;
+    _selectionRequest++;
     final samples = _sampleNamesOf(row);
     final isProduct = '${row['inspection_kind'] ?? 'raw'}' == 'product';
     safeEmit(
       state.copyWith(
         sourceName: '${row['material_name'] ?? ''}',
-        sourceType: isProduct ? 'product' : state.sourceType,
+        sourceType: isProduct ? 'product' : 'raw_material',
         rawMaterialId: isProduct
-            ? state.rawMaterialId
-            : int.tryParse('${row['material_id'] ?? ''}') ??
-                  state.rawMaterialId,
+            ? null
+            : int.tryParse('${row['material_id'] ?? ''}'),
         productId: isProduct
-            ? int.tryParse('${row['product_id'] ?? ''}') ?? state.productId
-            : state.productId,
+            ? int.tryParse('${row['product_id'] ?? ''}')
+            : null,
+        inspections: [row],
+        loadingInspections: false,
+        error: null,
         selectedInspection: row,
-        selectedSampleName: samples.isEmpty
-            ? state.selectedSampleName
-            : samples.first,
+        selectedSampleName: samples.isEmpty ? '' : samples.first,
       ),
     );
     return true;
@@ -340,6 +354,11 @@ class RunTestCubit extends AppCubit<RunTestState> {
     Map<String, dynamic>? user,
     String? entryCode,
   }) async {
+    if (state.analysisId == null) {
+      throw ValidationError(
+        AppText.t('اختر التحليل أولًا.', 'Select an analysis first.'),
+      );
+    }
     safeEmit(state.copyWith(running: true, error: null));
     try {
       final isProduct = state.sourceType == 'product';

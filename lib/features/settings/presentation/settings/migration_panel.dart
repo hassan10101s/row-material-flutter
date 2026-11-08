@@ -75,7 +75,7 @@ class _MigrationPanelState extends State<MigrationPanel> {
       if (!mounted) return;
       if (message.isNotEmpty) AppFeedback.success(context, message);
     } on AppError catch (e) {
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
     } finally {

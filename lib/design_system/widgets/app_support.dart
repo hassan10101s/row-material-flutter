@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import './app_tooltip.dart';
+import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/app_strings.dart';
@@ -15,7 +18,12 @@ class AppSupport {
   static const whatsapp = 'https://wa.me/201213473838';
   static const phone = 'tel:+201213473838';
 
-  static const companyName = 'Kvector Co.';
+  static const companyName = 'Kvector Co. LLC';
+
+  /// Deliberately shown in English on both language sides: the corporate
+  /// identity (name, line of business, seat) reads as a formal letterhead.
+  static const companyLine = 'Software Development & AI for Industry';
+  static const companySeat = 'Mohandiseen, Cairo, Egypt';
 
   static Future<void> openLink(BuildContext context, String value) async {
     final ok = await launchUrl(
@@ -89,16 +97,22 @@ Future<void> openSupportSheet(BuildContext context) {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // Formal letterhead in both languages: English identity,
+                  // then the seat line underneath.
                   const Text(
                     AppSupport.companyName,
                     style: TextStyle(fontWeight: FontWeight.w800),
                   ),
                   Text(
-                    AppText.t(
-                      'شركة تطوير برمجيات وحلول تقنية مؤسسية',
-                      'Software Development & Enterprise Solutions Company',
-                    ),
+                    AppSupport.companyLine,
                     style: TextStyle(color: AppColors.textMuted, fontSize: 12),
+                  ),
+                  Text(
+                    AppSupport.companySeat,
+                    style: TextStyle(
+                      color: AppColors.textMuted.withValues(alpha: 0.8),
+                      fontSize: 11,
+                    ),
                   ),
                 ],
               ),
@@ -106,30 +120,135 @@ Future<void> openSupportSheet(BuildContext context) {
           ],
         ),
         const SizedBox(height: AppSpacing.lg),
-        AppButton(
-          label: AppText.t('واتساب', 'WhatsApp'),
-          icon: const Icon(Icons.chat_outlined, size: 18),
-          expanded: true,
-          onPressed: () =>
-              AppSupport.openLink(sheetContext, AppSupport.whatsapp),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        AppButton(
-          label: AppText.t('اتصال', 'Call'),
-          icon: const Icon(Icons.phone_outlined, size: 18),
-          style: AppButtonStyle.secondary,
-          expanded: true,
-          onPressed: () => AppSupport.openLink(sheetContext, AppSupport.phone),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        AppButton(
-          label: AppText.t('الموقع', 'Website'),
-          icon: const Icon(Icons.language, size: 18),
-          style: AppButtonStyle.ghost,
-          expanded: true,
-          onPressed: () => AppSupport.openLink(sheetContext, AppSupport.site),
-        ),
+        // Compact circular channels row (website / call / WhatsApp) instead
+        // of stacked full-width buttons — same links, less space.
+        const AppSupportChannels(),
       ],
     ),
   );
+}
+
+/// One circular contact button with a small bilingual label underneath.
+/// Shared by the support sheet and the trial-expired screen.
+class AppSupportCircle extends StatelessWidget {
+  const AppSupportCircle({
+    super.key,
+    required this.label,
+    required this.tooltip,
+    required this.onTap,
+    this.icon,
+    this.glyph,
+    this.background,
+    this.foreground,
+    this.border,
+  }) : assert(icon != null || glyph != null);
+
+  final String label;
+  final String tooltip;
+  final VoidCallback onTap;
+  final IconData? icon;
+
+  /// Pre-sized widget used instead of [icon] (e.g. the authentic WhatsApp
+  /// SVG logo).
+  final Widget? glyph;
+  final Color? background;
+  final Color? foreground;
+  final Color? border;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppTooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(40.r),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              button: true,
+              label: tooltip,
+              child: Container(
+                width: 52.r,
+                height: 52.r,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: background ?? AppColors.surface,
+                  border: border == null
+                      ? null
+                      : Border.all(color: border!, width: 1.5),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: glyph ??
+                      Icon(
+                        icon,
+                        color: foreground ?? AppColors.primary,
+                        size: 22.r,
+                      ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              style: TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 11.5.spMax,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The company contact channels as tight circular icons side by side:
+/// website, call and WhatsApp (authentic logo). RTL flips the row.
+class AppSupportChannels extends StatelessWidget {
+  const AppSupportChannels({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        AppSupportCircle(
+          label: AppText.t('الموقع', 'Website'),
+          icon: Icons.language,
+          border: AppColors.border,
+          tooltip: AppText.t('فتح الموقع', 'Open the website'),
+          onTap: () => AppSupport.openLink(context, AppSupport.site),
+        ),
+        AppSupportCircle(
+          label: AppText.t('اتصال', 'Call'),
+          icon: Icons.phone_outlined,
+          background: AppColors.primary,
+          foreground: Colors.white,
+          tooltip: AppText.t('اتصال بالدعم', 'Call support'),
+          onTap: () => AppSupport.openLink(context, AppSupport.phone),
+        ),
+        AppSupportCircle(
+          label: AppText.t('واتساب', 'WhatsApp'),
+          background: AppColors.whatsapp,
+          foreground: Colors.white,
+          tooltip: AppText.t('تواصل واتساب', 'Chat on WhatsApp'),
+          glyph: SizedBox(
+            width: 22.r,
+            height: 22.r,
+            child: SvgPicture.asset('assets/images/whatsapp.svg'),
+          ),
+          onTap: () => AppSupport.openLink(context, AppSupport.whatsapp),
+        ),
+      ],
+    );
+  }
 }

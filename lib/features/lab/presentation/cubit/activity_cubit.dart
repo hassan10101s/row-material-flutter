@@ -17,7 +17,7 @@ class ActivityCubit extends AppCubit<ActivityState> {
       final rows = await repo.activityLog(limit: 300);
       safeEmit(state.copyWith(loading: false, rows: rows));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }

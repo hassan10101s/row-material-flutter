@@ -15,6 +15,7 @@ import 'package:material_lab/features/reports/data/tiny_jinja.dart';
 /// `range()` / `.lower()` / `+` / `|trim` and `{% for %}`-`{% else %}`.
 void main() {
   const settings = <String, dynamic>{
+    'report_language': 'en',
     'department_label': 'Quality Assurance Department',
     'report_logo_data_uri': '',
   };
@@ -28,7 +29,7 @@ void main() {
       );
       final out = tinyJinjaRender(_tpl('daily_report_template.html'), ctx);
       expect(out, contains('2026-09-22'));
-      expect(out, contains('Daily Quality Report'));
+      expect(out, contains('Daily raw material report'));
       expect(out, isNot(contains(r'{{')));
     });
 
@@ -59,11 +60,7 @@ void main() {
     });
 
     test('yearly_report_template.html', () {
-      final ctx = buildYearlyContext(
-        [_row()],
-        settings: settings,
-        year: 2026,
-      );
+      final ctx = buildYearlyContext([_row()], settings: settings, year: 2026);
       final out = tinyJinjaRender(_tpl('yearly_report_template.html'), ctx);
       expect(out, contains('2026'));
       expect(out, isNot(contains(r'{{')));
@@ -80,10 +77,10 @@ void main() {
     });
 
     test('batch_label_template.html', () {
-      final ctx = buildBatchLabelsContext(
-        [_row(entryCode: 'QC-100'), _row(entryCode: 'QC-101')],
-        settings: settings,
-      );
+      final ctx = buildBatchLabelsContext([
+        _row(entryCode: 'QC-100'),
+        _row(entryCode: 'QC-101'),
+      ], settings: settings);
       final out = tinyJinjaRender(_tpl('batch_label_template.html'), ctx);
       expect(out, contains('Batch Labels'));
       expect(out, contains('QC-100'));
@@ -128,6 +125,7 @@ void main() {
           generatedBy: 'Hassan',
           generatedAt: DateTime(2026, 3, 4, 5, 6),
         ),
+        settings: settings,
       );
       final out = tinyJinjaRender(_tpl('ncr_report_template.html'), ctx);
       expect(out, contains('Non-Conformance Report'));
@@ -138,10 +136,8 @@ void main() {
     });
 
     test('report_template.html (full inspection)', () {
-      final ctx = buildInspectionContext(
-        _row(),
-        settings: settings,
-      )..['qr_image_data_uri'] = '';
+      final ctx = buildInspectionContext(_row(), settings: settings)
+        ..['qr_image_data_uri'] = '';
       final out = tinyJinjaRender(_tpl('report_template.html'), ctx);
       expect(out, contains('Quality Control Report'));
       expect(out, isNot(contains(r'{{')));
@@ -164,14 +160,12 @@ void main() {
                 '[{"name": "Protein", "result": "12.5", "unit": "%"}]',
           },
         ];
-      final ctx = buildInspectionContext(
-        row,
-        settings: settings,
-      )..['qr_image_data_uri'] = '';
+      final ctx = buildInspectionContext(row, settings: settings)
+        ..['qr_image_data_uri'] = '';
       final out = tinyJinjaRender(_tpl('report_template.html'), ctx);
-      expect(out, contains('عينات التشغيلية'));
+      expect(out, contains('Operational Samples'));
       expect(out, isNot(contains('محضر فحص خامات')));
-      expect(out, contains('محضر فحص منتجات'));
+      expect(out, contains('Product Inspection Report'));
       // Header-level physical/chemical tables stay empty for products —
       // only the merged operational-samples table renders.
       expect(out, isNot(contains('Requirement')));
@@ -190,7 +184,9 @@ void main() {
 {% for row in rows %}{% set ns.has = true %}{% set ns.count = ns.count + 1 %}{% endfor %}
 {{ ns.has }}|{{ ns.count }}''';
       expect(
-        tinyJinjaRender(tpl, {'rows': [1, 2, 3]}),
+        tinyJinjaRender(tpl, {
+          'rows': [1, 2, 3],
+        }),
         contains('True|3'),
       );
     });
@@ -198,19 +194,25 @@ void main() {
     test('elif and for-else', () {
       expect(
         tinyJinjaRender(
-            '{% for x in items %}{{ x }}{% else %}none{% endfor %}',
-            {'items': <int>[]}),
+          '{% for x in items %}{{ x }}{% else %}none{% endfor %}',
+          {'items': <int>[]},
+        ),
         'none',
       );
       expect(
         tinyJinjaRender(
-            '{% for x in items %}{{ x }}{% else %}none{% endfor %}',
-            {'items': [1]}),
+          '{% for x in items %}{{ x }}{% else %}none{% endfor %}',
+          {
+            'items': [1],
+          },
+        ),
         '1',
       );
       expect(
-        tinyJinjaRender('{% if s == "a" %}A{% elif s == "b" %}B{% else %}C{% endif %}',
-            {'s': 'b'}),
+        tinyJinjaRender(
+          '{% if s == "a" %}A{% elif s == "b" %}B{% else %}C{% endif %}',
+          {'s': 'b'},
+        ),
         'B',
       );
     });
@@ -218,26 +220,27 @@ void main() {
     test('inline ternary (incl. nested) and and/or', () {
       expect(
         tinyJinjaRender(
-            "{{ 'high' if r >= 90 else ('medium' if r >= 70 else 'low') }}",
-            {'r': 95}),
+          "{{ 'high' if r >= 90 else ('medium' if r >= 70 else 'low') }}",
+          {'r': 95},
+        ),
         'high',
       );
       expect(
         tinyJinjaRender(
-            "{{ 'high' if r >= 90 else ('medium' if r >= 70 else 'low') }}",
-            {'r': 50}),
+          "{{ 'high' if r >= 90 else ('medium' if r >= 70 else 'low') }}",
+          {'r': 50},
+        ),
         'low',
       );
       expect(
-        tinyJinjaRender(
-            '{% if a and b == "-" %}yes{% else %}no{% endif %}',
-            {'a': 'x', 'b': '-'}),
+        tinyJinjaRender('{% if a and b == "-" %}yes{% else %}no{% endif %}', {
+          'a': 'x',
+          'b': '-',
+        }),
         'yes',
       );
       expect(
-        tinyJinjaRender(
-            "{{ x if x else 'fallback' }}",
-            {'x': 0}),
+        tinyJinjaRender("{{ x if x else 'fallback' }}", {'x': 0}),
         'fallback',
       );
     });
@@ -245,7 +248,9 @@ void main() {
     test('range() + arithmetic + list indexing', () {
       const tpl = '''
 {% for page_start in range(0, labels|length, 2) %}{% for i in range(2) %}{% set idx = page_start + i %}{% if idx < labels|length %}{{ labels[idx] }}{% endif %}{% endfor %}|{% endfor %}''';
-      final out = tinyJinjaRender(tpl, {'labels': ['a', 'b', 'c']});
+      final out = tinyJinjaRender(tpl, {
+        'labels': ['a', 'b', 'c'],
+      });
       expect(out, 'ab|c|');
     });
 
@@ -263,29 +268,28 @@ void main() {
 }
 
 Map<String, dynamic> _row({String entryCode = 'QC-001'}) => {
-      'id': 1,
-      'entry_code': entryCode,
-      'material_name': 'Sugar',
-      'inspection_date': '2026-09-22',
-      'expiry_date': '2027-09-22',
-      'supplier': 'Delta',
-      'truck_number': 'ABC-123',
-      'quantity': '25.000',
-      'rejected_quantity': '0',
-      'sample_taken_by': 'QA Team',
-      'specialist_name': 'Sara',
-      'created_by_name': 'Admin',
-      'decision_status': 'APPROVED',
-      'decision_reason': '',
-      'follow_up_note': '-',
-      'updated_at': '2026-09-22T10:00:00',
-      'sample_names': const ['Sample A', 'Sample B'],
-      'physical_reference': <String, dynamic>{},
-      'physical_results': <String, dynamic>{},
-      'chemical_reference': <String, dynamic>{},
-      'chemical_results': <String, dynamic>{},
-      'status_history': <dynamic>[],
-    };
+  'id': 1,
+  'entry_code': entryCode,
+  'material_name': 'Sugar',
+  'inspection_date': '2026-09-22',
+  'expiry_date': '2027-09-22',
+  'supplier': 'Delta',
+  'truck_number': 'ABC-123',
+  'quantity': '25.000',
+  'rejected_quantity': '0',
+  'sample_taken_by': 'QA Team',
+  'specialist_name': 'Sara',
+  'created_by_name': 'Admin',
+  'decision_status': 'APPROVED',
+  'decision_reason': '',
+  'follow_up_note': '-',
+  'updated_at': '2026-09-22T10:00:00',
+  'sample_names': const ['Sample A', 'Sample B'],
+  'physical_reference': <String, dynamic>{},
+  'physical_results': <String, dynamic>{},
+  'chemical_reference': <String, dynamic>{},
+  'chemical_results': <String, dynamic>{},
+  'status_history': <dynamic>[],
+};
 
-String _tpl(String name) =>
-    File('assets/templates/$name').readAsStringSync();
+String _tpl(String name) => File('assets/templates/$name').readAsStringSync();

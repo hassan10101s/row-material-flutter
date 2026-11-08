@@ -87,7 +87,7 @@ class AppTopBarFallback extends StatelessWidget implements PreferredSizeWidget {
   final Future<void> Function()? onRefresh;
 
   @override
-  Size get preferredSize => const Size.fromHeight(kToolbarHeight);
+  Size get preferredSize => AppTopAppBar(title: title).preferredSize;
 
   @override
   Widget build(BuildContext context) {

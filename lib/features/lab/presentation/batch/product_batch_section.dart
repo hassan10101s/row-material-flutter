@@ -1,5 +1,8 @@
+import '../../../../core/security/secure_payload_compiler.dart';
+import '../../../../core/security/secure_field_access.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import 'package:flutter/material.dart';
+import '../../../../design_system/widgets/app_tooltip.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -9,6 +12,7 @@ import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_format.dart';
 import '../../../../../core/utils/reference_range.dart';
+import '../../../../../design_system/widgets/analysis_value_advisory.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
@@ -29,16 +33,14 @@ import '../../../inspections/presentation/cubit/inspection_detail_cubit.dart';
 import '../../../reference/domain/reference_repository.dart';
 import '../../domain/lab_result_repository.dart';
 import '../../domain/product_batch_repository.dart';
+import '../../../qc_manager/domain/qc_repositories.dart';
+import '../../../qc_manager/presentation/ncr/qc_ncr_create_screen.dart';
+import '../../../qc_manager/presentation/cubit/qc_ncr_cubit.dart';
 import '../cubit/product_batch_cubit.dart';
 import '../cubit/product_batch_state.dart';
 import '../../../../design_system/widgets/app_data_table.dart';
 
-const _batchDecisions = [
-  'APPROVED',
-  'CONDITIONAL_APPROVAL',
-  'PARTIAL_REJECTION',
-  'FULL_REJECTION',
-];
+const _batchDecisions = ['APPROVED', 'FULL_REJECTION', 'NON_CONFORMANCE'];
 
 /// Chemical result fields accept numbers only (no letters): digits with at
 /// most one decimal point, matching the raw-material form's normalization.
@@ -115,6 +117,9 @@ class ProductBatchSection extends StatelessWidget {
   Widget build(BuildContext context) {
     return BlocProvider(
       create: (_) => ProductBatchCubit(
+        secureAccess: getIt.isRegistered<SecureFieldAccess>()
+            ? getIt<SecureFieldAccess>()
+            : null,
         batchId: batchId,
         repo: getIt<ProductBatchRepository>(),
         currentUser: () {
@@ -191,14 +196,35 @@ class _BatchSectionBodyState extends State<_BatchSectionBody> {
   Future<_BatchSampleTemplate> _loadTemplate(BuildContext context) async {
     Map<String, dynamic> physicalRef = {};
     Map<String, dynamic> chemicalRef = {};
+    var hasSnapshot = false;
     try {
+      // A saved batch owns its reference snapshot. Product edits/archival
+      // must not replace that snapshot or erase the physical template.
+      final record = await getIt<InspectionRepository>().getById(batchId);
+      if (record['inspection_kind'] == 'product' &&
+          record['product_id'] == productId &&
+          record['physical_reference'] is Map &&
+          record['chemical_reference'] is Map) {
+        physicalRef = Map<String, dynamic>.from(
+          record['physical_reference'] as Map,
+        );
+        chemicalRef = Map<String, dynamic>.from(
+          record['chemical_reference'] as Map,
+        );
+        final secureTemplate = secureJson(record['secure_template_json']);
+        physicalRef.addAll(secureJson(secureTemplate['physical']));
+        chemicalRef.addAll(secureJson(secureTemplate['chemical']));
+        hasSnapshot = true;
+      }
+    } catch (_) {}
+    if (!hasSnapshot) {
       final product = await getIt<ReferenceRepository>()
           .getProductForInspection(productId);
       final p = product['physical_reference'];
       if (p is Map) physicalRef = Map<String, dynamic>.from(p);
       final c = product['chemical_reference'];
       if (c is Map) chemicalRef = Map<String, dynamic>.from(c);
-    } catch (_) {}
+    }
     List<Map<String, dynamic>> takers = const [];
     try {
       takers = await getIt<InspectionRepository>().listSampleTakerHistory();
@@ -211,7 +237,7 @@ class _BatchSectionBodyState extends State<_BatchSectionBody> {
     } catch (_) {}
     // Legacy products (ranges only, no chemical_reference_json yet):
     // convert ranges into the same fixed chemical template.
-    if (chemicalRef.isEmpty && ranges.isNotEmpty) {
+    if (!hasSnapshot && chemicalRef.isEmpty && ranges.isNotEmpty) {
       chemicalRef = {
         for (final r in ranges)
           if ('${r['analysis_name'] ?? ''}'.trim().isNotEmpty)
@@ -237,17 +263,28 @@ class _BatchSectionBodyState extends State<_BatchSectionBody> {
 
   /// Adds a sample inheriting the محضر linked items: every physical بيان
   /// (e.g. اللون) and every chemical analysis arrives pre-filled with its
-  /// unit/reference — only the values + taker are filled per sample.
+  /// unit/reference — only the values + taker are filled per sample. The
+  /// form is long (dynamic بيان/تحليل rows), so it follows the unified
+  /// content surface: a window on desktop, a full page on phones.
   Future<void> _addSample(BuildContext context) async {
     final cubit = context.read<ProductBatchCubit>();
-    final template = await _loadTemplate(context);
+    final _BatchSampleTemplate template;
+    try {
+      template = await _loadTemplate(context);
+    } catch (error) {
+      if (context.mounted) AppFeedback.errorFrom(context, error);
+      return;
+    }
     if (!context.mounted) return;
-    final data = await showAppOverlay<_SampleFormData>(
+    final data = await showAppContent<_SampleFormData>(
       context,
       title: AppText.t('عينة جديدة', 'New sample'),
       icon: Icons.science_outlined,
-      builder: (sheetContext, close) =>
-          _SampleForm(template: template, onSave: (d) => close(d)),
+      size: AppWindowSize.lg,
+      scrollBody: false,
+      builder: (sheetContext, close) => SingleChildScrollView(
+        child: _SampleForm(template: template, onSave: (d) => close(d)),
+      ),
     );
     if (data == null || !context.mounted) return;
     HapticFeedback.selectionClick();
@@ -277,16 +314,43 @@ class _BatchSectionBodyState extends State<_BatchSectionBody> {
   ) async {
     final cubit = context.read<ProductBatchCubit>();
     final sampleId = (sample['id'] as num).toInt();
-    final template = await _loadTemplate(context);
+    final _BatchSampleTemplate template;
+    try {
+      final all = await _loadTemplate(context);
+      final saved = SecureFieldAccess.publicRecord(sample);
+      final privateTemplate = secureJson(saved['secure_template_json']);
+      final names = {
+        ...secureJson(privateTemplate['physical']).keys,
+        ...secureJson(privateTemplate['chemical']).keys,
+      };
+      template = _BatchSampleTemplate(
+        physicalRef: {
+          for (final e in all.physicalRef.entries)
+            if (!names.contains(e.key)) e.key: e.value,
+        },
+        chemicalRef: {
+          for (final e in all.chemicalRef.entries)
+            if (!names.contains(e.key)) e.key: e.value,
+        },
+        takerOptions: all.takerOptions,
+      );
+    } catch (error) {
+      if (context.mounted) AppFeedback.errorFrom(context, error);
+      return;
+    }
     if (!context.mounted) return;
-    final data = await showAppOverlay<_SampleFormData>(
+    final data = await showAppContent<_SampleFormData>(
       context,
       title: AppText.t('تعديل العينة', 'Edit sample'),
       icon: Icons.edit_outlined,
-      builder: (sheetContext, close) => _SampleForm(
-        template: template,
-        initial: sample,
-        onSave: (d) => close(d),
+      size: AppWindowSize.lg,
+      scrollBody: false,
+      builder: (sheetContext, close) => SingleChildScrollView(
+        child: _SampleForm(
+          template: template,
+          initial: SecureFieldAccess.publicRecord(sample),
+          onSave: (d) => close(d),
+        ),
       ),
     );
     if (data == null || !context.mounted) return;
@@ -313,11 +377,12 @@ class _BatchSectionBodyState extends State<_BatchSectionBody> {
     final cubit = context.read<ProductBatchCubit>();
     final sampleId = (sample['id'] as num).toInt();
     var status = '${sample['decision_status'] ?? ''}';
+    if (status == 'CONDITIONAL_APPROVAL') status = 'APPROVED';
+    if (status == 'PARTIAL_REJECTION') status = 'FULL_REJECTION';
     if (!_batchDecisions.contains(status)) status = 'APPROVED';
-    final reasonCtrl = TextEditingController(
-      text: '${sample['decision_reason'] ?? ''}',
-    );
-    final saved = await showAppOverlay<bool>(
+    final previousReason = '${sample['decision_reason'] ?? ''}';
+    final reasonCtrl = TextEditingController(text: previousReason);
+    final saved = await showAppContent<bool>(
       context,
       title: AppText.t('قرار العينة', 'Sample decision'),
       icon: Icons.fact_check_outlined,
@@ -331,7 +396,14 @@ class _BatchSectionBodyState extends State<_BatchSectionBody> {
               labelText: AppText.t('القرار', 'Decision'),
               items: [
                 for (final s in _batchDecisions)
-                  AppDropdownItem(value: s, label: statusLabel(s)),
+                  AppDropdownItem(
+                    value: s,
+                    label: s == 'APPROVED'
+                        ? AppText.t('مقبول', 'Accepted')
+                        : s == 'FULL_REJECTION'
+                        ? AppText.t('مرفوض', 'Rejected')
+                        : AppText.t('عدم مطابقة', 'Non-conformance'),
+                  ),
               ],
               onChanged: (v) => setDraft(() => status = v ?? status),
             ),
@@ -354,6 +426,36 @@ class _BatchSectionBodyState extends State<_BatchSectionBody> {
     final reason = reasonCtrl.text;
     reasonCtrl.dispose();
     if (saved != true || !context.mounted) return;
+    if (status == 'NON_CONFORMANCE') {
+      final report = getIt<QcNcrCubit>();
+      try {
+        final previous = await getIt<QcNcCapaRepository>()
+            .getProductSampleFinding(sampleId);
+        if (!context.mounted) return;
+        final completed = await QcNcrCreateScreen.open(
+          context,
+          report,
+          finding: previous?.isClosed == false ? previous : null,
+          productSampleId: sampleId,
+          activateProductDecision: true,
+          initialDescription:
+              reason.trim().isNotEmpty && reason.trim() != previousReason.trim()
+              ? reason.trim()
+              : null,
+          productContext:
+              '$entryCode - ${sample['sample_name'] ?? sample['sample_no'] ?? ''}',
+        );
+        if (completed && context.mounted) {
+          await cubit.load();
+          if (context.mounted) _refreshDetail(context);
+        }
+      } catch (error) {
+        if (context.mounted) AppFeedback.errorFrom(context, error);
+      } finally {
+        await report.close();
+      }
+      return;
+    }
     await cubit.setSampleDecision(
       sampleId,
       status: status,
@@ -603,7 +705,7 @@ class _SamplesSequentialTable extends StatelessWidget {
     required Widget child,
     required Map<String, dynamic> sample,
   }) {
-    return Tooltip(
+    return AppTooltip(
       message: _buildSampleHoverTooltip(sample),
       waitDuration: const Duration(milliseconds: 200),
       showDuration: const Duration(seconds: 4),
@@ -1354,9 +1456,6 @@ class _BatchSampleTemplate {
   final Map<String, dynamic> physicalRef;
   final Map<String, dynamic> chemicalRef;
   final List<Map<String, dynamic>> takerOptions;
-
-  bool get hasPhysical => physicalRef.isNotEmpty;
-  bool get hasChemical => chemicalRef.isNotEmpty;
 }
 
 /// Collected sample form data: identity + the sample's own results.
@@ -1417,6 +1516,7 @@ class _ChemRow {
   final String name;
   final String unit;
   final String refHint;
+  final Object? reference;
   final TextEditingController result = TextEditingController();
 
   /// Free legacy row (only when the product has no linked items at all).
@@ -1427,6 +1527,7 @@ class _ChemRow {
     required this.name,
     required this.unit,
     required this.refHint,
+    this.reference,
     String resultText = '',
   }) : freeName = null,
        freeUnit = null {
@@ -1440,6 +1541,7 @@ class _ChemRow {
   }) : name = '',
        unit = '',
        refHint = '',
+       reference = null,
        freeName = TextEditingController(text: nameText),
        freeUnit = TextEditingController(text: unitText) {
     result.text = resultText;
@@ -1489,8 +1591,9 @@ class _SampleFormState extends State<_SampleForm> {
   late final List<_PhysRow> _physRows;
   late final List<_ChemRow> _chemRows;
 
-  bool get _physFixed => widget.template.hasPhysical;
-  bool get _chemFixed => widget.template.hasChemical;
+  // An empty linked template is still fixed: it never enables free fields.
+  bool get _physFixed => true;
+  bool get _chemFixed => true;
 
   @override
   void initState() {
@@ -1528,6 +1631,7 @@ class _SampleFormState extends State<_SampleForm> {
             name: e.key,
             unit: referenceUnitText(e.value),
             refHint: referenceValueText(e.value),
+            reference: e.value,
             resultText: chemByName[e.key]?['result'] ?? '',
           ),
       ];
@@ -1604,34 +1708,44 @@ class _SampleFormState extends State<_SampleForm> {
   /// (raw-material parity); free rows fall back to the standard keywords.
   Widget _physicalValueField(String label, _PhysRow row) {
     final suggestions = _physicalValueSuggestions(row.reference);
-    return AppField(
-      label: label,
+    return AnalysisValueAdvisory(
       controller: row.value,
-      suffix: suggestions.isEmpty
-          ? null
-          : PopupMenuButton<String>(
-              tooltip: AppText.t('اقتراحات', 'Suggestions'),
-              onSelected: (v) => setState(() => row.value.text = v),
-              itemBuilder: (_) => [
-                for (final s in suggestions)
-                  PopupMenuItem(value: s, child: Text(s)),
-              ],
-              child: Icon(
-                Icons.arrow_drop_down,
-                size: 20.r,
-                color: AppColors.textMuted,
+      parameter: row.name,
+      reference: row.reference,
+      child: AppField(
+        label: label,
+        controller: row.value,
+        suffix: suggestions.isEmpty
+            ? null
+            : PopupMenuButton<String>(
+                tooltip: AppText.t('اقتراحات', 'Suggestions'),
+                onSelected: (v) => setState(() => row.value.text = v),
+                itemBuilder: (_) => [
+                  for (final s in suggestions)
+                    PopupMenuItem(value: s, child: Text(s)),
+                ],
+                child: Icon(
+                  Icons.arrow_drop_down,
+                  size: 20.r,
+                  color: AppColors.textMuted,
+                ),
               ),
-            ),
+      ),
     );
   }
 
   /// Chemical result input: numbers only (letters are rejected).
-  Widget _chemicalResultField(String label, TextEditingController ctrl) {
-    return AppField(
-      label: label,
-      controller: ctrl,
-      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-      inputFormatters: [_decimalOnlyFormatter],
+  Widget _chemicalResultField(String label, _ChemRow row) {
+    return AnalysisValueAdvisory(
+      controller: row.result,
+      parameter: row.effectiveName,
+      reference: row.reference,
+      child: AppField(
+        label: label,
+        controller: row.result,
+        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: [_decimalOnlyFormatter],
+      ),
     );
   }
 
@@ -1867,7 +1981,7 @@ class _SampleFormState extends State<_SampleForm> {
                             flex: 2,
                             child: _chemicalResultField(
                               AppText.t('النتيجة', 'Result'),
-                              _chemRows[i].result,
+                              _chemRows[i],
                             ),
                           ),
                         ],
@@ -1910,7 +2024,7 @@ class _SampleFormState extends State<_SampleForm> {
                                 flex: 3,
                                 child: _chemicalResultField(
                                   AppText.t('النتيجة', 'Result'),
-                                  _chemRows[i].result,
+                                  _chemRows[i],
                                 ),
                               ),
                               const SizedBox(width: AppSpacing.sm),

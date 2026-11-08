@@ -1,4 +1,4 @@
-﻿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/commands/command_contract.dart';
@@ -89,8 +89,7 @@ void main() {
       ),
       'new-material',
       version: version,
-    )
-      ..['updatedAt'] = updatedAt;
+    )..['updatedAt'] = updatedAt;
     return ApprovedRecord(
       entityType: 'referenceMaterial',
       entityId: 'new-material',
@@ -154,6 +153,52 @@ void main() {
     'hasMore': false,
   };
 
+  test(
+    'staged install crosses allocation and materialization batches with shared actors',
+    () async {
+      final template = sample();
+      final children = [
+        for (var i = 0; i < 505; i++)
+          ApprovedRecord(
+            entityType: 'sample',
+            entityId: 'child-$i',
+            version: 1,
+            data: {
+              ...template.data,
+              'remoteId': 'child-$i',
+              'entryCode': 'BATCH-$i',
+              'createdBy': i < 501 ? 'history-one' : 'history-two',
+            },
+          ),
+      ];
+      await projection.stageRecords(children);
+      await projection.stageRecords([await material()]);
+      await projection.installFromStaging(throughSequence: 7);
+      final rows = await fixture.db.query('inspections', orderBy: 'id');
+      expect(rows, hasLength(505));
+      expect(rows.map((r) => r['id']).toSet(), hasLength(505));
+      expect(rows.map((r) => r['material_id']).toSet(), hasLength(1));
+      final users = {
+        for (final row in await fixture.db.query('users'))
+          row['uid']: row['id'],
+      };
+      expect(
+        rows.take(501).every((r) => r['created_by'] == users['history-one']),
+        isTrue,
+      );
+      expect(
+        rows.skip(501).every((r) => r['created_by'] == users['history-two']),
+        isTrue,
+      );
+      expect(users['history-one'], isNot(users['history-two']));
+      expect(
+        await fixture.db.query('central_approved_records'),
+        hasLength(506),
+      );
+      expect(await fixture.db.query('central_bootstrap_staging'), isEmpty);
+    },
+  );
+
   /// Serves the material on its snapshot page, empty pages for every other
   /// entity type, and drives `beginSnapshot` / `events` from counters.
   /// Returns the driver and its counting transport so tests can assert on
@@ -169,8 +214,10 @@ void main() {
       switch (mode) {
         case 'beginSnapshot':
           return {
-            'throughSequence': beginWatermarks[
-                begins++ < beginWatermarks.length ? begins - 1 : beginWatermarks.length - 1],
+            'throughSequence':
+                beginWatermarks[begins++ < beginWatermarks.length
+                    ? begins - 1
+                    : beginWatermarks.length - 1],
             'manifestVersion': 1,
           };
         case 'snapshotPage':
@@ -220,7 +267,9 @@ void main() {
         'event merge and installs at H1', () async {
       final (d, _) = await driver(
         beginWatermarks: [0, 1],
-        eventsByCursor: {0: eventFrame(1, [sample()])},
+        eventsByCursor: {
+          0: eventFrame(1, [sample()]),
+        },
       );
       final cursor = await d.syncNow();
 
@@ -244,102 +293,120 @@ void main() {
       expect(await fixture.db.query('central_bootstrap_state'), isEmpty);
     });
 
-    test('a document updated mid-download installs the newer version',
-        () async {
-      final (d, _) = await driver(
-        beginWatermarks: [0, 1],
-        eventsByCursor: {
-          0: eventFrame(1, [
-            await material(version: 2, updatedAt: '2026-10-26T01:00:00.000Z'),
-          ]),
-        },
-      );
-      await d.syncNow();
+    test(
+      'a document updated mid-download installs the newer version',
+      () async {
+        final (d, _) = await driver(
+          beginWatermarks: [0, 1],
+          eventsByCursor: {
+            0: eventFrame(1, [
+              await material(version: 2, updatedAt: '2026-10-26T01:00:00.000Z'),
+            ]),
+          },
+        );
+        await d.syncNow();
 
-      final row = (await fixture.db.query(
-        'reference_materials',
-        where: "remote_id = 'new-material'",
-      )).single;
-      expect(row['remote_version'], 2);
-      final stored = (await fixture.db.query(
-        'central_approved_records',
-        where: "entity_id = 'new-material'",
-      )).single;
-      expect(stored['version'], 2);
-      expect(
-        stored['payload_hash'],
-        hashPayload(
-(await material(version: 2, updatedAt: '2026-10-26T01:00:00.000Z')).data,
-        ),
-      );
-    });
+        final row = (await fixture.db.query(
+          'reference_materials',
+          where: "remote_id = 'new-material'",
+        )).single;
+        expect(row['remote_version'], 2);
+        final stored = (await fixture.db.query(
+          'central_approved_records',
+          where: "entity_id = 'new-material'",
+        )).single;
+        expect(stored['version'], 2);
+        expect(
+          stored['payload_hash'],
+          hashPayload(
+            (await material(
+              version: 2,
+              updatedAt: '2026-10-26T01:00:00.000Z',
+            )).data,
+          ),
+        );
+      },
+    );
 
-    test('a tombstone committed mid-download installs as a soft delete',
-        () async {
-      final (d, _) = await driver(
-        beginWatermarks: [0, 2],
-        eventsByCursor: {
-          0: eventFrame(1, [sample()]),
-          1: eventFrame(2, [
-            sample(version: 2, deletedAt: '2026-10-26T02:00:00.000Z'),
-          ]),
-        },
-      );
-      final cursor = await d.syncNow();
+    test(
+      'a tombstone committed mid-download installs as a soft delete',
+      () async {
+        final (d, _) = await driver(
+          beginWatermarks: [0, 2],
+          eventsByCursor: {
+            0: eventFrame(1, [sample()]),
+            1: eventFrame(2, [
+              sample(version: 2, deletedAt: '2026-10-26T02:00:00.000Z'),
+            ]),
+          },
+        );
+        final cursor = await d.syncNow();
 
-      expect(cursor, 2);
-      final row = (await fixture.db.query(
-        'inspections',
-        where: "remote_id = 'inspection-global'",
-      )).single;
-      expect(row['deleted_at'], '2026-10-26T02:00:00.000Z');
-      expect(
-        (await fixture.db.query('central_sync_state')).single['bootstrap_state'],
-        'ready',
-      );
-    });
+        expect(cursor, 2);
+        final row = (await fixture.db.query(
+          'inspections',
+          where: "remote_id = 'inspection-global'",
+        )).single;
+        expect(row['deleted_at'], '2026-10-26T02:00:00.000Z');
+        expect(
+          (await fixture.db.query(
+            'central_sync_state',
+          )).single['bootstrap_state'],
+          'ready',
+        );
+      },
+    );
 
-    test('a crash after the watermark resumes WITHOUT re-downloading pages',
-        () async {
-      final (failing, _) = await driver(
-        beginWatermarks: [0, 1],
-        onEvents: (after) => StateError('connection dropped'),
-      );
-      await expectLater(failing.syncNow(), throwsStateError);
+    test(
+      'a crash after the watermark resumes WITHOUT re-downloading pages',
+      () async {
+        final (failing, _) = await driver(
+          beginWatermarks: [0, 1],
+          onEvents: (after) => StateError('connection dropped'),
+        );
+        await expectLater(failing.syncNow(), throwsStateError);
 
-      // The staged download survived: state row marks pages complete, the
-      // canonical cache is still untouched.
-      final resume = (await fixture.db.query('central_bootstrap_state')).single;
-      expect(resume['h0'], 0);
-      expect(resume['h1'], 1);
-      expect(resume['manifest_version'], 1);
-      expect(await fixture.db.query('central_sync_state'), isEmpty);
-      expect(await fixture.db.query('central_approved_records'), isEmpty);
-      expect(await fixture.db.query('central_bootstrap_staging'), hasLength(1));
+        // The staged download survived: state row marks pages complete, the
+        // canonical cache is still untouched.
+        final resume = (await fixture.db.query(
+          'central_bootstrap_state',
+        )).single;
+        expect(resume['h0'], 0);
+        expect(resume['h1'], 1);
+        expect(resume['manifest_version'], 1);
+        expect(await fixture.db.query('central_sync_state'), isEmpty);
+        expect(await fixture.db.query('central_approved_records'), isEmpty);
+        expect(
+          await fixture.db.query('central_bootstrap_staging'),
+          hasLength(1),
+        );
 
-      final (d, transport) = await driver(
-        beginWatermarks: [0, 1],
-        eventsByCursor: {
-          0: eventFrame(1, [
-            await material(version: 2, updatedAt: '2026-10-26T01:00:00.000Z'),
-          ]),
-        },
-      );
-      final cursor = await d.syncNow();
-      expect(cursor, 1);
-      // The resume path verified the manifest and went straight to the merge.
-      expect(transport.snapshotPages, 0);
-      expect(
-        (await fixture.db.query('central_sync_state')).single['bootstrap_state'],
-        'ready',
-      );
-      final row = (await fixture.db.query(
-        'reference_materials',
-        where: "remote_id = 'new-material'",
-      )).single;
-      expect(row['remote_version'], 2);
-      expect(await fixture.db.query('central_bootstrap_state'), isEmpty);
-    });
+        final (d, transport) = await driver(
+          beginWatermarks: [0, 1],
+          eventsByCursor: {
+            0: eventFrame(1, [
+              await material(version: 2, updatedAt: '2026-10-26T01:00:00.000Z'),
+            ]),
+          },
+        );
+        final cursor = await d.syncNow();
+        expect(cursor, 1);
+        // The resume path verified the manifest and went straight to the merge.
+        expect(transport.snapshotPages, 0);
+        expect(
+          (await fixture.db.query(
+            'central_sync_state',
+          )).single['bootstrap_state'],
+          'ready',
+        );
+        final row = (await fixture.db.query(
+          'reference_materials',
+          where: "remote_id = 'new-material'",
+        )).single;
+        expect(row['remote_version'], 2);
+        expect(await fixture.db.query('central_bootstrap_state'), isEmpty);
+      },
+    );
 
     test('two different payloads for the same approved version abort the '
         'bootstrap as a server inconsistency', () async {
@@ -357,46 +424,53 @@ void main() {
       // Nothing was installed; the staged bytes and the resume row stay.
       expect(await fixture.db.query('central_sync_state'), isEmpty);
       expect(await fixture.db.query('central_approved_records'), isEmpty);
-      final staged = (await fixture.db.query('central_bootstrap_staging')).single;
+      final staged = (await fixture.db.query(
+        'central_bootstrap_staging',
+      )).single;
       expect(staged['version'], 1);
       expect(await fixture.db.query('central_bootstrap_state'), hasLength(1));
     });
 
-    test('installFromStaging resolves a parent that stages after its child',
-        () async {
-      final scope = SyncRunScope(
-        SessionSource(() => session),
-        fixture.helper,
-      );
-      // The child is staged first â€” ordering by rowid puts it in an earlier
-      // batch than the material it references.
-      await projection.stageRecords([sample()], scope: scope);
-      await projection.stageRecords([await material()], scope: scope);
+    test(
+      'installFromStaging resolves a parent that stages after its child',
+      () async {
+        final scope = SyncRunScope(
+          SessionSource(() => session),
+          fixture.helper,
+        );
+        // The child is staged first â€” ordering by rowid puts it in an earlier
+        // batch than the material it references.
+        await projection.stageRecords([sample()], scope: scope);
+        await projection.stageRecords([await material()], scope: scope);
 
-      await projection.installFromStaging(throughSequence: 1, scope: scope);
+        await projection.installFromStaging(throughSequence: 1, scope: scope);
 
-      final materialRow = (await fixture.db.query(
-        'reference_materials',
-        where: "remote_id = 'new-material'",
-      )).single;
-      final inspectionRow = (await fixture.db.query(
-        'inspections',
-        where: "remote_id = 'inspection-global'",
-      )).single;
-      expect(inspectionRow['material_id'], materialRow['id']);
-      expect(
-        (await fixture.db.query('central_sync_state')).single['bootstrap_state'],
-        'catching_up',
-      );
-      expect(await fixture.db.query('central_bootstrap_staging'), isEmpty);
-    });
+        final materialRow = (await fixture.db.query(
+          'reference_materials',
+          where: "remote_id = 'new-material'",
+        )).single;
+        final inspectionRow = (await fixture.db.query(
+          'inspections',
+          where: "remote_id = 'inspection-global'",
+        )).single;
+        expect(inspectionRow['material_id'], materialRow['id']);
+        expect(
+          (await fixture.db.query(
+            'central_sync_state',
+          )).single['bootstrap_state'],
+          'catching_up',
+        );
+        expect(await fixture.db.query('central_bootstrap_staging'), isEmpty);
+      },
+    );
   });
 }
 
-class _CountingTransport implements CentralSyncTransport {
+class _CountingTransport implements CentralSyncReader {
   _CountingTransport(this.handler);
 
-  final Future<Map<String, dynamic>> Function(Map<String, Object?> data) handler;
+  final Future<Map<String, dynamic>> Function(Map<String, Object?> data)
+  handler;
   int snapshotPages = 0;
   int begins = 0;
 
@@ -406,7 +480,4 @@ class _CountingTransport implements CentralSyncTransport {
     if (data['mode'] == 'beginSnapshot') begins++;
     return handler(data);
   }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

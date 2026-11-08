@@ -1,7 +1,23 @@
+/// Stable wire value: a failed attempt is never encoded as zero or NaN.
+const labFailureResult = 'FAILURE';
+
+/// User-facing status stays English in the app and all report languages.
+const labFailureLabel = 'Failure';
+bool isFailedLabResult(Object? value) =>
+    '${value ?? ''}'.trim().toUpperCase() == labFailureResult;
+
+String formatLabResultWithUnit(Object? value, String unit) =>
+    isFailedLabResult(value)
+    ? formatLabResult(value)
+    : '${formatLabResult(value)} $unit'.trim();
+
 /// Formats numeric laboratory results for display without changing storage.
 String formatLabResult(Object? value, {int decimals = 3}) {
   final raw = '${value ?? ''}'.trim();
   if (raw.isEmpty) return '-';
+  if (isFailedLabResult(raw)) {
+    return labFailureLabel;
+  }
   final suffix = raw.endsWith('%') ? '%' : '';
   final numeric = double.tryParse(raw.replaceAll('%', '').trim());
   if (numeric == null) return raw;

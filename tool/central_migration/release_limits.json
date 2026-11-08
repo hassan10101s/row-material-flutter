@@ -1,0 +1,15 @@
+{
+  "maxBusinessEffects": 10,
+  "maxStandardBusinessEffects": 4,
+  "maxLabDefinitionEffects": 6,
+  "maxLabConsumptionEffects": 10,
+  "maxProductReferenceEffects": 7,
+  "maxSimpleBusinessEffects": 12,
+  "maxChemicalDefinitions": 36,
+  "chemicalDefinitionBlockSize": 4,
+  "maxChemicalDefinitionProofBlocks": 9,
+  "simpleEntityTypes": ["parameter", "materialBound", "organizationSetting", "labConstant", "labUnit", "equipment", "equipmentEvent", "worksheet", "referenceMaterial", "labMaterialAnalysis", "nutritionFormulation", "qcCustomTableRow"],
+  "firestoreAtomicRuleAccessLimit": 20,
+  "expandedEntityTypes": ["qcCustomTable", "qcCustomTableField"],
+  "largeOperations": "draft_only_no_submission_no_partial_commit"
+}

@@ -12,6 +12,7 @@ import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
+import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
 import '../../domain/lab_local_repository.dart';
 
@@ -19,13 +20,26 @@ import '../../domain/lab_local_repository.dart';
 /// unified history feed (receipts, FEFO consumption lines, adjustments,
 /// disposals and reversals), newest first.
 class InventoryLogScreen extends StatefulWidget {
-  const InventoryLogScreen({super.key, required this.item});
+  const InventoryLogScreen({
+    super.key,
+    required this.item,
+    this.windowed = false,
+  });
 
   final Map<String, dynamic> item;
+  final bool windowed;
 
   static Future<void> open(BuildContext context, Map<String, dynamic> item) {
-    return Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => InventoryLogScreen(item: item)),
+    return showAppContentSurface<void>(
+      context,
+      builder: (_, fullScreen) => fullScreen
+          ? InventoryLogScreen(item: item)
+          : AppWindow(
+              title: AppText.t('سجل المخزون', 'Stock log'),
+              size: AppWindowSize.lg,
+              scrollBody: false,
+              child: InventoryLogScreen(item: item, windowed: true),
+            ),
     );
   }
 
@@ -114,7 +128,7 @@ class _InventoryLogScreenState extends State<InventoryLogScreen> {
     } on AppError catch (e) {
       if (!mounted) return;
       setState(() => _disposing = false);
-      AppFeedback.error(context, e.message);
+      AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (!mounted) return;
       setState(() => _disposing = false);
@@ -125,8 +139,11 @@ class _InventoryLogScreenState extends State<InventoryLogScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: !widget.windowed,
       backgroundColor: AppColors.background,
-      appBar: AppTopAppBar(title: AppText.t('سجل المخزون', 'Stock log')),
+      appBar: widget.windowed
+          ? null
+          : AppTopAppBar(title: AppText.t('سجل المخزون', 'Stock log')),
       body: SafeArea(
         child: _loading && _lots.isEmpty && _feed.isEmpty
             ? const Padding(

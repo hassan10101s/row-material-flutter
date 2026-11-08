@@ -157,9 +157,11 @@ class DecisionFormState extends State<DecisionForm> {
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }

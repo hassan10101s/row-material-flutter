@@ -1,11 +1,17 @@
 # Material Lab — Flutter Desktop
 
-Offline-first Flutter (Windows) desktop rewrite of the stable PySide6 + Vue
+Server-confirmed Flutter (Windows) desktop rewrite of the stable PySide6 + Vue
 "row material lab" quality-lab application. 1:1 Dart port of the Python/Vue
 core: inspection entry with QR labels, reference material library, decision
 workflow with versioned history, daily/monthly/lab repoirts, and a wet-chemistry
 lab module (inventory, products, analyses, constants formula engine, sample
 tests, shared worksheet, consumption log).
+
+Shared creates, edits and deletes require explicit online submission and a
+verified server receipt before success. SQLite provides the offline read cache;
+offline changes can only be saved as local drafts for manual review/submission.
+Startup, reconnect and resume refresh reads and check attempted-operation
+receipts; they never automatically submit drafts or upload local rows.
 
 ## Highlights
 
@@ -40,4 +46,6 @@ adb uninstall com.materiallab
 flutter run -d CPH2043 --dart-define-from-file=ven/firebase-android.json --release 
 ```
 
-Assets bundled with the app seed `Reference.xlsx` + `units.xlsx` on first run.
+Shared reference data comes from the approved Firestore archive. Bundled Excel
+assets are migration inputs; signing in never seeds or uploads business data.
+See [the current synchronization contract](SYNC_CURRENT_CONTRACT.md).

@@ -154,14 +154,59 @@ void main() {
     await fx.db.rawInsert(
       'INSERT INTO lab_sample_tests (analysis_id, source_type, '
       'source_ref_id, source_name, sample_name, result_text, tested_by, '
-      'tested_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [analysisId, 'product', id, 'Flour 50T', 'Sample 1', '12.5', 1, 'x'],
+      'tested_at, entry_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        analysisId,
+        'product',
+        id,
+        'Flour 50T',
+        'Sample 1',
+        '12.5',
+        1,
+        'x',
+        'BATCH-50T',
+      ],
     );
     final res = await repo.listSampleResults(id);
     expect(res, hasLength(1));
     expect(res.first['analysis_name'], 'Protein');
     expect(res.first['tested_by_name'], 'Ahmed Ali');
   });
+
+  test(
+    'sample results require the same batch code despite numeric id collisions',
+    () async {
+      final sample = await repo.addBatchSample(batchId: batchId);
+      final id = sample['id'];
+      for (final code in ['BATCH-50T', 'OTHER-BATCH', null]) {
+        await fx.db.insert('lab_sample_tests', {
+          'analysis_id': analysisId,
+          'source_type': 'product',
+          'source_ref_id': id,
+          'source_name': 'Flour 50T',
+          'sample_name': 'Sample 1',
+          'result_text': '12.5',
+          'tested_at': '2026-01-01',
+          'entry_code': code,
+        });
+      }
+      await fx.db.insert('lab_sample_tests', {
+        'analysis_id': analysisId,
+        'source_type': 'product',
+        'source_ref_id': id,
+        'source_name': 'Flour 50T',
+        'sample_name': 'Sample 1',
+        'result_text': 'SECRET',
+        'tested_at': '2026-01-01',
+        'entry_code': 'BATCH-50T',
+        'secure_result': 1,
+      });
+      final results = await repo.listSampleResults((id as num).toInt());
+      expect(results, hasLength(1));
+      expect(results.single['entry_code'], 'BATCH-50T');
+      expect(await fx.db.query('lab_sample_tests'), hasLength(4));
+    },
+  );
 
   test('keepSourceRefId keeps the sample scope', () async {
     final s = await repo.addBatchSample(batchId: batchId);

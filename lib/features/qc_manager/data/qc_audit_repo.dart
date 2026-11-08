@@ -6,6 +6,8 @@ import '../../../core/audit/audit_hasher.dart';
 import '../../../core/auth/app_session.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/database/database_helper.dart';
+import '../../../core/database/business_transaction.dart';
+import '../../../core/commands/central_qc_audit_cache.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../domain/qc_audit.dart';
@@ -97,7 +99,7 @@ class QcAuditRepo implements QcAuditRepository {
   /// Appends one entry to the chain and returns its id.
   ///
   /// Pass [exec] to commit inside a caller's transaction, which is how the
-  /// offline-first facade guarantees that a state change and its audit row land
+  /// server-confirmed facade guarantees that a state change and its audit row land
   /// together or not at all.
   ///
   /// When no [exec] is supplied this opens its **own** transaction. That is not
@@ -185,7 +187,26 @@ class QcAuditRepo implements QcAuditRepository {
 
     // Read the head *inside* the transaction, so it cannot change between this
     // read and the insert below.
-    final prevHash = await AuditHasher.computePrevHash(txn, table: table) ?? '';
+    String prevHash;
+    if (dbHelper.businessGateway != null) {
+      final floor = BusinessAuthoringContext.newRowFloor(table);
+      if (floor == null) {
+        throw StateError('QC audits require a business authoring transaction');
+      }
+      final transient = await txn.query(
+        table,
+        columns: ['hash'],
+        where: 'id > ?',
+        whereArgs: [floor],
+        orderBy: 'id DESC',
+        limit: 1,
+      );
+      prevHash = transient.isEmpty
+          ? await CentralQcAuditCache.head(txn)
+          : transient.single['hash'] as String;
+    } else {
+      prevHash = await AuditHasher.computePrevHash(txn, table: table) ?? '';
+    }
 
     final row = <String, Object?>{
       'entity_type': entityType,
@@ -217,6 +238,10 @@ class QcAuditRepo implements QcAuditRepository {
   @override
   Future<QcAudit?> get(int id, {DatabaseExecutor? exec}) async {
     final db = await _db;
+    if (dbHelper.businessGateway != null) {
+      final rows = await CentralQcAuditCache.rows(exec ?? db, id: id);
+      return rows.isEmpty ? null : QcAudit.fromMap(rows.single);
+    }
     final rows = await db.query(
       table,
       where: 'id = ?',
@@ -238,6 +263,19 @@ class QcAuditRepo implements QcAuditRepository {
     DatabaseExecutor? exec,
   }) async {
     final db = await _db;
+    if (dbHelper.businessGateway != null) {
+      return [
+        for (final row in await CentralQcAuditCache.rows(
+          exec ?? db,
+          entityType: entityType,
+          entityId: entityId,
+          action: action,
+          limit: limit,
+          offset: offset,
+        ))
+          QcAudit.fromMap(row),
+      ];
+    }
     final where = <String>[];
     final args = <Object?>[];
     if (entityType.isNotEmpty) {
@@ -272,6 +310,13 @@ class QcAuditRepo implements QcAuditRepository {
     DatabaseExecutor? exec,
   }) async {
     final db = await _db;
+    if (dbHelper.businessGateway != null) {
+      return (await CentralQcAuditCache.rows(
+        exec ?? db,
+        entityType: entityType,
+        entityId: entityId,
+      )).length;
+    }
     final where = <String>[];
     final args = <Object?>[];
     if (entityType.isNotEmpty) {
@@ -299,8 +344,11 @@ class QcAuditRepo implements QcAuditRepository {
     DatabaseExecutor? exec,
   }) async {
     final db = await _db;
-    final rows = await db.query(table, orderBy: 'id ASC, at ASC', limit: limit);
-    final result = AuditHasher.verifyChain(rows);
+    final result = dbHelper.businessGateway != null
+        ? await CentralQcAuditCache.verify(exec ?? db)
+        : AuditHasher.verifyChain(
+            await db.query(table, orderBy: 'id ASC, at ASC', limit: limit),
+          );
     return QcChainVerification(
       isValid: result.isValid,
       checked: result.checked,
@@ -314,10 +362,19 @@ class QcAuditRepo implements QcAuditRepository {
   /// offline archive. Read-only, so it needs no guard.
   Future<String> exportJson({int? limit, DatabaseExecutor? exec}) async {
     final db = await _db;
-    final rows = await db.query(table, orderBy: 'id ASC, at ASC', limit: limit);
+    final rows = dbHelper.businessGateway != null
+        ? await CentralQcAuditCache.rows(
+            exec ?? db,
+            ascending: true,
+            limit: limit,
+          )
+        : await db.query(table, orderBy: 'id ASC, at ASC', limit: limit);
     final verification = await verifyChain(limit: limit, exec: exec);
     return jsonEncode({
       'exported_at': nowIso(),
+      'chain_mode': dbHelper.businessGateway != null
+          ? 'approved_graph'
+          : 'legacy_linear',
       'row_count': rows.length,
       'chain_valid': verification.isValid,
       'broken_at': verification.brokenAt,

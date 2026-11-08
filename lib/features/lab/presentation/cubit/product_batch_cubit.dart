@@ -1,3 +1,4 @@
+import '../../../../core/security/secure_field_access.dart';
 import 'dart:async';
 
 import '../../../../core/state/app_cubit.dart';
@@ -16,8 +17,26 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
     required this.batchId,
     required this.repo,
     required this.currentUser,
+    this.secureAccess,
   }) : super(const ProductBatchState()) {
     refreshOnSync(load);
+    secureAccess?.addListener(_privacyChanged);
+  }
+
+  final SecureFieldAccess? secureAccess;
+  void _privacyChanged() {
+    safeEmit(
+      state.copyWith(
+        samples: state.samples.map(SecureFieldAccess.publicRecord).toList(),
+      ),
+    );
+    load();
+  }
+
+  @override
+  Future<void> close() {
+    secureAccess?.removeListener(_privacyChanged);
+    return super.close();
   }
 
   final int batchId;
@@ -29,10 +48,23 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true, clearError: true));
     try {
-      final samples = await repo.listBatchSamples(batchId);
-      safeEmit(state.copyWith(loading: false, samples: samples));
+      var samples = await repo.listBatchSamples(batchId);
+      if (secureAccess != null) {
+        samples = await Future.wait([
+          for (final row in samples)
+            secureAccess!.reveal('productBatchSample', row),
+        ]);
+      }
+      safeEmit(
+        state.copyWith(
+          loading: false,
+          samples: secureAccess?.enabled == true
+              ? samples
+              : samples.map(SecureFieldAccess.publicRecord).toList(),
+        ),
+      );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
@@ -64,7 +96,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
       safeEmit(state.copyWith(saving: false));
       return sample;
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
       return null;
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
@@ -92,7 +124,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
       await load();
       safeEmit(state.copyWith(saving: false));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
@@ -113,7 +145,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
       await load();
       safeEmit(state.copyWith(saving: false));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }
@@ -126,7 +158,7 @@ class ProductBatchCubit extends AppCubit<ProductBatchState> {
       await load();
       safeEmit(state.copyWith(saving: false));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }

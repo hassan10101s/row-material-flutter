@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show immutable;
 
 @immutable
 class RunTestState extends Equatable {
+  static const _unchanged = Object();
   final bool loading;
   final String? error;
   final List<Map<String, dynamic>> analyses;
@@ -39,34 +40,40 @@ class RunTestState extends Equatable {
 
   RunTestState copyWith({
     bool? loading,
-    String? error,
+    Object? error = _unchanged,
     List<Map<String, dynamic>>? analyses,
     List<Map<String, dynamic>>? products,
     List<Map<String, dynamic>>? rawMaterials,
     List<Map<String, dynamic>>? inspections,
-    int? analysisId,
+    Object? analysisId = _unchanged,
     String? sourceType,
     String? sourceName,
-    int? rawMaterialId,
+    Object? rawMaterialId = _unchanged,
     Map<String, dynamic>? selectedInspection,
     String? selectedSampleName,
-    int? productId,
+    Object? productId = _unchanged,
     bool? loadingInspections,
     bool? running,
   }) => RunTestState(
     loading: loading ?? this.loading,
-    error: error ?? this.error,
+    error: identical(error, _unchanged) ? this.error : error as String?,
     analyses: analyses ?? this.analyses,
     products: products ?? this.products,
     rawMaterials: rawMaterials ?? this.rawMaterials,
     inspections: inspections ?? this.inspections,
-    analysisId: analysisId ?? this.analysisId,
+    analysisId: identical(analysisId, _unchanged)
+        ? this.analysisId
+        : analysisId as int?,
     sourceType: sourceType ?? this.sourceType,
     sourceName: sourceName ?? this.sourceName,
-    rawMaterialId: rawMaterialId ?? this.rawMaterialId,
+    rawMaterialId: identical(rawMaterialId, _unchanged)
+        ? this.rawMaterialId
+        : rawMaterialId as int?,
     selectedInspection: selectedInspection ?? this.selectedInspection,
     selectedSampleName: selectedSampleName ?? this.selectedSampleName,
-    productId: productId ?? this.productId,
+    productId: identical(productId, _unchanged)
+        ? this.productId
+        : productId as int?,
     loadingInspections: loadingInspections ?? this.loadingInspections,
     running: running ?? this.running,
   );

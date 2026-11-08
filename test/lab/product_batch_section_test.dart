@@ -5,6 +5,9 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/app/auth_gate.dart';
 import 'package:material_lab/core/constants/app_strings.dart';
+import 'package:material_lab/core/responsive/form_factor.dart';
+import 'package:material_lab/design_system/widgets/app_button.dart';
+import 'package:material_lab/design_system/widgets/app_field.dart';
 import 'package:material_lab/di/service_locator.dart';
 import 'package:material_lab/features/auth/domain/user.dart';
 import 'package:material_lab/features/inspections/domain/inspection_repository.dart';
@@ -42,6 +45,17 @@ void main() {
     getIt.registerSingleton<ProductBatchRepository>(repo);
     getIt.registerSingleton<InspectionRepository>(inspections);
     getIt.registerSingleton<AuthGate>(gate);
+    when(() => inspections.getById(7)).thenAnswer(
+      (_) async => {
+        'inspection_kind': 'product',
+        'product_id': 3,
+        'physical_reference': {'Color': 'white'},
+        'chemical_reference': {
+          'Protein': {'value': '10-15', 'unit': '%'},
+        },
+      },
+    );
+    when(inspections.listSampleTakerHistory).thenAnswer((_) async => []);
 
     when(() => repo.listBatchSamples(any())).thenAnswer(
       (_) async => <Map<String, dynamic>>[
@@ -64,6 +78,7 @@ void main() {
   });
 
   tearDown(() async {
+    FormFactor.debugSet(null);
     await getIt.reset();
   });
 
@@ -144,4 +159,91 @@ void main() {
     expect(find.text('No samples yet'), findsOneWidget);
     expect(find.text('New sample'), findsOneWidget);
   });
+
+  testWidgets(
+    'above double the product maximum warns but saves the original value',
+    (tester) async {
+      FormFactor.debugSet(AppFormFactor.mobile);
+      when(
+        () => repo.updateBatchSample(
+          11,
+          sampleName: any(named: 'sampleName'),
+          sampleTaker: any(named: 'sampleTaker'),
+          physicalResults: any(named: 'physicalResults'),
+          chemicalResults: any(named: 'chemicalResults'),
+        ),
+      ).thenAnswer((_) async {});
+      await pumpSection(tester);
+      await tester.tap(find.byTooltip('Edit sample').first);
+      await tester.pumpAndSettle();
+      final field = find.descendant(
+        of: find.byWidgetPredicate((w) => w is AppField && w.label == 'Result'),
+        matching: find.byType(TextField),
+      );
+      await tester.ensureVisible(field);
+      await tester.enterText(field, '30');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Are you sure about Protein:'), findsNothing);
+      await tester.enterText(field, '31');
+      await tester.pumpAndSettle();
+      expect(find.text('Are you sure about Protein: 31?'), findsOneWidget);
+      final save = find.widgetWithText(AppButton, 'Save');
+      await tester.ensureVisible(save);
+      await tester.tap(save);
+      await tester.pumpAndSettle();
+      final values =
+          verify(
+                () => repo.updateBatchSample(
+                  11,
+                  sampleName: any(named: 'sampleName'),
+                  sampleTaker: any(named: 'sampleTaker'),
+                  physicalResults: any(named: 'physicalResults'),
+                  chemicalResults: captureAny(named: 'chemicalResults'),
+                ),
+              ).captured.single
+              as List;
+      expect(values.single['result'], '31');
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'saved batch snapshot fixes both templates even without a live product',
+    (tester) async {
+      await pumpSection(tester);
+      await tester.tap(find.widgetWithText(AppButton, 'Sample'));
+      await tester.pumpAndSettle();
+      expect(find.text('Color'), findsOneWidget);
+      expect(find.text('Protein'), findsOneWidget);
+      expect(find.text('Physical row'), findsNothing);
+      verify(() => inspections.getById(7)).called(1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final action in ['New sample', 'Edit sample', 'Decision']) {
+    testWidgets(
+      'phone $action opens a full page and back returns to the batch',
+      (tester) async {
+        FormFactor.debugSet(AppFormFactor.mobile);
+        await pumpSection(tester);
+        if (action == 'New sample') {
+          await tester.tap(find.widgetWithText(AppButton, 'Sample'));
+        } else {
+          await tester.tap(find.byTooltip(action).first);
+        }
+        await tester.pumpAndSettle();
+        expect(find.byType(Dialog), findsNothing);
+        expect(find.byType(BackButton), findsOneWidget);
+        expect(
+          find.text(action == 'Decision' ? 'Sample decision' : action),
+          findsOneWidget,
+        );
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+        expect(find.text('Batch samples'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
 }

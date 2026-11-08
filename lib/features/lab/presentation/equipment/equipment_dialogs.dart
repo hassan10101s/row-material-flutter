@@ -16,6 +16,8 @@ import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
+import '../../../../../app/auth_gate.dart';
+import '../../../../../core/auth/permissions.dart';
 import '../../../settings/domain/settings_repository.dart';
 import '../../domain/lab_local_repository.dart';
 import '../../../../design_system/widgets/app_select_field.dart';
@@ -100,14 +102,25 @@ Future<bool> showFormNumbersDialog(
   required List<FormNoField> fields,
   String title = '',
 }) async {
-  final saved = await showAppWindow<bool>(
+  if (getIt.isRegistered<AuthGate>() &&
+      !getIt<AuthGate>().canWrite(Permission.reportsCreate)) {
+    AppFeedback.error(
+      context,
+      AppText.t(
+        'ليس لديك صلاحية تعديل أرقام النماذج.',
+        'You cannot edit shared report form numbers.',
+      ),
+    );
+    return false;
+  }
+  final saved = await showAppOverlay<bool>(
     context,
     title: title.isEmpty
         ? AppText.t('رقم فورم الجودة', 'QA form number')
         : title,
     icon: Icons.settings_outlined,
-    maxWidth: 440,
-    child: _FormNoForm(fields: fields),
+    size: AppWindowSize.sm,
+    builder: (_, _) => _FormNoForm(fields: fields),
   );
   return saved ?? false;
 }
@@ -173,6 +186,7 @@ class _FormNoFormState extends State<_FormNoForm> {
         Navigator.of(context).pop(true);
       }
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -365,9 +379,11 @@ class _EquipmentFormState extends State<_EquipmentForm> {
         Navigator.of(context).pop(true);
       }
     } on AppError catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -541,9 +557,11 @@ class _EquipmentEventFormState extends State<_EquipmentEventForm> {
         Navigator.of(context).pop(true);
       }
     } on AppError catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }

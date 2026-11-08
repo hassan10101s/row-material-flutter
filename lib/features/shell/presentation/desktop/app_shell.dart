@@ -9,7 +9,7 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_button.dart';
 import '../../../auth/domain/user.dart';
-import '../../../sync/presentation/sync_status_controller.dart';
+import '../../../connection/presentation/connection_status_controller.dart';
 import '../shell_chrome.dart';
 import '../shell_nav.dart';
 
@@ -50,7 +50,7 @@ class DesktopAppShell extends StatelessWidget {
   final List<ShellNavEntry> entries;
   final LocaleService locale;
   final ThemeService theme;
-  final SyncStatusController syncStatus;
+  final ConnectionStatusController syncStatus;
   final void Function(String path) onNavigate;
   final VoidCallback onLogout;
   final VoidCallback onLogoutThisDevice;
@@ -122,7 +122,7 @@ class DesktopAppShell extends StatelessWidget {
                       // scope, so the tables below gain the vertical space
                       // the in-page headers used to take.
                       title: shellPageTitle(currentPath, entries),
-                      onOpenSync: () => onNavigate('/settings?tab=sync'),
+                      onRefreshData: syncStatus.refreshData,
                     ),
                     Expanded(child: child),
                   ],
@@ -171,7 +171,7 @@ class _Sidebar extends StatelessWidget {
                   user: user,
                   onLogout: onLogout,
                   onLogoutThisDevice: onLogoutThisDevice,
-                  onOpenSettings: () => onSelect('/settings'),
+                  onOpenAccount: () => onSelect('/account'),
                 ),
                 const Divider(height: 1),
                 // Nav list.

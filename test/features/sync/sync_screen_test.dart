@@ -1,362 +1,65 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
-
 import 'package:material_lab/app/auth_gate.dart';
-import 'package:material_lab/core/auth/app_session.dart';
-import 'package:material_lab/core/commands/command_outbox.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
-import 'package:material_lab/core/sync/sync_engine.dart';
-import 'package:material_lab/core/sync/sync_queue.dart';
+import 'package:material_lab/core/commands/direct_write_service.dart';
+import 'package:material_lab/core/commands/drafts_store.dart';
 import 'package:material_lab/di/service_locator.dart';
-import 'package:material_lab/features/sync/presentation/sync/sync_screen.dart';
+import 'package:material_lab/features/drafts/presentation/drafts_screen.dart';
 
-class _MockOutbox extends Mock implements CommandOutbox {}
+class _Drafts extends Mock implements DraftsStore {}
 
-class _MockEngine extends Mock implements SyncEngine {}
+class _Writes extends Mock implements DirectWriteService {}
 
-class _MockQueue extends Mock implements SyncQueue {}
+class _Gate extends Mock implements AuthGate {}
 
-class _MockResolver extends Mock implements ConflictResolver {}
-
-class _MockGate extends Mock implements AuthGate {}
-
-/// Every handler on this screen used to be a bare `try { ... } finally { ... }`
-/// with no `catch`. A thrown error therefore escaped as an *unhandled* async
-/// exception: the busy spinner cleared, no message appeared, and the user was
-/// left concluding their row was fine. On a sync screen that is the worst
-/// possible failure mode - the one screen whose entire job is to tell the truth
-/// about whether work reached the server.
-///
-/// These pin the fixed contract: a failure in any handler reaches the user as a
-/// banner, and a successful load produces no banner.
 void main() {
-  // The banner never leads with driver internals: any error that is not a
-  // `UserFacingError` collapses to the generic message (`AppFeedback._userText`
-  // -> `_unexpected`), with the detail going to the log only. These suites pin
-  // that *a* banner reached the user, not the exact driver text.
-  const unexpectedBanner = 'حدث خطأ غير متوقع';
-  const clean = SyncStatusSnapshot(
-    online: true,
-    syncing: false,
-    pending: 0,
-    blocked: 0,
-    conflicts: 0,
-  );
-
-  late _MockEngine engine;
-  late _MockQueue queue;
-  late _MockResolver resolver;
-  late _MockGate gate;
-  late List<void Function()> cleanups;
-
-  void stubGate({bool online = true, bool offline = false}) {
-    when(() => gate.online).thenReturn(online);
-    when(() => gate.organizationId).thenReturn('7');
-    when(() => gate.session).thenReturn(
-      AppSession(
-        uid: 'uid-1',
-        organizationId: '7',
-        deviceId: 'dev-1',
-        offline: offline,
-      ),
-    );
-  }
-
+  late _Drafts drafts;
+  late _Writes writes;
+  setUp(() {
+    drafts = _Drafts();
+    writes = _Writes();
+    final gate = _Gate();
+    when(() => gate.online).thenReturn(true);
+    when(() => drafts.listOpen(limit: 100000)).thenAnswer((_) async => []);
+    when(writes.openRequests).thenAnswer((_) async => []);
+    getIt.registerSingleton<DraftsStore>(drafts);
+    getIt.registerSingleton<DirectWriteService>(writes);
+    getIt.registerSingleton<AuthGate>(gate);
+  });
+  tearDown(() async {
+    await getIt.reset();
+  });
   Future<void> pump(WidgetTester tester) async {
     await tester.pumpWidget(
       ScreenUtilInit(
         designSize: const Size(1280, 800),
-        builder: (context, child) =>
-            const MaterialApp(home: Scaffold(body: SyncScreen())),
+        builder: (_, child) =>
+            const MaterialApp(home: Scaffold(body: DraftsScreen())),
       ),
     );
-    // Drain the deferred first load (a post-frame callback) and the banner
-    // animation. `pump` twice: once to run the callback, once to settle.
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
   }
 
-  setUp(() {
-    cleanups = [];
-    engine = _MockEngine();
-    queue = _MockQueue();
-    resolver = _MockResolver();
-    gate = _MockGate();
-
-    when(
-      () => engine.status,
-    ).thenAnswer((_) => const Stream<SyncStatusSnapshot>.empty());
-    when(
-      () => queue.listConflicts(limit: any(named: 'limit')),
-    ).thenAnswer((_) async => const <Map<String, Object?>>[]);
-    when(
-      () => queue.listQueue(limit: any(named: 'limit')),
-    ).thenAnswer((_) async => const <Map<String, Object?>>[]);
-    when(() => queue.retryBlocked()).thenAnswer((_) async => 0);
-    when(
-      () => queue.retryRow(any(that: isA<int>())),
-    ).thenAnswer((_) async => 1);
-    stubGate();
-    final outbox = _MockOutbox();
-    when(
-      () => outbox.list(limit: any(named: 'limit')),
-    ).thenAnswer((_) async => []);
-    when(outbox.counts).thenAnswer(
-      (_) async => const CommandOutboxCounts(
-        pending: 0,
-        inFlight: 0,
-        approved: 0,
-        rejected: 0,
-        needsReview: 0,
-        requiresAuth: 0,
-      ),
-    );
-    getIt.registerSingleton<CommandOutbox>(outbox);
-    cleanups.add(() => getIt.unregister<CommandOutbox>());
-
-    // Registered under the concrete type the screen asks `getIt` for; an
-    // `instanceName` under `Object` would not resolve.
-    getIt.registerSingleton<SyncEngine>(engine);
-    getIt.registerSingleton<SyncQueue>(queue);
-    getIt.registerSingleton<ConflictResolver>(resolver);
-    getIt.registerSingleton<AuthGate>(gate);
-    cleanups.addAll([
-      () => getIt.unregister<SyncEngine>(),
-      () => getIt.unregister<SyncQueue>(),
-      () => getIt.unregister<ConflictResolver>(),
-      () => getIt.unregister<AuthGate>(),
-    ]);
-  });
-
-  tearDown(() {
-    for (final cleanup in cleanups) {
-      cleanup();
-    }
-  });
-
-  testWidgets(
-    'cleanup requires confirmation and cancelling preserves conflicts',
-    (tester) async {
-      when(
-        () => engine.syncNow(reason: 'screen'),
-      ).thenAnswer((_) async => clean);
-      when(() => gate.session).thenReturn(
-        const AppSession(
-          uid: 'uid-1',
-          organizationId: '7',
-          deviceId: 'dev-1',
-          role: 'admin',
-          status: 'active',
-        ),
-      );
-      when(() => queue.listConflicts(limit: any(named: 'limit'))).thenAnswer(
-        (_) async => [
-          {
-            'id': 41,
-            'entity_type': 'sample',
-            'entity_id': 'S-41',
-            'direction': 'push',
-            'local_payload': '{}',
-            'remote_payload': '{}',
-            'detected_at': '2026-10-25',
-          },
-        ],
-      );
-      await pump(tester);
-      expect(find.text('رفع المتأخر'), findsNothing);
-      await tester.tap(find.text('تنظيف التعارضات'));
-      // The underlying screen remains busy while the confirmation is open.
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 500));
-      expect(find.text('اعتماد نسخة السيرفر'), findsOneWidget);
-      await tester.tap(find.text('إلغاء'));
-      await tester.pumpAndSettle();
-      verifyZeroInteractions(resolver);
-      expect(find.text('تنظيف التعارضات'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets('a failed initial load is reported to the user', (tester) async {
-    when(
-      () => engine.syncNow(reason: any(named: 'reason')),
-    ).thenThrow(StateError('database_closed'));
-
-    await pump(tester);
-
-    // A banner reached the user (the flattened generic text); the raw driver
-    // detail stays in the log by design.
-    expect(find.textContaining(unexpectedBanner), findsOneWidget);
-  });
-
-  testWidgets('the error banner is not an unhandled async exception', (
+  testWidgets('opening drafts only reads local records and never sends', (
     tester,
   ) async {
-    when(
-      () => engine.syncNow(reason: any(named: 'reason')),
-    ).thenThrow(StateError('boom'));
-
-    // A throw that escaped `_guarded` would fail this test rather than render.
     await pump(tester);
+    verify(() => drafts.listOpen(limit: 100000)).called(1);
+    verify(writes.openRequests).called(1);
+    verifyNoMoreInteractions(writes);
     expect(tester.takeException(), isNull);
   });
-
-  testWidgets('a failed manual sync is reported and clears the busy state', (
+  testWidgets('load failure is recoverable and hides driver details', (
     tester,
   ) async {
-    when(() => engine.syncNow(reason: 'screen')).thenAnswer((_) async => clean);
-    await pump(tester);
-    expect(find.textContaining('boom'), findsNothing);
-
     when(
-      () => engine.syncNow(reason: 'manual'),
-    ).thenThrow(StateError('permission-denied'));
-    await tester.tap(find.text('مزامنة الآن'));
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
-
-    expect(find.textContaining(unexpectedBanner), findsOneWidget);
-    // The spinner has to stop, or the button stays permanently "working".
-    final button = tester.widget<Text>(find.text('مزامنة الآن'));
-    expect(button.data, 'مزامنة الآن');
-  });
-
-  testWidgets('a failed download-history is reported', (tester) async {
-    when(() => engine.syncNow(reason: 'screen')).thenAnswer((_) async => clean);
-    when(
-      () => engine.syncNow(reason: any(named: 'reason'), pullOnly: true),
-    ).thenThrow(StateError('pull-failed'));
+      () => drafts.listOpen(limit: 100000),
+    ).thenThrow(StateError('private SQL detail'));
     await pump(tester);
-
-    await tester.tap(find.text('تنزيل السجل'));
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
-
-    expect(find.textContaining(unexpectedBanner), findsOneWidget);
-  });
-
-  testWidgets('a failed retry-all is reported', (tester) async {
-    const blocked = SyncStatusSnapshot(
-      online: true,
-      syncing: false,
-      pending: 3,
-      blocked: 1,
-      conflicts: 0,
-    );
-    when(
-      () => engine.syncNow(reason: 'screen'),
-    ).thenAnswer((_) async => blocked);
-    when(() => queue.retryBlocked()).thenThrow(StateError('retry-failed'));
-    await pump(tester);
-    expect(find.text('إعادة المحاولة'), findsOneWidget);
-
-    await tester.tap(find.text('إعادة المحاولة'));
-    await tester.pump();
-    await tester.pump(const Duration(seconds: 1));
-
-    expect(find.textContaining(unexpectedBanner), findsOneWidget);
-  });
-
-  testWidgets('a successful load shows counters and no banner', (tester) async {
-    when(() => engine.syncNow(reason: any(named: 'reason'))).thenAnswer(
-      (_) async => const SyncStatusSnapshot(
-        online: true,
-        syncing: false,
-        pending: 4,
-        blocked: 2,
-        conflicts: 1,
-      ),
-    );
-
-    await pump(tester);
-
-    // The badge reports the most urgent state, so blocked outranks pending.
-    expect(find.text('Blocked 2'), findsOneWidget);
-    expect(find.text('4'), findsOneWidget);
-    expect(find.text('2'), findsOneWidget);
-    expect(find.text('1'), findsOneWidget);
+    expect(find.textContaining('تعذر تحميل المسودات'), findsOneWidget);
+    expect(find.textContaining('private SQL'), findsNothing);
     expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('the status stream is applied without throwing', (tester) async {
-    final controller = StreamController<SyncStatusSnapshot>();
-    addTearDown(controller.close);
-    when(() => engine.status).thenAnswer((_) => controller.stream);
-    when(
-      () => engine.syncNow(reason: any(named: 'reason')),
-    ).thenAnswer((_) async => clean);
-
-    await pump(tester);
-
-    controller.add(
-      const SyncStatusSnapshot(
-        online: true,
-        syncing: true,
-        pending: 9,
-        blocked: 0,
-        conflicts: 0,
-      ),
-    );
-    // Two frames: the event is delivered in a microtask, and the setState it
-    // triggers schedules the rebuild for the frame after it.
-    await tester.pump();
-    await tester.pump();
-
-    expect(find.text('Syncing'), findsOneWidget);
-    expect(find.text('9'), findsOneWidget);
-  });
-
-  testWidgets('the header and the tiles lay out on a narrow phone', (
-    tester,
-  ) async {
-    // 360dp is the narrowest phone this ships to. As one `Row` with a `Spacer`
-    // the title plus three Arabic-labelled buttons exceeded it, and the buttons
-    // were pushed off-screen behind a RenderFlex overflow - the sync button was
-    // unreachable on exactly the devices least able to wait for a sync.
-    tester.view.physicalSize = const Size(360, 740);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-
-    when(
-      () => engine.syncNow(reason: any(named: 'reason')),
-    ).thenAnswer((_) async => clean);
-
-    await pump(tester);
-
-    expect(tester.takeException(), isNull, reason: 'no RenderFlex overflow');
-    // Every action stays reachable.
-    expect(find.text('مزامنة الآن'), findsOneWidget);
-    expect(find.text('تنزيل السجل'), findsOneWidget);
-    expect(find.text('الحالة'), findsOneWidget);
-    expect(find.text('في الانتظار'), findsOneWidget);
-  });
-
-  testWidgets('the tiles stack on a narrow phone instead of overflowing', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(360, 740);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-
-    when(() => engine.syncNow(reason: any(named: 'reason'))).thenAnswer(
-      (_) async => const SyncStatusSnapshot(
-        online: true,
-        syncing: false,
-        pending: 1234,
-        blocked: 5678,
-        conflicts: 9012,
-      ),
-    );
-
-    await pump(tester);
-
-    expect(tester.takeException(), isNull);
-    expect(find.text('1234'), findsOneWidget);
-    expect(find.text('5678'), findsOneWidget);
-    expect(find.text('9012'), findsOneWidget);
   });
 }

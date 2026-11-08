@@ -1,3 +1,5 @@
+import '../../../../../design_system/widgets/app_export_button.dart';
+import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -15,7 +17,6 @@ import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
-import '../../../../../design_system/widgets/app_page_header.dart';
 import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../lab/domain/lab_result_repository.dart';
@@ -66,9 +67,9 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
         ),
       ),
     );
-    if (saved != true || !mounted) return;
+    if (!mounted) return;
     await context.read<ReferenceCubit>().load();
-    if (mounted) {
+    if (mounted && saved == true) {
       AppFeedback.success(context, AppText.t('تم الحفظ', 'Saved'));
     }
   }
@@ -91,7 +92,7 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
         AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       }
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -102,17 +103,14 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
     final cubit = context.read<ReferenceCubit>();
     final state = context.watch<ReferenceCubit>().state;
     final rows = state.materials;
-    final countLabel = state.hasMore ? '${rows.length}+' : '${rows.length}';
     return AppErrorFeedback<ReferenceCubit, ReferenceState>(
       selector: (s) => s.error,
       // Add floats like the raw-material register (heroTag null: sibling
       // tabs share one IndexedStack).
       child: Scaffold(
-        floatingActionButton: FloatingActionButton(
-          heroTag: null,
+        floatingActionButton: AppAddFloatingActionButton(
           tooltip: AppText.t('إضافة مادة', 'Add New Material'),
           onPressed: () => _openEditor(),
-          child: Icon(Icons.add, size: 24.r),
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -120,46 +118,32 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
             // Header-only entrance, the same convention as the sibling
             // reference tabs — the card list below never animates per card.
             AppEntrance(
-              child: AppPageHeader(
-                title: AppText.t('خامات مرجعية', 'Reference Materials'),
-                subtitle: '$countLabel ${AppText.t('مادة', 'materials')}',
-                icon: Icons.science_outlined,
-                actions: [
-                  IconButton(
-                    tooltip: AppText.t('تصدير جدول', 'Export table'),
-                    constraints: const BoxConstraints(
-                      minWidth: 48,
-                      minHeight: 48,
-                    ),
-                    onPressed: rows.isEmpty
-                        ? null
-                        : () => TableHtmlExport.export(
-                            context,
-                            filePrefix: 'materials',
-                            title: DesktopMaterialsTab.exportTitle(),
-                            headers: DesktopMaterialsTab.exportHeaders(),
-                            rows: DesktopMaterialsTab.exportRows(rows),
-                          ),
-                    icon: const Icon(Icons.table_view_outlined),
+              child: AppSearchRow(
+                search: DebouncedSearchField(
+                  controller: _searchCtrl,
+                  focusNode: _searchFocus,
+                  hint: AppText.t(
+                    'بحث بالاسم أو الكود',
+                    'Search by name or code...',
                   ),
-                ],
+                  onChanged: (query) {
+                    if (mounted) {
+                      context.read<ReferenceCubit>().setQuery(query.trim());
+                    }
+                  },
+                ),
+                export: AppExportIconButton(
+                  onPressed: rows.isEmpty
+                      ? null
+                      : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'materials',
+                          title: DesktopMaterialsTab.exportTitle(),
+                          headers: DesktopMaterialsTab.exportHeaders(),
+                          rows: DesktopMaterialsTab.exportRows(rows),
+                        ),
+                ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            // Compact dense search (icon + clear + built-in debounce) instead
-            // of the tall labeled form field — the label floats inside.
-            DebouncedSearchField(
-              controller: _searchCtrl,
-              focusNode: _searchFocus,
-              hint: AppText.t(
-                'بحث بالاسم أو الكود',
-                'Search by name or code...',
-              ),
-              onChanged: (query) {
-                if (mounted) {
-                  context.read<ReferenceCubit>().setQuery(query.trim());
-                }
-              },
             ),
             const SizedBox(height: AppSpacing.sm),
             if (state.loading && rows.isNotEmpty) const AppRefreshBar(),
@@ -310,13 +294,20 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
             IconButton(
               tooltip: AppStrings.edit,
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              onPressed: () => _openEditor(id),
+              onPressed: context.watch<ReferenceCubit>().state.isBlocked(id)
+                  ? null
+                  : () => _openEditor(id),
               icon: Icon(Icons.edit_outlined, size: 20.r),
             ),
             IconButton(
               tooltip: AppStrings.delete,
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              onPressed: () => _delete(context, m),
+              onPressed:
+                  context.watch<ReferenceCubit>().state.isBlocked(
+                    (m['id'] as num).toInt(),
+                  )
+                  ? null
+                  : () => _delete(context, m),
               icon: Icon(
                 Icons.delete_outline,
                 size: 20.r,

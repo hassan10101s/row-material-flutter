@@ -7,7 +7,7 @@ import 'package:material_lab/core/constants/app_errors.dart';
 import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/core/utils/app_exceptions.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
-import 'package:material_lab/features/qc_manager/data/offline_first_qc_repository.dart';
+import 'package:material_lab/features/qc_manager/data/server_confirmed_qc_repository.dart';
 import 'package:material_lab/features/qc_manager/data/qc_audit_repo.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_inspection.dart';
@@ -17,7 +17,7 @@ import 'package:material_lab/features/qc_manager/domain/qc_template.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart'
     show Database, DatabaseException;
 
-/// The offline-first contract for QC (plan V6_ENHANCED Â§21.3, P3).
+/// The server-confirmed contract for QC (plan V6_ENHANCED Â§21.3, P3).
 ///
 /// The local repositories are proven elsewhere (`qc_repo_test.dart`). What is
 /// proven *here* is the seam the local layer deliberately does not have:
@@ -98,7 +98,7 @@ void main() {
   );
 
   QcRepositories repos(_TestGuard guard, {QcActor? actor}) =>
-      QcRepositories.offlineFirst(
+      QcRepositories.serverConfirmed(
         dbHelper: helper,
         guard: guard,
         actorReader: () =>

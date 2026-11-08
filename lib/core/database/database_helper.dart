@@ -552,6 +552,12 @@ class DatabaseHelper {
     // Each reset appends a NEW row (history is preserved); the active
     // validation horizon is the row with the greatest id.
     await _createNirValidationSettingsTable(db);
+    await _ensureColumn(
+      db,
+      'lab_sample_tests',
+      'nir_exclusions_json',
+      'nir_exclusions_json TEXT',
+    );
     await db.execute('''
       CREATE TABLE IF NOT EXISTS lab_worksheet (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -653,6 +659,82 @@ class DatabaseHelper {
   /// §5): user drafts, the send outbox and the per-organization applied
   /// change-sequence checkpoint. `CREATE TABLE IF NOT EXISTS` on every open,
   /// same guarantee as the sync tables above.
+  Future<void> _createSecureTables(Database db) async {
+    await db.execute('''CREATE TABLE IF NOT EXISTS secure_field_submissions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      inspection_id INTEGER, batch_sample_id INTEGER, sample_test_id INTEGER,
+      source_kind TEXT NOT NULL, source_version INTEGER NOT NULL,
+      fields_json TEXT NOT NULL, created_at TEXT, updated_at TEXT)''');
+    for (final table in [
+      'inspections',
+      'product_batch_samples',
+      'lab_sample_tests',
+      'nir_validation_settings',
+      'nutrition_formulations',
+    ]) {
+      await _ensureColumn(db, table, 'secure_entry_id', 'secure_entry_id TEXT');
+      await _ensureColumn(db, table, 'public_privacy_epoch', 'public_privacy_epoch INTEGER NOT NULL DEFAULT 0');
+      await _ensureColumn(
+        db,
+        table,
+        'secure_policy_job',
+        'secure_policy_job TEXT',
+      );
+      await _ensureColumn(
+        db,
+        table,
+        'secure_template_json',
+        'secure_template_json TEXT',
+      );
+    }
+    await _ensureColumn(
+      db,
+      'nir_validation_settings',
+      'secure_result',
+      'secure_result INTEGER NOT NULL DEFAULT 0',
+    );
+    await _ensureColumn(
+      db,
+      'lab_sample_tests',
+      'secure_result',
+      'secure_result INTEGER NOT NULL DEFAULT 0',
+    );
+    for (final table in ['reference_materials', 'lab_products']) {
+      await _ensureColumn(
+        db,
+        table,
+        'secure_policy_job',
+        'secure_policy_job TEXT',
+      );
+      await _ensureColumn(
+        db,
+        table,
+        'secure_configured',
+        'secure_configured INTEGER NOT NULL DEFAULT 0',
+      );
+    }
+    await _ensureColumn(
+      db,
+      'secure_field_submissions',
+      'secure_policy_job',
+      'secure_policy_job TEXT',
+    );
+    for (final column in [
+      'nir_reset_id INTEGER',
+      'formulation_id INTEGER',
+      'original_snapshot_json TEXT',
+      'original_parameter TEXT',
+      'original_note TEXT',
+    ]) {
+      await _ensureColumn(
+        db,
+        'secure_field_submissions',
+        column.split(' ').first,
+        column,
+      );
+    }
+  }
+
   Future<void> _createCommandTables(Database db) async {
     await db.execute('''CREATE TABLE IF NOT EXISTS central_entity_identities (
       entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
@@ -673,10 +755,17 @@ class DatabaseHelper {
       organization_id TEXT NOT NULL, uid TEXT NOT NULL, role TEXT NOT NULL,
       applied_sequence INTEGER NOT NULL DEFAULT 0,
       bootstrap_state TEXT NOT NULL DEFAULT 'required',
+      protocol_schema INTEGER NOT NULL DEFAULT 0,
       snapshot_watermark INTEGER, snapshot_entity TEXT, snapshot_after TEXT,
       updated_at TEXT,
       PRIMARY KEY(organization_id, uid)
     )''');
+    await _ensureColumn(
+      db,
+      'central_sync_state',
+      'protocol_schema',
+      'protocol_schema INTEGER NOT NULL DEFAULT 0',
+    );
     await db.execute('''CREATE TABLE IF NOT EXISTS central_bootstrap_staging (
       organization_id TEXT NOT NULL, uid TEXT NOT NULL,
       entity_type TEXT NOT NULL, entity_id TEXT NOT NULL,
@@ -697,6 +786,12 @@ class DatabaseHelper {
       source_id TEXT NOT NULL,
       row_json TEXT NOT NULL,
       archived_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS central_qc_audits (
+      entity_id TEXT PRIMARY KEY, local_ref INTEGER NOT NULL UNIQUE,
+      target_type TEXT NOT NULL, target_global_id TEXT NOT NULL,
+      audit_kind TEXT NOT NULL, action TEXT NOT NULL,
+      origin_hash TEXT NOT NULL, row_json TEXT NOT NULL
     )''');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS drafts (
@@ -746,6 +841,15 @@ class DatabaseHelper {
         updated_at TEXT NOT NULL
       )
     ''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS dismissed_command_requests (
+      operation_id TEXT PRIMARY KEY,
+      organization_id TEXT NOT NULL,
+      uid TEXT NOT NULL,
+      dismissed_at TEXT NOT NULL
+    )''');
+    await db.execute('''CREATE TABLE IF NOT EXISTS command_followups (
+      operation_id TEXT PRIMARY KEY, notified_at TEXT
+    )''');
     // `operation_id UNIQUE` is the client-side half of "one effect": a replay
     // path that would mint a second operationId for the same logical send is
     // a bug, and this index makes it loud.
@@ -928,7 +1032,7 @@ class DatabaseHelper {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS notifications (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        type TEXT NOT NULL CHECK(type IN ('inspection','labResult')),
+        type TEXT NOT NULL CHECK(type IN ('inspection','labResult','productSample','sync')),
         ref_id INTEGER NOT NULL,
         entry_code TEXT NOT NULL,
         title TEXT NOT NULL,
@@ -938,6 +1042,37 @@ class DatabaseHelper {
         UNIQUE(type, entry_code, ref_id)
       )
     ''');
+    final notificationSchema = await db.rawQuery(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'notifications'",
+    );
+    if (!'${notificationSchema.single['sql']}'.contains("'productSample'")) {
+      // Local notification cache only. A savepoint also works when schema
+      // guarantees run within an upgrade transaction; preserve existing ids
+      // and read state while widening the legacy CHECK constraint.
+      await db.execute('SAVEPOINT notification_types');
+      try {
+        await db.execute(
+          'ALTER TABLE notifications RENAME TO notifications_old_types',
+        );
+        await db.execute(
+          '''CREATE TABLE notifications (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          type TEXT NOT NULL CHECK(type IN ('inspection','labResult','productSample','sync')),
+          ref_id INTEGER NOT NULL, entry_code TEXT NOT NULL,
+          title TEXT NOT NULL, subtitle TEXT NOT NULL, created_at TEXT NOT NULL,
+          read INTEGER NOT NULL DEFAULT 0, UNIQUE(type, entry_code, ref_id))''',
+        );
+        await db.execute(
+          'INSERT INTO notifications SELECT * FROM notifications_old_types',
+        );
+        await db.execute('DROP TABLE notifications_old_types');
+        await db.execute('RELEASE SAVEPOINT notification_types');
+      } catch (_) {
+        await db.execute('ROLLBACK TO SAVEPOINT notification_types');
+        await db.execute('RELEASE SAVEPOINT notification_types');
+        rethrow;
+      }
+    }
     await db.execute('''
       CREATE INDEX IF NOT EXISTS idx_notifications_unread
         ON notifications(read, created_at DESC, id DESC)
@@ -948,6 +1083,7 @@ class DatabaseHelper {
   /// (plan §6.5). `organization_id` is deliberately absent: isolation is
   /// physical (one file per organization).
   static const List<String> syncedTables = [
+    'secure_field_submissions',
     'inspections',
     'inspection_status_history',
     'lab_sample_tests',
@@ -1440,7 +1576,7 @@ class DatabaseHelper {
   ///
   /// None of the QC tables that reference these use `ON DELETE CASCADE` (deletes
   /// are soft, via `deleted_at`), so blocking the delete cannot break a cascade.
-  Future<void> _createQcAuditGuards(Database db) async {
+  Future<void> _createQcAuditGuards(DatabaseExecutor db) async {
     for (final table in const ['qc_audits', 'qc_sop_audits']) {
       await db.execute('''
         CREATE TRIGGER IF NOT EXISTS ${table}_block_update
@@ -1501,6 +1637,28 @@ class DatabaseHelper {
       "answered_by_name TEXT NOT NULL DEFAULT ''",
     );
     await _createQcTables(db);
+    for (final column in const {
+      'remote_id': 'TEXT',
+      'created_at': 'TEXT',
+      'updated_at': 'TEXT',
+      'created_by': 'TEXT',
+      'updated_by': 'TEXT',
+      'deleted_at': 'TEXT',
+      'version': 'INTEGER NOT NULL DEFAULT 1',
+      'remote_version': 'INTEGER NOT NULL DEFAULT 0',
+      'sync_state': "TEXT NOT NULL DEFAULT 'synced'",
+      'remote_synced_at': 'TEXT',
+      'target_entity_type': 'TEXT',
+      'target_global_id': 'TEXT',
+      'previous_audit_id': 'TEXT',
+    }.entries) {
+      await _ensureColumn(
+        db,
+        'qc_audits',
+        column.key,
+        '${column.key} ${column.value}',
+      );
+    }
     await _createQcIndexes(db);
     await _createQcAuditGuards(db);
 
@@ -1675,6 +1833,18 @@ class DatabaseHelper {
     // nullable `inspection_id`; the FK itself stays - a NULL child is its own
     // "no context" marker. Same guarded rebuild pattern as above.
     await _migrateQcFindingsStandalone(db);
+    await _ensureColumn(
+      db,
+      'qc_findings_nc',
+      'product_sample_id',
+      'product_sample_id INTEGER REFERENCES product_batch_samples(id)',
+    );
+    await _ensureColumn(
+      db,
+      'qc_findings_nc',
+      'product_sample_remote_id',
+      'product_sample_remote_id TEXT',
+    );
     // مطلوب flag per field: which physical/chemical params must have a value
     // at inspection time. JSON-embedded for materials (no backfill needed),
     // column-backed for product ranges + material bounds.
@@ -1697,11 +1867,43 @@ class DatabaseHelper {
     // gain it without a version bump (same rule as the equipment/lot tables
     // above; `syncedTables` then adds its columns right after).
     await _createNirValidationSettingsTable(db);
+    await _ensureColumn(
+      db,
+      'lab_sample_tests',
+      'nir_exclusions_json',
+      'nir_exclusions_json TEXT',
+    );
     // Per-item horizon (فلديشن): a reset can target one parameter inside one
     // خامة/منتج instead of the whole calibration. Existing installs gain the
     // scoping columns on next open (NULL/empty = a global reset, the legacy
     // behaviour).
     await _ensureColumn(db, 'nir_validation_settings', 'scope', 'scope TEXT');
+    // Typed optional parents are remapped through central parentRefs on every
+    // device. entity_id remains origin metadata for legacy reset history only.
+    await _ensureColumn(
+      db,
+      'nir_validation_settings',
+      'material_id',
+      'material_id INTEGER',
+    );
+    await _ensureColumn(
+      db,
+      'nir_validation_settings',
+      'product_id',
+      'product_id INTEGER',
+    );
+    await _ensureColumn(
+      db,
+      'nir_validation_settings',
+      'reference_version',
+      'reference_version INTEGER',
+    );
+    await _ensureColumn(
+      db,
+      'nir_validation_settings',
+      'calibration_snapshot_json',
+      'calibration_snapshot_json TEXT',
+    );
     await _ensureColumn(
       db,
       'nir_validation_settings',
@@ -1876,6 +2078,7 @@ class DatabaseHelper {
       CREATE INDEX IF NOT EXISTS idx_nutrition_formulations_active
       ON nutrition_formulations(is_archived, updated_at DESC)
     ''');
+    await _createSecureTables(db);
     final sharedKeysSql = sharedSettingKeys.map((key) => "'$key'").join(',');
     await db.execute(
       'CREATE TABLE IF NOT EXISTS settings '
@@ -2746,6 +2949,7 @@ class DatabaseHelper {
         tested_at TEXT NOT NULL,
         decision_status TEXT NOT NULL DEFAULT '',
         decision_reason TEXT,
+        non_conformance_remote_id TEXT NOT NULL DEFAULT '',
         created_by INTEGER,
         created_at TEXT NOT NULL,
         updated_at TEXT,
@@ -2766,6 +2970,12 @@ class DatabaseHelper {
       CREATE INDEX IF NOT EXISTS idx_batch_samples_batch
         ON product_batch_samples(batch_id, sample_no ASC, id ASC)
     ''');
+    await _ensureColumn(
+      db,
+      'product_batch_samples',
+      'non_conformance_remote_id',
+      "non_conformance_remote_id TEXT NOT NULL DEFAULT ''",
+    );
     await db.execute('''
       CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_samples_remote_id
         ON product_batch_samples(remote_id)
@@ -2844,6 +3054,10 @@ class DatabaseHelper {
         reset_by_name TEXT,
         scope TEXT,
         entity_id INTEGER,
+        material_id INTEGER,
+        product_id INTEGER,
+        reference_version INTEGER,
+        calibration_snapshot_json TEXT,
         entity_name TEXT NOT NULL DEFAULT '',
         parameter TEXT NOT NULL DEFAULT '',
         created_at TEXT NOT NULL,

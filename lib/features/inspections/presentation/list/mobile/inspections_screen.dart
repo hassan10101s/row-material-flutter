@@ -1,4 +1,7 @@
+import '../../../../../core/security/secure_field_access.dart';
+import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import 'package:flutter/material.dart';
+import '../../../../../design_system/widgets/app_tooltip.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -74,7 +77,7 @@ class MobileInspectionsScreen extends StatelessWidget {
     final changed = await Navigator.of(context).push<bool>(
       AppPageRoute(
         builder: (_) => BlocProvider(
-          create: (c) => InspectionDetailCubit(
+          create: (c) => InspectionDetailCubit(secureAccess: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null,
             inspectionId: id,
             repo: getIt<InspectionRepository>(),
             reports: getIt<ReportRepository>(),
@@ -146,6 +149,7 @@ class MobileInspectionsScreen extends StatelessWidget {
                 Flexible(
                   child: SingleChildScrollView(
                     child: InspectionFilterGrid(
+                      formulationReceiptsOnly: cubit.formulationReceiptsOnly,
                       isProduct: isProduct,
                       status: dStatus,
                       reason: dReason,
@@ -230,7 +234,7 @@ class MobileInspectionsScreen extends StatelessWidget {
       }
       await AppFeedbackExport.actions(context, filePath: path);
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -258,7 +262,7 @@ class MobileInspectionsScreen extends StatelessWidget {
             : file.uri.pathSegments.last,
       );
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -289,13 +293,11 @@ class MobileInspectionsScreen extends StatelessWidget {
       selector: (s) => s.error,
       child: Scaffold(
         floatingActionButton: canCreate
-            ? FloatingActionButton(
+            ? AppAddFloatingActionButton(
                 // No hero animation: two registers (raw + product) live in one
                 // IndexedStack, so two default-tagged FAB heroes share one
                 // route subtree and crash navigation (duplicate Hero tag).
-                heroTag: null,
                 onPressed: () => _newInspection(context),
-                child: Icon(Icons.add, size: 24.r),
               )
             : null,
         body: RefreshIndicator(
@@ -662,7 +664,7 @@ class _InspectionCard extends StatelessWidget {
               // reveals the full status text (desktop hover equivalent).
               // Raw-only: products carry no header decision.
               if (decision.isNotEmpty) ...[
-                Tooltip(
+                AppTooltip(
                   message: statusText,
                   child: Padding(
                     padding: const EdgeInsets.only(top: AppSpacing.xxs),
@@ -692,7 +694,7 @@ class _InspectionCard extends StatelessWidget {
               // Hero: full material name, up to 3 lines. Long-press shows it
               // all when even three lines are not enough.
               Expanded(
-                child: Tooltip(
+                child: AppTooltip(
                   message: material,
                   child: Text(
                     material,

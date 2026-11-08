@@ -9,20 +9,21 @@
  *   parentRefs   backfill `parentRefs` on legacy documents from their
  *                remote-id columns, so the client can materialize the
  *                snapshot channel after cutover (only writes when absent)
- *   reservations build `uniqueReservations` for every LIVE document — the
+ *   freeze       enforce maintenance mode before inspecting or changing data
+ *   reservations build `uniqueReservations` for every document, retaining
+ *                non-partial unique claims on tombstones — the
  *                exact claims domain admission will enforce
- *   gate         set `commandProtocol` = {enabled, schemaVersion: 2,
- *                domainManifestVersion: 1, migrationId, writerDeviceId,
+ *   gate         set `commandProtocol` = {enabled, schemaVersion: 3,
+ *                domainManifestVersion: 1, migrationId, writePolicy: multi_authorized,
  *                globalReferencesReady: true, uniqueAdmissionComplete: true}
  *
- * `--abort` flips `commandProtocol.enabled` back to false (the rules then
- * stop rejecting central reads AND `legacyDomainWritesAllowed` re-admits the
- * legacy path), records the abort in migrationState, and leaves every other
+ * `--abort` enforces maintenance mode; it never reopens a legacy writer.
+ * It records the abort in migrationState, and leaves every other
  * artifact in place for a later re-run.
  *
  * Usage:
- *   node migrate.js --org <orgId> --writer-device <deviceId> [--project demo-materiallab]
- *   node migrate.js --org <orgId> --stage gate --project <prod>
+ *   node migrate.js --org <orgId> [--project demo-materiallab]
+ *   node migrate.js --org <orgId> --stage gate --evidence FILE --project <prod>
  *   node migrate.js --org <orgId> --abort [--abort-reason "..."]
  */
 'use strict';
@@ -66,14 +67,15 @@ async function stageCounters(db, orgRef, orgId) {
   let maxSeq = 0;
   if (existing.exists && Number.isSafeInteger(existing.data().value)) {
     maxSeq = existing.data().value;
-  } else {
-    const events = await orgRef.collection('changeEvents').get();
-    for (const doc of events.docs) {
-      const seq = doc.data().seq;
-      if (Number.isSafeInteger(seq) && seq > maxSeq) maxSeq = seq;
-    }
   }
-  let maxSample = 0;
+  const events = await orgRef.collection('changeEvents').get();
+  for (const doc of events.docs) {
+    const seq = doc.data().seq;
+    if (Number.isSafeInteger(seq) && seq > maxSeq) maxSeq = seq;
+  }
+  const existingSample = await orgRef.collection('counters').doc('sampleNumber').get();
+  let maxSample = existingSample.exists && Number.isSafeInteger(existingSample.data().value)
+    ? existingSample.data().value : 0;
   const samples = await collectionOf(db, orgId, 'sample').get();
   for (const doc of samples.docs) {
     const no = doc.data().sampleNo;
@@ -95,11 +97,11 @@ async function stageParentRefs(db, orgRef, orgId) {
     const parentDocs = await loadParentDocs(db, orgId, [...new Set(def.parents.map(p => p.type))]);
     for (const group of chunk(docs, 450)) {
       const batch = db.batch();
-      for (const {id, data: doc} of group) {
+      for (const {id, data: doc, updateTime} of group) {
         if (doc.parentRefs && typeof doc.parentRefs === 'object' && Object.keys(doc.parentRefs).length) continue;
         const refs = {};
         for (const parent of def.parents) {
-          const idValue = parentRemoteId(def, doc, parent);
+          const idValue = parentRemoteId(def, doc, parent, parentDocs);
           if (idValue == null) continue;
           const snap = parentDocs.get(`${parent.type}/${idValue}`);
           refs[parent.relation] = {
@@ -108,7 +110,7 @@ async function stageParentRefs(db, orgRef, orgId) {
           };
         }
         if (!Object.keys(refs).length) continue;
-        batch.update(orgRef.collection(def.collection).doc(id), {parentRefs: refs});
+        batch.update(orgRef.collection(def.collection).doc(id), {parentRefs: refs}, {lastUpdateTime: updateTime});
         updated += 1;
       }
       await batch.commit();
@@ -123,13 +125,13 @@ async function stageReservations(db, orgRef, orgId) {
   const reservation = orgRef.collection('uniqueReservations');
   for (const type of entityTypes()) {
     const def = definition(type);
-    const docs = (await listDocs(db, orgId, type)).filter(({data: doc}) => doc.deletedAt == null);
+    const docs = await listDocs(db, orgId, type);
     const parentDocs = await loadParentDocs(db, orgId, [...new Set(def.parents.map(p => p.type))]);
     const pending = [];
     for (const {id, data: doc} of docs) {
       const refs = {};
       for (const parent of def.parents) {
-        const idValue = parentRemoteId(def, doc, parent);
+        const idValue = parentRemoteId(def, doc, parent, parentDocs);
         if (idValue != null) refs[parent.relation] = {entityType: parent.type, entityId: idValue};
       }
       let claims = [];
@@ -142,8 +144,19 @@ async function stageReservations(db, orgRef, orgId) {
     }
     for (const group of chunk(pending, 450)) {
       const batch = db.batch();
-      for (const claim of group) {
-        batch.set(reservation.doc(claim.key), {entityType: claim.entityType, entityId: claim.entityId});
+      const previous = group.length ? await db.getAll(...group.map(c => reservation.doc(c.key))) : [];
+      for (const [index, claim] of group.entries()) {
+        const snap = previous[index];
+        const data = {entityType: claim.entityType, entityId: claim.entityId, released: false,
+          collection: def.collection, recordPath: orgRef.collection(def.collection).doc(claim.entityId)};
+        if (snap.exists) {
+          if (snap.data().entityType !== claim.entityType || snap.data().entityId !== claim.entityId) {
+            throw Error(`Reservation ${claim.key} belongs to another record; a reviewed business decision is required`);
+          }
+          batch.update(snap.ref, data, {lastUpdateTime: snap.updateTime});
+        } else {
+          batch.create(reservation.doc(claim.key), data);
+        }
         written += 1;
       }
       await batch.commit();
@@ -153,21 +166,35 @@ async function stageReservations(db, orgRef, orgId) {
   return {reservations: written};
 }
 
-async function stageGate(orgRef, migrationId, writerDeviceId) {
-  if (!migrationId || typeof writerDeviceId !== 'string' || !writerDeviceId) {
-    throw new Error('stage gate needs --migration-id and --writer-device');
+async function stageGate(orgRef, migrationId, evidence) {
+  if (!orgRef.firestore.projectId.startsWith('demo-')) require('./release_gate').assertReleaseEvidence(evidence);
+  if (!migrationId) throw new Error('stage gate needs --migration-id');
+  const state = await readState(orgRef);
+  if (!state || !state.audit || state.audit.blockerCount !== 0 ||
+      !Object.hasOwn(state, 'changeSequence') ||
+      !Object.hasOwn(state, 'sampleNumber') ||
+      !Object.hasOwn(state, 'documentsUpdated') ||
+      !Object.hasOwn(state, 'reservations')) {
+    throw new Error('Complete audit, counters, parentRefs and reservations before enabling the central protocol.');
+  }
+  // Recheck the actual server data at cutover; never manufacture readiness
+  // flags to bypass missing raw-inspection references or duplicate identities.
+  await stageAudit(orgRef.firestore, orgRef, orgRef.id);
+  const devices = await orgRef.collection('devices').get();
+  if (!devices.docs.some(d => d.data().status === 'active' && d.data().readOnly === false)) {
+    throw new Error('Register at least one active writable device before cutover');
   }
   await orgRef.update('commandProtocol', {
     enabled: true, schemaVersion: SCHEMA_VERSION, domainManifestVersion: 1,
-    migrationId, writerDeviceId,
+    migrationId, mode: 'firestore_direct_v2', writePolicy: 'multi_authorized', maintenance: false,
     globalReferencesReady: true, uniqueAdmissionComplete: true,
   });
-  await writeState(orgRef, {stage: 'gate', migrationId, writerDeviceId, gatedAt: admin.firestore.FieldValue.serverTimestamp()});
-  return {migrationId, writerDeviceId};
+  await writeState(orgRef, {stage: 'gate', migrationId, writePolicy: 'multi_authorized', gatedAt: admin.firestore.FieldValue.serverTimestamp()});
+  return {migrationId, writePolicy: 'multi_authorized'};
 }
 
 async function abort(orgRef, reason) {
-  await orgRef.update('commandProtocol', {enabled: false});
+  await orgRef.update('commandProtocol.maintenance', true);
   await writeState(orgRef, {stage: 'aborted', abortReason: reason ?? null, abortedAt: admin.firestore.FieldValue.serverTimestamp()});
 }
 
@@ -177,16 +204,19 @@ async function migrate(db, orgId, options = {}) {
     await abort(orgRef, options.abortReason);
     return {aborted: true};
   }
+  const gate = (await orgRef.get()).data()?.commandProtocol;
+  if (options.stage && options.stage !== 'freeze' && gate?.maintenance !== true) throw new Error('Freeze client writes before migration');
   const migrationId = options.migrationId || `migration-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   const results = {};
-  const stages = options.stage ? [options.stage] : ['audit', 'counters', 'parentRefs', 'reservations', 'gate'];
+  const stages = options.stage ? [options.stage] : ['freeze', 'audit', 'counters', 'parentRefs', 'reservations', 'gate'];
   for (const stage of stages) {
     switch (stage) {
+      case 'freeze': await orgRef.set({commandProtocol: {maintenance: true}}, {merge: true}); results.freeze = true; break;
       case 'audit': results.audit = await stageAudit(db, orgRef, orgId); break;
       case 'counters': results.counters = await stageCounters(db, orgRef, orgId); break;
       case 'parentRefs': results.parentRefs = await stageParentRefs(db, orgRef, orgId); break;
       case 'reservations': results.reservations = await stageReservations(db, orgRef, orgId); break;
-      case 'gate': results.gate = await stageGate(orgRef, migrationId, options.writerDeviceId); break;
+      case 'gate': results.gate = await stageGate(orgRef, migrationId, options.evidence); break;
       default: throw new Error(`Unknown stage ${stage}`);
     }
   }
@@ -205,16 +235,16 @@ async function main() {
   const shared = require('./shared');
   const {db} = shared.init(args.project);
   if (!args.org) {
-    console.error('Usage: node migrate.js --org <orgId> [--writer-device <id>] [--migration-id <id>] [--stage <name>] [--abort] [--project <projectId>]');
+    console.error('Usage: node migrate.js --org <orgId> [--evidence <file>] [--migration-id <id>] [--stage <name>] [--abort] [--project <projectId>]');
     process.exit(2);
   }
   try {
     const result = await migrate(db, args.org, {
+      evidence: args.evidence,
       abort: args.abort === true,
       abortReason: args['abort-reason'],
       stage: typeof args.stage === 'string' ? args.stage : undefined,
       migrationId: typeof args['migration-id'] === 'string' ? args['migration-id'] : undefined,
-      writerDeviceId: typeof args['writer-device'] === 'string' ? args['writer-device'] : undefined,
     });
     console.log(JSON.stringify(result, null, 2));
   } finally {

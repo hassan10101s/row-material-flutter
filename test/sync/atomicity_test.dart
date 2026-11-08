@@ -6,7 +6,7 @@ import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/core/utils/app_exceptions.dart';
 import 'package:material_lab/features/inspections/data/inspection_repo.dart';
-import 'package:material_lab/features/inspections/data/offline_first_inspection_repository.dart';
+import 'package:material_lab/features/inspections/data/server_confirmed_inspection_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 import 'package:material_lab/features/reference/data/reference_repo.dart';
 
@@ -90,11 +90,11 @@ void main() {
   late _FakeGuard guard;
   late UserContext user;
 
-  OfflineFirstInspectionRepository buildRepo({
+  ServerConfirmedInspectionRepository buildRepo({
     WriteGuard? writeGuard,
     SyncQueue? syncQueue,
     AuditLogger? auditLogger,
-  }) => OfflineFirstInspectionRepository(
+  }) => ServerConfirmedInspectionRepository(
     dbHelper: fixture.helper,
     referenceRepo: referenceRepo,
     guard: writeGuard ?? guard,

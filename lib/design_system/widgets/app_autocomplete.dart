@@ -57,7 +57,9 @@ class AppAutocomplete<T extends Object> extends StatefulWidget {
 
   /// Injected controller and focus node, mirroring the form-side lifecycle of
   /// the field they replace. Defaults to internally owned instances so the
-  /// control is self-contained.
+  /// control is self-contained. A parent-supplied controller is only written
+  /// from outside the build phase: syncing it with [selected] while the tree
+  /// builds would notify the owner's listeners mid-build.
   final TextEditingController? controller;
   final FocusNode? focusNode;
 
@@ -113,12 +115,26 @@ class _AppAutocompleteState<T extends Object>
   /// never be changed without first clearing it.
   bool _reopening = false;
 
+  /// True while a committed-text sync bumped into the build phase and was
+  /// deferred past the current frame. During the deferral the controller still
+  /// carries the old committed string, so the no-hit helper below stays quiet
+  /// until the write lands (otherwise it would flash for exactly one frame).
+  bool _pendingFieldSync = false;
+
   @override
   void initState() {
     super.initState();
     // A picker opened with an existing committed choice must show it from the
     // very first frame, not only after the parent changes the selection.
-    _resolveFieldText();
+    //
+    // This write is synchronous and MUST stay synchronous: it runs during the
+    // owner's first build, before the RawAutocomplete descendant mounts, so
+    // the field's `_lastFieldText` tracking never sees it (a later reopen then
+    // still counts the select-all as a fresh query and reopens the whole
+    // list). Parents that watch an injected controller tolerate the mid-build
+    // notification by deferring their own setState (see `_markDirty` in
+    // inspection_form_screen.dart).
+    _syncFieldText();
     _focusNode.addListener(_handleFocusChange);
   }
 
@@ -129,7 +145,7 @@ class _AppAutocompleteState<T extends Object>
     // it changes from outside (e.g. a "change X" action clears the selection).
     if (oldWidget.selected != widget.selected) {
       _reopening = false;
-      _resolveFieldText();
+      _syncCommittedTextAfterBuild();
     }
   }
 
@@ -138,17 +154,49 @@ class _AppAutocompleteState<T extends Object>
   void _handleFocusChange() {
     if (_focusNode.hasFocus || !_reopening) return;
     setState(() => _reopening = false);
-    _resolveFieldText();
+    _syncFieldText();
   }
 
-  void _resolveFieldText() {
-    final desired = widget.selected == null
-        ? ''
-        : widget.displayString(widget.selected!);
-    if (_controller.text != desired) {
-      _controller.text = desired;
-      _controller.selection = TextSelection.collapsed(offset: desired.length);
-    }
+  /// [didUpdateWidget] entry point for the committed-text sync.
+  ///
+  /// The controller is often parent-supplied and parent-watched (the form
+  /// screens listen to it for their dirty guards), and this runs while the
+  /// owner is rebuilding — i.e. mid-build. Writing it now would notify the
+  /// parent's listeners mid-build and crash with setState-during-build on the
+  /// owning form screen. So the write moves to after the frame; pending
+  /// requests coalesce into one final sync that reads the then-current
+  /// [widget.selected], and nothing notifies during the building frame.
+  ///
+  /// (The [initState] sync stays synchronous on purpose — before the
+  /// RawAutocomplete descendant mounts it is invisible to its query tracking;
+  /// see the comment there.)
+  void _syncCommittedTextAfterBuild() {
+    final desired = _committedDisplay();
+    if (_controller.text == desired) return;
+    if (_pendingFieldSync) return;
+    _pendingFieldSync = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _pendingFieldSync = false;
+      _syncFieldText();
+    });
+  }
+
+  /// The display string of the parent-owned committed choice, or '' when none.
+  String _committedDisplay() => widget.selected == null
+      ? ''
+      : widget.displayString(widget.selected!);
+
+  /// Writes [TextEditingController] as the committed choice. Safe to notify
+  /// listeners: call sites are either before the RawAutocomplete mounts
+  /// ([initState]) or after the frame ([_syncCommittedTextAfterBuild], focus
+  /// changes); a mid-build trigger would instead go through
+  /// [_syncCommittedTextAfterBuild].
+  void _syncFieldText() {
+    final desired = _committedDisplay();
+    if (_controller.text == desired) return;
+    _controller.text = desired;
+    _controller.selection = TextSelection.collapsed(offset: desired.length);
   }
 
   void _openOptions() {
@@ -196,6 +244,7 @@ class _AppAutocompleteState<T extends Object>
         final query = value.text.trim().toLowerCase();
         final noMatch =
             !committed &&
+            !_pendingFieldSync &&
             query.isNotEmpty &&
             widget.options
                 .where((option) => widget.filter(option, query))

@@ -18,13 +18,13 @@ import '../../core/formula_engine.dart'
         inventoryUnits,
         safeFormulaFloat,
         unitAllowedForCategory,
-        unitDimOf,
         validateFormula;
 import '../../domain/lab_local_repository.dart';
 import '../../domain/lab_result_repository.dart';
 import '../../../reference/domain/reference_repository.dart';
 import '../../../../design_system/widgets/app_select_field.dart';
 import '../../../../design_system/widgets/app_text_field.dart';
+import 'analysis_field_config_editor.dart';
 
 /// Shared analysis editor: all fields, formula, items and save path.
 ///
@@ -70,7 +70,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
   List<Map<String, dynamic>> _parameters = [];
   int? _parameterId;
   Future<void>? _parameterLoad;
-  int _linkPicker = -1;
   bool _saving = false;
   String? _parameterError;
   String? _nameError;
@@ -236,12 +235,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
     return options;
   }
 
-  void _disposeFieldEditors(int index) {
-    final cfg = _fieldLinks[index];
-    (cfg['valueCtrl'] as TextEditingController?)?.dispose();
-    (cfg['listAddCtrl'] as TextEditingController?)?.dispose();
-  }
-
   @override
   void dispose() {
     _name.dispose();
@@ -252,10 +245,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
     _newFieldController.dispose();
     for (final c in _fieldControllers) {
       c.dispose();
-    }
-    for (final cfg in _fieldLinks) {
-      (cfg['valueCtrl'] as TextEditingController?)?.dispose();
-      (cfg['listAddCtrl'] as TextEditingController?)?.dispose();
     }
     for (final item in _consumedItems) {
       (item['qtyCtrl'] as TextEditingController?)?.dispose();
@@ -448,9 +437,11 @@ class AnalysisEditorState extends State<AnalysisEditor> {
       }
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -468,38 +459,87 @@ class AnalysisEditorState extends State<AnalysisEditor> {
 
   void _removeField(int index) {
     setState(() {
-      _disposeFieldEditors(index);
       _fieldControllers[index].dispose();
       _fieldControllers.removeAt(index);
       _fieldLinks.removeAt(index);
-      if (_linkPicker >= _fieldControllers.length) _linkPicker = -1;
     });
   }
 
   String _kindOf(int index) => '${_fieldLinks[index]['kind'] ?? 'none'}';
 
-  void _setFieldKind(int index, String kind) {
-    setState(() {
-      final prev = _kindOf(index);
-      if (prev == kind) return;
-      _disposeFieldEditors(index);
-      final cfg = <String, dynamic>{'kind': kind};
-      if (kind == 'link') cfg['unit'] = 'mL';
-      if (kind == 'list') cfg['list_values'] = <String>['2', '5', '10'];
-      _fieldLinks[index] = cfg;
-      _linkPicker = -1;
-    });
+  Future<void> _configureField(int index, String kind) async {
+    final controller = _fieldControllers[index];
+    final current = _fieldLinks[index];
+    final initial = _kindOf(index) == kind
+        ? current
+        : <String, dynamic>{'kind': kind};
+    final editorKey = GlobalKey<AnalysisFieldConfigEditorState>();
+    final label = switch (kind) {
+      'link' => AppText.t('ربط مخزون', 'Stock link'),
+      'value' => AppText.t('قيمة ثابتة', 'Fixed value'),
+      _ => AppText.t('قائمة قيم', 'Value list'),
+    };
+    final result = await showAppContent<Map<String, dynamic>>(
+      context,
+      title: '$label — ${controller.text}',
+      size: AppWindowSize.sm,
+      builder: (_, _) => AnalysisFieldConfigEditor(
+        key: editorKey,
+        initial: initial,
+        inventory: _inventory,
+        units: (unit, id) => _consumeOptions(unit, id),
+      ),
+      actionsBuilder: (_, close) => [
+        AppButton(
+          style: AppButtonStyle.secondary,
+          label: AppText.t('إلغاء', 'Cancel'),
+          onPressed: () => close(),
+        ),
+        AppButton(
+          label: AppText.t('تطبيق', 'Apply'),
+          onPressed: () {
+            final result = editorKey.currentState?.validatedConfiguration();
+            if (result != null) close(result);
+          },
+        ),
+      ],
+    );
+    if (!mounted || result == null) return;
+    final position = _fieldControllers.indexOf(controller);
+    if (position < 0) return;
+    setState(() => _fieldLinks[position] = result);
   }
 
   Widget _kindChips(int index) {
     final kind = _kindOf(index);
-    return Wrap(
-      spacing: 4,
+    return Row(
       children: [
-        _kindChip(index, 'none', kind, AppText.t('بدون', 'None')),
-        _kindChip(index, 'link', kind, AppText.t('رابط', 'Link')),
-        _kindChip(index, 'value', kind, AppText.t('قيمة', 'Value')),
-        _kindChip(index, 'list', kind, AppText.t('قائمة', 'List')),
+        Expanded(
+          child: _kindChip(
+            index,
+            'link',
+            kind,
+            AppText.t('ربط مخزون', 'Stock link'),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: _kindChip(
+            index,
+            'value',
+            kind,
+            AppText.t('قيمة ثابتة', 'Fixed value'),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Expanded(
+          child: _kindChip(
+            index,
+            'list',
+            kind,
+            AppText.t('قائمة قيم', 'Value list'),
+          ),
+        ),
       ],
     );
   }
@@ -519,7 +559,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
           ? const SizedBox.shrink()
           : _stateChip(
               Icons.view_list_outlined,
-              'قائمة ($n)',
+              AppText.t('قائمة ($n)', 'List ($n)'),
               AppColors.accent,
             );
     }
@@ -566,288 +606,15 @@ class AnalysisEditorState extends State<AnalysisEditor> {
   Widget _kindChip(int index, String value, String current, String label) {
     return ChoiceChip(
       visualDensity: VisualDensity.compact,
-      label: Text(label, style: TextStyle(fontSize: 12.spMax)),
-      selected: current == value,
-      onSelected: (_) => _setFieldKind(index, value),
-    );
-  }
-
-  Widget _linkSummary(int index) {
-    final cfg = _fieldLinks[index];
-    if (int.tryParse('${cfg['inventory_id'] ?? 0}') == null ||
-        (int.tryParse('${cfg['inventory_id'] ?? 0}') ?? 0) <= 0) {
-      return ActionChip(
-        visualDensity: VisualDensity.compact,
-        avatar: Icon(Icons.link, size: 14.r),
-        label: Text(
-          AppText.t('ربط', 'Link'),
-          style: TextStyle(fontSize: 12.spMax),
-        ),
-        onPressed: () =>
-            setState(() => _linkPicker = _linkPicker == index ? -1 : index),
-      );
-    }
-    final name = '${cfg['inventory_name'] ?? ''}';
-    final unit = '${cfg['unit'] ?? ''}';
-    return InputChip(
-      visualDensity: VisualDensity.compact,
-      avatar: Icon(Icons.link, size: 14.r),
       label: Text(
-        name.isEmpty
-            ? AppText.t('مرتبط', 'Linked')
-            : '$name ${unit.isNotEmpty ? '($unit)' : ''}',
-        overflow: TextOverflow.ellipsis,
+        label,
+        textAlign: TextAlign.center,
+        maxLines: 2,
         style: TextStyle(fontSize: 12.spMax),
       ),
-      onPressed: () =>
-          setState(() => _linkPicker = _linkPicker == index ? -1 : index),
-      onDeleted: () => setState(() {
-        _fieldLinks[index] = {'kind': 'link', 'unit': 'mL'};
-        _linkPicker = -1;
-      }),
-    );
-  }
-
-  Widget _linkPanel(int index) {
-    if (_inventory.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text(
-          AppText.t('لا توجد مواد في المخزون.', 'No inventory items.'),
-          style: TextStyle(color: AppColors.textMuted, fontSize: 12.spMax),
-        ),
-      );
-    }
-    final cfg = _fieldLinks[index];
-    final selectedId = int.tryParse('${cfg['inventory_id'] ?? ''}');
-    return Container(
-      margin: const EdgeInsets.only(top: 4),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceSoft,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            AppText.t(
-              'ربط بمادة المخزون (استهلاك تلقائي)',
-              'Link to stock item (auto consume)',
-            ),
-            style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
-          ),
-          const SizedBox(height: 6),
-          AppSelectField<int?>(
-            initialValue: selectedId,
-            isExpanded: true,
-            menuMaxHeight: 320,
-            decoration: InputDecoration(
-              labelText: AppText.t('المادة', 'Material'),
-            ),
-            items: [
-              DropdownMenuItem<int?>(
-                value: null,
-                child: Text(AppText.t('— بدون ربط —', '— no link —')),
-              ),
-              for (final inv in _inventory)
-                DropdownMenuItem<int?>(
-                  value: int.tryParse('${inv['id']}'),
-                  child: Text(
-                    '${inv['name']}',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-            ],
-            onChanged: (v) => setState(() {
-              if (v == null) {
-                _fieldLinks[index] = {'kind': 'link', 'unit': 'mL'};
-              } else {
-                final inv = _inventory.firstWhere((e) => '${e['id']}' == '$v');
-                _fieldLinks[index] = {
-                  'kind': 'link',
-                  'inventory_id': v,
-                  'inventory_name': '${inv['name']}',
-                  'unit': '${inv['unit'] ?? 'mL'}',
-                };
-              }
-            }),
-          ),
-          if (_kindOf(index) == 'link' &&
-              (int.tryParse('${_fieldLinks[index]['inventory_id'] ?? 0}') ??
-                      0) >
-                  0) ...[
-            const SizedBox(height: 6),
-            Builder(
-              builder: (context) {
-                final current = '${_fieldLinks[index]['unit'] ?? 'mL'}';
-                final linkInvId =
-                    int.tryParse(
-                      '${_fieldLinks[index]['inventory_id'] ?? 0}',
-                    ) ??
-                    0;
-                return AppSelectField<String>(
-                  initialValue: current.isEmpty ? null : current,
-                  isExpanded: true,
-                  menuMaxHeight: 320,
-                  decoration: InputDecoration(
-                    labelText: AppText.t('وحدة الاستهلاك', 'Consume unit'),
-                  ),
-                  items: [
-                    for (final u in _consumeOptions(current, linkInvId))
-                      DropdownMenuItem<String>(value: u, child: Text(u)),
-                  ],
-                  onChanged: (u) => setState(() {
-                    _fieldLinks[index] = {..._fieldLinks[index]}..['unit'] = u;
-                  }),
-                );
-              },
-            ),
-            if (unitDimOf('${_fieldLinks[index]['unit'] ?? 'mL'}') !=
-                unitDimOf(
-                  '${_inventory.firstWhere((e) => '${e['id']}' == '${_fieldLinks[index]['inventory_id']}')['unit'] ?? ''}',
-                )) ...[
-              const SizedBox(height: 4),
-              Text(
-                'تنبيه: وحدة الاستهلاك لا تطابق وحدة المادة، الكمية قد تُستهلك بقيمة رقمية مباشرة.',
-                style: TextStyle(color: AppColors.warning, fontSize: 11.spMax),
-              ),
-            ],
-          ],
-        ],
-      ),
-    );
-  }
-
-  TextEditingController _valueCtrl(int index) {
-    final cfg = _fieldLinks[index];
-    var c = cfg['valueCtrl'] as TextEditingController?;
-    if (c == null) {
-      final v = cfg['fixed_value'];
-      c = TextEditingController(text: v == null ? '' : '$v');
-      cfg['valueCtrl'] = c;
-    }
-    return c;
-  }
-
-  Widget _valuePanel(int index) {
-    return Container(
-      margin: const EdgeInsets.only(top: 4),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceSoft,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            AppText.t(
-              'قيمة ثابتة تستخدم في المعادلة',
-              'Fixed value used in the formula',
-            ),
-            style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
-          ),
-          const SizedBox(height: 6),
-          AppTextField(
-            controller: _valueCtrl(index),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            onChanged: (t) {
-              _fieldLinks[index]['fixed_value'] = safeFormulaFloat(t);
-            },
-            decoration: InputDecoration(
-              labelText: AppText.t('قيمة ثابتة', 'Fixed value'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  TextEditingController _listAddCtrl(int index) {
-    final cfg = _fieldLinks[index];
-    var c = cfg['listAddCtrl'] as TextEditingController?;
-    if (c == null) {
-      c = TextEditingController();
-      cfg['listAddCtrl'] = c;
-    }
-    return c;
-  }
-
-  void _addListValue(int index) {
-    final c = _listAddCtrl(index);
-    final v = c.text.trim();
-    if (v.isEmpty) return;
-    setState(() {
-      (_fieldLinks[index]['list_values'] as List<String>).add(v);
-      c.clear();
-    });
-  }
-
-  Widget _listPanel(int index) {
-    final values = (_fieldLinks[index]['list_values'] as List<String>?) ?? [];
-    return Container(
-      margin: const EdgeInsets.only(top: 4),
-      padding: const EdgeInsets.all(8),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceSoft,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            AppText.t(
-              'قيم متعددة — يختار المستخدم قيمة لكل اختبار',
-              'Multiple values — user picks one per test',
-            ),
-            style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
-          ),
-          if (values.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (var i = 0; i < values.length; i++)
-                  InputChip(
-                    visualDensity: VisualDensity.compact,
-                    avatar: Icon(Icons.tag, size: 14.r),
-                    label: Text(
-                      values[i],
-                      style: TextStyle(fontSize: 12.spMax),
-                    ),
-                    onDeleted: () => setState(() => values.removeAt(i)),
-                  ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                child: AppTextField(
-                  controller: _listAddCtrl(index),
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  onChanged: (_) => setState(() {}),
-                  decoration: InputDecoration(
-                    labelText: AppText.t('قيمة...', 'Value...'),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              AppButton(
-                small: true,
-                label: AppText.t('إضافة', 'Add'),
-                icon: Icon(Icons.add, size: 14.r),
-                onPressed: () => _addListValue(index),
-              ),
-            ],
-          ),
-        ],
-      ),
+      labelPadding: const EdgeInsets.symmetric(horizontal: 4),
+      selected: current == value,
+      onSelected: (_) => _configureField(index, value),
     );
   }
 
@@ -1025,8 +792,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
 
   Future<void> _pickInventoryItem() async {
     if (_inventory.isEmpty) return;
-    // Adaptive chrome: centred window on desktop, bottom sheet on phones.
-    final selected = await showAppOverlay<Map<String, dynamic>>(
+    final selected = await showAppContent<Map<String, dynamic>>(
       context,
       title: AppText.t('اختر مادة مستهلكة', 'Pick consumed chemical'),
       icon: Icons.science_outlined,
@@ -1194,8 +960,8 @@ class AnalysisEditorState extends State<AnalysisEditor> {
         const SizedBox(height: 4),
         Text(
           AppText.t(
-            'لكل حقل حدد كيف تُملأ قيمته: مرتبط بمادة من المخزون (تُستهلك تلقائياً)، أو قيمة ثابتة تدخل في المعادلة، أو قائمة قيم يختار منها المستخدم.',
-            'For each field choose how its value is filled: linked to a stock item (auto consumed), a fixed value in the formula, or a list the user picks from.',
+            'حدد مصدر قيمة الحقل. بدون تحديد، يُدخل المستخدم القيمة عند إجراء الفحص.',
+            'Choose the field value source. With no option selected, the value is entered during the test.',
           ),
           style: TextStyle(color: AppColors.textMuted, fontSize: 11.spMax),
         ),
@@ -1229,7 +995,6 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                       ),
                     ),
                     const SizedBox(width: 6),
-                    _fieldSummaryChip(i),
                     IconButton(
                       tooltip: AppText.t('حذف الحقل', 'Delete field'),
                       visualDensity: VisualDensity.compact,
@@ -1245,18 +1010,33 @@ class AnalysisEditorState extends State<AnalysisEditor> {
                   alignment: AlignmentDirectional.centerStart,
                   child: _kindChips(i),
                 ),
-                if (_kindOf(i) == 'link') ...[
-                  if (_linkPicker == i)
-                    _linkPanel(i)
-                  else
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: _linkSummary(i),
+                const SizedBox(height: AppSpacing.sm),
+                if (_kindOf(i) == 'none')
+                  Text(
+                    AppText.t(
+                      'إدخال يدوي أثناء الفحص',
+                      'Entered manually during the test',
                     ),
-                ] else if (_kindOf(i) == 'value')
-                  _valuePanel(i)
-                else if (_kindOf(i) == 'list')
-                  _listPanel(i),
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12.spMax,
+                    ),
+                  )
+                else
+                  Row(
+                    children: [
+                      Flexible(child: _fieldSummaryChip(i)),
+                      IconButton(
+                        tooltip: AppText.t(
+                          'إلغاء التخصيص وإدخال القيمة يدويًا',
+                          'Clear configuration and enter manually',
+                        ),
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () =>
+                            setState(() => _fieldLinks[i] = {'kind': 'none'}),
+                      ),
+                    ],
+                  ),
               ],
             ),
           ),

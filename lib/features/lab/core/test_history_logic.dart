@@ -4,6 +4,7 @@
 library;
 
 import '../../../core/constants/app_strings.dart';
+import 'lab_result_format.dart';
 
 const int thPageSize = 200;
 
@@ -30,6 +31,7 @@ String thNormalizeText(Object? value) {
 }
 
 String thRangeLabel(String state) {
+  if (state == 'failed') return labFailureLabel;
   if (state == 'out') return AppText.t('خارج النطاق', 'Out of range');
   if (state == 'in') return AppText.t('ضمن النطاق', 'Within range');
   return AppText.t('بدون نطاق', 'No range');

@@ -22,7 +22,14 @@ class AnalysesCubit extends AppCubit<AnalysesState> {
 
   Future<void> load() async {
     final token = ++_token;
-    safeEmit(state.copyWith(loading: true, error: null, errorMore: null));
+    safeEmit(
+      state.copyWith(
+        loading: true,
+        loadingMore: false,
+        clearError: true,
+        clearErrorMore: true,
+      ),
+    );
     try {
       final settled = await Future.wait([
         repo.listAnalysesPaged(query: state.query, limit: pageSize, offset: 0),
@@ -41,7 +48,7 @@ class AnalysesCubit extends AppCubit<AnalysesState> {
       );
     } on AppError catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       if (token != _token) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
@@ -50,13 +57,15 @@ class AnalysesCubit extends AppCubit<AnalysesState> {
 
   Future<void> loadMore() async {
     if (state.loading || state.loadingMore || !state.hasMore) return;
-    safeEmit(state.copyWith(loadingMore: true, errorMore: null));
+    final token = _token;
+    safeEmit(state.copyWith(loadingMore: true, clearErrorMore: true));
     try {
       final more = await repo.listAnalysesPaged(
         query: state.query,
         limit: pageSize,
         offset: state.rows.length,
       );
+      if (token != _token || isClosed) return;
       safeEmit(
         state.copyWith(
           loadingMore: false,
@@ -65,8 +74,12 @@ class AnalysesCubit extends AppCubit<AnalysesState> {
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loadingMore: false, errorMore: e.message));
+      if (token != _token || isClosed) return;
+      safeEmit(
+        state.copyWith(loadingMore: false, errorMore: AppError.friendly(e)),
+      );
     } catch (e) {
+      if (token != _token || isClosed) return;
       safeEmit(state.copyWith(loadingMore: false, errorMore: '$e'));
     }
   }

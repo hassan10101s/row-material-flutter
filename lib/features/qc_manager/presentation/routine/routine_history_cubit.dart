@@ -44,7 +44,9 @@ const Object _unset = Object();
 /// Filters + paged rows of the done log over [RoutineListsRepository].
 class RoutineHistoryCubit extends AppCubit<RoutineHistoryState> {
   RoutineHistoryCubit({required this.repo})
-    : super(const RoutineHistoryState());
+    : super(const RoutineHistoryState()) {
+    refreshOnSync(load);
+  }
 
   final RoutineListsRepository repo;
 
@@ -54,7 +56,7 @@ class RoutineHistoryCubit extends AppCubit<RoutineHistoryState> {
       final log = await repo.doneLog(state.filters);
       safeEmit(state.copyWith(loading: false, log: log));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }

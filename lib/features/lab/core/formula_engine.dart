@@ -321,10 +321,11 @@ double? _numericOf(Map<String, dynamic> desc) {
 
 double? safeFormulaFloat(Object? value) {
   if (value == null) return null;
-  if (value is num) return value.toDouble();
+  if (value is num) return value.isFinite ? value.toDouble() : null;
   final s = '$value'.replaceAll(',', '.').trim();
   if (s.isEmpty) return null;
-  return double.tryParse(s);
+  final number = double.tryParse(s);
+  return number != null && number.isFinite ? number : null;
 }
 
 /// Resolve a {symbol: value|desc} map into {symbol: double}, supporting
@@ -418,20 +419,25 @@ Map<String, dynamic> resolveConstants(
             AppErrors.formulaEvalError(symbol, exc.message),
           );
         }
-        value = convertDim(desc, _toNum(result));
+        value = _toNum(convertDim(desc, _toNum(result)));
       } else {
         final num = _numericOf(desc);
         if (num == null) {
           throw ValidationError(AppErrors.formulaMissingConstantValue(symbol));
         }
-        value = convertDim(desc, num);
+        value = _toNum(convertDim(desc, num));
       }
       final lo = desc['min_value'];
       final hi = desc['max_value'];
-      if (lo != null && value < safeFormulaFloat(lo)!) {
+      final minimum = lo == null ? null : safeFormulaFloat(lo);
+      final maximum = hi == null ? null : safeFormulaFloat(hi);
+      if ((lo != null && minimum == null) || (hi != null && maximum == null)) {
+        throw ValidationError(AppErrors.formulaInvalidNumber);
+      }
+      if (minimum != null && value < minimum) {
         throw ValidationError(AppErrors.formulaBelowMin(symbol, value, lo));
       }
-      if (hi != null && value > safeFormulaFloat(hi)!) {
+      if (maximum != null && value > maximum) {
         throw ValidationError(AppErrors.formulaAboveMax(symbol, value, hi));
       }
       final prec = desc['precision'];
@@ -474,7 +480,14 @@ double _toNum(Object? value) {
 
 double _roundTo(double value, int digits) {
   final f = math.pow(10, digits).toDouble();
-  return (value * f).roundToDouble() / f;
+  if (!f.isFinite || f == 0) {
+    throw ValidationError(AppErrors.formulaInvalidNumber);
+  }
+  final scaled = value * f;
+  // A finite number this large already has no representable fraction at
+  // the requested precision. Scaling it must not turn it into infinity.
+  if (!scaled.isFinite) return value;
+  return _toNum(scaled.roundToDouble() / f);
 }
 
 double evaluateFormula(
@@ -805,7 +818,9 @@ class FormulaParser {
     }
     final text = _src.substring(start, _pos);
     final value = double.tryParse(text);
-    if (value == null) throw ValidationError(AppErrors.formulaInvalidNumber);
+    if (value == null || !value.isFinite) {
+      throw ValidationError(AppErrors.formulaInvalidNumber);
+    }
     _ws();
     return value;
   }
@@ -906,7 +921,7 @@ class FormulaEvaluator {
   }) {
     switch (node) {
       case NumExpr n:
-        return n.value;
+        return _toNum(n.value);
       case NameExpr name:
         if (name.name == 'true') return 1.0;
         if (name.name == 'false') return 0.0;
@@ -917,7 +932,7 @@ class FormulaEvaluator {
           throw ValidationError(AppErrors.formulaMissingFieldValue(name.name));
         }
         if (constants != null && constants.containsKey(name.name)) {
-          return constants[name.name]!;
+          return _toNum(constants[name.name]);
         }
         throw ValidationError(AppErrors.formulaMissingFieldValue(name.name));
       case BinExpr b:
@@ -927,16 +942,16 @@ class FormulaEvaluator {
         final rd = _toNum(r);
         switch (b.op) {
           case '+':
-            return ld + rd;
+            return _toNum(ld + rd);
           case '-':
-            return ld - rd;
+            return _toNum(ld - rd);
           case '*':
-            return ld * rd;
+            return _toNum(ld * rd);
           case '/':
             if (rd == 0) throw ValidationError(AppErrors.formulaDivisionByZero);
-            return ld / rd;
+            return _toNum(ld / rd);
           case '%':
-            return ld % rd;
+            return _toNum(ld % rd);
           case '**':
             final result = math.pow(ld, rd);
             if (result.isInfinite || result.isNaN) {
@@ -1132,7 +1147,86 @@ Map<String, dynamic> normalizeFormulaValue(Object? formula) {
     });
   }
   if (cleaned.isNotEmpty) out['constants'] = cleaned;
+  if (formula is Map && formula['chemical_definitions'] is List) {
+    out['chemical_definitions'] = formula['chemical_definitions'];
+  }
+  if (formula is Map && formula.containsKey('field_configs')) {
+    final configs = formula['field_configs'];
+    if (configs is! List) {
+      throw const ValidationError('تنسيق إعدادات حقول التحليل غير صالح.');
+    }
+    final seen = <String>{};
+    out['field_configs'] = <Map<String, dynamic>>[
+      for (final raw in configs)
+        if (raw is Map) ..._normalizeFieldConfiguration(raw, seen),
+    ];
+  }
   return out;
+}
+
+List<Map<String, dynamic>> _normalizeFieldConfiguration(
+  Map raw,
+  Set<String> seen,
+) {
+  final field = '${raw['dynamic_field'] ?? ''}'.trim();
+  if (field.isEmpty || !seen.add(field)) return const [];
+  final kind = '${raw['kind'] ?? 'link'}';
+  final value = safeFormulaFloat(raw['fixed_value']);
+  if (kind == 'link') {
+    return [
+      {'dynamic_field': field, 'kind': 'link'},
+    ];
+  }
+  if (kind == 'value' && value != null) {
+    return [
+      {'dynamic_field': field, 'kind': 'value', 'fixed_value': value},
+    ];
+  }
+  if (kind == 'list') {
+    final values = [
+      for (final v in raw['list_values'] as List? ?? const [])
+        if (safeFormulaFloat(v) != null) safeFormulaFloat(v)!,
+    ];
+    if (values.isNotEmpty) {
+      return [
+        {'dynamic_field': field, 'kind': 'list', 'list_values': values},
+      ];
+    }
+  }
+  return const [];
+}
+
+/// Value/list settings belong to their analysis document, not separate shared
+/// identities. Chemical links retain real rows and server-validated parents.
+List<Map<String, dynamic>> mergeAnalysisFieldConfigurations(
+  Map<String, dynamic> analysis,
+  List<Map<String, dynamic>> legacy,
+) {
+  final formula = analysis['formula'];
+  if (formula is! Map || !formula.containsKey('field_configs')) return legacy;
+  final byField = {
+    for (final row in legacy)
+      if (row['deleted_at'] == null) '${row['dynamic_field']}': row,
+  };
+  final result = <Map<String, dynamic>>[];
+  for (final raw in formula['field_configs'] as List) {
+    final config = Map<String, dynamic>.from(raw as Map);
+    if (config['kind'] == 'link') {
+      final row = byField[config['dynamic_field']];
+      if (row != null && (row['kind'] ?? 'link') == 'link') result.add(row);
+    } else {
+      result.add({
+        'analysis_id': analysis['id'],
+        'inventory_id': null,
+        'unit': 'mL',
+        ...config,
+      });
+    }
+  }
+  result.sort(
+    (a, b) => '${a['dynamic_field']}'.compareTo('${b['dynamic_field']}'),
+  );
+  return result;
 }
 
 /// is_out_of_range port from core/utils.py.

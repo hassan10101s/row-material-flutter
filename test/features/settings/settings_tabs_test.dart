@@ -18,10 +18,14 @@ void main() {
       }
     });
 
-    test('Sync and Members are settings sections, not their own route', () {
+    test('account and sync are separate from administrative settings', () {
       // `/settings?tab=sync` is what the top-bar sync badge deep-links to, and
       // `/settings?tab=members` is where the roster moved.
-      expect(SettingsTab.fromKey('sync'), SettingsTab.sync);
+      expect(SettingsTab.values.map((tab) => tab.key), isNot(contains('sync')));
+      expect(
+        SettingsTab.values.map((tab) => tab.key),
+        isNot(contains('account')),
+      );
       expect(SettingsTab.fromKey('members'), SettingsTab.members);
     });
 

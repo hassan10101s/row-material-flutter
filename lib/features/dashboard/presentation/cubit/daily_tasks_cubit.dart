@@ -29,7 +29,9 @@ class DailyTasksState extends Equatable {
 /// Loads the daily-tasks counts once per mount; presentation no longer
 /// reaches into repositories from a widget's initState (Phase 0 cleanup).
 class DailyTasksCubit extends AppCubit<DailyTasksState> {
-  DailyTasksCubit() : super(const DailyTasksState(loading: true));
+  DailyTasksCubit() : super(const DailyTasksState(loading: true)) {
+    refreshOnSync(load);
+  }
 
   Future<void> load() async {
     safeEmit(state.copyWith(loading: true));

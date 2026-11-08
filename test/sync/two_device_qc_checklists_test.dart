@@ -4,14 +4,14 @@ import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
-import 'package:material_lab/features/qc_manager/data/offline_first_qc_repository.dart';
+import 'package:material_lab/features/qc_manager/data/server_confirmed_qc_repository.dart';
 import 'package:material_lab/features/qc_manager/data/qc_audit_repo.dart';
 import 'package:material_lab/features/qc_manager/data/qc_repo.dart';
 import 'package:material_lab/features/qc_manager/data/qc_sync_writer.dart';
@@ -63,7 +63,7 @@ class _Device {
     syncAudit: audit,
   );
 
-  OfflineFirstQcNcCapaRepository nc() => OfflineFirstQcNcCapaRepository(
+  ServerConfirmedQcNcCapaRepository nc() => ServerConfirmedQcNcCapaRepository(
     local: QcNcCapaRepo(fixture.helper),
     guard: _SyncGuard(this),
     audit: QcAuditRepo(

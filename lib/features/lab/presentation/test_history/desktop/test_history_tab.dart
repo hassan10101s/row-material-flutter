@@ -32,14 +32,14 @@ class DesktopTestHistoryTab extends StatelessWidget {
   final int refreshTick;
 
   Future<void> _openNewTest(BuildContext context) async {
-    await showAppWindow<void>(
+    await showAppContent<void>(
       context,
       title: AppText.t('اختبار جديد', 'New Test'),
       icon: Icons.science_outlined,
       maxWidth: 1040,
       height: 780,
       scrollBody: false,
-      child: BlocProvider(
+      builder: (_, _) => BlocProvider(
         create: (_) => RunTestCubit(
           config: getIt<LabConfigurationRepository>(),
           results: getIt<LabResultRepository>(),

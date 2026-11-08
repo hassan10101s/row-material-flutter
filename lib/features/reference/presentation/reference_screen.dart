@@ -3,6 +3,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
+import '../../../core/commands/pending_entity_actions.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_adaptive.dart';
 import '../../../di/service_locator.dart';
@@ -72,9 +73,7 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
     final velocity = details.primaryVelocity ?? 0;
     if (velocity.abs() < 350) return;
     setState(
-      () => _tab = (_tab + (velocity < 0 ? 1 : -1))
-          .clamp(0, count - 1)
-          .toInt(),
+      () => _tab = (_tab + (velocity < 0 ? 1 : -1)).clamp(0, count - 1).toInt(),
     );
   }
 
@@ -87,7 +86,14 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
         AppText.t('خامات مرجعية', 'Materials'),
         Icons.science_outlined,
         (context) => BlocProvider(
-          create: (_) => ReferenceCubit(repo: refRepo)..load(),
+          create: (_) => ReferenceCubit(
+            repo: refRepo,
+            pendingRecords: getIt.isRegistered<PendingEntityActions>()
+                ? () => getIt<PendingEntityActions>().localReferences(
+                    'referenceMaterial',
+                  )
+                : null,
+          )..load(),
           child: MaterialsTab(refRepo: refRepo, labConfig: labConfig),
         ),
       ),
@@ -150,7 +156,9 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
                           ? MaterialTapTargetSize.shrinkWrap
                           : MaterialTapTargetSize.padded,
                       labelStyle: TextStyle(
-                        fontWeight: _tab == i ? FontWeight.w700 : FontWeight.w500,
+                        fontWeight: _tab == i
+                            ? FontWeight.w700
+                            : FontWeight.w500,
                       ),
                       onSelected: (_) => setState(() => _tab = i),
                     ),
@@ -166,14 +174,14 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
                 ? null
                 : (details) => _swipeTab(details, tabs.length),
             child: Padding(
-            padding: const EdgeInsets.all(AppSpacing.page),
-            child: IndexedStack(
-              index: _tab,
-              children: [
-                for (var i = 0; i < tabs.length; i++)
-                  _LazyTab(active: _tab == i, builder: tabs[i].builder),
-              ],
-            ),
+              padding: const EdgeInsets.all(AppSpacing.page),
+              child: IndexedStack(
+                index: _tab,
+                children: [
+                  for (var i = 0; i < tabs.length; i++)
+                    _LazyTab(active: _tab == i, builder: tabs[i].builder),
+                ],
+              ),
             ),
           ),
         ),

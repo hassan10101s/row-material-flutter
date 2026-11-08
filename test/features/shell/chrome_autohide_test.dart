@@ -15,7 +15,7 @@ import 'package:material_lab/features/settings/data/settings_repo.dart';
 import 'package:material_lab/features/shell/presentation/mobile/app_shell.dart';
 import 'package:material_lab/features/shell/presentation/chrome_reveal.dart';
 import 'package:material_lab/features/shell/presentation/shell_nav.dart';
-import 'package:material_lab/features/sync/presentation/sync_status_controller.dart';
+import 'package:material_lab/features/connection/presentation/connection_status_controller.dart';
 
 class _QueueMock extends Mock implements SyncQueue {}
 
@@ -47,16 +47,12 @@ void main() {
     theme = ThemeService(settings: settings);
   });
 
-  SyncStatusController badge() {
+  ConnectionStatusController badge() {
     when(queue.countPending).thenAnswer((_) async => 0);
     when(queue.countBlocked).thenAnswer((_) async => 0);
     when(metadata.lastPushAt).thenAnswer((_) async => null);
     when(metadata.lastPullAt).thenAnswer((_) async => null);
-    return SyncStatusController(
-      queue: queue,
-      metadata: metadata,
-      isOnline: () => true,
-    );
+    return ConnectionStatusController(metadata: metadata, isOnline: () => true);
   }
 
   Iterable<ChromeReveal> reveals(WidgetTester tester, ChromeRevealEdge edge) =>

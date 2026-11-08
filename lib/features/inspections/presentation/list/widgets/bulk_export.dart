@@ -66,7 +66,7 @@ Future<void> exportSelectedReports(BuildContext context) async {
     }
     cubit.clearSelection();
   } on AppError catch (e) {
-    if (context.mounted) AppFeedback.error(context, e.message);
+    if (context.mounted) AppFeedback.errorFrom(context, e);
   } catch (e) {
     if (context.mounted) AppFeedback.errorFrom(context, e);
   }
@@ -145,7 +145,7 @@ Future<void> exportSelectedLabels(BuildContext context) async {
     );
     cubit.clearSelection();
   } on AppError catch (e) {
-    if (context.mounted) AppFeedback.error(context, e.message);
+    if (context.mounted) AppFeedback.errorFrom(context, e);
   } catch (e) {
     if (context.mounted) AppFeedback.errorFrom(context, e);
   }

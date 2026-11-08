@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 /// In-app page route with a subtle fade + slide transition.
@@ -29,16 +31,10 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
          },
          transitionsBuilder: (context, animation, secondaryAnimation, child) {
            final slide = SlideTransition(
-             position:
-                 Tween<Offset>(
-                   begin: const Offset(0, 0.018),
-                   end: Offset.zero,
-                 ).animate(
-                   CurvedAnimation(
-                     parent: animation,
-                     curve: Curves.easeOutCubic,
-                   ),
-                 ),
+             position: Tween<Offset>(
+               begin: const Offset(0, 0.018),
+               end: Offset.zero,
+             ).chain(CurveTween(curve: Curves.easeOutCubic)).animate(animation),
              child: child,
            );
            return FadeTransition(opacity: animation, child: slide);
@@ -110,6 +106,7 @@ class AppEntrance extends StatefulWidget {
 class _AppEntranceState extends State<AppEntrance>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
+  Timer? _entranceDelay;
 
   @override
   void initState() {
@@ -120,8 +117,9 @@ class _AppEntranceState extends State<AppEntrance>
       value: 0,
     );
     if (widget.delay > Duration.zero) {
-      Future<void>.delayed(widget.delay, () {
-        if (mounted) _controller.forward();
+      _entranceDelay = Timer(widget.delay, () {
+        _entranceDelay = null;
+        _controller.forward();
       });
     } else {
       _controller.forward();
@@ -130,13 +128,14 @@ class _AppEntranceState extends State<AppEntrance>
 
   @override
   void dispose() {
+    _entranceDelay?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final animation = CurvedAnimation(parent: _controller, curve: widget.curve);
+    final animation = CurveTween(curve: widget.curve).animate(_controller);
     final slide = SlideTransition(
       position: Tween<Offset>(
         begin: widget.offset,
@@ -199,14 +198,13 @@ class _AppStaggerState extends State<AppStagger>
     final children = <Widget>[];
     for (var i = 0; i < count; i++) {
       final start = intervalShare * i;
-      final animation = CurvedAnimation(
-        parent: _controller,
+      final animation = CurveTween(
         curve: Interval(
           start,
           (start + itemShare).clamp(0.0, 1.0),
           curve: Curves.easeOutCubic,
         ),
-      );
+      ).animate(_controller);
       children.add(
         SlideTransition(
           position: Tween<Offset>(

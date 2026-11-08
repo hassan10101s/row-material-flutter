@@ -1,3 +1,7 @@
+import '../../../../core/security/secure_field_policy.dart';
+import '../../../../core/auth/session_source.dart';
+import '../../../../di/service_locator.dart';
+import '../../../../design_system/widgets/app_secure_toggle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -13,7 +17,6 @@ import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_required_toggle.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../di/service_locator.dart';
 import '../../domain/parameter_type.dart';
 import '../../domain/reference_repository.dart';
 import '../cubit/products_cubit.dart';
@@ -33,12 +36,14 @@ enum ProductEditorLayout {
 class _PhysicalParamRow {
   int? parameterId;
   bool required;
+  bool secure;
   final TextEditingController nameCtrl;
   final TextEditingController reqCtrl;
   _PhysicalParamRow({
     String name = '',
     String requirement = '',
     this.required = false,
+    this.secure = false,
   }) : nameCtrl = TextEditingController(text: name),
        reqCtrl = TextEditingController(text: requirement);
   void dispose() {
@@ -50,6 +55,7 @@ class _PhysicalParamRow {
 class _ChemicalParamRow {
   int? parameterId;
   bool required;
+  bool secure;
   final TextEditingController nameCtrl;
   final TextEditingController minCtrl;
   final TextEditingController maxCtrl;
@@ -60,6 +66,7 @@ class _ChemicalParamRow {
     String max = '',
     String unit = '%',
     this.required = false,
+    this.secure = false,
   }) : nameCtrl = TextEditingController(text: name),
        minCtrl = TextEditingController(text: min),
        maxCtrl = TextEditingController(text: max),
@@ -181,6 +188,7 @@ class ProductEditorState extends State<ProductEditor> {
           name: e.key,
           requirement: referenceValueText(e.value),
           required: isReferenceRequired(e.value),
+          secure: isReferenceSecure(e.value),
         ),
       );
     }
@@ -211,6 +219,7 @@ class ProductEditorState extends State<ProductEditor> {
           max: parsed.max,
           unit: unit.isNotEmpty ? unit : '%',
           required: isReferenceRequired(e.value),
+          secure: isReferenceSecure(e.value),
         ),
       );
     }
@@ -464,10 +473,13 @@ class ProductEditorState extends State<ProductEditor> {
             ),
           );
         }
-        physicalReference[paramName] = withReferenceRequired(
-          p.reqCtrl.text.trim(),
-          p.required,
-          '${parameter['unit'] ?? ''}',
+        physicalReference[paramName] = withReferenceSecure(
+          withReferenceRequired(
+            p.reqCtrl.text.trim(),
+            p.required,
+            '${parameter['unit'] ?? ''}',
+          ),
+          p.secure,
         );
       }
       for (final c in _chemical) {
@@ -497,10 +509,13 @@ class ProductEditorState extends State<ProductEditor> {
         } else if (max.isNotEmpty) {
           range = 'max $max';
         }
-        chemicalReference[paramName] = withReferenceRequired(
-          range,
-          c.required,
-          '${parameter['unit'] ?? ''}',
+        chemicalReference[paramName] = withReferenceSecure(
+          withReferenceRequired(
+            range,
+            c.required,
+            '${parameter['unit'] ?? ''}',
+          ),
+          c.secure,
         );
       }
       final cubit = widget.productsCubit;
@@ -523,9 +538,11 @@ class ProductEditorState extends State<ProductEditor> {
       }
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -657,11 +674,29 @@ class ProductEditorState extends State<ProductEditor> {
     ],
   );
 
-  Widget _requiredToggle(bool value, ValueChanged<bool> onChanged) {
-    return AppRequiredToggle(
-      value: value,
-      enabled: !_saving,
-      onChanged: onChanged,
+  Widget _requiredToggle(
+    bool value,
+    ValueChanged<bool?> onChanged,
+    bool secure,
+    ValueChanged<bool> onSecureChanged,
+  ) {
+    final mayManage =
+        getIt.isRegistered<SessionSource>() &&
+        SecureFieldPolicy(session: getIt<SessionSource>().session).mayManage;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AppRequiredToggle(
+          value: value,
+          enabled: !_saving,
+          onChanged: (v) => onChanged(v),
+        ),
+        AppSecureToggle(
+          value: secure,
+          enabled: !_saving && mayManage,
+          onChanged: onSecureChanged,
+        ),
+      ],
     );
   }
 
@@ -737,7 +772,9 @@ class ProductEditorState extends State<ProductEditor> {
                 requirement,
                 _requiredToggle(
                   row.required,
-                  (v) => setState(() => row.required = v),
+                  (v) => setState(() => row.required = v ?? false),
+                  row.secure,
+                  (v) => setState(() => row.secure = v),
                 ),
               ],
             )
@@ -749,7 +786,9 @@ class ProductEditorState extends State<ProductEditor> {
                 Expanded(flex: 3, child: requirement),
                 _requiredToggle(
                   row.required,
-                  (v) => setState(() => row.required = v),
+                  (v) => setState(() => row.required = v ?? false),
+                  row.secure,
+                  (v) => setState(() => row.secure = v),
                 ),
                 remove,
               ],
@@ -816,7 +855,7 @@ class ProductEditorState extends State<ProductEditor> {
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
     );
     final unit = AppField(
-      label: AppText.t('الوحدة الموروثة', 'Inherited unit'),
+      label: AppText.t('الوحدة', 'Unit'),
       controller: row.unitCtrl,
       enabled: false,
     );
@@ -857,12 +896,18 @@ class ProductEditorState extends State<ProductEditor> {
                 ),
                 _requiredToggle(
                   row.required,
-                  (v) => setState(() => row.required = v),
+                  (v) => setState(() => row.required = v ?? false),
+                  row.secure,
+                  (v) => setState(() => row.secure = v),
                 ),
               ],
             )
           : Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              // The parameter selector has no label above it, so top-aligned
+              // labeled Min/Max/Unit fields sit visibly lower. Bottom
+              // alignment puts all field boxes on one baseline; the
+              // toggle/remove controls ride on the same bottom edge.
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(flex: 3, child: dropdown),
                 const SizedBox(width: AppSpacing.sm),
@@ -873,7 +918,9 @@ class ProductEditorState extends State<ProductEditor> {
                 SizedBox(width: 110.w, child: unit),
                 _requiredToggle(
                   row.required,
-                  (v) => setState(() => row.required = v),
+                  (v) => setState(() => row.required = v ?? false),
+                  row.secure,
+                  (v) => setState(() => row.secure = v),
                 ),
                 remove,
               ],

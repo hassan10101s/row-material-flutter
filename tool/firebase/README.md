@@ -1,8 +1,7 @@
 # Firebase build & deploy (P12)
 
 How to build Material Lab against a real Firebase project, and how to publish the
-Firestore rules and indexes. Everything here is derived from
-`PLAN_V2_ORG_FIREBASE_OFFLINE_FIRST.md` §14-P12.
+Firestore rules and indexes. The current synchronization policy is [SYNC_CURRENT_CONTRACT.md](../../SYNC_CURRENT_CONTRACT.md).
 
 ---
 
@@ -86,6 +85,27 @@ secret, but do not reuse a key across projects you do not control.
 
 ---
 
+### Android production signing on this machine
+
+Run `powershell -NoProfile -File tool/firebase/create_android_signing.ps1` in an
+interactive terminal. Enter the certificate identity, password, and an external
+backup folder locally. The script never overwrites an existing `android/key.properties`,
+creates an access-restricted PKCS12/RSA-3072 key with a 10,000-day certificate,
+verifies a separate keystore backup, and writes SHA-1/SHA-256 to
+`output/android-production-signing.json`. Keep the password in your password manager.
+
+Gradle reads ignored `android/key.properties` first, with the former
+`F:/material lab/key.properties` location retained as a fallback. Release tasks
+fail when signing credentials are missing; they never silently use a debug key.
+Keys and credentials must stay out of Git. Do not paste passwords into chat or logs.
+
+Add both certificate fingerprints to the existing Firebase Android app for
+`com.materiallab`; retain existing fingerprints for existing installations.
+A different signing identity cannot normally update the installed APK in place.
+Never uninstall or clear app storage as a workaround: that can destroy local
+drafts and unresolved operation evidence. For Play distribution, also register
+the Play app-signing certificate, which may differ from the upload certificate.
+
 ## 4) Deploying the rules and indexes
 
 **Always deploy to staging first, run the emulator suite against a real project
@@ -113,9 +133,11 @@ immediately, including already-installed desktop apps. So:
 
 To roll back, redeploy the previous `firestore.rules`.
 
-Enable budget alerts (plan D8) before inviting real users: the app is written to
-avoid filter queries, uses batches of ≤400 and a 1500-document ceiling per pull,
-but the alert is the backstop.
+Keep this project on Spark without linking a billing account or deploying
+Functions. A billing budget is an alert, not a spending cap; it is not a reason
+to activate billing for this application. The current direct reader checks the
+server head every 30 seconds in the foreground, reads changed records in pages,
+and stops after quota exhaustion until an explicit manual request.
 
 ---
 
@@ -169,32 +191,60 @@ the error rather than looping. Credential changes take a few minutes to propagat
 
 ---
 
-## 6) Release 1 policy (deliberate, not a temporary hack)
+## 6) Current release policy
 
-**Release 1 = exactly one writing device + any number of read-only viewers.**
+Firebase Auth and direct Firestore transactions are the runtime path. Protocol
+3 permits multiple registered authorized writers and read-only viewers. Auth,
+membership, role, device state, expected versions and atomic receipts remain
+independently enforced by Firestore rules. Device IDs do not replace Auth.
 
-Second and further writing devices are enabled in a later release, and only
-after the two-writer conflict path has been exercised on staging. The optimistic
-`version` field, the Rules' `request.resource.data.version == resource.data.version + 1`
-check and the `sync_conflicts` table are what make concurrent writers safe, and
-that path is exactly what release 1 deliberately does not put into production.
+Offline work remains an unsent draft until explicitly submitted. A submitted
+request recovers its original operation ID after a lost reply. No legacy queue
+or seed data is uploaded on session startup.
 
-A viewer device is one whose Firestore user document has
-`readOnlyDevice: true`. It is enforced in three independent layers, and it is
-worth knowing which is which:
+Unclassified and mixed operations permit **4 business effects**. Proven scoped
+families have separate limits: custom-table definitions **10 effects / 9
+columns**, analysis definitions up to **6 effects**, laboratory results with
+stock consumption up to **10 effects**, and one existing product with its
+existing reference updates up to **7 effects**. Simple configuration/record
+families use a calculated bound up to **12 effects**. Eleven/twelve-effect
+operations include one immutable proof so that the change event and proof each
+stay within the per-write read limit. Twelve images + seven shared lookups +
+one proof use the whole twenty-call atomic budget. Uniqueness reservations and
+external parents lower that bound (for example, six new unique parameters).
+An analysis can pack up to **36 chemical definitions** across nine four-entry
+proof blocks when the distinct inventory references fit the same budget;
+36 arbitrary different inventory parents cannot fit. Distinct parents, lots and
+chemical proofs can lower these limits. The Dart admission calculation and
+Firestore Rules both enforce the applicable family. Larger operations stay
+unsent drafts with submission disabled; they are never split or partly saved.
+Every supported operation still needs its own rule and acceptance evidence.
 
-- `AppSession.canDo(...)` returns `false` for every permission, so no repository
-  write can start.
-- `AppSession.canWrite` is `false`, so the route guard refuses `/inspection-new`
-  and the write forms never open.
-- The Firestore Rules are the real boundary: even a modified client gets nothing
-  it is not entitled to.
+These are atomic-operation limits, separate from the Standard database's Spark
+quota: **50,000 reads, 20,000 writes and 20,000 deletes per day**, **1 GiB stored**
+and **10 GiB outbound per month**, shared across all applications/devices in the
+project. Receipts, events, counters, audit records, reservations and security-rule
+document reads also consume quota; a business save is not one billed write.
+Daily quota resets around midnight Pacific time. Emulator usage counters are
+diagnostic estimates and exclude billed internal rule/index reads; they do not
+prove that an arbitrary production workload fits the daily quota. See the
+[official limits](https://firebase.google.com/docs/firestore/quotas) and
+[billing calculation](https://firebase.google.com/docs/firestore/pricing).
 
-Note what a read-only device is *not*: `session.permissions` is still derived
-from the role, so an `admin` on a read-only device keeps `usersRead` and can
-still open `/members` to look. It cannot change anything there. If you want
-read-only devices to lose the members screen entirely, strip the role rather
-than only setting `readOnlyDevice`.
+Deleting a local organization cache triggers a permission-scoped archive
+download. Pages use one Firestore read time, and cache plus cursor install
+atomically. A missing server sequence/protocol or malformed record blocks
+readiness explicitly; never repair this by opening rules or uploading local data.
+Foreground refresh runs every 30 seconds and on reconnect/resume. Background
+business polling and remote push delivery are not required or enabled.
+
+Trials and suspension are enforced by Firestore rules using server time, with
+the client gate providing UI feedback. There is no scheduled expiry function.
+Administrative activation and data migrations require their own reviewed path.
+
+Production acceptance, migration and rollback requirements are in the
+[current contract](../../SYNC_CURRENT_CONTRACT.md). Do not infer a live
+deployment or a successful release build from these instructions.
 
 ---
 

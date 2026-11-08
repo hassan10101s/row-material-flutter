@@ -28,17 +28,26 @@ android {
         isCoreLibraryDesugaringEnabled = true
     }
 
-    // Release signing lives OUTSIDE the repo: F:/material lab/key.properties
-    // (upload keystore + passwords). If the file is absent (another machine),
-    // release falls back to debug keys so `flutter run --release` still works.
-    val keystorePropsFile = file("F:/material lab/key.properties")
+    // Machine-local signing credentials are ignored by Git. Retain the old
+    // external path for installations that already use it.
+    val localKeystorePropsFile = rootProject.file("key.properties")
+    val keystorePropsFile = if (localKeystorePropsFile.exists())
+        localKeystorePropsFile else file("F:/material lab/key.properties")
     val keystoreProps = Properties()
     if (keystorePropsFile.exists()) {
         FileInputStream(keystorePropsFile).use { keystoreProps.load(it) }
     }
+    val signingReady = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+        .all { !keystoreProps.getProperty(it).isNullOrEmpty() }
+    val releaseRequested = gradle.startParameter.taskNames.any {
+        it.contains("release", ignoreCase = true)
+    }
+    if (releaseRequested && !signingReady) {
+        throw GradleException("Release signing is not configured. Create android/key.properties; debug signing is never used for release.")
+    }
 
     signingConfigs {
-        if (keystoreProps.containsKey("storeFile")) {
+        if (signingReady) {
             create("upload") {
                 storeFile = file(keystoreProps.getProperty("storeFile"))
                 storePassword = keystoreProps.getProperty("storePassword")
@@ -59,10 +68,8 @@ android {
 
     buildTypes {
         release {
-            // Uses the "upload" signing config when F:/material lab/key.properties
-            // exists, otherwise debug keys (see above).
+            // A release must use the configured production identity.
             signingConfig = signingConfigs.findByName("upload")
-                ?: signingConfigs.getByName("debug")
         }
     }
 }

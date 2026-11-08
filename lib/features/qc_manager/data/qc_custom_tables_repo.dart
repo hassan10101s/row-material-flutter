@@ -7,7 +7,7 @@ import 'qc_repo.dart';
 /// The local SQL layer for user-authored tables (QC settings feature).
 ///
 /// Thin by house rule: SQL only — no session, no permission check, no queue,
-/// no audit. Those live in `offline_first_qc_custom_tables.dart`, which threads
+/// no audit. Those live in `server_confirmed_qc_custom_tables.dart`, which threads
 /// its transaction into every method here through [exec]. Reconciliation
 /// (which fields a save updates / tombstones) is written down in one place,
 /// the facade, because it is a policy, not a query.

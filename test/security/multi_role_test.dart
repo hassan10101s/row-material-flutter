@@ -5,6 +5,29 @@ import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/features/auth/domain/user.dart';
 
 void main() {
+  test(
+    'quality specialists manage inspections laboratory and QC without member administration',
+    () {
+      final grants = rolePermissions(AppRoles.lab);
+      expect(
+        grants,
+        containsAll([
+          Permission.samplesCreate,
+          Permission.labResultsCreate,
+          Permission.qcApprove,
+          Permission.qcReject,
+          Permission.qcRead,
+          Permission.qcWrite,
+          Permission.reportsRead,
+          Permission.reportsCreate,
+          Permission.reportsExport,
+        ]),
+      );
+      expect(grants, isNot(contains(Permission.orgUpdate)));
+      expect(grants, isNot(contains(Permission.usersCreate)));
+      expect(grants, isNot(contains(Permission.usersUpdate)));
+    },
+  );
   const employee = AppSession(
     uid: 'employee',
     organizationId: 'org',

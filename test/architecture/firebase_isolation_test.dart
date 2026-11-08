@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// the CI runners.
 const String sep = r'\';
 
-/// Enforces the boundaries of the offline-first architecture (plan §6.3/§9.2):
+/// Enforces the boundaries of the server-confirmed architecture (plan §6.3/§9.2):
 ///
 ///  1. no feature module imports the Firebase/Google SDKs - only `lib/core/**`
 ///     and `lib/core/sync/remote/**` may;

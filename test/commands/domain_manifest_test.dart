@@ -14,7 +14,7 @@ void main() {
       try {
         final actual = await buildDomainManifest(fixture.db);
         final published = jsonDecode(
-          await File('functions/domain_manifest.json').readAsString(),
+          await File('tool/central_migration/domain_manifest.json').readAsString(),
         );
         expect(
           actual,

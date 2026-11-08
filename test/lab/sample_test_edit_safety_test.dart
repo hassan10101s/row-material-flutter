@@ -21,16 +21,32 @@ class _FakeAppPaths extends AppPaths {
   Future<Directory> appSupportRoot() async => Directory('$base/MaterialLab');
 }
 
+/// Refuse a connection-level inventory read immediately rather than letting a
+/// regression deadlock the transaction (and its test cleanup).
+class _TransactionInventoryRepo extends LabRepo {
+  _TransactionInventoryRepo({required super.dbHelper});
+
+  @override
+  Future<Map<int, Map<String, dynamic>>> loadInventoryMap(
+    DatabaseExecutor? txn,
+    Set<int> inventoryIds,
+  ) {
+    expect(
+      txn,
+      isA<Transaction>(),
+      reason: 'Consumption planning must use the active edit transaction',
+    );
+    return super.loadInventoryMap(txn, inventoryIds);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   DatabaseHelper.ensureDesktopFactory();
 
   group('thRowKey — stable selection identity', () {
     test('prefers the database id', () {
-      expect(
-        thRowKey({'id': 5, 'entry_code': 'EC-1'}),
-        'id:5',
-      );
+      expect(thRowKey({'id': 5, 'entry_code': 'EC-1'}), 'id:5');
     });
 
     test('falls back to entry-code/time/analysis without an id', () {
@@ -134,8 +150,13 @@ void main() {
       repo = LabRepo(dbHelper: dbHelper);
       final ts = nowIso();
       titerId = await db.insert('lab_inventory', {
-        'name': 'NaOH 0.1M', 'category': 'liquid', 'unit': 'mL',
-        'current_qty': 40, 'min_qty': 0, 'created_at': ts, 'updated_at': ts,
+        'name': 'NaOH 0.1M',
+        'category': 'liquid',
+        'unit': 'mL',
+        'current_qty': 40,
+        'min_qty': 0,
+        'created_at': ts,
+        'updated_at': ts,
       });
       final created = await repo.createAnalysis(
         name: 'Protein',
@@ -160,8 +181,7 @@ void main() {
       } catch (_) {}
     });
 
-    test('rewriting a set entry code is refused and changes nothing',
-        () async {
+    test('rewriting a set entry code is refused and changes nothing', () async {
       final result = await repo.runSampleTest(
         analysisId: analysisId,
         sourceType: 'raw_material',
@@ -181,11 +201,13 @@ void main() {
 
       await expectLater(
         repo.updateSampleTest(testId, entryCode: 'EC-2'),
-        throwsA(isA<ValidationError>().having(
-          (e) => e.message,
-          'message',
-          contains(AppErrors.entryCodeImmutable),
-        )),
+        throwsA(
+          isA<ValidationError>().having(
+            (e) => e.message,
+            'message',
+            contains(AppErrors.entryCodeImmutable),
+          ),
+        ),
       );
       expect((await testRow(testId))['entry_code'], 'EC-1');
     });
@@ -215,8 +237,7 @@ void main() {
       expect(updated['sample_name'], 'S2b');
     });
 
-    test('linking an empty code to a missing inspection is refused',
-        () async {
+    test('linking an empty code to a missing inspection is refused', () async {
       final result = await repo.runSampleTest(
         analysisId: analysisId,
         sourceType: 'raw_material',
@@ -231,6 +252,62 @@ void main() {
       );
       expect('${(await testRow(testId))['entry_code'] ?? ''}', isEmpty);
     });
+
+    test(
+      'transactional edits release the connection and keep consumption atomic',
+      () async {
+        await db.delete(
+          'inventory_lots',
+          where: 'inventory_id = ?',
+          whereArgs: [titerId],
+        );
+        await repo.receiveLot(
+          inventoryId: titerId,
+          qty: 40,
+          expiryDate: '2027-01-01',
+          executor: db,
+        );
+        final created = await repo.runSampleTest(
+          analysisId: analysisId,
+          sourceType: 'raw_material',
+          sourceName: 'Wheat',
+          sampleName: 'Transactional edit',
+          dynamicValues: {'Titer': '3'},
+        );
+        final testId = (created['test'] as Map)['id'] as int;
+        final transactionalRepo = _TransactionInventoryRepo(dbHelper: dbHelper);
+
+        Future<Map<String, dynamic>> edit(String amount, String result) => db
+            .transaction(
+              (txn) => transactionalRepo.updateSampleTest(
+                testId,
+                dynamicValues: {'Titer': amount},
+                resultText: result,
+                executor: txn,
+              ),
+            )
+            .timeout(const Duration(seconds: 5));
+
+        final updated = await edit('5', '12');
+        expect(updated['result_text'], '12');
+        expect(await titerQty(), 35);
+        expect((await logs(testId)).last['event_type'], 'CONSUMPTION');
+        await edit('4', '13');
+        expect(await titerQty(), 36);
+        expect((await logs(testId)).last['event_type'], 'REVERSAL');
+
+        final before = await testRow(testId);
+        final beforeLogs = await logs(testId);
+        await expectLater(edit('100', '99'), throwsA(isA<ValidationError>()));
+        expect(await testRow(testId), before);
+        expect(await logs(testId), beforeLogs);
+        expect(await titerQty(), 36);
+        // Reads used by sync/status can acquire the connection after the edit.
+        expect(await db.rawQuery('SELECT 1 AS ready'), [
+          {'ready': 1},
+        ]);
+      },
+    );
 
     test('correcting dynamic values posts a consumption delta', () async {
       // Reset through lots (the pool is SUM(lots): writing it directly
@@ -260,10 +337,7 @@ void main() {
       await repo.updateSampleTest(testId, dynamicValues: {'Titer': '5'});
       expect(await titerQty(), 35.0, reason: '+2 consumed by the correction');
       final afterUp = await logs(testId);
-      expect(
-        afterUp.last,
-        containsPair('event_type', 'CONSUMPTION'),
-      );
+      expect(afterUp.last, containsPair('event_type', 'CONSUMPTION'));
 
       await repo.updateSampleTest(testId, dynamicValues: {'Titer': '4'});
       expect(await titerQty(), 36.0, reason: '-1 reversed by the correction');
@@ -294,11 +368,13 @@ void main() {
           resultText: '99.9',
           dynamicValues: {'Titer': '50'},
         ),
-        throwsA(isA<ValidationError>().having(
-          (e) => e.message,
-          'message',
-          contains(AppErrors.insufficientStock),
-        )),
+        throwsA(
+          isA<ValidationError>().having(
+            (e) => e.message,
+            'message',
+            contains(AppErrors.insufficientStock),
+          ),
+        ),
       );
       // Plan-before-patch: the text correction saved nothing either.
       expect('${(await testRow(testId))['result_text'] ?? ''}', isNot('99.9'));

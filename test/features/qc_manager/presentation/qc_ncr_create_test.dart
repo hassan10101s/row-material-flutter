@@ -1,4 +1,4 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -68,13 +68,23 @@ Future<void> _fill(WidgetTester tester, String label, String text) async {
 Widget _hostWithTrigger(
   QcNcrCubit cubit, {
   List<({String id, String name})> assignees = const [],
+  int? productSampleId,
+  bool activateProductDecision = false,
+  String? initialDescription,
 }) => _host(
   Builder(
     builder: (context) => Scaffold(
       body: Center(
         child: TextButton(
-          onPressed: () =>
-              QcNcrCreateScreen.open(context, cubit, assignees: assignees),
+          onPressed: () => QcNcrCreateScreen.open(
+            context,
+            cubit,
+            assignees: assignees,
+            productSampleId: productSampleId,
+            productContext: productSampleId == null ? '' : 'P-10 / Sample 3',
+            activateProductDecision: activateProductDecision,
+            initialDescription: initialDescription,
+          ),
           child: const Text('open create'),
         ),
       ),
@@ -152,6 +162,75 @@ void main() {
       FormFactor.debugSet(AppFormFactor.desktop);
       addTearDown(() => FormFactor.debugSet(AppFormFactor.desktop));
     });
+
+    for (final save in [false, true]) {
+      testWidgets(
+        'linked product form: ${save ? 'save atomically' : 'cancel without changing decision'}',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = const Size(1280, 900);
+          addTearDown(tester.view.reset);
+          final report = _ReportMock();
+          final cubit = cubitWithReport(report);
+          addTearDown(cubit.close);
+          final capa = getIt<QcNcCapaRepository>() as _CapaMock;
+          when(
+            () => capa.saveProductSampleFinding(any()),
+          ).thenAnswer((_) async => 402);
+          final gate = _GateMock();
+          when(() => gate.canWrite(any())).thenReturn(true);
+          when(() => gate.session).thenReturn(
+            const AppSession(
+              uid: 'u1',
+              organizationId: 'org-1',
+              status: MemberStatus.active,
+            ),
+          );
+          getIt.registerSingleton<AuthGate>(gate);
+          await tester.pumpWidget(
+            _hostWithTrigger(
+              cubit,
+              productSampleId: 33,
+              activateProductDecision: true,
+              initialDescription: 'Protein outside limits',
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('open create'));
+          await tester.pumpAndSettle();
+          expect(find.text('P-10 / Sample 3'), findsOneWidget);
+          if (save) {
+            expect(
+              _fieldOf(tester, 'Description').controller?.text,
+              'Protein outside limits',
+            );
+            await _fill(tester, 'Affected qty (optional)', '٢٫٥');
+            await _fill(tester, 'Unit (optional)', 'new-kg');
+          }
+          final action = find.text(save ? 'Create' : 'Cancel');
+          await tester.ensureVisible(action);
+          await tester.tap(action);
+          await tester.pumpAndSettle();
+          expect(find.byType(AppWindow), findsNothing);
+          verifyNever(() => capa.createFinding(any()));
+          verifyNever(() => capa.saveFinding(any()));
+          if (save) {
+            final finding =
+                verify(
+                      () => capa.saveProductSampleFinding(captureAny()),
+                    ).captured.single
+                    as QcFindingNc;
+            expect(finding.productSampleId, 33);
+            expect(finding.inspectionId, 0);
+            expect(finding.description, 'Protein outside limits');
+            expect(finding.qtyAffected, 2.5);
+            expect(finding.qtyUnit, 'new-kg');
+          } else {
+            verifyNever(() => capa.saveProductSampleFinding(any()));
+          }
+        },
+      );
+    }
 
     testWidgets('open() shows the form in a window, not a route', (
       tester,
@@ -345,8 +424,11 @@ void main() {
       await tester.tap(find.text('open create'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Cancel'));
+      final cancel = find.text('Cancel');
+      await tester.ensureVisible(cancel);
+      await tester.tap(cancel);
       await tester.pumpAndSettle();
+      expect(find.text('New non-conformance'), findsNothing);
       expect(find.byType(Scaffold), findsOneWidget);
       final capa = getIt<QcNcCapaRepository>() as _CapaMock;
       verifyNever(() => capa.createFinding(any()));
@@ -499,7 +581,10 @@ void main() {
       expect(find.text('Edit non-conformance'), findsOneWidget);
       final description = _fieldOf(tester, 'Description');
       expect(description.controller?.text, 'seal broken');
-      expect(_fieldOf(tester, 'Category (optional)').controller?.text, 'Packaging');
+      expect(
+        _fieldOf(tester, 'Category (optional)').controller?.text,
+        'Packaging',
+      );
       expect(find.text('2026-02-01'), findsOneWidget);
 
       await _fill(tester, 'Description', 'seal crushed');
@@ -614,4 +699,3 @@ void main() {
     });
   });
 }
-

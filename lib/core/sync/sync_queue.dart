@@ -143,11 +143,9 @@ class SyncQueue {
 
   /// Fired at the end of every [enqueue] (inside the business transaction).
   ///
-  /// The service locator points this at `SyncEngine.scheduleSync`, which turns
-  /// every local mutation into a debounced push within seconds — no waiting
-  /// for the 60 s timer and no manual "sync now" tap. Fires pre-commit, so a
-  /// rolled-back transaction causes at most one empty sync cycle. Null in
-  /// tests and in any context without an engine.
+  /// Production leaves this callback unbound. Captured changes are submitted
+  /// only through the explicit server-confirmed write gateway; this hook must
+  /// never trigger an automatic send. Retained for isolated queue observers.
   void Function()? onEnqueued;
 
   void _notifyEnqueued() {
@@ -170,13 +168,9 @@ class SyncQueue {
   /// Memoizing the handle has an unavoidable window: `await _db` yields, the
   /// helper closes the database underneath us (an organization switch or a
   /// restore), and the caller's query then lands on a closed handle and throws
-  /// `DatabaseException(error database_closed)`. The sync engine reads the
-  /// counters below from an unawaited timer, so that escaped as an unhandled
-  /// exception and killed the app during startup:
-  ///
-  ///     Unhandled Exception: DatabaseException(error database_closed)
-  ///     #3 SyncQueue._count (package:material_lab/core/sync/sync_queue.dart)
-  ///     #4 SyncEngine._current (package:material_lab/core/sync/sync_engine.dart)
+  /// `DatabaseException(error database_closed)`. A concurrent status read must
+  /// recover from this closed handle without turning it into an unhandled
+  /// exception during startup.
   ///
   /// Dropping the memo and retrying once on a *fresh* connection turns that
   /// race into a slightly later, correct read. Any other error propagates

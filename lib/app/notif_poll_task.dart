@@ -1,15 +1,13 @@
 import 'dart:io';
 
-import 'package:flutter/widgets.dart' show debugPrint;
 import 'package:workmanager/workmanager.dart';
 
-import 'background_tasks.dart'
-    show backgroundTaskDispatcher, ensureBackgroundInitialized;
+import 'background_tasks.dart' show backgroundTaskDispatcher;
 
 /// Android periodic new-item poll (mobile-only) — the OFFLINE fallback.
 ///
-/// Primary killed-app path is FCM push (see `fcm_push_service.dart` + Cloud
-/// Function `functions/index.js`): Play services can wake the background
+/// Primary killed-app path is FCM push (see `fcm_push_service.dart`): Play
+/// services can wake the background
 /// handler after ordinary process termination. Android Settings force-stop
 /// requires reopening the app. This poll covers the offline /
 /// FCM-less gap: every 15 min (Android clamp) it pulls remote rows, then shows
@@ -33,23 +31,7 @@ class AndroidNotifPollScheduler {
   bool get isScheduled => Platform.isAndroid;
 
   Future<void> schedule() async {
-    if (!isScheduled) return;
-    try {
-      // Shared dispatcher (see background_tasks.dart): workmanager allows
-      // only one per process, shared with the auto-backup task.
-      await ensureBackgroundInitialized();
-      await Workmanager().registerPeriodicTask(
-        taskName,
-        taskName,
-        frequency: frequency,
-        constraints: Constraints(networkType: NetworkType.connected),
-        existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
-        backoffPolicy: BackoffPolicy.exponential,
-        backoffPolicyDelay: const Duration(minutes: 5),
-      );
-    } on Object catch (e) {
-      debugPrint('[notif] could not schedule poll task: $e');
-    }
+    await cancel();
   }
 
   Future<void> cancel() async {

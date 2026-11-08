@@ -47,6 +47,12 @@ Widget appAdaptiveVariant(
 bool appUsesDesktopChrome(BuildContext context) =>
     ResponsiveScope.maybeOf(context)?.isDesktop ?? FormFactor.current.isDesktop;
 
+/// Scaffold reads PreferredSizeWidget.preferredSize without a BuildContext.
+/// Keep navigation geometry tied to the same process platform as designSize,
+/// so rotating a phone or resizing Windows never selects different chrome.
+double get appNavigationToolbarHeight =>
+    FormFactor.current.isDesktop ? 56 : AppControlSizes.touch;
+
 /// One density policy for shared controls; window width never shrinks targets.
 double appControlHeight(BuildContext context, {bool compact = false}) =>
     appUsesDesktopChrome(context)

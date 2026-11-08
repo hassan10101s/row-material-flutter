@@ -19,7 +19,299 @@ import 'package:uuid/uuid.dart';
 
 /// Bump when the wire contract changes; the server refuses anything else
 /// (`SCHEMA_VERSION_MISMATCH`).
-const int commandSchemaVersion = 2;
+const int commandSchemaVersion = 3;
+const int maxBusinessEffects = 10;
+const int maxStandardBusinessEffects = 4;
+const int maxLabDefinitionEffects = 6;
+const int maxLabConsumptionEffects = 10;
+const int maxProductReferenceEffects = 7;
+const int maxSimpleBusinessEffects = 12;
+const int maxChemicalDefinitions = 36;
+const int chemicalDefinitionBlockSize = 4;
+const int maxChemicalDefinitionProofBlocks = 9;
+const simpleEntityTypes = {
+  'parameter',
+  'materialBound',
+  'organizationSetting',
+  'labConstant',
+  'labUnit',
+  'equipment',
+  'equipmentEvent',
+  'worksheet',
+  'referenceMaterial',
+  'labMaterialAnalysis',
+  'nutritionFormulation',
+  'qcCustomTableRow',
+};
+const int firestoreAtomicRuleAccessLimit = 20;
+
+bool isSimpleBusinessOperation(Iterable<dynamic> writes) =>
+    writes.isNotEmpty &&
+    writes.every(
+      (w) => w is Map && simpleEntityTypes.contains(w['entityType']),
+    );
+
+int simpleBusinessEffectLimit(Iterable<dynamic> writes) {
+  final rows = writes.cast<Map>().toList();
+  final written = {for (final w in rows) '${w['entityType']}/${w['entityId']}'};
+  final parents = <String>{};
+  var reservations = 0;
+  for (final row in rows) {
+    reservations += switch (row['entityType']) {
+      'equipment' => 2,
+      'equipmentEvent' ||
+      'worksheet' ||
+      'nutritionFormulation' ||
+      'qcCustomTableRow' => 0,
+      _ => 1,
+    };
+    for (final ref in (row['relations'] as Map? ?? {}).values) {
+      if (ref is Map) {
+        final key = '${ref['entityType']}/${ref['entityId']}';
+        if (!written.contains(key)) parents.add(key);
+      }
+    }
+  }
+  // Above ten images, one atomic proof validates the remaining ten images.
+  // Twelve images + seven shared lookups + one proof exhaust all twenty calls.
+  final proofs = rows.length > maxBusinessEffects ? 1 : 0;
+  return (firestoreAtomicRuleAccessLimit -
+          7 -
+          reservations -
+          parents.length -
+          proofs)
+      .clamp(0, maxSimpleBusinessEffects)
+      .toInt();
+}
+
+/// Consumption is already an immutable stock movement. New result commands
+/// use it as their ledger, instead of writing a second identical movement.
+bool isConsumptionLedgerOperation(Iterable<dynamic> writes) {
+  final rows = writes.toList();
+  return rows.isNotEmpty &&
+      rows.first is Map &&
+      rows.first['entityType'] == 'labResult' &&
+      rows.where((w) => w is Map && w['entityType'] == 'labResult').length ==
+          1 &&
+      rows.any((w) => w is Map && w['entityType'] == 'consumption') &&
+      rows.every(
+        (w) =>
+            w is Map &&
+            const {
+              'labResult',
+              'consumption',
+              'inventoryItem',
+              'inventoryLot',
+              'secureFieldSubmission',
+            }.contains(w['entityType']) &&
+            (w['entityType'] != 'consumption' ||
+                (w['operation'] == 'create' &&
+                    ((w['relations'] as Map?)?['sampleTestId']
+                            as Map?)?['entityId'] ==
+                        rows.first['entityId'])),
+      );
+}
+
+bool isProductReferenceOperation(Iterable<dynamic> writes) {
+  final rows = writes.toList();
+  return rows.isNotEmpty &&
+      rows.first is Map &&
+      rows.first['entityType'] == 'labProduct' &&
+      rows.first['operation'] == 'update' &&
+      rows
+          .skip(1)
+          .every(
+            (w) =>
+                w is Map &&
+                w['entityType'] == 'labProductAnalysis' &&
+                w['operation'] == 'update' &&
+                ((w['relations'] as Map?)?['productId'] as Map?)?['entityId'] ==
+                    rows.first['entityId'],
+          );
+}
+
+int productReferenceEffectLimit(Iterable<dynamic> writes) {
+  final rows = writes.cast<Map>().toList();
+  final written = {for (final w in rows) '${w['entityType']}/${w['entityId']}'};
+  final parents = <String>{};
+  for (final w in rows) {
+    for (final ref in (w['relations'] as Map? ?? {}).values) {
+      if (ref is Map) {
+        final key = '${ref['entityType']}/${ref['entityId']}';
+        if (!written.contains(key)) parents.add(key);
+      }
+    }
+  }
+  // Admitted, unchanged unique keys do not need a reservation lookup.
+  return (firestoreAtomicRuleAccessLimit - 7 - parents.length)
+      .clamp(0, maxProductReferenceEffects)
+      .toInt();
+}
+
+bool isLabConsumptionOperation(Iterable<dynamic> writes) {
+  final rows = writes.toList();
+  return rows.isNotEmpty &&
+      rows.first is Map &&
+      rows.first['entityType'] == 'labResult' &&
+      rows.where((w) => w is Map && w['entityType'] == 'labResult').length ==
+          1 &&
+      rows.every(
+        (w) =>
+            w is Map &&
+            const {
+              'labResult',
+              'consumption',
+              'inventoryTransaction',
+              'inventoryLot',
+              'inventoryItem',
+              'secureFieldSubmission',
+            }.contains(w['entityType']),
+      ) &&
+      rows.where((w) => w['entityType'] == 'secureFieldSubmission').length <=
+          1 &&
+      rows
+          .where((w) => w['entityType'] == 'secureFieldSubmission')
+          .every(
+            (w) =>
+                w['operation'] == 'create' &&
+                (w['payload'] as Map?)?['sourceKind'] == 'labResult' &&
+                ((w['relations'] as Map?)?['sampleTestId']
+                        as Map?)?['entityId'] ==
+                    rows.first['entityId'] &&
+                (rows.first['payload'] as Map?)?['secureEntryId'] ==
+                    w['entityId'],
+          ) &&
+      rows.any((w) => w['entityType'] == 'consumption') &&
+      (rows.any((w) => w['entityType'] == 'inventoryTransaction') ||
+          isConsumptionLedgerOperation(rows)) &&
+      rows
+          .where(
+            (w) => const {
+              'inventoryItem',
+              'inventoryLot',
+            }.contains(w['entityType']),
+          )
+          .every((w) => w['operation'] == 'update');
+}
+
+int labConsumptionEffectLimit(Iterable<dynamic> writes) {
+  final rows = writes.cast<Map>().toList();
+  final written = {for (final w in rows) '${w['entityType']}/${w['entityId']}'};
+  final parents = <String>{};
+  for (final w in rows) {
+    // A tombstone keeps its approved analysis relationship unchanged; the
+    // rules validate it against resource directly, without fetching its parent.
+    if (w['entityType'] == 'labResult' && w['operation'] == 'tombstone') {
+      continue;
+    }
+    for (final ref in (w['relations'] as Map? ?? {}).values) {
+      if (ref is Map) {
+        final key = '${ref['entityType']}/${ref['entityId']}';
+        if (!written.contains(key)) parents.add(key);
+      }
+    }
+  }
+  final beforeLots = isConsumptionLedgerOperation(rows)
+      ? 0
+      : rows.where((w) => w['entityType'] == 'inventoryLot').length;
+  return (firestoreAtomicRuleAccessLimit - 7 - parents.length - beforeLots)
+      .clamp(0, maxLabConsumptionEffects)
+      .toInt();
+}
+
+bool isLabDefinitionOperation(Iterable<dynamic> writes) {
+  final rows = writes.toList();
+  return rows.isNotEmpty &&
+      rows.every(
+        (write) =>
+            write is Map &&
+            const {
+              'labAnalysis',
+              'labAnalysisItem',
+              'labFieldLink',
+              'labUnit',
+            }.contains(write['entityType']),
+      ) &&
+      rows
+              .where((write) => (write as Map)['entityType'] == 'labAnalysis')
+              .length ==
+          1;
+}
+
+/// Inline choices/fixed values share their analysis document. Chemical links
+/// retain parent and uniqueness checks. Reserve seven shared rule lookups,
+/// two per config record (image + unique reservation), and external parents.
+int labDefinitionEffectLimit(Iterable<dynamic> writes) {
+  final rows = writes.cast<Map>().toList();
+  final written = {
+    for (final row in rows) '${row['entityType']}/${row['entityId']}',
+  };
+  final parents = <String>{};
+  var chemicalProofs = 0;
+  for (final row in rows) {
+    final chemicals = (row['payload'] as Map?)?['chemicalDefinitions'];
+    if (chemicals is List &&
+        chemicals.isNotEmpty &&
+        row['operation'] != 'tombstone') {
+      chemicalProofs +=
+          1 +
+          (chemicals.length + chemicalDefinitionBlockSize - 1) ~/
+              chemicalDefinitionBlockSize;
+      for (final d in chemicals) {
+        parents.add('inventoryItem/${(d as Map)['inventoryId']}');
+      }
+    }
+    final refs = row['relations'];
+    if (refs is! Map) continue;
+    for (final ref in refs.values) {
+      if (ref is Map) {
+        final key = '${ref['entityType']}/${ref['entityId']}';
+        if (!written.contains(key)) parents.add(key);
+      }
+    }
+  }
+  final budget =
+      (firestoreAtomicRuleAccessLimit - 7 - parents.length - chemicalProofs) ~/
+      2;
+  return budget.clamp(0, maxLabDefinitionEffects).toInt();
+}
+
+/// Limits describe the verified direct rules budget, not the Spark daily quota.
+int businessEffectLimit(Iterable<dynamic> writes) =>
+    isProductReferenceOperation(writes)
+    ? productReferenceEffectLimit(writes)
+    : isLabConsumptionOperation(writes)
+    ? labConsumptionEffectLimit(writes)
+    : isLabDefinitionOperation(writes)
+    ? labDefinitionEffectLimit(writes)
+    : writes.every(
+        (write) =>
+            write is Map &&
+            const {
+              'qcCustomTable',
+              'qcCustomTableField',
+            }.contains(write['entityType']),
+      )
+    ? maxBusinessEffects
+    : isSimpleBusinessOperation(writes)
+    ? simpleBusinessEffectLimit(writes)
+    : maxStandardBusinessEffects;
+
+/// Only for an empty organization created together with its zero counter.
+/// Existing organizations must use the reviewed migration, never this helper.
+Map<String, Object> freshOrganizationProtocol(String organizationId) => {
+  'enabled': true,
+  'schemaVersion': commandSchemaVersion,
+  'domainManifestVersion': 1,
+  'migrationId': 'fresh_$organizationId',
+  'mode': 'firestore_direct_v2',
+  'writePolicy': 'multi_authorized',
+  'maintenance': false,
+  'globalReferencesReady': true,
+  'uniqueAdmissionComplete': true,
+};
+const String largeOperationMessage =
+    'تجاوزت العملية حد السجلات المسموح لهذا النوع. حُفظت مسودة كاملة دون تغيير السيرفر؛ راجع تفاصيل العملية قبل الإرسال.';
 
 /// Command types shipped with [commandSchemaVersion]. The registry is the
 /// server-side allow-list AND the client-side builder map — both must agree
@@ -80,6 +372,7 @@ class CommandErrorCodes {
   static const String invalidField = 'INVALID_FIELD';
   static const String internal = 'INTERNAL';
   static const String protocolNotReady = 'PROTOCOL_NOT_READY';
+  static const String quotaExceeded = 'QUOTA_EXCEEDED';
 
   // Transient — worker retries with backoff.
   static const String unavailable = 'UNAVAILABLE';
@@ -111,6 +404,7 @@ const Set<String> commandPermanentErrors = {
   CommandErrorCodes.valueOutOfRange,
   CommandErrorCodes.invalidField,
   CommandErrorCodes.protocolNotReady,
+  CommandErrorCodes.quotaExceeded,
 };
 
 /// `true` for codes where retrying exactly the same request (same

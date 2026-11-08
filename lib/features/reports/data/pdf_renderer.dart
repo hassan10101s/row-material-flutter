@@ -273,6 +273,25 @@ class PdfRenderer {
     return doc.save();
   }
 
+  static pw.Widget _organizationBrand(
+    Map<String, dynamic> ctx,
+    pw.MemoryImage? logo, {
+    required double width,
+    required double height,
+  }) {
+    final name = '${ctx['organization_name'] ?? ''}'.trim();
+    if (logo == null && name.isEmpty) return pw.SizedBox();
+    return pw.SizedBox(
+      width: width,
+      child: pw.Column(
+        children: [
+          if (logo != null) pw.SizedBox(height: height, child: pw.Image(logo)),
+          if (name.isNotEmpty) ...[_spacer(4), _txt(name, size: 9, bold: true)],
+        ],
+      ),
+    );
+  }
+
   static pw.Widget _inspectionHeader(Map<String, dynamic> ctx) {
     final logo = _logo(ctx);
     final dept = ctx['department_label'] ?? 'Quality Assurance Department';
@@ -300,8 +319,7 @@ class PdfRenderer {
             ],
           ),
         ),
-        if (logo != null)
-          pw.SizedBox(width: 64, height: 48, child: pw.Image(logo)),
+        _organizationBrand(ctx, logo, width: 100, height: 48),
       ],
     );
   }
@@ -929,23 +947,8 @@ class PdfRenderer {
                           ),
                           size: 7,
                         ),
-                        if ('${insp['inspection_kind'] ?? 'raw'}' ==
+                        if ('${insp['inspection_kind'] ?? 'raw'}' !=
                             'product') ...[
-                          _txt(
-                            _t(
-                              'فورمولا: ${insp['formula_number'] ?? ''}',
-                              'Formula: ${insp['formula_number'] ?? ''}',
-                            ),
-                            size: 7,
-                          ),
-                          _txt(
-                            _t(
-                              'تشغيلة: ${insp['batch_number'] ?? ''}',
-                              'Batch: ${insp['batch_number'] ?? ''}',
-                            ),
-                            size: 7,
-                          ),
-                        ] else ...[
                           _txt(
                             _t(
                               'مورد: ${insp['supplier'] ?? ''}',
@@ -1309,8 +1312,8 @@ class PdfRenderer {
               _txt(
                 label['is_product'] == true
                     ? _t(
-                        'فورمولا: ${label['formula_number'] ?? ''} | تشغيلة: ${label['batch_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}',
-                        'Formula: ${label['formula_number'] ?? ''} | Batch: ${label['batch_number'] ?? ''} | Qty: ${label['quantity_display'] ?? ''}',
+                        'كمية: ${label['quantity_display'] ?? ''}',
+                        'Qty: ${label['quantity_display'] ?? ''}',
                       )
                     : _t(
                         'مورد: ${label['supplier'] ?? ''} | شاحنة: ${label['truck_number'] ?? ''} | كمية: ${label['quantity_display'] ?? ''}',
@@ -1397,8 +1400,7 @@ class PdfRenderer {
             ],
           ),
         ),
-        if (logo != null)
-          pw.SizedBox(height: 42, width: 56, child: pw.Image(logo)),
+        _organizationBrand(ctx, logo, width: 100, height: 42),
       ],
     );
   }
@@ -1518,7 +1520,7 @@ class PdfRenderer {
     return _renderPeriod(
       _Kind.daily,
       ctx,
-      _t('التقرير اليومي / Daily Report', 'Daily Report'),
+      _t('تقرير الخامات اليومي', 'Daily raw material report'),
       _dailySubtitle(ctx),
     );
   }
@@ -1540,7 +1542,7 @@ class PdfRenderer {
     return _renderPeriod(
       _Kind.monthly,
       ctx,
-      _t('التقرير الشهري / Monthly Report', 'Monthly Report'),
+      _t('تقرير الخامات الشهري', 'Monthly raw material report'),
       _periodSubtitle(ctx),
     );
   }
@@ -1561,7 +1563,7 @@ class PdfRenderer {
     return _renderPeriod(
       _Kind.yearly,
       ctx,
-      _t('التقرير السنوي / Yearly Report', 'Yearly Report'),
+      _t('تقرير الخامات السنوي', 'Yearly raw material report'),
       '${ctx['year']}   (${_t('انشئ', 'Generated')} ${ctx['now']})',
     );
   }

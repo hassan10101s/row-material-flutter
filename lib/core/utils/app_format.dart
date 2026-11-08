@@ -168,10 +168,12 @@ Object? withReferenceUnit(Object? value, String unit) {
       ? unit.trim()
       : referenceUnitText(value);
   final wasRequired = isReferenceRequired(value);
-  if (normalizedUnit.isNotEmpty || wasRequired) {
+  final wasSecure = isReferenceSecure(value);
+  if (normalizedUnit.isNotEmpty || wasRequired || wasSecure) {
     final out = <String, dynamic>{'value': baseValue};
     if (normalizedUnit.isNotEmpty) out['unit'] = normalizedUnit;
     if (wasRequired) out['required'] = true;
+    if (wasSecure) out['secure'] = true;
     // Plain value with no unit and no flag stays unwrapped for legacy rows.
     if (out.length == 1) return baseValue;
     return out;
@@ -213,9 +215,50 @@ Object? withReferenceRequired(Object? value, bool required, [String? unit]) {
   final baseValue = unwrapReferenceValue(value);
   final display = baseValue is Map ? referenceValueText(baseValue) : baseValue;
   final normalizedUnit = (unit ?? referenceUnitText(value)).trim();
-  if (!required && normalizedUnit.isEmpty) return display;
+  final secure = isReferenceSecure(value);
+  if (!required && normalizedUnit.isEmpty && !secure) return display;
   final out = <String, dynamic>{'value': display};
   if (normalizedUnit.isNotEmpty) out['unit'] = normalizedUnit;
   if (required) out['required'] = true;
+  if (secure) out['secure'] = true;
   return out;
+}
+
+bool isReferenceSecure(Object? value) {
+  var current = value;
+  for (var i = 0; i < 8 && current is Map; i++) {
+    final secure = current['secure'];
+    if (secure == true || secure == 1 || secure == 'true' || secure == '1') {
+      return true;
+    }
+    current = current['value'];
+  }
+  return false;
+}
+
+Object? withReferenceSecure(Object? value, bool secure) {
+  if (!secure && !isReferenceSecure(value)) return value;
+  final unwrapped = unwrapReferenceValue(value);
+  final raw = unwrapped is Map
+      ? (Map<String, dynamic>.from(unwrapped)..remove('secure'))
+      : unwrapped;
+  final base = <String, dynamic>{'value': raw};
+  final unit = referenceUnitText(value);
+  if (unit.isNotEmpty) base['unit'] = unit;
+  if (isReferenceRequired(value)) base['required'] = true;
+  if (secure) base['secure'] = true;
+  return base.length == 1 ? raw : base;
+}
+
+Map<String, dynamic> effectiveSecureDefinition(Map<String, dynamic> row) {
+  if (!row.containsKey('secure_configured') || row['secure_configured'] == 1) {
+    return row;
+  }
+  for (final field in ['physical_reference_json', 'chemical_reference_json']) {
+    final refs = jsonLoads('${row[field] ?? ''}');
+    row[field] = jsonDumps({
+      for (final e in refs.entries) e.key: withReferenceSecure(e.value, false),
+    });
+  }
+  return row;
 }

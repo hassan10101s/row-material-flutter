@@ -3,15 +3,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:material_lab/core/commands/command_contract.dart';
 import 'package:material_lab/core/commands/command_outbox.dart';
-import 'package:material_lab/core/commands/command_service.dart';
+import '../support/retired/core/commands/command_service.dart';
 import 'package:material_lab/core/commands/command_transport.dart';
-import 'package:material_lab/core/commands/command_worker.dart';
+import '../support/retired/core/commands/command_worker.dart';
 import 'package:material_lab/core/commands/drafts_store.dart';
-import 'package:material_lab/core/commands/sync_checkpoint.dart';
+import '../support/retired/core/commands/sync_checkpoint.dart';
 
 import '../sync/sync_test_fixture.dart';
 
@@ -69,7 +67,7 @@ void main() {
       final vectors =
           jsonDecode(
                 File(
-                  'functions/test/fixtures/command_hash_vectors.json',
+                  'test/fixtures/command_hash_vectors.json',
                 ).readAsStringSync(),
               )
               as List;
@@ -225,58 +223,6 @@ void main() {
     },
   );
 
-  test(
-    'Windows REST sends callable envelope and parses an authoritative receipt',
-    () async {
-      final entry = await stage('draft');
-      final request = entry.envelope();
-      final transport = CloudFunctionsCommandTransport(
-        useRest: true,
-        projectId: 'demo-materiallab',
-        tokenProvider: () async => 'test-token',
-        client: MockClient((wire) async {
-          expect(wire.url.scheme, 'https');
-          expect(wire.headers['Authorization'], 'Bearer test-token');
-          expect(jsonDecode(wire.body), {'data': request.toWire()});
-          return http.Response(
-            jsonEncode({'result': approved(request).toJson()}),
-            200,
-            headers: const {'content-type': 'application/json; charset=utf-8'},
-          );
-        }),
-      );
-      expect((await transport.submit(request)).isApproved, isTrue);
-    },
-  );
-
-  test('Windows REST preserves stable business failure codes', () async {
-    final entry = await stage('draft');
-    final transport = CloudFunctionsCommandTransport(
-      useRest: true,
-      projectId: 'demo-materiallab',
-      tokenProvider: () async => 'test-token',
-      client: MockClient(
-        (_) async => http.Response(
-          jsonEncode({
-            'error': {
-              'status': 'FAILED_PRECONDITION',
-              'message': 'review',
-              'details': {
-                'code': 'VERSION_CONFLICT',
-                'messageAr': 'راجع التعديل',
-              },
-            },
-          }),
-          400,
-          headers: const {'content-type': 'application/json; charset=utf-8'},
-        ),
-      ),
-    );
-    expect(
-      (await transport.submit(entry.envelope())).failure!.code,
-      CommandErrorCodes.versionConflict,
-    );
-  });
   test(
     'an unrelated approved receipt never approves the queued operation',
     () async {

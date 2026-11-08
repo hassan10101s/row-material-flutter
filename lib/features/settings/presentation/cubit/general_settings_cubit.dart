@@ -19,12 +19,14 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
     safeEmit(state.copyWith(loading: true));
     try {
       final label = await repo.getSettingValue('department_label');
+      final reportLanguage = await repo.getSettingValue('report_language');
       final logoPath = await repo.getReportLogoPath();
       final logoDataUri = await repo.getReportLogoDataUri();
       final exportRootPath = await repo.getSettingValue('export_root_path');
       safeEmit(
         state.copyWith(
           loading: false,
+          reportLanguage: reportLanguage == 'en' ? 'en' : 'ar',
           departmentLabel: label?.trim().isNotEmpty == true
               ? label!
               : _defaultDepartmentLabel,
@@ -51,6 +53,18 @@ class GeneralSettingsCubit extends AppCubit<GeneralSettingsState> {
     } on AppError {
       safeEmit(state.copyWith(saving: false));
       rethrow;
+    } catch (_) {
+      safeEmit(state.copyWith(saving: false));
+      rethrow;
+    }
+  }
+
+  Future<void> saveReportLanguage(bool english) async {
+    safeEmit(state.copyWith(saving: true));
+    try {
+      final language = english ? 'en' : 'ar';
+      await repo.updateSettings({'report_language': language});
+      safeEmit(state.copyWith(saving: false, reportLanguage: language));
     } catch (_) {
       safeEmit(state.copyWith(saving: false));
       rethrow;

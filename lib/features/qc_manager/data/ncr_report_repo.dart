@@ -57,8 +57,17 @@ class QcNcReportRepo implements QcNcReportRepository {
   static const String _from = '''
 FROM qc_findings_nc fn
 LEFT JOIN qc_inspections i ON i.inspection_id = fn.inspection_id
+LEFT JOIN product_batch_samples ps ON ps.id = fn.product_sample_id
+LEFT JOIN inspections pi ON pi.id = ps.batch_id
 LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
 ''';
+  static const _refType =
+      "CASE WHEN fn.product_sample_id IS NOT NULL THEN 'product' ELSE COALESCE(i.ref_type, '') END";
+  static const _refId =
+      "COALESCE(pi.entry_code || ' / ' || ps.sample_name, i.ref_id, '')";
+  static const _batchNo = "COALESCE(pi.batch_number, i.batch_no, '')";
+  static const _inspectionDate =
+      "COALESCE(pi.inspection_date, i.inspection_date, '')";
 
   /// The dated measures the filters and KPIs are computed from.
   ///
@@ -176,7 +185,7 @@ LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
       args['lot'] = '%${f.lotNo}%';
     }
     if (f.batchNo.isNotEmpty) {
-      clauses.add("COALESCE(i.batch_no, '') LIKE :batch");
+      clauses.add('$_batchNo LIKE :batch');
       args['batch'] = '%${f.batchNo}%';
     }
     if (f.poNo.isNotEmpty) {
@@ -184,11 +193,11 @@ LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
       args['po'] = '%${f.poNo}%';
     }
     if (f.refType.isNotEmpty) {
-      clauses.add("COALESCE(i.ref_type, '') = :reftype");
+      clauses.add('($_refType) = :reftype');
       args['reftype'] = f.refType;
     }
     if (f.refId.isNotEmpty) {
-      clauses.add("COALESCE(i.ref_id, '') LIKE :refid");
+      clauses.add('$_refId LIKE :refid');
       args['refid'] = '%${f.refId}%';
     }
 
@@ -202,7 +211,7 @@ LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
         " OR COALESCE(fn.category, '') LIKE :q"
         " OR COALESCE(fn.assigned_to_name, '') LIKE :q"
         " OR COALESCE(i.lot_no, '') LIKE :q"
-        " OR COALESCE(i.batch_no, '') LIKE :q"
+        ' OR $_batchNo LIKE :q OR $_refId LIKE :q'
         " OR COALESCE(i.po_no, '') LIKE :q"
         " OR COALESCE(i.grn_no, '') LIKE :q"
         " OR COALESCE(i.inspector_name, '') LIKE :q)",
@@ -214,7 +223,7 @@ LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
     // on both ends so `from=2026-09-01` includes everything that happened on
     // the 1st, whatever time it happened at.
     final column = switch (f.dateField) {
-      NcrFilters.dateFieldInspection => "COALESCE(i.inspection_date, '')",
+      NcrFilters.dateFieldInspection => _inspectionDate,
       NcrFilters.dateFieldClosed => "COALESCE(fn.closed_at, '')",
       _ => "COALESCE(fn.created_at, '')",
     };
@@ -337,6 +346,7 @@ LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
       '''
 SELECT
   fn.finding_id, fn.inspection_id, fn.item_id, fn.resp_id,
+  fn.product_sample_id, pi.id AS product_inspection_id,
   COALESCE(fn.code, '') AS code,
   COALESCE(fn.severity, '') AS severity,
   COALESCE(fn.category, '') AS category,
@@ -356,10 +366,10 @@ SELECT
   COALESCE(fn.verified_by_name, '') AS verified_by_name,
   COALESCE(fn.rejected_at, '') AS rejected_at,
   COALESCE(fn.assigned_to_name, '') AS assigned_to_name,
-  COALESCE(i.ref_type, '') AS inspection_ref_type,
-  COALESCE(i.ref_id, '') AS inspection_ref_id,
+  $_refType AS inspection_ref_type,
+  $_refId AS inspection_ref_id,
   COALESCE(i.lot_no, '') AS lot_no,
-  COALESCE(i.batch_no, '') AS batch_no,
+  $_batchNo AS batch_no,
   COALESCE(i.po_no, '') AS po_no,
   COALESCE(i.grn_no, '') AS grn_no,
   COALESCE(i.dept, '') AS dept,
@@ -369,7 +379,7 @@ SELECT
   COALESCE(i.work_center, '') AS work_center,
   COALESCE(i.inspector_id, '') AS inspector_id,
   COALESCE(i.inspector_name, '') AS inspector_name,
-  COALESCE(i.inspection_date, '') AS inspection_date,
+  $_inspectionDate AS inspection_date,
   COALESCE(i.status, '') AS inspection_status,
   COALESCE(c.capa_no, '') AS capa_no,
   COALESCE(c.type, '') AS capa_type,
@@ -413,7 +423,7 @@ $_from
       'created_at': 'fn.created_at',
       'closed_at': 'fn.closed_at',
       'age_days': 'age_days',
-      'inspection_date': 'i.inspection_date',
+      'inspection_date': _inspectionDate,
       'capa_no': 'c.capa_no',
     };
     final sortColumn = sortable[orderBy] ?? 'fn.finding_id';
@@ -443,9 +453,7 @@ LIMIT :row_limit OFFSET :row_offset
     final filter = _where(filters);
     final rows = await _query(
       resolved.db,
-      'SELECT COUNT(*) AS cnt FROM qc_findings_nc fn '
-      'LEFT JOIN qc_inspections i ON i.inspection_id = fn.inspection_id '
-      'LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL '
+      'SELECT COUNT(*) AS cnt $_from '
       'WHERE ${filter.where}',
       named: {...filter.args, ...resolved.args},
     );
@@ -636,13 +644,13 @@ LIMIT :row_limit
 SELECT
   CASE
     WHEN COALESCE(i.lot_no, '') <> '' THEN 'lot:' || i.lot_no
-    WHEN COALESCE(i.batch_no, '') <> '' THEN 'batch:' || i.batch_no
-    WHEN COALESCE(i.ref_id, '') <> '' THEN 'ref:' || i.ref_id
+    WHEN $_batchNo <> '' THEN 'batch:' || $_batchNo
+    WHEN $_refId <> '' THEN 'ref:' || $_refId
     ELSE ''
   END AS ref_key,
   COALESCE(i.lot_no, '') AS lot_no,
-  COALESCE(i.batch_no, '') AS batch_no,
-  COALESCE(i.ref_id, '') AS ref_id,
+  $_batchNo AS batch_no,
+  $_refId AS ref_id,
   COUNT(*) AS cnt,
   SUM(CASE WHEN fn.status NOT IN ('Closed', 'Rejected') THEN 1 ELSE 0 END) AS open_count
 $_from

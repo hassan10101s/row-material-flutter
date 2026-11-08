@@ -1,0 +1,490 @@
+{
+  "writes": [
+    {
+      "entityType": "labResult",
+      "entityId": "case-labResult-1",
+      "operation": "create",
+      "expectedVersion": 0,
+      "payload": {
+        "localId": 5,
+        "analysisId": 7,
+        "sourceType": "product",
+        "sourceRefId": 2,
+        "sourceName": "Fixture sample",
+        "sampleName": "Fixture sample",
+        "resultText": "15.879",
+        "dynamicValuesJson": "{\"v1\":\"0.1\",\"v2\":\"13.3\",\"m\":\"0.522\",\"c\":0.1,\"fator\":\"6.25\"}",
+        "entryCode": "Fixture sample",
+        "worksheetRowId": null,
+        "testedBy": "fixture-user",
+        "testedAt": "2026-11-03 15:54:13",
+        "createdBy": "fixture-user",
+        "updatedBy": "fixture-user",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "version": 1,
+        "deletedAt": null,
+        "remoteId": "case-labResult-1",
+        "deviceId": "fixture-device",
+        "organizationId": "fixture-org",
+        "createdAt": "__SERVER_TIMESTAMP__"
+      },
+      "relations": {
+        "analysisId": {
+          "entityType": "labAnalysis",
+          "entityId": "case-labAnalysis-1",
+          "expectedVersion": 1
+        }
+      }
+    },
+    {
+      "entityType": "consumption",
+      "entityId": "case-consumption-1",
+      "operation": "create",
+      "expectedVersion": 0,
+      "payload": {
+        "localId": 10,
+        "sampleTestId": 5,
+        "inventoryId": 1,
+        "qtyUsed": 2.0,
+        "requestedQty": 2.0,
+        "appliedQty": 2.0,
+        "shortfallQty": 0.0,
+        "eventType": "CONSUMPTION",
+        "reversalOfLogId": null,
+        "lotId": 1,
+        "lotNo": "case-inventoryLot-1",
+        "lotRemoteId": "case-inventoryLot-1",
+        "version": 1,
+        "deletedAt": null,
+        "remoteId": "case-consumption-1",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "organizationId": "fixture-org",
+        "createdAt": "__SERVER_TIMESTAMP__",
+        "createdBy": "fixture-user"
+      },
+      "relations": {
+        "inventoryId": {
+          "entityType": "inventoryItem",
+          "entityId": "case-inventoryItem-1",
+          "expectedVersion": 2
+        },
+        "sampleTestId": {
+          "entityType": "labResult",
+          "entityId": "case-labResult-1",
+          "expectedVersion": 0
+        },
+        "lotId": {
+          "entityType": "inventoryLot",
+          "entityId": "case-inventoryLot-1",
+          "expectedVersion": 1
+        }
+      }
+    },
+    {
+      "entityType": "inventoryTransaction",
+      "entityId": "case-inventoryTransaction-1",
+      "operation": "create",
+      "expectedVersion": 0,
+      "payload": {
+        "localId": 12,
+        "remoteId": "case-inventoryTransaction-1",
+        "inventoryId": 1,
+        "inventoryRemoteId": "case-inventoryItem-1",
+        "quantityDelta": -2.0,
+        "transactionType": "CONSUMPTION",
+        "referenceType": "sample_test",
+        "referenceId": 5,
+        "referenceRemoteId": null,
+        "reason": "",
+        "createdBy": "fixture-user",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "version": 1,
+        "deletedAt": null,
+        "organizationId": "fixture-org",
+        "createdAt": "__SERVER_TIMESTAMP__"
+      },
+      "relations": {
+        "inventoryId": {
+          "entityType": "inventoryItem",
+          "entityId": "case-inventoryItem-1",
+          "expectedVersion": 2
+        }
+      }
+    },
+    {
+      "entityType": "consumption",
+      "entityId": "case-consumption-2",
+      "operation": "create",
+      "expectedVersion": 0,
+      "payload": {
+        "localId": 9,
+        "sampleTestId": 5,
+        "inventoryId": 2,
+        "qtyUsed": 0.015,
+        "requestedQty": 0.015,
+        "appliedQty": 0.015,
+        "shortfallQty": 0.0,
+        "eventType": "CONSUMPTION",
+        "reversalOfLogId": null,
+        "lotId": 2,
+        "lotNo": "case-inventoryLot-2",
+        "lotRemoteId": "case-inventoryLot-2",
+        "version": 1,
+        "deletedAt": null,
+        "remoteId": "case-consumption-2",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "organizationId": "fixture-org",
+        "createdAt": "__SERVER_TIMESTAMP__",
+        "createdBy": "fixture-user"
+      },
+      "relations": {
+        "inventoryId": {
+          "entityType": "inventoryItem",
+          "entityId": "case-inventoryItem-2",
+          "expectedVersion": 3
+        },
+        "sampleTestId": {
+          "entityType": "labResult",
+          "entityId": "case-labResult-1",
+          "expectedVersion": 0
+        },
+        "lotId": {
+          "entityType": "inventoryLot",
+          "entityId": "case-inventoryLot-2",
+          "expectedVersion": 1
+        }
+      }
+    },
+    {
+      "entityType": "inventoryTransaction",
+      "entityId": "case-inventoryTransaction-2",
+      "operation": "create",
+      "expectedVersion": 0,
+      "payload": {
+        "localId": 13,
+        "remoteId": "case-inventoryTransaction-2",
+        "inventoryId": 2,
+        "inventoryRemoteId": "case-inventoryItem-2",
+        "quantityDelta": -0.015,
+        "transactionType": "CONSUMPTION",
+        "referenceType": "sample_test",
+        "referenceId": 5,
+        "referenceRemoteId": null,
+        "reason": "",
+        "createdBy": "fixture-user",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "version": 1,
+        "deletedAt": null,
+        "organizationId": "fixture-org",
+        "createdAt": "__SERVER_TIMESTAMP__"
+      },
+      "relations": {
+        "inventoryId": {
+          "entityType": "inventoryItem",
+          "entityId": "case-inventoryItem-2",
+          "expectedVersion": 3
+        }
+      }
+    },
+    {
+      "entityType": "inventoryLot",
+      "entityId": "case-inventoryLot-1",
+      "operation": "update",
+      "expectedVersion": 1,
+      "payload": {
+        "localId": 1,
+        "remoteId": "case-inventoryLot-1",
+        "inventoryId": 1,
+        "inventoryRemoteId": "case-inventoryItem-1",
+        "lotNo": "case-inventoryLot-1",
+        "qtyReceived": 1000.0,
+        "qtyRemaining": 998.0,
+        "expiryDate": "2027-11-12",
+        "supplier": "",
+        "note": "",
+        "receivedBy": "fixture-user",
+        "receivedAt": "2026-11-03 00:39:19",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "version": 2,
+        "deletedAt": null,
+        "organizationId": "fixture-org",
+        "createdBy": "fixture-user"
+      },
+      "relations": {
+        "inventoryId": {
+          "entityType": "inventoryItem",
+          "entityId": "case-inventoryItem-1",
+          "expectedVersion": 2
+        }
+      }
+    },
+    {
+      "entityType": "inventoryLot",
+      "entityId": "case-inventoryLot-2",
+      "operation": "update",
+      "expectedVersion": 1,
+      "payload": {
+        "localId": 2,
+        "remoteId": "case-inventoryLot-2",
+        "inventoryId": 2,
+        "inventoryRemoteId": "case-inventoryItem-2",
+        "lotNo": "case-inventoryLot-2",
+        "qtyReceived": 5.0,
+        "qtyRemaining": 4.985,
+        "expiryDate": "2026-11-16",
+        "supplier": "",
+        "note": "",
+        "receivedBy": "fixture-user",
+        "receivedAt": "2026-11-03 00:38:32",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "version": 2,
+        "deletedAt": null,
+        "organizationId": "fixture-org",
+        "createdBy": "fixture-user"
+      },
+      "relations": {
+        "inventoryId": {
+          "entityType": "inventoryItem",
+          "entityId": "case-inventoryItem-2",
+          "expectedVersion": 3
+        }
+      }
+    },
+    {
+      "entityType": "inventoryItem",
+      "entityId": "case-inventoryItem-1",
+      "operation": "update",
+      "expectedVersion": 2,
+      "payload": {
+        "localId": 1,
+        "name": "case-inventoryItem-1",
+        "category": "count",
+        "unit": "pc",
+        "currentQty": 998.0,
+        "minQty": 0.0,
+        "description": "",
+        "createdBy": "fixture-user",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "version": 3,
+        "deletedAt": null,
+        "remoteId": "case-inventoryItem-1",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "organizationId": "fixture-org"
+      },
+      "relations": {}
+    },
+    {
+      "entityType": "inventoryItem",
+      "entityId": "case-inventoryItem-2",
+      "operation": "update",
+      "expectedVersion": 3,
+      "payload": {
+        "localId": 2,
+        "name": "case-inventoryItem-2",
+        "category": "liquid",
+        "unit": "L",
+        "currentQty": 4.985,
+        "minQty": 2.0,
+        "description": "",
+        "createdBy": "fixture-user",
+        "updatedAt": "__SERVER_TIMESTAMP__",
+        "version": 4,
+        "deletedAt": null,
+        "remoteId": "case-inventoryItem-2",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "organizationId": "fixture-org"
+      },
+      "relations": {}
+    }
+  ],
+  "records": [
+    {
+      "type": "inventoryItem",
+      "id": "case-inventoryItem-1",
+      "version": 2,
+      "data": {
+        "localId": 3,
+        "name": "case-inventoryItem-1",
+        "category": "count",
+        "unit": "pc",
+        "currentQty": 1000.0,
+        "minQty": 0,
+        "description": "",
+        "createdBy": "fixture-user",
+        "version": 2,
+        "deletedAt": null,
+        "remoteId": "case-inventoryItem-1",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "organizationId": "fixture-org",
+        "createdAt": "2026-10-22T23:57:02.728",
+        "parentRefs": {},
+        "centralSequence": 37,
+        "updatedAt": "2026-11-02T22:39:24.768Z",
+        "protocol": {
+          "mode": "firestore_direct_v2",
+          "entityType": "inventoryItem",
+          "uniqueKeys": []
+        }
+      }
+    },
+    {
+      "type": "inventoryItem",
+      "id": "case-inventoryItem-2",
+      "version": 3,
+      "data": {
+        "localId": 1,
+        "name": "case-inventoryItem-2",
+        "category": "liquid",
+        "unit": "L",
+        "currentQty": 5.0,
+        "minQty": 2,
+        "description": "",
+        "createdBy": "fixture-user",
+        "version": 3,
+        "deletedAt": null,
+        "remoteId": "case-inventoryItem-2",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "organizationId": "fixture-org",
+        "createdAt": "2026-10-22T00:20:52.405",
+        "parentRefs": {},
+        "centralSequence": 35,
+        "updatedAt": "2026-11-02T22:38:36.847Z",
+        "protocol": {
+          "mode": "firestore_direct_v2",
+          "entityType": "inventoryItem",
+          "uniqueKeys": []
+        }
+      }
+    },
+    {
+      "type": "inventoryLot",
+      "id": "case-inventoryLot-1",
+      "version": 1,
+      "data": {
+        "localId": 3,
+        "remoteId": "case-inventoryLot-1",
+        "inventoryId": 1,
+        "inventoryRemoteId": "case-inventoryItem-1",
+        "lotNo": "case-inventoryLot-1",
+        "qtyReceived": 1000.0,
+        "qtyRemaining": 1000.0,
+        "expiryDate": "2027-11-12",
+        "supplier": "",
+        "note": "",
+        "receivedBy": "fixture-user",
+        "receivedAt": "2026-11-03 00:39:19",
+        "organizationId": "fixture-org",
+        "version": 1,
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "createdBy": "fixture-user",
+        "deletedAt": null,
+        "parentRefs": {
+          "inventoryId": {
+            "entityType": "inventoryItem",
+            "entityId": "case-inventoryItem-1",
+            "version": 2
+          }
+        },
+        "centralSequence": 37,
+        "createdAt": "2026-11-02T22:39:24.768Z",
+        "updatedAt": "2026-11-02T22:39:24.768Z",
+        "protocol": {
+          "mode": "firestore_direct_v2",
+          "entityType": "inventoryLot",
+          "uniqueKeys": []
+        }
+      }
+    },
+    {
+      "type": "inventoryLot",
+      "id": "case-inventoryLot-2",
+      "version": 1,
+      "data": {
+        "localId": 1,
+        "remoteId": "case-inventoryLot-2",
+        "inventoryId": 2,
+        "inventoryRemoteId": "case-inventoryItem-2",
+        "lotNo": "case-inventoryLot-2",
+        "qtyReceived": 5.0,
+        "qtyRemaining": 5.0,
+        "expiryDate": "2026-11-16",
+        "supplier": "",
+        "note": "",
+        "receivedBy": "fixture-user",
+        "receivedAt": "2026-11-03 00:38:32",
+        "organizationId": "fixture-org",
+        "version": 1,
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "createdBy": "fixture-user",
+        "deletedAt": null,
+        "parentRefs": {
+          "inventoryId": {
+            "entityType": "inventoryItem",
+            "entityId": "case-inventoryItem-2",
+            "version": 3
+          }
+        },
+        "centralSequence": 35,
+        "createdAt": "2026-11-02T22:38:36.847Z",
+        "updatedAt": "2026-11-02T22:38:36.847Z",
+        "protocol": {
+          "mode": "firestore_direct_v2",
+          "entityType": "inventoryLot",
+          "uniqueKeys": []
+        }
+      }
+    },
+    {
+      "type": "labAnalysis",
+      "id": "case-labAnalysis-1",
+      "version": 1,
+      "data": {
+        "localId": 15,
+        "name": "Fixture analysis",
+        "unit": "%",
+        "description": "",
+        "dynamicFieldsJson": "[]",
+        "formulaJson": "{}",
+        "active": 1,
+        "version": 1,
+        "deletedAt": null,
+        "parameterId": null,
+        "remoteId": "case-labAnalysis-1",
+        "updatedAt": "2026-09-29 13:19:03",
+        "updatedBy": "fixture-user",
+        "deviceId": "fixture-device",
+        "reference": "",
+        "parameterRemoteId": null,
+        "organizationId": "fixture-org",
+        "createdAt": "2026-09-29 13:19:03",
+        "createdBy": "fixture-user",
+        "configType": "lab_analyses",
+        "parentRefs": {},
+        "centralSequence": 1,
+        "protocol": {
+          "mode": "firestore_direct_v2",
+          "entityType": "labAnalysis",
+          "uniqueKeys": []
+        }
+      }
+    }
+  ]
+}

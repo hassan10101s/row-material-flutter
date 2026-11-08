@@ -5,7 +5,7 @@ import 'package:material_lab/core/app_paths.dart';
 import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/database/database_helper.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
-import 'package:material_lab/features/qc_manager/data/offline_first_qc_repository.dart';
+import 'package:material_lab/features/qc_manager/data/server_confirmed_qc_repository.dart';
 import 'package:material_lab/features/qc_manager/data/qc_audit_repo.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_inspection.dart';
@@ -89,7 +89,7 @@ void main() {
     },
   );
 
-  QcRepositories repos() => QcRepositories.offlineFirst(
+  QcRepositories repos() => QcRepositories.serverConfirmed(
     dbHelper: helper,
     guard: approver(),
     actorReader: () =>
@@ -590,7 +590,7 @@ void main() {
     test('reporting the action finished needs no approve permission', () async {
       // The owner finishing their own work is routine; only a reviewer may
       // declare the CAPA effective.
-      final r = QcRepositories.offlineFirst(
+      final r = QcRepositories.serverConfirmed(
         dbHelper: helper,
         guard: _TestGuard(),
         actorReader: () =>

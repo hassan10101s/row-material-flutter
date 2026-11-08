@@ -1,0 +1,34 @@
+{
+  "date": "2026-11-08",
+  "emulatorProject": "demo-materiallab",
+  "beforePassed": 109,
+  "beforeFailed": 18,
+  "finalTestSummary": [
+    "01:47 +109 -18: Some tests failed."
+  ],
+  "afterFailed": 18,
+  "identicalFailureSet": true,
+  "rulesUnchanged": true,
+  "manifestUnchanged": true,
+  "differences": [],
+  "failingTests": [
+    "test/security/permissions_parity_test.dart: no rule grants write access to an unknown collection [E]",
+    "test/security/firestore_direct_sync_test.dart: direct atomic save, replay and pointer feed work as a real Firebase user [E]",
+    "test/security/firestore_direct_sync_test.dart: legacy enrolled writer works; revoked, foreign and read-only devices fail [E]",
+    "test/security/spark_lab_capacity_test.dart: actual-nine: result and two chemical deductions commit atomically and replay once [E]",
+    "test/security/firestore_direct_sync_test.dart: existing clients without the compact effect proof retain small atomic saves [E]",
+    "test/security/firestore_direct_sync_test.dart: lab specialist creates final approved and rejected inspections without admin privileges [E]",
+    "test/security/firestore_direct_sync_test.dart: all standard employee roles can bootstrap their permission-scoped archive [E]",
+    "test/security/firestore_direct_sync_test.dart: screen repositories publish raw and product inspections, samples, analyses and worksheets to two caches [E]",
+    "test/security/firestore_direct_sync_test.dart: admin product sample NCR is one atomic server-confirmed command and remaps its link on a second device [E]",
+    "test/security/spark_lab_capacity_test.dart: seven consumption security: forged, missing and partial proofs fail; 25 links save [E]",
+    "test/security/firestore_direct_sync_test.dart: lab product sample NCR is one atomic server-confirmed command and remaps its link on a second device [E]",
+    "test/security/firestore_direct_sync_test.dart: five writable devices create concurrently and stale updates never overwrite [E]",
+    "test/security/firestore_direct_sync_test.dart: entry identity stays immutable even with a correctly replaced unique reservation [E]",
+    "test/security/firestore_direct_sync_test.dart: one hundred replays preserve the original receipt and single effect [E]",
+    "test/security/firestore_direct_sync_test.dart: snapshot and incremental reads keep one server readTime while another device edits [E]",
+    "test/security/firestore_direct_sync_test.dart: deleted local organization cache downloads the archive without uploading local rows [E]",
+    "test/security/firestore_direct_sync_test.dart: real outbox survives lost commit response and projects a formula on two devices [E]",
+    "test/security/firestore_direct_sync_test.dart: NIR scoped resets bind global parents, replay once and reject missing or foreign links [E]"
+  ]
+}

@@ -3,6 +3,9 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/report_form_keys.dart';
+import '../../../../app/auth_gate.dart';
+import '../../../../core/auth/permissions.dart';
+import '../../../../di/service_locator.dart';
 import '../../../../core/responsive/form_factor.dart';
 import '../../../../core/utils/app_dates.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
@@ -47,12 +50,17 @@ class _LabReportsTabState extends State<LabReportsTab> {
             style: const TextStyle(fontWeight: FontWeight.w700),
           ),
         ),
-        IconButton(
-          tooltip: AppText.t('رقم فورم هذا التقرير', 'This report form number'),
-          onPressed: () =>
-              showQaFormNoDialog(context, key: formNoKey, title: dialogTitle),
-          icon: const Icon(Icons.settings_outlined),
-        ),
+        if (getIt.isRegistered<AuthGate>() &&
+            getIt<AuthGate>().canWrite(Permission.reportsCreate))
+          IconButton(
+            tooltip: AppText.t(
+              'رقم فورم هذا التقرير',
+              'This report form number',
+            ),
+            onPressed: () =>
+                showQaFormNoDialog(context, key: formNoKey, title: dialogTitle),
+            icon: const Icon(Icons.settings_outlined),
+          ),
       ],
     );
   }

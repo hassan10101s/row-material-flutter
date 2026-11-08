@@ -5,9 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
@@ -87,6 +87,29 @@ void main() {
     final b = await openSyncFixture();
     await a.seedOrganization();
     await b.seedOrganization();
+    for (final fixture in [a, b]) {
+      await fixture.db.insert('reference_materials', {
+        'id': 2,
+        'material_name': 'Sand',
+        'material_code': 'M-SAND',
+        'physical_reference_json': '{}',
+        'chemical_reference_json': '{}',
+        'imported_at': '2026-01-01',
+        'remote_id': 'material-sand',
+      });
+      await fixture.db.update(
+        'reference_materials',
+        {'remote_id': 'material-cement'},
+        where: 'id = ?',
+        whereArgs: [1],
+      );
+      await fixture.db.insert('lab_products', {
+        'id': 1,
+        'name': 'Feed',
+        'created_at': '2026-01-01',
+        'remote_id': 'product-feed',
+      });
+    }
     writer = _FormulationDevice(
       a,
       const AppSession(
@@ -154,7 +177,7 @@ void main() {
     expect((await viewer.puller(remote).runOnce()).applied, 0);
     expect(await viewer.rows(), isEmpty);
 
-    final id = await writer.repo().save(record());
+    await writer.repo().save(record());
     final writerRow = (await writer.rows()).single;
     final remoteId = '${writerRow['remote_id']}';
     expect(remoteId, isNotEmpty);
@@ -175,23 +198,62 @@ void main() {
     expect(row['product_id'], 1);
     expect(row['is_archived'], 0);
     expect(row['copied_from_id'], isNull);
-    expect(jsonDecode('${row['items_json']}'), record()['items']);
-    expect(jsonDecode('${row['parameters_json']}'), record()['parameters']);
+    final remoteItems = (jsonDecode('${row['items_json']}') as List)
+        .map(
+          (item) => Map<String, dynamic>.from(item as Map)
+            ..remove('_material_code')
+            ..remove('_material_remote_id'),
+        )
+        .toList();
+    expect(remoteItems, record()['items']);
+    final parameters = Map<String, dynamic>.from(
+      jsonDecode('${row['parameters_json']}') as Map,
+    )..remove('_product_reference');
+    expect(parameters, record()['parameters']);
     expect(
       jsonDecode('${row['graph_parameters_json']}'),
       record()['graph_parameters'],
     );
     expect(jsonDecode('${row['calculation_json']}'), record()['calculation']);
-    expect(
-      jsonDecode('${row['source_snapshot_json']}'),
-      record()['sources'],
-    );
+    expect(jsonDecode('${row['source_snapshot_json']}'), record()['sources']);
     expect(row['sync_state'], 'synced');
     expect((row['remote_version'] as num).toInt(), 1);
 
     // The received row is not queued for a pointless push back.
     expect(await viewer.queue.countPending(), 0);
   });
+
+  test(
+    'formulation references resolve on a viewer with different local IDs',
+    () async {
+      await viewer.fixture.db.update(
+        'reference_materials',
+        {'id': 71},
+        where: 'id = ?',
+        whereArgs: [1],
+      );
+      await viewer.fixture.db.update(
+        'reference_materials',
+        {'id': 72},
+        where: 'id = ?',
+        whereArgs: [2],
+      );
+      await viewer.fixture.db.update(
+        'lab_products',
+        {'id': 81},
+        where: 'id = ?',
+        whereArgs: [1],
+      );
+      await writer.repo().save(record());
+      expect((await writer.pusher(remote).runOnce()).failed, 0);
+      expect((await viewer.puller(remote).runOnce()).failed, 0);
+      final received = (await viewer.repo().list()).single;
+      expect(received['product_id'], 81);
+      final items = jsonDecode(received['items_json'] as String) as List;
+      expect(items.map((item) => item['material_id']), [71, 72]);
+      expect(received['_missing_references'], false);
+    },
+  );
 
   test('an edit and an archive on the writer propagate in order', () async {
     final id = await writer.repo().save(record());
@@ -240,20 +302,23 @@ void main() {
     expect(await viewer.queue.countPending(), 0);
   });
 
-  test('the viewer (read-only device) cannot push a formulation back', () async {
-    final id = await writer.repo().save(record());
-    await writer.pusher(remote).runOnce();
-    await viewer.puller(remote).runOnce();
+  test(
+    'the viewer (read-only device) cannot push a formulation back',
+    () async {
+      await writer.repo().save(record());
+      await writer.pusher(remote).runOnce();
+      await viewer.puller(remote).runOnce();
 
-    // Simulate a tampered viewer: it must not be able to enqueue+push a
-    // change to the formulation. The write guard refuses the permission.
-    await expectLater(
-      viewer.repo().save({'name': 'Evil', 'items': record()['items']}),
-      throwsA(isA<AuthorizationError>()),
-    );
-    // Only the pulled formulation exists; the tampered save wrote nothing.
-    final rows = await viewer.rows();
-    expect(rows, hasLength(1));
-    expect(rows.single['name'], 'Starter mix');
-  });
+      // Simulate a tampered viewer: it must not be able to enqueue+push a
+      // change to the formulation. The write guard refuses the permission.
+      await expectLater(
+        viewer.repo().save({'name': 'Evil', 'items': record()['items']}),
+        throwsA(isA<AuthorizationError>()),
+      );
+      // Only the pulled formulation exists; the tampered save wrote nothing.
+      final rows = await viewer.rows();
+      expect(rows, hasLength(1));
+      expect(rows.single['name'], 'Starter mix');
+    },
+  );
 }

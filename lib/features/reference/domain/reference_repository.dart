@@ -73,6 +73,17 @@ abstract interface class ReferenceRepository {
     Map<String, dynamic> units = const {},
   });
 
+  /// Saves the material and its complete acceptance bounds as one operation.
+  Future<int> saveMaterialDefinition({
+    int? id,
+    required String materialName,
+    required String materialCode,
+    Map<String, dynamic> physicalReference = const {},
+    Map<String, dynamic> chemicalReference = const {},
+    Map<String, dynamic> units = const {},
+    required List<Map<String, dynamic>> bounds,
+  });
+
   Future<void> updateMaterial(
     int id, {
     required String materialName,

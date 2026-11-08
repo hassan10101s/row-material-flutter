@@ -292,42 +292,11 @@ class _TrialExpiredView extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: AppSpacing.lg),
-                  // Three beautiful contact circles: website, call, WhatsApp.
-                  // Row flips automatically in RTL (Arabic), no hard-coded
-                  // directions. Each circle opens the AppSupport link.
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _SupportCircle(
-                        label: AppText.t('الموقع', 'Website'),
-                        icon: Icons.language,
-                        background: AppColors.surface,
-                        foreground: AppColors.primary,
-                        border: AppColors.border,
-                        tooltip: AppText.t('فتح الموقع', 'Open the website'),
-                        onTap: () =>
-                            AppSupport.openLink(context, AppSupport.site),
-                      ),
-                      _SupportCircle(
-                        label: AppText.t('اتصال', 'Call'),
-                        icon: Icons.phone_outlined,
-                        background: AppColors.primary,
-                        foreground: Colors.white,
-                        tooltip: AppText.t('اتصال بالدعم', 'Call support'),
-                        onTap: () =>
-                            AppSupport.openLink(context, AppSupport.phone),
-                      ),
-                      _SupportCircle(
-                        label: AppText.t('واتساب', 'WhatsApp'),
-                        icon: Icons.chat_outlined,
-                        background: AppColors.whatsapp,
-                        foreground: Colors.white,
-                        tooltip: AppText.t('تواصل واتساب', 'Chat on WhatsApp'),
-                        onTap: () =>
-                            AppSupport.openLink(context, AppSupport.whatsapp),
-                      ),
-                    ],
-                  ),
+                  // Three beautiful contact circles: website, call, WhatsApp
+                  // (authentic WhatsApp logo). Row flips automatically in RTL
+                  // (Arabic), no hard-coded directions. Each circle opens the
+                  // AppSupport link — shared with the support sheet.
+                  const AppSupportChannels(),
                   const SizedBox(height: AppSpacing.lg),
                   AppButton(
                     label: AppText.t('تحديث الحالة', 'Refresh status'),
@@ -371,75 +340,6 @@ class _TrialExpiredView extends StatelessWidget {
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// One circular contact button with a bilingual label underneath.
-class _SupportCircle extends StatelessWidget {
-  const _SupportCircle({
-    required this.label,
-    required this.icon,
-    required this.background,
-    required this.foreground,
-    required this.tooltip,
-    required this.onTap,
-    this.border,
-  });
-
-  final String label;
-  final IconData icon;
-  final Color background;
-  final Color foreground;
-  final Color? border;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(40.r),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Semantics(
-              button: true,
-              label: tooltip,
-              child: Container(
-                width: 64.r,
-                height: 64.r,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: background,
-                  border: border == null
-                      ? null
-                      : Border.all(color: border!, width: 1.5),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.08),
-                      blurRadius: 8,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: Icon(icon, color: foreground, size: 28.r),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 12.spMax,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
         ),
       ),
     );

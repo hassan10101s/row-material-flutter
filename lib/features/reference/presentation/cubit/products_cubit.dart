@@ -22,7 +22,14 @@ class ProductsCubit extends AppCubit<ProductsState> {
 
   Future<void> load() async {
     final token = ++_token;
-    safeEmit(state.copyWith(loading: true, clearError: true));
+    safeEmit(
+      state.copyWith(
+        loading: true,
+        loadingMore: false,
+        clearError: true,
+        clearErrorMore: true,
+      ),
+    );
     try {
       final settled = await Future.wait([
         repo.listProductsPaged(query: state.query, limit: pageSize, offset: 0),
@@ -45,7 +52,7 @@ class ProductsCubit extends AppCubit<ProductsState> {
       );
     } on AppError catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       if (token != _token) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
@@ -54,6 +61,7 @@ class ProductsCubit extends AppCubit<ProductsState> {
 
   Future<void> loadMore() async {
     if (state.loading || state.loadingMore || !state.hasMore) return;
+    final token = _token;
     safeEmit(state.copyWith(loadingMore: true, clearErrorMore: true));
     try {
       final more = await repo.listProductsPaged(
@@ -61,6 +69,7 @@ class ProductsCubit extends AppCubit<ProductsState> {
         limit: pageSize,
         offset: state.rows.length,
       );
+      if (token != _token || isClosed) return;
       safeEmit(
         state.copyWith(
           loadingMore: false,
@@ -69,8 +78,12 @@ class ProductsCubit extends AppCubit<ProductsState> {
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loadingMore: false, errorMore: e.message));
+      if (token != _token || isClosed) return;
+      safeEmit(
+        state.copyWith(loadingMore: false, errorMore: AppError.friendly(e)),
+      );
     } catch (e) {
+      if (token != _token || isClosed) return;
       safeEmit(state.copyWith(loadingMore: false, errorMore: '$e'));
     }
   }

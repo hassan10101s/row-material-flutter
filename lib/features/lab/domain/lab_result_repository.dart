@@ -9,7 +9,7 @@ import 'package:sqflite/sqflite.dart';
 abstract interface class LabResultRepository {
   /// Runs an analysis against a sample: writes the `lab_sample_tests` row,
   /// consumes the chemicals from the inventory and appends the consumption log
-  /// - one local transaction, replicated as one `labResult` document.
+  /// - one atomic server-confirmed operation including its stock effects.
   Future<Map<String, dynamic>> runSampleTest({
     required int analysisId,
     required String sourceType,
@@ -28,8 +28,8 @@ abstract interface class LabResultRepository {
   Future<Map<String, dynamic>> getSampleTest(int testId);
 
   /// Updates an existing `lab_sample_tests` row (result text, sample name,
-  /// dynamic field values, entry code). Consumption is NOT recomputed —
-  /// the original stock movement stays as recorded.
+  /// dynamic field values, entry code). Any resulting stock correction and
+  /// return-to-source effects join the same atomic business operation.
   Future<Map<String, dynamic>> updateSampleTest(
     int testId, {
     String? sampleName,

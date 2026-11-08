@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="fonts/fonts.css">
+  <style>
+    @page { size: A4; margin: 9mm 8mm; }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #182537; background: #fff;
+      font-family: 'Inter', 'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, Arial, sans-serif;
+      font-size: 11px; line-height: 1.5; }
+    .header { text-align: center; border: 1px solid #dde5ef; border-top: 4px solid #182537;
+      border-radius: 14px; padding: 12px 16px; margin-bottom: 12px; break-inside: avoid; }
+    .logo { display: block; max-width: 100px; max-height: 52px; margin: 0 auto 4px; object-fit: contain; }
+    .organization-name { font-size: 12px; font-weight: 700; overflow-wrap: anywhere; }
+    .department { color: #6d7f93; font-size: 10px; margin-top: 2px; }
+    h1 { font-size: 18px; margin: 8px 0 3px; }
+    .period { font-variant-numeric: tabular-nums; }
+    .filter { margin-top: 3px; color: #43566d; }
+    .meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px;
+      margin-bottom: 8px; color: #43566d; font-size: 10px; }
+    .table-frame { border: 1px solid #dde5ef; border-radius: 12px; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    thead { display: table-header-group; }
+    th, td { text-align: start; padding: 7px 9px; border-bottom: 1px solid #e8edf3; overflow-wrap: anywhere; }
+    th { background: #eef2f6; font-size: 10px; color: #43566d; font-weight: 700; }
+    th:first-child { width: 40%; }
+    tbody tr:nth-child(even) { background: #f8fafc; }
+    tr { break-inside: avoid; }
+    tr:last-child td { border-bottom: 0; }
+    .number { font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+    .net { font-weight: 700; }
+    .note { margin-top: 10px; border: 1px solid #dde5ef; border-radius: 10px; padding: 8px 10px;
+      color: #43566d; background: #f8fafc; break-inside: avoid; font-size: 10px; }
+    .print-action { display: block; margin: 12px auto; border: 0; border-radius: 8px;
+      background: #182537; color: #fff; padding: 8px 24px; cursor: pointer; font: inherit; }
+    @media print { .print-action { display: none; } }
+  </style>
+</head>
+<body>
+  <button class="print-action" onclick="window.print()">{% if is_en %}Print{% else %}طباعة{% endif %}</button>
+  <header class="header">
+    {% if report_logo_data_uri %}<img class="logo" src="{{ report_logo_data_uri }}" alt="">{% endif %}
+    {% if organization_name %}<div class="organization-name">{{ organization_name }}</div>{% endif %}
+    <div class="department">{{ department_label }}</div>
+    <h1>{{ title }}</h1>
+    <div class="period" dir="ltr">{{ period }}</div>
+    <div class="filter">{{ selection.name }}</div>
+  </header>
+  <div class="meta">
+    <span>{% if is_en %}Chemicals{% else %}عدد المواد{% endif %}: {{ chemical_count }}</span>
+    <span>{% if is_en %}Generated{% else %}تاريخ الإصدار{% endif %}: <bdi>{{ generated_at }}</bdi></span>
+  </div>
+  <div class="table-frame"><table>
+    <thead><tr>
+      <th>{% if is_en %}Chemical{% else %}المادة{% endif %}</th>
+      <th>{% if is_en %}Unit{% else %}الوحدة{% endif %}</th>
+      <th>{% if is_en %}Consumed{% else %}المستهلك{% endif %}</th>
+      <th>{% if is_en %}Returned{% else %}المرتجع{% endif %}</th>
+      <th>{% if is_en %}Net{% else %}الصافي{% endif %}</th>
+    </tr></thead>
+    <tbody>{% for row in rows %}<tr>
+      <td>{{ row.name }}</td><td>{{ row.unit }}</td>
+      <td class="number">{{ row.consumed }}</td><td class="number">{{ row.returned }}</td>
+      <td class="number net">{{ row.net }}</td>
+    </tr>{% endfor %}</tbody>
+  </table></div>
+  <div class="note">{{ note }}</div>
+</body>
+</html>

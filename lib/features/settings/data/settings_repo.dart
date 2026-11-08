@@ -25,6 +25,7 @@ class SettingsRepo implements SettingsRepository {
   final AppPaths? paths;
   final SyncQueue? queue;
   final WriteGuard? guard;
+  final String Function()? organizationName;
 
   SettingsRepo({
     required this.dbHelper,
@@ -32,6 +33,7 @@ class SettingsRepo implements SettingsRepository {
     this.paths,
     this.queue,
     this.guard,
+    this.organizationName,
   });
 
   Future<Map<String, dynamic>> getSettings() async {
@@ -40,6 +42,9 @@ class SettingsRepo implements SettingsRepository {
     final map = <String, dynamic>{};
     for (final r in rows) {
       map['${r['key']}'] = r['value'];
+    }
+    if (organizationName != null) {
+      map['organization_name'] = organizationName!();
     }
     return map;
   }
@@ -134,21 +139,10 @@ class SettingsRepo implements SettingsRepository {
       // document), each editable from the gear button beside its own report
       // or label. `qa_form_no` is the legacy global value, kept as a fallback
       // for any form whose own key is still empty.
-      ReportFormKeys.global: '',
-      ReportFormKeys.inspectionReport: '',
-      ReportFormKeys.inspectionLabel: '',
-      // Equipment label keeps its historical key.
-      ReportFormKeys.equipmentLabel: '',
-      ReportFormKeys.dailyReport: '',
-      ReportFormKeys.monthlyReport: '',
-      ReportFormKeys.yearlyReport: '',
-      ReportFormKeys.followUpReport: '',
-      ReportFormKeys.labDailyReport: '',
-      ReportFormKeys.labMonthlyReport: '',
-      ReportFormKeys.labYearlyReport: '',
-      ReportFormKeys.ncrReport: '',
+      for (final key in ReportFormKeys.all) key: '',
       'usage_expiry_date': '',
       'report_logo_path': '',
+      'report_language': 'ar',
       'reference_seed_done': '0',
       'security_clock_tamper_flag': '0',
       'security_max_seen_date': '',

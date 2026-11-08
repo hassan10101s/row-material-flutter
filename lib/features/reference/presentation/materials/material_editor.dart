@@ -1,3 +1,7 @@
+import '../../../../core/security/secure_field_policy.dart';
+import '../../../../core/auth/session_source.dart';
+import '../../../../di/service_locator.dart';
+import '../../../../design_system/widgets/app_secure_toggle.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
@@ -73,6 +77,7 @@ class MaterialEditor extends StatefulWidget {
 class _PhysicalParamRow {
   int? parameterId;
   bool required;
+  bool secure;
   final TextEditingController nameCtrl;
   final TextEditingController reqCtrl;
   _PhysicalParamRow({
@@ -80,6 +85,7 @@ class _PhysicalParamRow {
     String name = '',
     String requirement = '',
     this.required = false,
+    this.secure = false,
   }) : nameCtrl = TextEditingController(text: name),
        reqCtrl = TextEditingController(text: requirement);
   void dispose() {
@@ -91,6 +97,7 @@ class _PhysicalParamRow {
 class _ChemicalParamRow {
   int? parameterId;
   bool required;
+  bool secure;
   final TextEditingController nameCtrl;
   final TextEditingController minCtrl;
   final TextEditingController maxCtrl;
@@ -102,6 +109,7 @@ class _ChemicalParamRow {
     String max = '',
     String unit = '%',
     this.required = false,
+    this.secure = false,
   }) : nameCtrl = TextEditingController(text: name),
        minCtrl = TextEditingController(text: min),
        maxCtrl = TextEditingController(text: max),
@@ -124,6 +132,7 @@ class MaterialEditorState extends State<MaterialEditor> {
 
   bool _loading = true;
   bool _saving = false;
+  String? _pendingMessage;
   String? _nameError;
   String? _codeError;
 
@@ -132,6 +141,8 @@ class MaterialEditorState extends State<MaterialEditor> {
   bool get _compact => widget.layout == MaterialEditorLayout.compact;
 
   bool get saving => _saving;
+  bool get pending => _pendingMessage != null;
+  bool get _blocked => _saving || pending;
 
   ReferenceRepository get _refRepo => widget.refRepo;
 
@@ -219,6 +230,7 @@ class MaterialEditorState extends State<MaterialEditor> {
               name: e.key,
               requirement: referenceValueText(e.value),
               required: isReferenceRequired(e.value),
+              secure: isReferenceSecure(e.value),
             ),
         ];
 
@@ -258,11 +270,13 @@ class MaterialEditorState extends State<MaterialEditor> {
             max: parsed.max,
             unit: refUnit,
             required: isReferenceRequired(refVal),
+            secure: isReferenceSecure(refVal),
           );
         });
         // Merge required flag from JSON when bounds row missed it.
         chemRef.forEach((name, refVal) {
           final row = chemicalByName[name.trim().toLowerCase()];
+          if (row != null) row.secure = isReferenceSecure(refVal);
           if (row != null && isReferenceRequired(refVal)) row.required = true;
         });
         // Merge required flag for physical bounds fields too.
@@ -398,6 +412,7 @@ class MaterialEditorState extends State<MaterialEditor> {
   }
 
   Future<void> _save() async {
+    if (_saving || pending) return;
     if (!_validate()) return;
     setState(() => _saving = true);
     try {
@@ -419,10 +434,13 @@ class MaterialEditorState extends State<MaterialEditor> {
               ),
             );
           }
-          physicalReference[name] = withReferenceRequired(
-            p.reqCtrl.text.trim(),
-            p.required,
-            '${parameter['unit'] ?? ''}',
+          physicalReference[name] = withReferenceSecure(
+            withReferenceRequired(
+              p.reqCtrl.text.trim(),
+              p.required,
+              '${parameter['unit'] ?? ''}',
+            ),
+            p.secure,
           );
         }
       }
@@ -453,10 +471,13 @@ class MaterialEditorState extends State<MaterialEditor> {
         } else if (max.isNotEmpty) {
           range = 'max $max';
         }
-        chemicalReference[name] = withReferenceRequired(
-          range,
-          c.required,
-          '${parameter['unit'] ?? ''}',
+        chemicalReference[name] = withReferenceSecure(
+          withReferenceRequired(
+            range,
+            c.required,
+            '${parameter['unit'] ?? ''}',
+          ),
+          c.secure,
         );
         final unit = '${parameter['unit'] ?? ''}'.trim();
         units[name] = unit;
@@ -490,31 +511,25 @@ class MaterialEditorState extends State<MaterialEditor> {
             },
       ];
 
-      if (widget.materialId == null) {
-        final id = await _refRepo.createMaterial(
-          materialName: name,
-          materialCode: code,
-          physicalReference: physicalReference,
-          chemicalReference: chemicalReference,
-          units: units,
-        );
-        await _labConfig.saveMaterialBounds(id, boundsPayload);
-      } else {
-        await _refRepo.updateMaterial(
-          widget.materialId!,
-          materialName: name,
-          materialCode: code,
-          physicalReference: physicalReference,
-          chemicalReference: chemicalReference,
-          units: units,
-        );
-        await _labConfig.saveMaterialBounds(widget.materialId!, boundsPayload);
-      }
+      await _refRepo.saveMaterialDefinition(
+        id: widget.materialId,
+        materialName: name,
+        materialCode: code,
+        physicalReference: physicalReference,
+        chemicalReference: chemicalReference,
+        units: units,
+        bounds: boundsPayload,
+      );
       if (mounted) Navigator.of(context).pop(true);
     } on AppError catch (e) {
-      setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        if (e is PendingOperation) _pendingMessage = e.userMessage;
+      });
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -560,7 +575,7 @@ class MaterialEditorState extends State<MaterialEditor> {
         onChanged: (_) => setState(() => _codeError = null),
         hint: 'e.g. APL',
         error: _codeError,
-        enabled: !_saving,
+        enabled: !_blocked,
       ),
     ),
     const SizedBox(height: AppSpacing.lg),
@@ -579,7 +594,7 @@ class MaterialEditorState extends State<MaterialEditor> {
               style: AppButtonStyle.secondary,
               icon: Icon(Icons.add, size: 16.r),
               label: AppText.t('إضافة بارامتر', 'Add Parameter'),
-              onPressed: _saving ? null : _addPhysicalRow,
+              onPressed: _blocked ? null : _addPhysicalRow,
             ),
           ),
         ],
@@ -604,7 +619,7 @@ class MaterialEditorState extends State<MaterialEditor> {
                 'إضافة من بارامترات المرجع',
                 'Add from Reference Parameters',
               ),
-              onPressed: _saving ? null : _addChemicalRow,
+              onPressed: _blocked ? null : _addChemicalRow,
             ),
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -635,7 +650,7 @@ class MaterialEditorState extends State<MaterialEditor> {
           'e.g. Apple Pomace / تفل تفاح',
         ),
         error: _nameError,
-        enabled: !_saving,
+        enabled: !_blocked,
       ),
     );
   }
@@ -651,11 +666,29 @@ class MaterialEditorState extends State<MaterialEditor> {
     ],
   );
 
-  Widget _requiredToggle(bool value, ValueChanged<bool?> onChanged) {
-    return AppRequiredToggle(
-      value: value,
-      enabled: !_saving,
-      onChanged: (v) => onChanged(v),
+  Widget _requiredToggle(
+    bool value,
+    ValueChanged<bool?> onChanged,
+    bool secure,
+    ValueChanged<bool> onSecureChanged,
+  ) {
+    final mayManage =
+        getIt.isRegistered<SessionSource>() &&
+        SecureFieldPolicy(session: getIt<SessionSource>().session).mayManage;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        AppRequiredToggle(
+          value: value,
+          enabled: !_blocked,
+          onChanged: (v) => onChanged(v),
+        ),
+        AppSecureToggle(
+          value: secure,
+          enabled: !_blocked && mayManage,
+          onChanged: onSecureChanged,
+        ),
+      ],
     );
   }
 
@@ -679,7 +712,7 @@ class MaterialEditorState extends State<MaterialEditor> {
             label: '${parameter['parameter_name']}',
           ),
       ],
-      onChanged: _saving ? null : (id) => _onPhysicalParameterChange(row, id),
+      onChanged: _blocked ? null : (id) => _onPhysicalParameterChange(row, id),
     );
     // NOTE: bare column — never Expanded here. The stacked layout lives
     // in a scrolling dialog (unbounded height) where a vertical flex
@@ -692,7 +725,7 @@ class MaterialEditorState extends State<MaterialEditor> {
           controller: row.reqCtrl,
           onChanged: (_) => setState(() {}),
           hint: AppText.t('مثال: عادي', 'e.g. Normal'),
-          enabled: !_saving,
+          enabled: !_blocked,
         ),
         if (_suggestionChips(row.reqCtrl.text).isNotEmpty) ...[
           const SizedBox(height: AppSpacing.xs),
@@ -710,7 +743,7 @@ class MaterialEditorState extends State<MaterialEditor> {
     final remove = IconButton(
       tooltip: AppStrings.delete,
       visualDensity: VisualDensity.compact,
-      onPressed: _saving ? null : () => _removePhysicalRow(index),
+      onPressed: _blocked ? null : () => _removePhysicalRow(index),
       icon: Icon(
         Icons.remove_circle_outline,
         size: 18.r,
@@ -735,6 +768,8 @@ class MaterialEditorState extends State<MaterialEditor> {
                 _requiredToggle(
                   row.required,
                   (v) => setState(() => row.required = v ?? false),
+                  row.secure,
+                  (v) => setState(() => row.secure = v),
                 ),
               ],
             )
@@ -747,6 +782,8 @@ class MaterialEditorState extends State<MaterialEditor> {
                 _requiredToggle(
                   row.required,
                   (v) => setState(() => row.required = v ?? false),
+                  row.secure,
+                  (v) => setState(() => row.secure = v),
                 ),
                 remove,
               ],
@@ -776,7 +813,7 @@ class MaterialEditorState extends State<MaterialEditor> {
   Widget _chemicalRow(int index) {
     final row = _chemical[index];
     final used = _usedParameterIds(index);
-    final enabled = row.parameterId != null && !_saving;
+    final enabled = row.parameterId != null && !_blocked;
     // A dangling `parameterId` (parameter deleted/retyped after the bounds
     // were saved) used to crash the whole editor on open
     // (`There should be exactly one item with [DropdownButton]'s value`).
@@ -793,7 +830,7 @@ class MaterialEditorState extends State<MaterialEditor> {
             label: '${p['parameter_name']}',
           ),
       ],
-      onChanged: _saving
+      onChanged: _blocked
           ? null
           : (v) {
               row.parameterId = v;
@@ -813,14 +850,14 @@ class MaterialEditorState extends State<MaterialEditor> {
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
     );
     final unit = AppField(
-      label: AppText.t('الوحدة الموروثة', 'Inherited unit'),
+      label: AppText.t('الوحدة', 'Unit'),
       controller: row.unitCtrl,
       enabled: false,
     );
     final remove = IconButton(
       tooltip: AppStrings.delete,
       visualDensity: VisualDensity.compact,
-      onPressed: _saving ? null : () => _removeChemicalRow(index),
+      onPressed: _blocked ? null : () => _removeChemicalRow(index),
       icon: Icon(
         Icons.remove_circle_outline,
         size: 18.r,
@@ -855,11 +892,17 @@ class MaterialEditorState extends State<MaterialEditor> {
                 _requiredToggle(
                   row.required,
                   (v) => setState(() => row.required = v ?? false),
+                  row.secure,
+                  (v) => setState(() => row.secure = v),
                 ),
               ],
             )
           : Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              // The LabDropdown parameter selector has no label above it, so
+              // top-aligned labeled Min/Max/Unit fields sit visibly lower.
+              // Bottom alignment puts all field boxes on one baseline; the
+              // toggle/remove controls ride on the same bottom edge.
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Expanded(flex: 3, child: dropdown),
                 const SizedBox(width: AppSpacing.sm),
@@ -871,6 +914,8 @@ class MaterialEditorState extends State<MaterialEditor> {
                 _requiredToggle(
                   row.required,
                   (v) => setState(() => row.required = v ?? false),
+                  row.secure,
+                  (v) => setState(() => row.secure = v),
                 ),
                 remove,
               ],
@@ -897,13 +942,15 @@ class MaterialEditorActions extends StatelessWidget {
     final cancel = AppButton(
       style: AppButtonStyle.secondary,
       label: AppStrings.cancel,
-      onPressed: state.saving ? null : () => Navigator.of(context).pop(false),
+      onPressed: () => Navigator.of(context).pop(false),
     );
     final save = AppButton(
       style: AppButtonStyle.primary,
       loading: state.saving,
-      label: AppText.t('حفظ', 'Save'),
-      onPressed: state.saving ? null : state.save,
+      label: state.pending
+          ? AppText.t('راجع المسودات', 'Review drafts')
+          : AppText.t('حفظ', 'Save'),
+      onPressed: state.saving || state.pending ? null : state.save,
     );
 
     return Padding(

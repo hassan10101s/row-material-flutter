@@ -3,7 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/core/utils/app_dates.dart';
-import 'package:material_lab/features/lab/data/offline_first_lab_repository.dart';
+import 'package:material_lab/core/utils/app_exceptions.dart';
+import 'package:material_lab/features/lab/data/server_confirmed_lab_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 
 import '../sync/sync_test_fixture.dart';
@@ -32,7 +33,7 @@ class _AllowAllGuard implements WriteGuard {
 
 void main() {
   late SyncFixture fixture;
-  late OfflineFirstLabRepository repo;
+  late ServerConfirmedLabRepository repo;
 
   setUp(() async {
     fixture = await openSyncFixture();
@@ -42,7 +43,7 @@ void main() {
     audit.uid = 'uid_admin';
     audit.userName = 'Ahmed Ali';
     audit.deviceId = 'dev_1';
-    repo = OfflineFirstLabRepository(
+    repo = ServerConfirmedLabRepository(
       dbHelper: fixture.helper,
       guard: _AllowAllGuard(),
       queue: queue,
@@ -222,6 +223,33 @@ void main() {
   });
 
   group('saveMaterialBounds', () {
+    test('rejects adding a deleted bound back before creating other rows', () async {
+      await seedCement();
+      const sulfate = {
+        'parameter_name': 'Sulfates',
+        'parameter_type': 'chemical',
+        'min_value': 1,
+      };
+      await repo.saveMaterialBounds(10, [sulfate]);
+      await fixture.db.update('material_parameter_bounds', {
+        'deleted_at': nowIso(),
+        'active': 0,
+      }, where: 'material_id = ?', whereArgs: [10]);
+      final before = await fixture.db.query('material_parameter_bounds');
+
+      await expectLater(
+        repo.saveMaterialBounds(10, [
+          {'parameter_name': 'Chloride', 'parameter_type': 'chemical'},
+          sulfate,
+        ]),
+        throwsA(isA<ValidationError>()),
+      );
+
+      expect(await fixture.db.query('material_parameter_bounds'), before);
+      final parameters = await fixture.db.query('parameters');
+      expect(parameters.map((row) => row['parameter_name']), ['Sulfates']);
+    });
+
     test('creates the parameter origin, the bounds row and the linked recipe',
         () async {
       await seedCement();

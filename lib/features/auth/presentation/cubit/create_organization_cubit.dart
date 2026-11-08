@@ -29,6 +29,68 @@ class CreateOrganizationCubit extends AppCubit<CreateOrganizationState> {
   void setInviteCode(String value) =>
       safeEmit(state.copyWith(inviteCode: value, error: null));
 
+  /// One-time probe of the Firebase e-mail verification flag. A False result
+  /// shows the verification banner (the server refuses genesis for unverified
+  /// addresses); a failure stays silent — the submit path reports precisely.
+  Future<void> loadEmailVerified() async {
+    if (state.emailVerified != null) return;
+    try {
+      safeEmit(
+        state.copyWith(emailVerified: await auth.refreshEmailVerified()),
+      );
+    } on Object {
+      // Unknown until the next probe; the banner stays hidden.
+    }
+  }
+
+  /// Re-sends the verification link; the message lands on the banner.
+  Future<void> resendVerificationEmail() async {
+    if (state.verificationBusy) return;
+    safeEmit(state.copyWith(verificationBusy: true, notice: null, error: null));
+    try {
+      await auth.sendEmailVerification();
+      safeEmit(
+        state.copyWith(
+          verificationBusy: false,
+          notice: AppText.t(
+            'أُرسل رابط التوثيق من جديد — افتح بريدك واضغط الرابط.',
+            'The verification link was sent again — open your inbox and click it.',
+          ),
+        ),
+      );
+    } on Object catch (e) {
+      safeEmit(
+        state.copyWith(verificationBusy: false, error: AppError.friendly(e)),
+      );
+    }
+  }
+
+  /// The user clicked the link and reports back: re-read the flag. When it
+  /// flipped to verified, the banner disappears and creation may proceed.
+  Future<void> refreshEmailVerified() async {
+    if (state.verificationBusy) return;
+    safeEmit(state.copyWith(verificationBusy: true, notice: null, error: null));
+    try {
+      final verified = await auth.refreshEmailVerified();
+      safeEmit(
+        state.copyWith(
+          verificationBusy: false,
+          emailVerified: verified,
+          notice: verified
+              ? null
+              : AppText.t(
+                  'لم نرصد التوثيق بعد — تأكد من فتح الرابط وانتظر بضع ثوان ثم أعد الفحص.',
+                  'Not verified yet — make sure you opened the link, wait a few seconds, then check again.',
+                ),
+        ),
+      );
+    } on Object catch (e) {
+      safeEmit(
+        state.copyWith(verificationBusy: false, error: AppError.friendly(e)),
+      );
+    }
+  }
+
   Future<bool> submit() async {
     final create = state.mode == CreateMode.create;
     if (create && state.name.trim().isEmpty) {
@@ -77,7 +139,7 @@ class CreateOrganizationCubit extends AppCubit<CreateOrganizationState> {
       safeEmit(state.copyWith(busy: false));
       return true;
     } on OrganizationFailure catch (e) {
-      safeEmit(state.copyWith(busy: false, error: e.message));
+      safeEmit(state.copyWith(busy: false, error: AppError.friendly(e)));
       return false;
     } on Object catch (e) {
       safeEmit(state.copyWith(busy: false, error: AppError.friendly(e)));

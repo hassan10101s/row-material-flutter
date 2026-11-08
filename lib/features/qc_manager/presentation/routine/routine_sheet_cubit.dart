@@ -65,7 +65,7 @@ class RoutineSheetCubit extends AppCubit<RoutineSheetState> {
       final sheet = await repo.loadSheet(inspectionId);
       safeEmit(state.copyWith(loading: false, sheet: sheet));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
@@ -98,7 +98,7 @@ class RoutineSheetCubit extends AppCubit<RoutineSheetState> {
       safeEmit(
         state.copyWith(
           toggling: state.toggling.where((id) => id != itemId).toSet(),
-          error: e.message,
+          error: AppError.friendly(e),
         ),
       );
     } catch (e) {
@@ -136,7 +136,7 @@ class RoutineSheetCubit extends AppCubit<RoutineSheetState> {
       safeEmit(
         state.copyWith(
           logging: state.logging.where((id) => id != itemId).toSet(),
-          error: e.message,
+          error: AppError.friendly(e),
         ),
       );
     } catch (e) {

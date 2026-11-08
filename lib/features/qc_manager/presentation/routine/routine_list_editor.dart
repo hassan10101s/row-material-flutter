@@ -2,14 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
-import '../../../../../core/responsive/form_factor.dart';
 import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_field.dart';
-import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../design_system/widgets/app_window.dart';
 import '../../../../../di/service_locator.dart';
 import '../../domain/routine_repository.dart';
@@ -38,34 +36,14 @@ Future<bool> showRoutineListEditor(
   }
   if (!context.mounted) return false;
   final form = _RoutineListForm(template: template, items: items);
-  if (FormFactor.current.isDesktop) {
-    final saved = await showAppWindow<bool>(
-      context,
-      title: template == null
-          ? AppText.t('قائمة جديدة', 'New list')
-          : AppText.t('تعديل القائمة', 'Edit list'),
-      icon: Icons.checklist_outlined,
-      maxWidth: 560,
-      child: form,
-    );
-    return saved ?? false;
-  }
-  final saved = await Navigator.of(context).push<bool>(
-    MaterialPageRoute(
-      builder: (_) => Scaffold(
-        appBar: AppTopAppBar(
-          title: template == null
-              ? AppText.t('قائمة جديدة', 'New list')
-              : AppText.t('تعديل القائمة', 'Edit list'),
-        ),
-        body: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.pageMobile),
-            child: form,
-          ),
-        ),
-      ),
-    ),
+  final saved = await showAppContent<bool>(
+    context,
+    title: template == null
+        ? AppText.t('قائمة جديدة', 'New list')
+        : AppText.t('تعديل القائمة', 'Edit list'),
+    icon: Icons.checklist_outlined,
+    maxWidth: 560,
+    builder: (_, _) => form,
   );
   return saved ?? false;
 }
@@ -87,9 +65,11 @@ class _RoutineListFormState extends State<_RoutineListForm> {
   late final TextEditingController _dept = TextEditingController(
     text: widget.template?.dept ?? '',
   );
-  late String _recurrence = widget.template?.recurrence == QcRecurrence.monthly
-      ? QcRecurrence.monthly
-      : QcRecurrence.daily;
+  late String _recurrence = switch (widget.template?.recurrence) {
+    QcRecurrence.yearly => QcRecurrence.yearly,
+    QcRecurrence.monthly => QcRecurrence.monthly,
+    _ => QcRecurrence.daily,
+  };
   late final List<TextEditingController> _items = [
     for (final label in widget.items) TextEditingController(text: label),
     if (widget.items.isEmpty) TextEditingController(),
@@ -138,9 +118,11 @@ class _RoutineListFormState extends State<_RoutineListForm> {
         Navigator.of(context).pop(true); // the pop is the confirmation
       }
     } on AppError catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
-      if (mounted) AppFeedback.error(context, e.message);
+      if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
+      if (!mounted) return;
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
@@ -185,6 +167,15 @@ class _RoutineListFormState extends State<_RoutineListForm> {
                 AppText.t(
                   'شهرية — تتصفر كل شهر',
                   'Monthly — resets every month',
+                ),
+              ),
+            ),
+            DropdownMenuItem(
+              value: QcRecurrence.yearly,
+              child: Text(
+                AppText.t(
+                  'سنوية — تتجدد كل سنة',
+                  'Yearly — starts a new sheet each year',
                 ),
               ),
             ),

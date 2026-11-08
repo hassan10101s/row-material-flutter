@@ -1,3 +1,5 @@
+import '../../../../../design_system/widgets/app_export_button.dart';
+import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import 'dart:async';
 
@@ -16,9 +18,8 @@ import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_delete_confirm.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
-import '../../../../../design_system/widgets/app_field.dart';
+import '../../../../../design_system/widgets/app_text_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
-import '../../../../../design_system/widgets/app_page_header.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/export/table_html_export.dart';
 import '../../cubit/params_cubit.dart';
@@ -99,7 +100,7 @@ class _MobileParamsTabState extends State<MobileParamsTab> {
       }
       await cubit.load();
     } on AppError catch (e) {
-      if (context.mounted) AppFeedback.error(context, e.message);
+      if (context.mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
       if (context.mounted) AppFeedback.errorFrom(context, e);
     }
@@ -109,19 +110,14 @@ class _MobileParamsTabState extends State<MobileParamsTab> {
   Widget build(BuildContext context) {
     final cubit = context.read<ParamsCubit>();
     final state = context.watch<ParamsCubit>().state;
-    final countLabel = state.hasMore
-        ? '${state.rows.length}+'
-        : '${state.rows.length}';
     return AppErrorFeedback<ParamsCubit, ParamsState>(
       selector: (s) => s.error,
       // Add floats like the raw-material register (heroTag null: sibling
       // tabs share one IndexedStack).
       child: Scaffold(
-        floatingActionButton: FloatingActionButton(
-          heroTag: null,
+        floatingActionButton: AppAddFloatingActionButton(
           tooltip: AppText.t('بارامتر جديد', 'New Parameter'),
           onPressed: () => _openEditor(context),
-          child: Icon(Icons.add, size: 24.r),
         ),
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -129,48 +125,34 @@ class _MobileParamsTabState extends State<MobileParamsTab> {
             // Header entrance only (per-card entrances would keep timers
             // alive while scrolling — see analyses_tab).
             AppEntrance(
-              child: AppPageHeader(
-                title: _isChemical
-                    ? AppText.t('التحليل الكيميائي', 'Chemical Analysis')
-                    : AppText.t('الفحص الظاهري', 'Physical Aspects'),
-                subtitle: '$countLabel ${AppText.t('بارامتر', 'parameters')}',
-                icon: Icons.tag_outlined,
-                actions: [
-                  IconButton(
-                    tooltip: AppText.t('تصدير جدول', 'Export table'),
-                    constraints: const BoxConstraints(
-                      minWidth: 48,
-                      minHeight: 48,
+              child: AppSearchRow(
+                search: AppTextField(
+                  controller: _searchCtrl,
+                  decoration: InputDecoration(
+                    hintText: AppText.t(
+                      'بحث بالاسم أو الوحدة',
+                      'Search name or unit...',
                     ),
-                    onPressed: state.rows.isEmpty
-                        ? null
-                        : () => TableHtmlExport.export(
-                            context,
-                            filePrefix: 'params',
-                            title: _isChemical
-                                ? AppText.t(
-                                    'التحليل الكيميائي',
-                                    'Parameter Chemical Analysis',
-                                  )
-                                : AppText.t(
-                                    'الفحص الظاهري',
-                                    'Physical Aspects',
-                                  ),
-                            headers: DesktopParamsTab.exportHeaders(),
-                            rows: DesktopParamsTab.exportRows(state.rows),
-                          ),
-                    icon: const Icon(Icons.table_view_outlined),
+                    prefixIcon: const Icon(Icons.search),
                   ),
-                ],
+                ),
+                export: AppExportIconButton(
+                  onPressed: state.rows.isEmpty
+                      ? null
+                      : () => TableHtmlExport.export(
+                          context,
+                          filePrefix: 'params',
+                          title: _isChemical
+                              ? AppText.t(
+                                  'التحليل الكيميائي',
+                                  'Parameter Chemical Analysis',
+                                )
+                              : AppText.t('الفحص الظاهري', 'Physical Aspects'),
+                          headers: DesktopParamsTab.exportHeaders(),
+                          rows: DesktopParamsTab.exportRows(state.rows),
+                        ),
+                ),
               ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            AppField(
-              label: AppText.t(
-                'بحث بالاسم أو الوحدة',
-                'Search name or unit...',
-              ),
-              controller: _searchCtrl,
             ),
             const SizedBox(height: AppSpacing.sm),
             if (state.loading && state.rows.isNotEmpty) const AppRefreshBar(),

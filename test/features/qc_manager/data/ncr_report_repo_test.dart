@@ -33,7 +33,8 @@ void main() {
   late QcNcReportRepo repo;
 
   String day(int offset) {
-    final base = DateTime.now().add(Duration(days: offset));
+    final now = DateTime.now();
+    final base = DateTime(now.year, now.month, now.day + offset);
     return '${base.year.toString().padLeft(4, '0')}-'
         '${base.month.toString().padLeft(2, '0')}-'
         '${base.day.toString().padLeft(2, '0')}';

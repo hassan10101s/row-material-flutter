@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Material Lab V2 - multi-organization, offline-first (PLAN_V2 §10).
+// Material Lab - server-confirmed writes and permission-scoped read caching.
 //
 // The client is NOT trusted: every rule below re-derives the caller's identity
 // from `users/{uid}` (the only document the caller can create for itself) and
@@ -14,6 +14,1398 @@ rules_version = '2';
 // (`lib/core/sync/remote/*` and `lib/core/sync/entity_registry.dart`).
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // BEGIN GENERATED DIRECT DOMAIN RULES (generate_rules.js)
+function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\"", "\\\\\"") + "\""; }
+
+    function auditTextValid(v) { return v is string && v.matches('^[^\\x00-\\x1f]*$'); }
+
+    function qcOperationAudited(orgId, d) {
+      let path = /databases/$(database)/documents/organizations/$(orgId)/qcAudits/$(d.protocol.qcAuditId);
+      return d.protocol.qcAuditPath == path && getAfter(path).data.protocol.operationId == d.protocol.operationId;
+    }
+    function qcInspectionDecision(d) {
+      let old = resource == null ? '' : resource.data.status;
+      return d.status in ['InProgress','Submitted','Reviewed','Approved','Rejected','Closed']
+        && ((d.status in ['Approved','Closed'] || old in ['Approved','Closed']
+          || !(d.get('approvedBy',null) in [null,'']) || !(d.get('approvedAt',null) in [null,'']) || !(d.get('closedAt',null) in [null,'']))
+          ? roleCan('qc.approve') : true)
+        && ((d.status == 'Rejected' || old == 'Rejected' || !(d.get('rejectedAt',null) in [null,''])) ? roleCan('qc.reject') : true)
+        && (d.get('approvedBy',null) in [null,''] || d.approvedBy == request.auth.uid
+          || (resource != null && d.approvedBy == resource.data.approvedBy))
+        && (d.get('scorePct',null) == null || (d.scorePct >= 0 && d.scorePct <= 100));
+    }
+    function qcAuditLinked(orgId, d) {
+      let kinds = {'SOP':'qcSop','SOP_REV':'qcSopRevision','SOP_READ':'qcSopRead','TEMPLATE':'qcTemplate','SECTION':'qcSection','ITEM':'qcItem','INSPECTION':'qcInspection','RESPONSE':'qcResponse','FINDING':'qcFindingNc','CAPA':'qcCapa'};
+      let collections = {'SOP':'qcSops','SOP_REV':'qcSopRevisions','SOP_READ':'qcSopReads','TEMPLATE':'qcTemplates','SECTION':'qcSections','ITEM':'qcItems','INSPECTION':'qcInspections','RESPONSE':'qcResponses','FINDING':'qcFindingsNc','CAPA':'qcCapa'};
+      let targetPath = /databases/$(database)/documents/organizations/$(orgId)/$(collections.get(d.entityType,''))/$(d.targetGlobalId);
+      let target = getAfter(targetPath);
+      let previous = d.previousAuditId == null ? null : getAfter(/databases/$(database)/documents/organizations/$(orgId)/qcAudits/$(d.previousAuditId));
+      let canonical = '{' + '"action":' + auditQuoted(d.action) + ',"after_json":' + auditQuoted(d.afterJson) + ',"at":' + auditQuoted(d.at) + ',"before_json":' + auditQuoted(d.beforeJson) + ',"by_user_id":' + auditQuoted(d.byUserId) + ',"by_user_name":' + auditQuoted(d.byUserName) + ',"entity_id":' + auditQuoted(d.entityId) + ',"entity_type":' + auditQuoted(d.entityType) + ',"meta_json":' + auditQuoted(d.metaJson) + ',"prev_hash":' + auditQuoted(d.prevHash) + '}';
+      return d.byUserId == request.auth.uid && d.immutable == 1
+        && d.action in ['SOP_CREATED','SOP_UPDATED','SOP_DELETED','SOP_PUBLISHED','SOP_READ','TEMPLATE_CREATED','TEMPLATE_SAVED','TEMPLATE_DELETED','TEMPLATE_PUBLISHED','TEMPLATE_ARCHIVED','TEMPLATE_DUPLICATED','INSPECTION_CREATED','INSPECTION_SAVED','INSPECTION_SUBMITTED','INSPECTION_REVIEWED','INSPECTION_APPROVED','INSPECTION_REJECTED','INSPECTION_DELETED','ITEM_ANSWERED','NC_CREATED','NC_UPDATED','NC_ASSIGNED','NC_VERIFIED','NC_CLOSED','NC_DELETED','CAPA_CREATED','CAPA_UPDATED','CAPA_ACTION_COMPLETE','CAPA_VERIFIED','CAPA_CLOSED']
+        && d.targetEntityType == kinds.get(d.entityType, '')
+        && d.protocol.auditTargetPath == targetPath
+        && target.data.protocol.operationId == d.protocol.operationId
+        && target.data.updatedAt == request.time
+        && auditTextValid(d.action) && auditTextValid(d.afterJson) && auditTextValid(d.at) && auditTextValid(d.beforeJson) && auditTextValid(d.byUserId) && auditTextValid(d.byUserName) && auditTextValid(d.entityId) && auditTextValid(d.entityType) && auditTextValid(d.metaJson) && auditTextValid(d.prevHash)
+        && d.hash == hashing.sha256(canonical.toUtf8()).toHexString().lower()
+        && (d.prevHash == '' ? d.previousAuditId == null :
+          (previous != null && previous.data.hash == d.prevHash
+            && (previous.data.protocol.operationId != d.protocol.operationId
+              || previous.data.protocol.auditOrdinal < d.protocol.auditOrdinal)));
+    }
+
+    function chemicalAt(orgId, a, index) {
+      let defs = a.get('chemicalDefinitions', []);
+      return defs.size() <= index || chemicalEntry(orgId, defs[index]);
+    }
+    function chemicalEntry(orgId, c) {
+      let stock = getAfter(/databases/$(database)/documents/organizations/$(orgId)/inventoryItems/$(c.inventoryId));
+      return c is map && c.keys().hasOnly(['kind','inventoryId','unit','field','quantity'])
+        && c.inventoryId is string && c.inventoryId.size() > 0
+        && c.unit is string && stock != null && stock.data.organizationId == orgId
+        && stock.data.get('deletedAt', null) == null
+        && (stock.data.category == 'liquid' ? c.unit in ['L','mL']
+          : stock.data.category == 'powder' ? c.unit in ['kg','g'] : c.unit == 'pc')
+        && (c.kind == 'fixed' ? c.quantity is number && c.quantity > 0 && c.quantity < 1000000000000000
+          && !c.keys().hasAny(['field'])
+          : c.kind == 'link' && c.field is string && c.field.size() > 0 && !c.keys().hasAny(['quantity']));
+    }
+    function chemicalDefinitionProof(orgId, d) {
+      let defs = d.get('chemicalDefinitions', []);
+      return defs is list && defs.size() <= 36
+        && (defs.size() == 0 || d.deletedAt != null || chemicalSummary(orgId, d));
+    }
+    function chemicalSummary(orgId, d) {
+      let id = d.protocol.operationId + '_' + d.remoteId + '_summary';
+      let proof = getAfter(/databases/$(database)/documents/organizations/$(orgId)/analysisDefinitionProofs/$(id));
+      return proof != null && proof.data.analysisId == d.remoteId
+        && proof.data.operationId == d.protocol.operationId && proof.data.summary == true
+        && proof.data.committedAt == request.time;
+    }
+    function chemicalBlockProof(orgId, d, block) {
+      let id = d.protocol.operationId + '_' + d.remoteId + '_' + string(block);
+      let proof = getAfter(/databases/$(database)/documents/organizations/$(orgId)/analysisDefinitionProofs/$(id));
+      return proof != null && proof.data.analysisId == d.remoteId
+        && proof.data.operationId == d.protocol.operationId && proof.data.summary == false
+        && proof.data.block == block && proof.data.committedAt == request.time;
+    }
+    function chemicalAllBlocks(orgId, a, n) {
+      return n == int(math.ceil(a.chemicalDefinitions.size() / 4.0)) && n > 0 && n <= 9
+        && (n <= 0 || chemicalBlockProof(orgId, a, 0))
+        && (n <= 1 || chemicalBlockProof(orgId, a, 1))
+        && (n <= 2 || chemicalBlockProof(orgId, a, 2))
+        && (n <= 3 || chemicalBlockProof(orgId, a, 3))
+        && (n <= 4 || chemicalBlockProof(orgId, a, 4))
+        && (n <= 5 || chemicalBlockProof(orgId, a, 5))
+        && (n <= 6 || chemicalBlockProof(orgId, a, 6))
+        && (n <= 7 || chemicalBlockProof(orgId, a, 7))
+        && (n <= 8 || chemicalBlockProof(orgId, a, 8));
+    }
+    function optional_string(v) { return v is string || v == null; }
+    function optional_int(v) { return v is int || v == null; }
+    function optional_number(v) { return v is number || v == null; }
+    function keyPart(v) {
+      let text = string(v);
+      return string(text.toUtf8().size()) + ':' + text;
+    }
+    function heldUnique(orgId, d, key) {
+      let held = getAfter(/databases/$(database)/documents/organizations/$(orgId)/uniqueReservations/$(key));
+      return held != null && held.data.released == false
+        && held.data.entityType == d.protocol.entityType && held.data.entityId == d.remoteId
+        && held.data.recordPath == request.path;
+    }
+    function parentValid(orgId, d, field, type, collection, configType) {
+      let ref = d.parentRefs.get(field, {});
+      let id = ref.get('entityId', '');
+      let parent = getAfter(/databases/$(database)/documents/organizations/$(orgId)/$(collection)/$(id));
+      let data = parent.data;
+      return ref.keys().hasOnly(['entityType','entityId','version'])
+        && ref.get('entityType', '') == type && id is string && id.size() > 0
+        && ref.version is int && ref.version > 0 && parent != null
+        && data.organizationId == orgId && data.version == ref.version
+        && (!(type == 'labAnalysis' && d.protocol.entityType == 'labResult' && data.keys().hasAny(['chemicalDefinitions'])) || d.protocol.get('chemicalDefinitionAware', false) == true)
+        && (!(type == 'labAnalysis' && d.protocol.entityType in ['labAnalysisItem','labFieldLink']) || !data.keys().hasAny(['chemicalDefinitions']))
+        && (configType == '' || data.configType == configType)
+        && (data.get('deletedAt', null) == null || d.deletedAt != null
+          || (resource != null && resource.data.get('parentRefs', {}).get(field, {}).get('entityId', '') == id))
+        && (d.protocol.entityType != 'productBatchSample' || data.inspectionKind == 'product');
+    }
+    // QC parents have no labConfig discriminator, chemical-definition gate
+    // or product-sample kind gate. Keep the same reference/version/deletion
+    // contract without evaluating those unrelated domain branches per parent.
+    function qcParentValid(orgId, d, field, type, collection) {
+      let ref = d.parentRefs.get(field, {});
+      let id = ref.get('entityId', '');
+      let parent = getAfter(/databases/$(database)/documents/organizations/$(orgId)/$(collection)/$(id));
+      let data = parent.data;
+      return ref.keys().hasOnly(['entityType','entityId','version'])
+        && ref.get('entityType', '') == type && id is string && id.size() > 0
+        && ref.version is int && ref.version > 0 && parent != null
+        && data.organizationId == orgId && data.version == ref.version
+        && (data.get('deletedAt', null) == null || d.deletedAt != null
+          || (resource != null && resource.data.get('parentRefs', {}).get(field, {}).get('entityId', '') == id));
+    }
+    function payloadTypes(type, d) {
+      return type == 'sample' ? payloadTypes_sample(d) : type == 'productBatchSample' ? payloadTypes_productBatchSample(d) : type == 'qcInspection' ? payloadTypes_qcInspection(d) : type == 'qcResponse' ? payloadTypes_qcResponse(d) : true;
+    }
+    function effectAt(orgId, e, i) {
+      let path = e.recordPaths[i];
+      let record = e.records[i];
+      let doc = getAfter(path);
+      let collection = record.collection;
+      return record.keys().hasOnly(['entityType','entityId','version','collection'])
+        && record.entityId is string && record.version is int
+        && path == /databases/$(database)/documents/organizations/$(orgId)/$(collection)/$(record.entityId)
+        && doc != null && doc.data.version == record.version
+        && doc.data.remoteId == record.entityId && doc.data.protocol.entityType == record.entityType
+        && doc.data.protocol.operationId == e.operationId && doc.data.updatedAt == request.time
+        && payloadTypes(record.entityType, doc.data);
+    }
+    function exactEffects(orgId, e) {
+      return e.records.size() <= 4 ? smallEffects(orgId, e) : tableEffects(orgId, e);
+    }
+    function smallEffects(orgId, e) {
+      return e.records.size() > 0 && e.recordPaths.toSet().size() == e.records.size()
+        && (e.records.size() <= 0 || effectAt(orgId, e, 0))
+        && (e.records.size() <= 1 || effectAt(orgId, e, 1))
+        && (e.records.size() <= 2 || effectAt(orgId, e, 2))
+        && (e.records.size() <= 3 || effectAt(orgId, e, 3));
+    }
+    function compactTableEffect(orgId, d, type, collection) {
+      let proof = d.protocol.get('effect', null);
+      // directShape binds remoteId to the collection's captured docId. Avoid
+      // reconstructing the entire request path in every stock/lot write.
+      return proof == null || proof == {'entityType':type,'entityId':d.remoteId,'version':d.version,'collection':collection};
+    }
+    function tableEffectAt(e, i, types) {
+      let doc = getAfter(e.recordPaths[i]).data;
+      return doc.protocol.entityType in types
+        && doc.protocol.effect == e.records[i]
+        && doc.protocol.operationId == e.operationId && doc.updatedAt == request.time;
+    }
+    function tableEffects(orgId, e) {
+      // Bind event metadata through its first business effect. That effect's
+      // own write rule already requires the same authenticated atomic receipt.
+      // Reading the receipt here as well would consume an eleventh lookup for
+      // a ten-effect event, beyond Firestore's per-write access-call budget.
+      let first = getAfter(e.recordPaths[0]).data;
+      let table = first.protocol.entityType in ['qcCustomTable','qcCustomTableField'];
+      let consumption = first.protocol.entityType == 'labResult';
+      let product = first.protocol.entityType == 'labProduct';
+      let simple = first.protocol.entityType in 'parameter,materialBound,organizationSetting,labConstant,labUnit,equipment,equipmentEvent,worksheet,referenceMaterial,labMaterialAnalysis,nutritionFormulation,qcCustomTableRow'.split(',');
+      let types = table ? ['qcCustomTable','qcCustomTableField'] : consumption ? ['consumption','inventoryTransaction','inventoryLot','inventoryItem','secureFieldSubmission'] : simple ? 'parameter,materialBound,organizationSetting,labConstant,labUnit,equipment,equipmentEvent,worksheet,referenceMaterial,labMaterialAnalysis,nutritionFormulation,qcCustomTableRow'.split(',') : ['labAnalysis','labAnalysisItem','labFieldLink','labUnit'];
+      return e.records.size() > 0 && e.records.size() <= (simple ? 12 : 10)
+        && (product ? e.records.size() <= 7 : (table || consumption || simple || e.records.size() <= 6))
+        && e.organizationId == orgId && first.organizationId == orgId
+        && first.deviceId == e.deviceId && first.centralSequence == e.sequence
+        && e.recordPaths.toSet().size() == e.records.size()
+        && (simple && e.records.size() > 10 ? simpleLargeEffects(orgId, e) : (
+          (e.records.size() <= 0 || (product ? productEffectAt(e, 0, first.remoteId) : tableEffectAt(e, 0, consumption ? ['labResult'] : types)))
+          && (e.records.size() <= 1 || (product ? productEffectAt(e, 1, first.remoteId) : tableEffectAt(e, 1, types)))
+          && (e.records.size() <= 2 || (product ? productEffectAt(e, 2, first.remoteId) : tableEffectAt(e, 2, types)))
+          && (e.records.size() <= 3 || (product ? productEffectAt(e, 3, first.remoteId) : tableEffectAt(e, 3, types)))
+          && (e.records.size() <= 4 || (product ? productEffectAt(e, 4, first.remoteId) : tableEffectAt(e, 4, types)))
+          && (e.records.size() <= 5 || (product ? productEffectAt(e, 5, first.remoteId) : tableEffectAt(e, 5, types)))
+          && (e.records.size() <= 6 || (product ? productEffectAt(e, 6, first.remoteId) : tableEffectAt(e, 6, types)))
+          && (e.records.size() <= 7 || (product ? productEffectAt(e, 7, first.remoteId) : tableEffectAt(e, 7, types)))
+          && (e.records.size() <= 8 || (product ? productEffectAt(e, 8, first.remoteId) : tableEffectAt(e, 8, types)))
+          && (e.records.size() <= 9 || (product ? productEffectAt(e, 9, first.remoteId) : tableEffectAt(e, 9, types)))));
+    }
+    function simpleLargeEffects(orgId, e) {
+      let proof = getAfter(/databases/$(database)/documents/organizations/$(orgId)/simpleOperationProofs/$(e.operationId)).data;
+      return proof.organizationId == orgId && proof.operationId == e.operationId
+        && proof.sequence == e.sequence && proof.committedAt == request.time
+        && proof.records == e.records && proof.recordPaths == e.recordPaths
+        && tableEffectAt(e, 0, 'parameter,materialBound,organizationSetting,labConstant,labUnit,equipment,equipmentEvent,worksheet,referenceMaterial,labMaterialAnalysis,nutritionFormulation,qcCustomTableRow'.split(','))
+        && tableEffectAt(e, 1, 'parameter,materialBound,organizationSetting,labConstant,labUnit,equipment,equipmentEvent,worksheet,referenceMaterial,labMaterialAnalysis,nutritionFormulation,qcCustomTableRow'.split(','));
+    }
+    function simpleProofAt(orgId, d, i) {
+      let record = d.records[i];
+      let path = d.recordPaths[i];
+      let doc = getAfter(path).data;
+      return path == /databases/$(database)/documents/organizations/$(orgId)/$(record.collection)/$(record.entityId)
+        && doc.organizationId == orgId && doc.protocol.entityType in 'parameter,materialBound,organizationSetting,labConstant,labUnit,equipment,equipmentEvent,worksheet,referenceMaterial,labMaterialAnalysis,nutritionFormulation,qcCustomTableRow'.split(',')
+        && doc.protocol.effect == record && doc.protocol.operationId == d.operationId
+        && doc.centralSequence == d.sequence && doc.updatedAt == request.time;
+    }
+    function simpleProofAllowed(orgId, d) {
+      let first = getAfter(d.recordPaths[2]).data;
+      return d.keys().hasOnly(['organizationId','operationId','sequence','records','recordPaths','committedAt'])
+        && d.organizationId == orgId && d.records.size() > 10
+        && d.records.size() <= 12 && d.records.size() == d.recordPaths.size()
+        && first.updatedBy == request.auth.uid && d.committedAt == request.time
+        && (d.records.size() <= 2 || simpleProofAt(orgId, d, 2))
+        && (d.records.size() <= 3 || simpleProofAt(orgId, d, 3))
+        && (d.records.size() <= 4 || simpleProofAt(orgId, d, 4))
+        && (d.records.size() <= 5 || simpleProofAt(orgId, d, 5))
+        && (d.records.size() <= 6 || simpleProofAt(orgId, d, 6))
+        && (d.records.size() <= 7 || simpleProofAt(orgId, d, 7))
+        && (d.records.size() <= 8 || simpleProofAt(orgId, d, 8))
+        && (d.records.size() <= 9 || simpleProofAt(orgId, d, 9))
+        && (d.records.size() <= 10 || simpleProofAt(orgId, d, 10))
+        && (d.records.size() <= 11 || simpleProofAt(orgId, d, 11));
+    }
+    function productEffectAt(e, i, productId) {
+      let doc = getAfter(e.recordPaths[i]).data;
+      return (i == 0 ? doc.protocol.entityType == 'labProduct'
+        : doc.protocol.entityType == 'labProductAnalysis' && doc.parentRefs.productId.entityId == productId)
+        && doc.protocol.effect == e.records[i]
+        && doc.protocol.operationId == e.operationId && doc.updatedAt == request.time;
+    }
+    function ledgerDelta(orgId, d, i) {
+      let paths = d.protocol.ledgerPaths;
+      return paths.size() <= i ? 0 : getAfter(paths[i]).data.quantityDelta;
+    }
+    function ledgerEffect(orgId, d, i) {
+      let paths = d.protocol.ledgerPaths;
+      let ledger = paths.size() <= i ? null : getAfter(paths[i]);
+      return paths.size() <= i || (ledger != null
+        && ledger.data.protocol.entityType == 'inventoryTransaction'
+        && ledger.data.protocol.operationId == d.protocol.operationId
+        && ledger.data.parentRefs.inventoryId.entityId == d.remoteId
+        && ledger.data.organizationId == orgId && ledger.data.updatedAt == request.time);
+    }
+    function inventoryBalance(orgId, d) {
+      let before = resource == null ? 0 : resource.data.currentQty;
+      let compact = d.protocol.get('ledgerMode', '') == 'consumption_v1';
+      let delta = compact ? consumptionDelta(d, 0) + consumptionDelta(d, 1) + consumptionDelta(d, 2) + consumptionDelta(d, 3) : (d.protocol.ledgerPaths.size() > 0 ? ledgerDeltaAt(orgId, d, d.protocol.ledgerPaths[0]) : 0) + (d.protocol.ledgerPaths.size() > 1 ? ledgerDeltaAt(orgId, d, d.protocol.ledgerPaths[1]) : 0) + (d.protocol.ledgerPaths.size() > 2 ? ledgerDeltaAt(orgId, d, d.protocol.ledgerPaths[2]) : 0) + (d.protocol.ledgerPaths.size() > 3 ? ledgerDeltaAt(orgId, d, d.protocol.ledgerPaths[3]) : 0);
+      let lots = compact ? 0 : (d.protocol.lotPaths.size() > 0 ? lotDeltaAt(orgId, d, d.protocol.lotPaths[0]) : 0) + (d.protocol.lotPaths.size() > 1 ? lotDeltaAt(orgId, d, d.protocol.lotPaths[1]) : 0) + (d.protocol.lotPaths.size() > 2 ? lotDeltaAt(orgId, d, d.protocol.lotPaths[2]) : 0) + (d.protocol.lotPaths.size() > 3 ? lotDeltaAt(orgId, d, d.protocol.lotPaths[3]) : 0);
+      let consumed = d.protocol.get('consumptionPaths', []);
+      return d.currentQty is number && d.currentQty >= 0 && d.currentQty < 1000000000000000
+        && d.protocol.ledgerPaths.size() <= 4 && d.protocol.ledgerPaths.toSet().size() == d.protocol.ledgerPaths.size()
+        && d.protocol.lotPaths.size() <= 4 && d.protocol.lotPaths.toSet().size() == d.protocol.lotPaths.size()
+        && consumed is list && consumed.size() <= 4 && consumed.toSet().size() == consumed.size()
+        && (!compact || (consumed.size() > 0 && d.protocol.ledgerPaths.size() == 0))
+        && (compact || math.abs(lots - delta) <= 0.00000001 * (math.abs(delta) > 1 ? math.abs(delta) : 1))
+        && math.abs(d.currentQty - before - delta) <= 0.00000001 * (math.abs(before) > math.abs(d.currentQty) ? (math.abs(before) > 1 ? math.abs(before) : 1) : (math.abs(d.currentQty) > 1 ? math.abs(d.currentQty) : 1));
+    }
+    function ledgerDeltaAt(orgId, d, path) {
+      let ledger = getAfter(path);
+      return ledger != null && ledger.data.protocol.entityType == 'inventoryTransaction'
+        && ledger.data.protocol.operationId == d.protocol.operationId
+        && ledger.data.parentRefs.inventoryId.entityId == d.remoteId
+        && ledger.data.organizationId == orgId && ledger.data.updatedAt == request.time
+        ? ledger.data.quantityDelta : 1000000000000000000;
+    }
+    function lotDeltaAt(orgId, d, path) {
+      let after = getAfter(path);
+      let before = get(path);
+      return after != null && after.data.organizationId == orgId
+        && after.data.protocol.entityType == 'inventoryLot'
+        && after.data.parentRefs.inventoryId.entityId == d.remoteId
+        && after.data.protocol.operationId == d.protocol.operationId && after.data.updatedAt == request.time
+        ? after.data.qtyRemaining - (before == null ? 0 : before.data.qtyRemaining) : 1000000000000000000;
+    }
+    function lotDelta(orgId, d, i) {
+      let paths = d.protocol.lotPaths;
+      let path = paths.size() <= i ? null : paths[i];
+      let after = path == null ? null : getAfter(path);
+      let before = path == null ? null : get(path);
+      return path == null ? 0 : (after != null && after.data.organizationId == orgId
+        && after.data.protocol.entityType == 'inventoryLot'
+        && after.data.parentRefs.inventoryId.entityId == d.remoteId
+        && after.data.protocol.operationId == d.protocol.operationId && after.data.updatedAt == request.time
+        ? after.data.qtyRemaining - (before == null ? 0 : before.data.qtyRemaining) : 1000000000000000000);
+    }
+    function consumptionDelta(d, index) {
+      let paths = d.protocol.get('consumptionPaths', []);
+      let log = paths.size() <= index ? null : getAfter(paths[index]);
+      return log == null ? 0 : (log.data.parentRefs.inventoryId.entityId == d.remoteId
+        && log.data.protocol.entityType == 'consumption' && log.data.protocol.operationId == d.protocol.operationId
+        && log.data.organizationId == d.organizationId && log.data.updatedAt == request.time
+        ? (log.data.eventType == 'REVERSAL' ? log.data.appliedQty : -log.data.appliedQty) : 1000000000000000000);
+    }
+    function consumptionLinked(orgId, d) {
+      let item = getAfter(/databases/$(database)/documents/organizations/$(orgId)/inventoryItems/$(d.parentRefs.inventoryId.entityId));
+      let result = getAfter(/databases/$(database)/documents/organizations/$(orgId)/labResults/$(d.parentRefs.sampleTestId.entityId));
+      return d.eventType in ['CONSUMPTION','REVERSAL']
+        && item != null && item.data.organizationId == orgId
+        && d.parentRefs.inventoryId == {'entityType':'inventoryItem','entityId':item.data.remoteId,'version':item.data.version}
+        && item.data.get('deletedAt', null) == null
+        && result != null && result.data.organizationId == orgId
+        && d.parentRefs.sampleTestId == {'entityType':'labResult','entityId':result.data.remoteId,'version':result.data.version}
+        && (result.data.get('deletedAt', null) == null || (d.eventType == 'REVERSAL' && d.parentRefs.get('reversalOfLogId', null) != null))
+        && result.data.updatedAt == request.time
+        && d.appliedQty >= 0 && d.requestedQty >= 0 && d.requestedQty < 1000000000000000
+        && d.shortfallQty >= 0 && d.qtyUsed == (d.eventType == 'REVERSAL' ? -d.appliedQty : d.appliedQty)
+        && math.abs(d.requestedQty - d.appliedQty - d.shortfallQty) <= 0.00000001 * (d.requestedQty > 1 ? d.requestedQty : 1)
+        && result.data.protocol.operationId == d.protocol.operationId
+        && (d.appliedQty == 0 || (item.data.protocol.operationId == d.protocol.operationId
+          && (item.data.protocol.get('ledgerMode', '') == 'consumption_v1'
+            ? d.protocol.get('ledgerMode', '') == 'consumption_v1' && d.parentRefs.get('lotId', null) != null
+            : item.data.protocol.ledgerPaths.size() > 0)
+          && item.data.protocol.get('consumptionPaths', []).hasAny([request.path])));
+    }
+    // Consumption is append-only: its optional parents can use a smaller
+    // validator without the generic configuration/update exceptions.
+    function consumptionParentValid(orgId, d, field, type, collection) {
+      let ref = d.parentRefs[field];
+      let parent = getAfter(/databases/$(database)/documents/organizations/$(orgId)/$(collection)/$(ref.entityId));
+      return ref.version is int && ref.version > 0 && parent != null
+        && parent.data.organizationId == orgId
+        && ref == {'entityType':type,'entityId':parent.data.remoteId,'version':parent.data.version}
+        && parent.data.get('deletedAt', null) == null
+        && (type != 'inventoryLot' || d.appliedQty == 0 || d.protocol.get('ledgerMode', '') != 'consumption_v1'
+          || (parent.data.protocol.get('ledgerMode', '') == 'consumption_v1'
+            && parent.data.parentRefs.inventoryId.entityId == d.parentRefs.inventoryId.entityId
+            && parent.data.protocol.operationId == d.protocol.operationId && parent.data.updatedAt == request.time))
+        && (type != 'consumption' || deletionReversalValid(d, parent.data));
+    }
+    function tombstoneParentUnchanged(d, field) {
+      let ref = d.parentRefs.get(field, {});
+      let prior = resource.data.parentRefs.get(field, {});
+      return resource.data.get('deletedAt', null) == null
+        && ref.keys().hasOnly(['entityType','entityId','version'])
+        && ref.entityType == prior.entityType && ref.entityId == prior.entityId
+        && ref.version is int && ref.version > 0;
+    }
+    function deletionReversalValid(d, original) {
+      // The optional-parent gate above already checks existence, tenant,
+      // version and lifecycle; bind its business meaning here exactly once.
+      return d.eventType == 'REVERSAL' && original.eventType == 'CONSUMPTION'
+        && original.parentRefs.sampleTestId.entityId == d.parentRefs.sampleTestId.entityId
+        && original.parentRefs.inventoryId.entityId == d.parentRefs.inventoryId.entityId
+        && original.parentRefs.get('lotId', {}).get('entityId', null) == d.parentRefs.get('lotId', {}).get('entityId', null)
+        && d.appliedQty > 0 && d.appliedQty <= original.appliedQty;
+    }
+    function lotLinked(orgId, d) {
+      let item = getAfter(/databases/$(database)/documents/organizations/$(orgId)/inventoryItems/$(d.parentRefs.inventoryId.entityId));
+      return d.qtyReceived >= 0 && d.qtyReceived < 1000000000000000
+        && d.qtyRemaining >= 0 && d.qtyRemaining <= d.qtyReceived
+        && (d.deletedAt == null || d.qtyRemaining == 0)
+        && (resource == null || (d.qtyReceived == resource.data.qtyReceived
+          && d.parentRefs.inventoryId.entityId == resource.data.parentRefs.inventoryId.entityId))
+        && item.data.protocol.operationId == d.protocol.operationId
+        && item.data.protocol.lotPaths.hasAny([request.path])
+        && (item.data.protocol.get('ledgerMode', '') == 'consumption_v1') == (d.protocol.get('ledgerMode', '') == 'consumption_v1')
+        && (d.protocol.get('ledgerMode', '') != 'consumption_v1' || (resource != null
+          && item.data.protocol.get('ledgerMode', '') == 'consumption_v1'
+          && math.abs(d.qtyRemaining - resource.data.qtyRemaining - lotConsumptionDelta(item.data, d.remoteId))
+            <= 0.00000001 * (resource.data.qtyRemaining > 1 ? resource.data.qtyRemaining : 1)));
+    }
+    function lotConsumptionAt(item, lot, index) {
+      let paths = item.protocol.get('consumptionPaths', []);
+      let log = paths.size() <= index ? null : getAfter(paths[index]);
+      return log == null || log.data.parentRefs.get('lotId', {}).get('entityId', '') != lot ? 0
+        // The same freshly-written item's inventoryBalance validates every
+        // path's type/tenant/operation/time. Here only select this lot's share;
+        // repeating all those checks exceeds the expression budget.
+        : (log.data.eventType == 'REVERSAL' ? log.data.appliedQty : -log.data.appliedQty);
+    }
+    function lotConsumptionDelta(item, lot) {
+      return lotConsumptionAt(item, lot, 0) + lotConsumptionAt(item, lot, 1)
+        + lotConsumptionAt(item, lot, 2) + lotConsumptionAt(item, lot, 3);
+    }
+    function adjustmentLinked(orgId, d) {
+      let path = /databases/$(database)/documents/organizations/$(orgId)/inventoryItems/$(d.parentRefs.inventoryId.entityId);
+      let before = get(path);
+      let after = getAfter(path);
+      return d.oldQty >= 0 && d.newQty >= 0
+        && d.oldQty == before.data.currentQty && d.newQty == after.data.currentQty
+        && after.data.protocol.operationId == d.protocol.operationId;
+    }
+    function ledgerLinked(orgId, d) {
+      let id = d.parentRefs.inventoryId.entityId;
+      let item = getAfter(/databases/$(database)/documents/organizations/$(orgId)/inventoryItems/$(id));
+      return d.quantityDelta is number && math.abs(d.quantityDelta) < 1000000000000000
+        && d.transactionType in ['OPENING_BALANCE','RECEIPT','ADJUSTMENT','CONSUMPTION','REVERSAL']
+        && item.data.protocol.operationId == d.protocol.operationId
+        && item.data.protocol.ledgerPaths.hasAny([request.path])
+        && (item.data.protocol.get('consumptionPaths', []).size() == 0
+          || consumptionMatchesLedger(orgId, item.data));
+    }
+    function consumptionMatchesLedger(orgId, item) {
+      let consumed = consumptionDelta(item, 0) + consumptionDelta(item, 1) + consumptionDelta(item, 2) + consumptionDelta(item, 3);
+      let delta = (item.protocol.ledgerPaths.size() > 0 ? ledgerDeltaAt(orgId, item, item.protocol.ledgerPaths[0]) : 0) + (item.protocol.ledgerPaths.size() > 1 ? ledgerDeltaAt(orgId, item, item.protocol.ledgerPaths[1]) : 0) + (item.protocol.ledgerPaths.size() > 2 ? ledgerDeltaAt(orgId, item, item.protocol.ledgerPaths[2]) : 0) + (item.protocol.ledgerPaths.size() > 3 ? ledgerDeltaAt(orgId, item, item.protocol.ledgerPaths[3]) : 0);
+      return math.abs(consumed - delta) <= 0.00000001 * (math.abs(delta) > 1 ? math.abs(delta) : 1);
+    }
+    function sampleDecision(orgId, d) {
+      let quantity = quantityNumber(d.get('quantity', null));
+      let rejected = quantityNumber(d.get('rejectedQuantity', null));
+      return d.decisionStatus in ['', 'PENDING','APPROVED','CONDITIONAL_APPROVAL','PARTIAL_REJECTION','FULL_REJECTION']
+        && quantity >= 0 && quantity < 1000000000000000 && rejected >= 0 && rejected <= quantity
+        && (resource == null
+          ? (d.decisionStatus in ['', 'PENDING'] ? true : initialDecisionAllowed(d.decisionStatus))
+          : (d.decisionStatus == resource.data.get('decisionStatus', '') ? true : sampleDecisionHistory(d)));
+    }
+    function initialDecisionAllowed(status) {
+      let profile = userDoc(request.auth.uid);
+      return profile.data.role in ['admin','quality_manager','lab'] ? true
+        : roleCan(status in ['PARTIAL_REJECTION','FULL_REJECTION'] ? 'qc.reject' : 'qc.approve');
+    }
+    function sampleDecisionHistory(d) {
+      let path = d.protocol.qualityHistoryPath;
+      let history = path == null ? null : getAfter(path);
+      return history != null
+        && history.data.protocol.entityType == 'qualityCheck'
+        && history.data.protocol.operationId == d.protocol.operationId
+        && history.data.parentRefs.inspectionId.entityId == d.remoteId
+        && history.data.oldStatus == resource.data.get('decisionStatus', '')
+        && history.data.newStatus == d.decisionStatus;
+    }
+    function quantityValid(raw) {
+      return raw == null || raw == '' || (raw is string && raw.matches('^[0-9]+([.,][0-9]+)?$')
+        && float(raw.replace(',', '.')) < 1000000000000000);
+    }
+    function quantityNumber(raw) { return raw == null || raw == '' ? 0 : float(raw.replace(',', '.')); }
+    function qualityHistory(orgId, d) {
+      let id = d.parentRefs.inspectionId.entityId;
+      let before = get(/databases/$(database)/documents/organizations/$(orgId)/samples/$(id));
+      let sample = getAfter(/databases/$(database)/documents/organizations/$(orgId)/samples/$(id));
+      return sample.data.protocol.operationId == d.protocol.operationId
+        && sample.data.protocol.qualityHistoryPath == request.path
+        && d.oldStatus == (before == null ? '' : before.data.decisionStatus)
+        // The qualityChecks create rule already gates this exact newStatus
+        // on qc.approve/qc.reject. Do not repeat that role evaluation here.
+        && d.newStatus == sample.data.decisionStatus;
+    }
+    function productSampleDecisionValid(orgId, d) {
+      let id = d.get('nonConformanceRemoteId', '');
+      let finding = id is string && id.size() > 0
+        ? getAfter(/databases/$(database)/documents/organizations/$(orgId)/qcFindingsNc/$(id)) : null;
+      return d.get('decisionStatus', '') in [null,'','PENDING','APPROVED','CONDITIONAL_APPROVAL','PARTIAL_REJECTION','FULL_REJECTION','NON_CONFORMANCE']
+        && (d.get('decisionStatus', '') != 'NON_CONFORMANCE'
+          || (finding != null && finding.data.get('deletedAt', null) == null
+            && finding.data.parentRefs.productSampleId.entityId == d.remoteId));
+    }
+    function productFindingLinkValid(orgId, d) {
+      let id = d.parentRefs.get('productSampleId', {}).get('entityId', '');
+      let before = resource == null ? '' : resource.data.get('parentRefs', {}).get('productSampleId', {}).get('entityId', '');
+      let sample = id.size() > 0 ? getAfter(/databases/$(database)/documents/organizations/$(orgId)/productBatchSamples/$(id)) : null;
+      return (resource == null || id == before)
+        && (d.get('deletedAt', null) == null || sample == null
+          || sample.data.get('deletedAt', null) != null
+          || sample.data.get('decisionStatus', '') != 'NON_CONFORMANCE'
+          || sample.data.get('nonConformanceRemoteId', '') != d.remoteId);
+    }
+    function rolePermissionGranted(role, perm) {
+      return perm in ['samples.create','samples.update','lab_results.create','lab_results.update','qc.write','reports.create']
+        ? role in ['admin','quality_manager','lab','trial_owner']
+        : perm in ['qc.approve','qc.reject','users.read','audit.read']
+        ? role in ['admin','quality_manager','lab']
+        : perm in ['org.update','users.create','users.update','users.disable','devices.read','devices.update']
+        ? role in ['admin']
+        : perm in rolePermissions(role);
+    }
+    function unique_parameter_0(d) {
+      return d.get('parameterName', null) != null
+        ? [hashing.sha256('u2|parameter|0|' + keyPart(d.get('parameterName', null))).toHexString().lower()] : [];
+    }
+    function keys_parameter(d) { return unique_parameter_0(d); }
+    function payloadCore_parameter(d) { return d.parameterName is string && optional_string(d.get('unit', null)) && optional_string(d.get('parameterType', null)) && d.importedAt is string; }
+    function payloadTypes_parameter(d) { return true; }
+    function shape_parameter(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,deviceId,importedAt,localId,organizationId,parameterName,parameterType,remoteId,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'parameter'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_parameter(d)
+        && payloadCore_parameter(d)
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && compactTableEffect(orgId, d, 'parameter', 'parameters');
+    }
+    function unique_materialBound_0(d) {
+      return d.parentRefs.get('materialId', null) != null && d.parentRefs.get('parameterId', null) != null
+        ? [hashing.sha256('u2|materialBound|0|' + keyPart(d.parentRefs.materialId.entityType + '/' + d.parentRefs.materialId.entityId) + keyPart(d.parentRefs.parameterId.entityType + '/' + d.parentRefs.parameterId.entityId)).toHexString().lower()] : [];
+    }
+    function keys_materialBound(d) { return unique_materialBound_0(d); }
+    function payloadCore_materialBound(d) { return optional_int(d.get('materialId', null)) && optional_int(d.get('parameterId', null)) && d.parameterType is string && optional_string(d.get('unit', null)) && optional_number(d.get('minValue', null)) && optional_number(d.get('maxValue', null)) && optional_int(d.get('precision', null)) && optional_int(d.get('active', null)) && optional_int(d.get('isRequired', null)) && optional_string(d.get('materialRemoteId', null)) && optional_string(d.get('parameterRemoteId', null)); }
+    function payloadTypes_materialBound(d) { return true; }
+    function shape_materialBound(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('active,createdAt,createdBy,deletedAt,deviceId,isRequired,localId,materialId,materialRemoteId,maxValue,minValue,organizationId,parameterId,parameterRemoteId,parameterType,precision,remoteId,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'materialBound'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['materialId','parameterId'])
+        && d.protocol.uniqueKeys == keys_materialBound(d)
+        && payloadCore_materialBound(d)
+        && parentValid(orgId, d, 'materialId', 'referenceMaterial', 'referenceMaterials', '')
+        && parentValid(orgId, d, 'parameterId', 'parameter', 'parameters', '')
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && compactTableEffect(orgId, d, 'materialBound', 'materialBounds');
+    }
+    function unique_organizationSetting_0(d) {
+      return d.get('key', null) != null
+        ? [hashing.sha256('u2|organizationSetting|0|' + keyPart(d.get('key', null))).toHexString().lower()] : [];
+    }
+    function keys_organizationSetting(d) { return unique_organizationSetting_0(d); }
+    function payloadCore_organizationSetting(d) { return d.key is string && d.value is string; }
+    function payloadTypes_organizationSetting(d) { return true; }
+    function shape_organizationSetting(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,deviceId,key,localId,organizationId,remoteId,updatedAt,updatedBy,value,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'organizationSetting'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_organizationSetting(d)
+        && payloadCore_organizationSetting(d)
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && compactTableEffect(orgId, d, 'organizationSetting', 'organizationSettings');
+    }
+    function unique_qcSop_0(d) {
+      return d.get('code', null) != null
+        ? [hashing.sha256('u2|qcSop|0|' + keyPart(d.get('code', null))).toHexString().lower()] : [];
+    }
+    function keys_qcSop(d) { return unique_qcSop_0(d); }
+    function payloadCore_qcSop(d) { return d.code is string && d.title is string && optional_string(d.get('category', null)) && optional_string(d.get('dept', null)) && optional_string(d.get('site', null)) && optional_string(d.get('status', null)) && optional_string(d.get('contentType', null)) && optional_string(d.get('contentText', null)) && optional_string(d.get('fileUrl', null)) && optional_string(d.get('fileName', null)) && optional_string(d.get('mimeType', null)) && optional_int(d.get('revNo', null)) && optional_string(d.get('effectiveDate', null)) && optional_string(d.get('publishedAt', null)) && optional_string(d.get('expiryDate', null)) && optional_int(d.get('isActive', null)) && optional_string(d.get('ownerId', null)) && optional_string(d.get('approverId', null)) && optional_string(d.get('approvedAt', null)) && optional_string(d.get('reviewedAt', null)) && optional_string(d.get('rejectionReason', null)) && optional_string(d.get('tags', null)) && optional_string(d.get('criticality', null)) && optional_string(d.get('viewRoles', null)) && optional_string(d.get('editRoles', null)) && optional_string(d.get('approveRoles', null)) && optional_string(d.get('publishRoles', null)) && optional_int(d.get('requiresReadAck', null)) && optional_int(d.get('readAckMandatory', null)) && optional_string(d.get('versionHash', null)); }
+    function payloadTypes_qcSop(d) { return true; }
+    function shape_qcSop(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('approveRoles,approvedAt,approverId,category,code,contentText,contentType,createdAt,createdBy,criticality,deletedAt,dept,deviceId,editRoles,effectiveDate,expiryDate,fileName,fileUrl,isActive,localId,mimeType,organizationId,ownerId,publishRoles,publishedAt,readAckMandatory,rejectionReason,remoteId,requiresReadAck,revNo,reviewedAt,site,status,tags,title,updatedAt,updatedBy,version,versionHash,viewRoles,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcSop'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_qcSop(d)
+        && payloadCore_qcSop(d)
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && qcOperationAudited(orgId, d);
+    }
+    function keys_qcSopRevision(d) { return []; }
+    function payloadCore_qcSopRevision(d) { return optional_int(d.get('sopId', null)) && d.revNo is int && optional_string(d.get('contentText', null)) && optional_string(d.get('fileUrl', null)) && optional_string(d.get('fileName', null)) && optional_string(d.get('mimeType', null)) && d.changeReason is string && optional_string(d.get('editedBy', null)) && d.editedAt is string && optional_string(d.get('diffSummary', null)) && optional_string(d.get('prevRevIdRef', null)) && optional_string(d.get('contentHash', null)) && optional_int(d.get('isPublishedRev', null)) && optional_string(d.get('editedByName', null)) && optional_string(d.get('supersededAt', null)) && optional_string(d.get('sopRemoteId', null)); }
+    function payloadTypes_qcSopRevision(d) { return true; }
+    function shape_qcSopRevision(orgId, d) {
+      let uniqueKeys = keys_qcSopRevision(d);
+      return d.keys().hasOnly('changeReason,contentHash,contentText,createdAt,createdBy,deletedAt,deviceId,diffSummary,editedAt,editedBy,editedByName,fileName,fileUrl,isPublishedRev,localId,mimeType,organizationId,prevRevIdRef,remoteId,revNo,sopId,sopRemoteId,supersededAt,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcSopRevision'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['sopId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcSopRevision(d)
+        && qcParentValid(orgId, d, 'sopId', 'qcSop', 'qcSops')
+        && qcOperationAudited(orgId, d);
+    }
+    function unique_qcSopRead_0(d) {
+      return d.parentRefs.get('sopId', null) != null && d.get('revNo', null) != null && d.get('userId', null) != null
+        ? [hashing.sha256('u2|qcSopRead|0|' + keyPart(d.parentRefs.sopId.entityType + '/' + d.parentRefs.sopId.entityId) + keyPart(d.get('revNo', null)) + keyPart(d.get('userId', null))).toHexString().lower()] : [];
+    }
+    function keys_qcSopRead(d) { return unique_qcSopRead_0(d); }
+    function payloadCore_qcSopRead(d) { return optional_int(d.get('sopId', null)) && d.revNo is int && d.userId is string && optional_string(d.get('userName', null)) && d.readAt is string && optional_string(d.get('signatureBase64', null)) && optional_string(d.get('ipAddress', null)) && optional_string(d.get('geo', null)) && optional_string(d.get('ackMethod', null)) && optional_string(d.get('sopRemoteId', null)); }
+    function payloadTypes_qcSopRead(d) { return true; }
+    function shape_qcSopRead(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('ackMethod,createdAt,createdBy,deletedAt,deviceId,geo,ipAddress,localId,organizationId,readAt,remoteId,revNo,signatureBase64,sopId,sopRemoteId,updatedAt,updatedBy,userId,userName,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcSopRead'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['sopId'])
+        && d.protocol.uniqueKeys == keys_qcSopRead(d)
+        && payloadCore_qcSopRead(d)
+        && qcParentValid(orgId, d, 'sopId', 'qcSop', 'qcSops')
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && qcOperationAudited(orgId, d);
+    }
+    function unique_sample_0(d) {
+      return d.get('entryCode', null) != null
+        ? [hashing.sha256('u2|sample|0|' + keyPart(d.get('entryCode', null))).toHexString().lower()] : [];
+    }
+    function keys_sample(d) { return unique_sample_0(d); }
+    function payloadCore_sample(d) { return d.entryCode is string && d.materialName is string && d.inspectionDate is string && optional_string(d.get('truckNumber', null)) && optional_string(d.get('sampleTakenBy', null)) && d.physicalResultsJson is string && d.physicalReferenceJson is string && d.decisionStatus is string && optional_string(d.get('followUpNote', null)) && d.snapshotJson is string && optional_int(d.get('decisionVersion', null)) && optional_string(d.get('expiryDate', null)) && optional_int(d.get('productId', null)) && optional_string(d.get('batchNumber', null)) && optional_int(d.get('publicPrivacyEpoch', null)) && optional_string(d.get('secureTemplateJson', null)); }
+    function payloadTypes_sample(d) { return optional_int(d.get('materialId', null)) && d.materialCode is string && optional_string(d.get('supplier', null)) && optional_string(d.get('quantity', null)) && d.specialistName is string && d.chemicalResultsJson is string && d.chemicalReferenceJson is string && optional_string(d.get('decisionReason', null)) && optional_string(d.get('rejectedQuantity', null)) && d.sampleNamesJson is string && d.createdByName is string && optional_string(d.get('inspectionKind', null)) && optional_string(d.get('formulaNumber', null)) && optional_string(d.get('secureEntryId', null)) && optional_string(d.get('securePolicyJob', null)); }
+    function shape_sample(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('batchNumber,chemicalReferenceJson,chemicalResultsJson,createdAt,createdBy,createdByName,decisionReason,decisionStatus,decisionVersion,deletedAt,deviceId,entryCode,expiryDate,followUpNote,formulaNumber,inspectionDate,inspectionKind,localId,materialCode,materialId,materialName,organizationId,payloadBytes,physicalReferenceJson,physicalResultsJson,productId,publicPrivacyEpoch,quantity,rejectedQuantity,remoteId,sampleNamesJson,sampleTakenBy,secureEntryId,securePolicyJob,secureTemplateJson,snapshotJson,specialistName,supplier,truckNumber,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'sample'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['materialId','productId'])
+        && d.protocol.uniqueKeys == keys_sample(d)
+        && (resource == null || d.entryCode == resource.data.entryCode)
+        && payloadCore_sample(d)
+        && (d.protocol.get('effect', null) == null || payloadTypes_sample(d))
+        && (d.parentRefs.get('materialId', null) == null ? d.get('inspectionKind', 'raw') == 'product' : parentValid(orgId, d, 'materialId', 'referenceMaterial', 'referenceMaterials', ''))
+        && (d.parentRefs.get('productId', null) == null ? true : parentValid(orgId, d, 'productId', 'labProduct', 'labConfig', 'lab_products'))
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && secureSource(orgId, d)
+        && sampleDecision(orgId, d);
+    }
+    function keys_qualityCheck(d) { return []; }
+    function payloadCore_qualityCheck(d) { return optional_int(d.get('inspectionId', null)) && optional_string(d.get('oldStatus', null)) && d.newStatus is string && optional_string(d.get('changeReason', null)) && optional_string(d.get('followUpNote', null)) && optional_string(d.get('rejectedQuantity', null)) && d.changedBy is string && d.changedByName is string && d.changedAt is string; }
+    function payloadTypes_qualityCheck(d) { return true; }
+    function shape_qualityCheck(orgId, d) {
+      let uniqueKeys = keys_qualityCheck(d);
+      return d.keys().hasOnly('businessVersion,changeReason,changedAt,changedBy,changedByName,createdAt,createdBy,deletedAt,deviceId,followUpNote,inspectionId,localId,newStatus,oldStatus,organizationId,rejectedQuantity,remoteId,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qualityCheck'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inspectionId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qualityCheck(d)
+        && parentValid(orgId, d, 'inspectionId', 'sample', 'samples', '')
+        && qualityHistory(orgId, d);
+    }
+    function keys_labResult(d) { return []; }
+    function payloadCore_labResult(d) { return (d.get('analysisId', null) is int || d.get('analysisId', null) == null) && d.sourceType is string && (d.get('sourceRefId', null) is int || d.get('sourceRefId', null) == null) && d.sourceName is string && d.sampleName is string && (d.get('resultText', null) is string || d.get('resultText', null) == null) && (d.get('dynamicValuesJson', null) is string || d.get('dynamicValuesJson', null) == null) && (d.get('entryCode', null) is string || d.get('entryCode', null) == null) && (d.get('worksheetRowId', null) is int || d.get('worksheetRowId', null) == null) && (d.get('testedBy', null) is string || d.get('testedBy', null) == null) && d.testedAt is string && (d.get('nirExclusionsJson', null) is string || d.get('nirExclusionsJson', null) == null) && (d.get('secureEntryId', null) is string || d.get('secureEntryId', null) == null) && (d.get('publicPrivacyEpoch', null) is int || d.get('publicPrivacyEpoch', null) == null) && (d.get('securePolicyJob', null) is string || d.get('securePolicyJob', null) == null) && (d.get('secureTemplateJson', null) is string || d.get('secureTemplateJson', null) == null) && (d.get('secureResult', null) is int || d.get('secureResult', null) == null); }
+    function payloadTypes_labResult(d) { return true; }
+    function shape_labResult(orgId, d) {
+      let uniqueKeys = keys_labResult(d);
+      return d.keys().hasOnly('analysisId,createdAt,createdBy,deletedAt,deviceId,dynamicValues,dynamicValuesJson,entryCode,localId,nirExclusionsJson,organizationId,publicPrivacyEpoch,remoteId,resultText,sampleName,secureEntryId,securePolicyJob,secureResult,secureTemplateJson,sourceName,sourceRefId,sourceType,testedAt,testedBy,updatedAt,updatedBy,version,worksheetRowId,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labResult'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['analysisId','worksheetRowId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_labResult(d)
+        && (d.get('deletedAt', null) != null && resource != null ? tombstoneParentUnchanged(d, 'analysisId') : parentValid(orgId, d, 'analysisId', 'labAnalysis', 'labConfig', 'lab_analyses'))
+        && (d.parentRefs.get('worksheetRowId', null) == null ? true : (d.get('deletedAt', null) != null && resource != null ? tombstoneParentUnchanged(d, 'worksheetRowId') : parentValid(orgId, d, 'worksheetRowId', 'worksheet', 'worksheets', '')))
+        && secureSource(orgId, d)
+        && (d.get('nirExclusionsJson', null) == null || d.nirExclusionsJson.size() <= 65536)
+        && (resource == null || resource.data.get('nirExclusionsJson', null) == null || d.get('nirExclusionsJson', null) is string)
+        && compactTableEffect(orgId, d, 'labResult', 'labResults');
+    }
+    function unique_productBatchSample_0(d) {
+      return d.parentRefs.get('batchId', null) != null && d.get('sampleNo', null) != null
+        ? [hashing.sha256('u2|productBatchSample|0|' + keyPart(d.parentRefs.batchId.entityType + '/' + d.parentRefs.batchId.entityId) + keyPart(d.get('sampleNo', null))).toHexString().lower()] : [];
+    }
+    function keys_productBatchSample(d) { return unique_productBatchSample_0(d); }
+    function payloadCore_productBatchSample(d) { return optional_int(d.get('batchId', null)) && d.sampleName is string && optional_string(d.get('physicalResultsJson', null)) && optional_string(d.get('testedBy', null)) && d.testedAt is string && optional_string(d.get('decisionReason', null)) && optional_string(d.get('batchRemoteId', null)) && optional_string(d.get('secureEntryId', null)) && optional_string(d.get('securePolicyJob', null)); }
+    function payloadTypes_productBatchSample(d) { return d.sampleNo is int && optional_string(d.get('sampleTaker', null)) && optional_string(d.get('chemicalResultsJson', null)) && optional_string(d.get('testedByName', null)) && optional_string(d.get('decisionStatus', null)) && optional_string(d.get('nonConformanceRemoteId', null)) && optional_string(d.get('batchEntryCode', null)) && optional_int(d.get('publicPrivacyEpoch', null)) && optional_string(d.get('secureTemplateJson', null)); }
+    function shape_productBatchSample(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('batchEntryCode,batchId,batchRemoteId,chemicalResultsJson,createdAt,createdBy,decisionReason,decisionStatus,deletedAt,deviceId,localId,nonConformanceRemoteId,organizationId,physicalResultsJson,publicPrivacyEpoch,remoteId,sampleName,sampleNo,sampleTaker,secureEntryId,securePolicyJob,secureTemplateJson,testedAt,testedBy,testedByName,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'productBatchSample'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['batchId'])
+        && d.protocol.uniqueKeys == keys_productBatchSample(d)
+        && payloadCore_productBatchSample(d)
+        && (d.protocol.get('effect', null) == null || payloadTypes_productBatchSample(d))
+        && parentValid(orgId, d, 'batchId', 'sample', 'samples', '')
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && secureSource(orgId, d)
+        && productSampleDecisionValid(orgId, d);
+    }
+    function unique_labAnalysis_0(d) {
+      return d.get('name', null) != null
+        ? [hashing.sha256('u2|labAnalysis|0|' + keyPart(d.get('name', null))).toHexString().lower()] : [];
+    }
+    function keys_labAnalysis(d) { return unique_labAnalysis_0(d); }
+    function payloadCore_labAnalysis(d) { return d.name is string && optional_string(d.get('unit', null)) && optional_string(d.get('description', null)) && optional_string(d.get('reference', null)) && optional_string(d.get('dynamicFieldsJson', null)) && optional_string(d.get('formulaJson', null)) && optional_int(d.get('parameterId', null)) && optional_int(d.get('active', null)) && optional_string(d.get('parameterRemoteId', null)); }
+    function payloadTypes_labAnalysis(d) { return true; }
+    function shape_labAnalysis(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('active,chemicalDefinitions,configType,createdAt,createdBy,deletedAt,description,deviceId,dynamicFieldsJson,formulaJson,localId,name,organizationId,parameterId,parameterRemoteId,reference,remoteId,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labAnalysis'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['parameterId'])
+        && d.protocol.uniqueKeys == keys_labAnalysis(d)
+        && d.configType == 'lab_analyses'
+        && payloadCore_labAnalysis(d)
+        && (d.parentRefs.get('parameterId', null) == null ? true : parentValid(orgId, d, 'parameterId', 'parameter', 'parameters', ''))
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && chemicalDefinitionProof(orgId, d)
+        && compactTableEffect(orgId, d, 'labAnalysis', 'labConfig');
+    }
+    function unique_labAnalysisItem_0(d) {
+      return d.parentRefs.get('analysisId', null) != null && d.parentRefs.get('inventoryId', null) != null
+        ? [hashing.sha256('u2|labAnalysisItem|0|' + keyPart(d.parentRefs.analysisId.entityType + '/' + d.parentRefs.analysisId.entityId) + keyPart(d.parentRefs.inventoryId.entityType + '/' + d.parentRefs.inventoryId.entityId)).toHexString().lower()] : [];
+    }
+    function keys_labAnalysisItem(d) { return unique_labAnalysisItem_0(d); }
+    function payloadCore_labAnalysisItem(d) { return optional_int(d.get('analysisId', null)) && optional_int(d.get('inventoryId', null)) && d.qtyPerSample is number && d.unit is string && optional_string(d.get('inventoryRemoteId', null)); }
+    function payloadTypes_labAnalysisItem(d) { return true; }
+    function shape_labAnalysisItem(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('analysisId,configType,createdAt,createdBy,deletedAt,deviceId,inventoryId,inventoryRemoteId,localId,organizationId,qtyPerSample,remoteId,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labAnalysisItem'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inventoryId','analysisId'])
+        && d.protocol.uniqueKeys == keys_labAnalysisItem(d)
+        && d.configType == 'lab_analysis_items'
+        && payloadCore_labAnalysisItem(d)
+        && parentValid(orgId, d, 'inventoryId', 'inventoryItem', 'inventoryItems', '')
+        && parentValid(orgId, d, 'analysisId', 'labAnalysis', 'labConfig', 'lab_analyses')
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && compactTableEffect(orgId, d, 'labAnalysisItem', 'labConfig');
+    }
+    function unique_labFieldLink_0(d) {
+      return d.parentRefs.get('analysisId', null) != null && d.get('dynamicField', null) != null
+        ? [hashing.sha256('u2|labFieldLink|0|' + keyPart(d.parentRefs.analysisId.entityType + '/' + d.parentRefs.analysisId.entityId) + keyPart(d.get('dynamicField', null))).toHexString().lower()] : [];
+    }
+    function keys_labFieldLink(d) { return unique_labFieldLink_0(d); }
+    function payloadCore_labFieldLink(d) { return optional_int(d.get('analysisId', null)) && d.dynamicField is string && optional_int(d.get('inventoryId', null)) && optional_string(d.get('unit', null)) && optional_string(d.get('kind', null)) && optional_number(d.get('fixedValue', null)) && optional_string(d.get('listValues', null)) && optional_string(d.get('inventoryRemoteId', null)); }
+    function payloadTypes_labFieldLink(d) { return true; }
+    function shape_labFieldLink(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('analysisId,configType,createdAt,createdBy,deletedAt,deviceId,dynamicField,fixedValue,inventoryId,inventoryRemoteId,kind,listValues,localId,organizationId,remoteId,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labFieldLink'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inventoryId','analysisId'])
+        && d.protocol.uniqueKeys == keys_labFieldLink(d)
+        && d.configType == 'lab_field_chemical_links'
+        && payloadCore_labFieldLink(d)
+        && (d.parentRefs.get('inventoryId', null) == null ? true : parentValid(orgId, d, 'inventoryId', 'inventoryItem', 'inventoryItems', ''))
+        && parentValid(orgId, d, 'analysisId', 'labAnalysis', 'labConfig', 'lab_analyses')
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && compactTableEffect(orgId, d, 'labFieldLink', 'labConfig');
+    }
+    function unique_labConstant_0(d) {
+      return d.get('name', null) != null
+        ? [hashing.sha256('u2|labConstant|0|' + keyPart(d.get('name', null))).toHexString().lower()] : [];
+    }
+    function keys_labConstant(d) { return unique_labConstant_0(d); }
+    function payloadCore_labConstant(d) { return d.name is string && d.symbol is string && optional_string(d.get('valueText', null)) && optional_string(d.get('unit', null)) && optional_string(d.get('unitDim', null)) && optional_int(d.get('isExpression', null)) && optional_string(d.get('expression', null)) && optional_number(d.get('minValue', null)) && optional_number(d.get('maxValue', null)) && optional_int(d.get('precision', null)) && optional_string(d.get('description', null)) && optional_int(d.get('isGlobal', null)); }
+    function payloadTypes_labConstant(d) { return true; }
+    function shape_labConstant(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('configType,createdAt,createdBy,deletedAt,description,deviceId,expression,isExpression,isGlobal,localId,maxValue,minValue,name,organizationId,precision,remoteId,symbol,unit,unitDim,updatedAt,updatedBy,valueText,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labConstant'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_labConstant(d)
+        && d.configType == 'lab_constants'
+        && payloadCore_labConstant(d)
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && compactTableEffect(orgId, d, 'labConstant', 'labConfig');
+    }
+    function unique_labProduct_0(d) {
+      return d.get('name', null) != null
+        ? [hashing.sha256('u2|labProduct|0|' + keyPart(d.get('name', null))).toHexString().lower()] : [];
+    }
+    function keys_labProduct(d) { return unique_labProduct_0(d); }
+    function payloadCore_labProduct(d) { return d.name is string && optional_string(d.get('category', null)) && optional_string(d.get('description', null)) && optional_string(d.get('physicalReferenceJson', null)) && optional_string(d.get('chemicalReferenceJson', null)) && optional_int(d.get('active', null)) && optional_string(d.get('securePolicyJob', null)) && optional_int(d.get('secureConfigured', null)); }
+    function payloadTypes_labProduct(d) { return true; }
+    function shape_labProduct(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      let admitted = resource != null && resource.data.get('deletedAt', null) == null && d.get('deletedAt', null) == null && d.name == resource.data.name;
+      return d.keys().hasOnly('active,category,chemicalReferenceJson,configType,createdAt,createdBy,deletedAt,description,deviceId,localId,name,organizationId,physicalReferenceJson,remoteId,secureConfigured,securePolicyJob,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labProduct'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_labProduct(d)
+        && d.configType == 'lab_products'
+        && payloadCore_labProduct(d)
+        && (uniqueKeys.size() <= 0 || admitted || heldUnique(orgId, d, uniqueKeys[0]))
+        && secureDefinition(orgId, d)
+        && (d.protocol.get('effect', null) == null || admitted)
+        && compactTableEffect(orgId, d, 'labProduct', 'labConfig');
+    }
+    function keys_nutritionFormulation(d) { return []; }
+    function payloadCore_nutritionFormulation(d) { return d.name is string && optional_int(d.get('productId', null)) && optional_string(d.get('itemsJson', null)) && optional_string(d.get('parametersJson', null)) && optional_string(d.get('graphParametersJson', null)) && optional_string(d.get('calculationJson', null)) && optional_string(d.get('sourceSnapshotJson', null)) && optional_int(d.get('copiedFromId', null)) && optional_int(d.get('isArchived', null)) && optional_string(d.get('secureEntryId', null)) && optional_int(d.get('publicPrivacyEpoch', null)) && optional_string(d.get('securePolicyJob', null)) && optional_string(d.get('secureTemplateJson', null)); }
+    function payloadTypes_nutritionFormulation(d) { return true; }
+    function shape_nutritionFormulation(orgId, d) {
+      let uniqueKeys = keys_nutritionFormulation(d);
+      return d.keys().hasOnly('calculationJson,configType,copiedFromId,createdAt,createdBy,deletedAt,deviceId,graphParametersJson,isArchived,itemsJson,localId,name,organizationId,parametersJson,productId,publicPrivacyEpoch,remoteId,secureEntryId,securePolicyJob,secureTemplateJson,sourceSnapshotJson,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'nutritionFormulation'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && d.configType == 'nutrition_formulations'
+        && payloadCore_nutritionFormulation(d)
+        && secureSource(orgId, d)
+        && compactTableEffect(orgId, d, 'nutritionFormulation', 'labConfig');
+    }
+    function unique_labProductAnalysis_0(d) {
+      return d.parentRefs.get('productId', null) != null && d.parentRefs.get('analysisId', null) != null
+        ? [hashing.sha256('u2|labProductAnalysis|0|' + keyPart(d.parentRefs.productId.entityType + '/' + d.parentRefs.productId.entityId) + keyPart(d.parentRefs.analysisId.entityType + '/' + d.parentRefs.analysisId.entityId)).toHexString().lower()] : [];
+    }
+    function keys_labProductAnalysis(d) { return unique_labProductAnalysis_0(d); }
+    function payloadCore_labProductAnalysis(d) { return optional_int(d.get('productId', null)) && optional_int(d.get('analysisId', null)) && optional_number(d.get('minValue', null)) && optional_number(d.get('maxValue', null)) && optional_string(d.get('unit', null)) && optional_int(d.get('isRequired', null)); }
+    function payloadTypes_labProductAnalysis(d) { return true; }
+    function shape_labProductAnalysis(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      let admitted = resource != null && resource.data.get('deletedAt', null) == null && d.get('deletedAt', null) == null && d.parentRefs.productId.entityType == resource.data.parentRefs.productId.entityType && d.parentRefs.productId.entityId == resource.data.parentRefs.productId.entityId && d.parentRefs.analysisId.entityType == resource.data.parentRefs.analysisId.entityType && d.parentRefs.analysisId.entityId == resource.data.parentRefs.analysisId.entityId;
+      return d.keys().hasOnly('analysisId,configType,createdAt,createdBy,deletedAt,deviceId,isRequired,localId,maxValue,minValue,organizationId,productId,remoteId,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labProductAnalysis'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['productId','analysisId'])
+        && d.protocol.uniqueKeys == keys_labProductAnalysis(d)
+        && d.configType == 'lab_product_analyses'
+        && payloadCore_labProductAnalysis(d)
+        && (qcParentValid(orgId, d, 'productId', 'labProduct', 'labConfig') && getAfter(/databases/$(database)/documents/organizations/$(orgId)/labConfig/$(d.parentRefs.productId.entityId)).data.configType == 'lab_products')
+        && (qcParentValid(orgId, d, 'analysisId', 'labAnalysis', 'labConfig') && getAfter(/databases/$(database)/documents/organizations/$(orgId)/labConfig/$(d.parentRefs.analysisId.entityId)).data.configType == 'lab_analyses')
+        && (uniqueKeys.size() <= 0 || admitted || heldUnique(orgId, d, uniqueKeys[0]))
+        && (d.protocol.get('effect', null) == null || admitted)
+        && compactTableEffect(orgId, d, 'labProductAnalysis', 'labConfig');
+    }
+    function unique_labUnit_0(d) {
+      return d.get('symbol', null) != null
+        ? [hashing.sha256('u2|labUnit|0|' + keyPart(d.get('symbol', null))).toHexString().lower()] : [];
+    }
+    function keys_labUnit(d) { return unique_labUnit_0(d); }
+    function payloadCore_labUnit(d) { return d.symbol is string && optional_string(d.get('name', null)) && optional_string(d.get('dimension', null)) && optional_int(d.get('isActive', null)); }
+    function payloadTypes_labUnit(d) { return true; }
+    function shape_labUnit(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('configType,createdAt,createdBy,deletedAt,deviceId,dimension,isActive,localId,name,organizationId,remoteId,symbol,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labUnit'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_labUnit(d)
+        && d.configType == 'lab_units'
+        && payloadCore_labUnit(d)
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && compactTableEffect(orgId, d, 'labUnit', 'labConfig');
+    }
+    function unique_inventoryItem_0(d) {
+      return d.get('name', null) != null
+        ? [hashing.sha256('u2|inventoryItem|0|' + keyPart(d.get('name', null))).toHexString().lower()] : [];
+    }
+    function keys_inventoryItem(d) { return unique_inventoryItem_0(d); }
+    function payloadCore_inventoryItem(d) { return d.name is string && (d.get('category', null) is string || d.get('category', null) == null) && (d.get('unit', null) is string || d.get('unit', null) == null) && (d.get('minQty', null) is number || d.get('minQty', null) == null) && (d.get('description', null) is string || d.get('description', null) == null); }
+    function payloadTypes_inventoryItem(d) { return true; }
+    function shape_inventoryItem(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('category,createdAt,createdBy,currentQty,deletedAt,description,deviceId,localId,minQty,name,organizationId,remoteId,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'inventoryItem'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_inventoryItem(d)
+        && payloadCore_inventoryItem(d)
+        && (uniqueKeys.size() <= 0 || (resource != null && resource.data.get('deletedAt', null) == null && d.get('deletedAt', null) == null && d.get('name', null) == resource.data.get('name', null)) || heldUnique(orgId, d, uniqueKeys[0]))
+        && inventoryBalance(orgId, d)
+        && (d.protocol.get('effect', null) == null || d.protocol.effect == {'entityType':'inventoryItem','entityId':d.remoteId,'version':d.version,'collection':'inventoryItems'});
+    }
+    function keys_inventoryTransaction(d) { return []; }
+    function payloadCore_inventoryTransaction(d) { return (d.get('inventoryId', null) is int || d.get('inventoryId', null) == null) && (d.get('inventoryRemoteId', null) is string || d.get('inventoryRemoteId', null) == null) && d.quantityDelta is number && (d.get('transactionType', null) is string || d.get('transactionType', null) == null) && (d.get('referenceType', null) is string || d.get('referenceType', null) == null) && (d.get('referenceId', null) is int || d.get('referenceId', null) == null) && (d.get('referenceRemoteId', null) is string || d.get('referenceRemoteId', null) == null) && (d.get('reason', null) is string || d.get('reason', null) == null); }
+    function payloadTypes_inventoryTransaction(d) { return true; }
+    function shape_inventoryTransaction(orgId, d) {
+      let uniqueKeys = keys_inventoryTransaction(d);
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,deviceId,inventoryId,inventoryRemoteId,localId,organizationId,quantityDelta,reason,referenceId,referenceRemoteId,referenceType,remoteId,transactionType,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'inventoryTransaction'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inventoryId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_inventoryTransaction(d)
+        && parentValid(orgId, d, 'inventoryId', 'inventoryItem', 'inventoryItems', '')
+        && !d.remoteId.matches('^derived_consumption_v1_.*')
+        && ledgerLinked(orgId, d)
+        && compactTableEffect(orgId, d, 'inventoryTransaction', 'inventoryTransactions');
+    }
+    function unique_inventoryLot_0(d) {
+      return d.get('lotNo', null) != null
+        ? [hashing.sha256('u2|inventoryLot|0|' + keyPart(d.get('lotNo', null))).toHexString().lower()] : [];
+    }
+    function keys_inventoryLot(d) { return unique_inventoryLot_0(d); }
+    function payloadCore_inventoryLot(d) { return (d.get('inventoryId', null) is int || d.get('inventoryId', null) == null) && (d.get('inventoryRemoteId', null) is string || d.get('inventoryRemoteId', null) == null) && (d.get('lotNo', null) is string || d.get('lotNo', null) == null) && (d.get('expiryDate', null) is string || d.get('expiryDate', null) == null) && (d.get('supplier', null) is string || d.get('supplier', null) == null) && (d.get('note', null) is string || d.get('note', null) == null) && (d.get('receivedBy', null) is string || d.get('receivedBy', null) == null) && d.receivedAt is string; }
+    function payloadTypes_inventoryLot(d) { return true; }
+    function shape_inventoryLot(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,deviceId,expiryDate,inventoryId,inventoryRemoteId,localId,lotNo,note,organizationId,qtyReceived,qtyRemaining,receivedAt,receivedBy,remoteId,supplier,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'inventoryLot'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inventoryId'])
+        && d.protocol.uniqueKeys == keys_inventoryLot(d)
+        && payloadCore_inventoryLot(d)
+        && parentValid(orgId, d, 'inventoryId', 'inventoryItem', 'inventoryItems', '')
+        && (uniqueKeys.size() <= 0 || (resource != null && resource.data.get('deletedAt', null) == null && d.get('deletedAt', null) == null && d.get('lotNo', null) == resource.data.get('lotNo', null)) || heldUnique(orgId, d, uniqueKeys[0]))
+        && lotLinked(orgId, d)
+        && (d.protocol.get('effect', null) == null || d.protocol.effect == {'entityType':'inventoryLot','entityId':d.remoteId,'version':d.version,'collection':'inventoryLots'});
+    }
+    function keys_consumption(d) { return []; }
+    function payloadCore_consumption(d) { return (d.get('eventType', null) is string || d.get('eventType', null) == null) && (d.get('lotNo', null) is string || d.get('lotNo', null) == null); }
+    function payloadTypes_consumption(d) { return true; }
+    function shape_consumption(orgId, d) {
+      let uniqueKeys = keys_consumption(d);
+      return d.keys().hasOnly('appliedQty,createdAt,createdBy,deletedAt,deviceId,eventType,inventoryId,localId,lotId,lotNo,lotRemoteId,organizationId,qtyUsed,remoteId,requestedQty,reversalOfLogId,sampleTestId,shortfallQty,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'consumption'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inventoryId','sampleTestId','lotId','reversalOfLogId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_consumption(d)
+        && (d.protocol.get('ledgerMode', '') == 'consumption_v1'
+          ? !d.keys().hasAny(['sampleTestId','inventoryId','lotId','reversalOfLogId','lotRemoteId'])
+          : optional_int(d.get('sampleTestId', null)) && optional_int(d.get('inventoryId', null))
+            && optional_int(d.get('lotId', null)) && optional_int(d.get('reversalOfLogId', null))
+            && optional_string(d.get('lotRemoteId', null)))
+        && (d.parentRefs.get('lotId', null) == null ? true : consumptionParentValid(orgId, d, 'lotId', 'inventoryLot', 'inventoryLots'))
+        && (d.parentRefs.get('reversalOfLogId', null) == null ? true : consumptionParentValid(orgId, d, 'reversalOfLogId', 'consumption', 'consumption'))
+        && consumptionLinked(orgId, d)
+        && compactTableEffect(orgId, d, 'consumption', 'consumption');
+    }
+    function keys_stockAdjustment(d) { return []; }
+    function payloadCore_stockAdjustment(d) { return optional_int(d.get('inventoryId', null)) && d.oldQty is number && d.newQty is number && optional_string(d.get('reason', null)) && optional_string(d.get('adjustedBy', null)) && d.adjustedAt is string; }
+    function payloadTypes_stockAdjustment(d) { return true; }
+    function shape_stockAdjustment(orgId, d) {
+      let uniqueKeys = keys_stockAdjustment(d);
+      return d.keys().hasOnly('adjustedAt,adjustedBy,createdAt,createdBy,deletedAt,deviceId,inventoryId,localId,newQty,oldQty,organizationId,reason,remoteId,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'stockAdjustment'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inventoryId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_stockAdjustment(d)
+        && parentValid(orgId, d, 'inventoryId', 'inventoryItem', 'inventoryItems', '')
+        && adjustmentLinked(orgId, d);
+    }
+    function unique_equipment_0(d) {
+      return d.get('code', null) != null
+        ? [hashing.sha256('u2|equipment|0|' + keyPart(d.get('code', null))).toHexString().lower()] : [];
+    }
+    function unique_equipment_1(d) {
+      return d.get('name', null) != null
+        ? [hashing.sha256('u2|equipment|1|' + keyPart(d.get('name', null))).toHexString().lower()] : [];
+    }
+    function keys_equipment(d) { return unique_equipment_0(d).concat(unique_equipment_1(d)); }
+    function payloadCore_equipment(d) { return d.name is string && d.code is string && optional_string(d.get('manufacturer', null)) && optional_string(d.get('serialNumber', null)) && optional_string(d.get('description', null)) && optional_string(d.get('lastCalibrationDate', null)) && optional_string(d.get('nextCalibrationDate', null)); }
+    function payloadTypes_equipment(d) { return true; }
+    function shape_equipment(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('code,createdAt,createdBy,deletedAt,description,deviceId,lastCalibrationDate,localId,manufacturer,name,nextCalibrationDate,organizationId,remoteId,serialNumber,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'equipment'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_equipment(d)
+        && payloadCore_equipment(d)
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && (uniqueKeys.size() <= 1 || heldUnique(orgId, d, uniqueKeys[1]))
+        && compactTableEffect(orgId, d, 'equipment', 'equipment');
+    }
+    function keys_equipmentEvent(d) { return []; }
+    function payloadCore_equipmentEvent(d) { return optional_int(d.get('equipmentId', null)) && optional_string(d.get('equipmentRemoteId', null)) && optional_string(d.get('eventType', null)) && d.eventDate is string && optional_string(d.get('notes', null)); }
+    function payloadTypes_equipmentEvent(d) { return true; }
+    function shape_equipmentEvent(orgId, d) {
+      let uniqueKeys = keys_equipmentEvent(d);
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,deviceId,equipmentId,equipmentRemoteId,eventDate,eventType,localId,notes,organizationId,remoteId,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'equipmentEvent'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['equipmentId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_equipmentEvent(d)
+        && parentValid(orgId, d, 'equipmentId', 'equipment', 'equipment', '')
+        && compactTableEffect(orgId, d, 'equipmentEvent', 'equipmentEvents');
+    }
+    function keys_worksheet(d) { return []; }
+    function payloadCore_worksheet(d) { return optional_string(d.get('sourceType', null)) && optional_int(d.get('sourceRefId', null)) && optional_string(d.get('sourceName', null)) && optional_string(d.get('sampleNumber', null)) && optional_string(d.get('entryCode', null)) && optional_string(d.get('status', null)) && optional_string(d.get('voidReason', null)) && optional_string(d.get('voidedBy', null)) && optional_string(d.get('voidedAt', null)); }
+    function payloadTypes_worksheet(d) { return true; }
+    function shape_worksheet(orgId, d) {
+      let uniqueKeys = keys_worksheet(d);
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,deviceId,entryCode,localId,organizationId,remoteId,sampleNumber,sourceName,sourceRefId,sourceType,status,updatedAt,updatedBy,version,voidReason,voidedAt,voidedBy,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'worksheet'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_worksheet(d)
+        && compactTableEffect(orgId, d, 'worksheet', 'worksheets');
+    }
+    function unique_referenceMaterial_0(d) {
+      return d.get('materialName', null) != null
+        ? [hashing.sha256('u2|referenceMaterial|0|' + keyPart(d.get('materialName', null))).toHexString().lower()] : [];
+    }
+    function keys_referenceMaterial(d) { return unique_referenceMaterial_0(d); }
+    function payloadCore_referenceMaterial(d) { return d.materialName is string && d.materialCode is string && d.physicalReferenceJson is string && d.chemicalReferenceJson is string && optional_int(d.get('sourceRow', null)) && d.importedAt is string && optional_int(d.get('active', null)) && optional_string(d.get('securePolicyJob', null)) && optional_int(d.get('secureConfigured', null)); }
+    function payloadTypes_referenceMaterial(d) { return true; }
+    function shape_referenceMaterial(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('active,category,chemicalReferenceJson,createdAt,createdBy,deletedAt,deviceId,importedAt,localId,materialCode,materialName,organizationId,physicalReferenceJson,remoteId,secureConfigured,securePolicyJob,sourceRow,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'referenceMaterial'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_referenceMaterial(d)
+        && payloadCore_referenceMaterial(d)
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && secureDefinition(orgId, d)
+        && compactTableEffect(orgId, d, 'referenceMaterial', 'referenceMaterials');
+    }
+    function unique_labMaterialAnalysis_0(d) {
+      return d.parentRefs.get('materialId', null) != null && d.parentRefs.get('analysisId', null) != null
+        ? [hashing.sha256('u2|labMaterialAnalysis|0|' + keyPart(d.parentRefs.materialId.entityType + '/' + d.parentRefs.materialId.entityId) + keyPart(d.parentRefs.analysisId.entityType + '/' + d.parentRefs.analysisId.entityId)).toHexString().lower()] : [];
+    }
+    function keys_labMaterialAnalysis(d) { return unique_labMaterialAnalysis_0(d); }
+    function payloadCore_labMaterialAnalysis(d) { return optional_int(d.get('materialId', null)) && optional_int(d.get('analysisId', null)) && optional_number(d.get('minValue', null)) && optional_number(d.get('maxValue', null)) && optional_string(d.get('unit', null)) && optional_string(d.get('materialRemoteId', null)); }
+    function payloadTypes_labMaterialAnalysis(d) { return true; }
+    function shape_labMaterialAnalysis(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('analysisId,configType,createdAt,createdBy,deletedAt,deviceId,localId,materialId,materialRemoteId,maxValue,minValue,organizationId,remoteId,unit,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'labMaterialAnalysis'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['materialId','analysisId'])
+        && d.protocol.uniqueKeys == keys_labMaterialAnalysis(d)
+        && d.configType == 'lab_material_analyses'
+        && payloadCore_labMaterialAnalysis(d)
+        && parentValid(orgId, d, 'materialId', 'referenceMaterial', 'referenceMaterials', '')
+        && parentValid(orgId, d, 'analysisId', 'labAnalysis', 'labConfig', 'lab_analyses')
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && compactTableEffect(orgId, d, 'labMaterialAnalysis', 'labConfig');
+    }
+    function keys_nirValidationSettings(d) { return []; }
+    function payloadCore_nirValidationSettings(d) { return d.startDate is string && optional_string(d.get('resetNote', null)) && optional_string(d.get('resetBy', null)) && optional_string(d.get('resetByName', null)) && optional_string(d.get('scope', null)) && optional_int(d.get('entityId', null)) && optional_int(d.get('materialId', null)) && optional_int(d.get('productId', null)) && optional_int(d.get('referenceVersion', null)) && optional_string(d.get('calibrationSnapshotJson', null)) && optional_string(d.get('entityName', null)) && optional_string(d.get('parameter', null)) && optional_string(d.get('secureEntryId', null)) && optional_int(d.get('publicPrivacyEpoch', null)) && optional_string(d.get('securePolicyJob', null)) && optional_string(d.get('secureTemplateJson', null)) && optional_int(d.get('secureResult', null)); }
+    function payloadTypes_nirValidationSettings(d) { return true; }
+    function shape_nirValidationSettings(orgId, d) {
+      let uniqueKeys = keys_nirValidationSettings(d);
+      return d.keys().hasOnly('calibrationSnapshotJson,configType,createdAt,createdBy,deletedAt,deviceId,entityId,entityName,localId,materialId,organizationId,parameter,productId,publicPrivacyEpoch,referenceVersion,remoteId,resetBy,resetByName,resetNote,scope,secureEntryId,securePolicyJob,secureResult,secureTemplateJson,startDate,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'nirValidationSettings'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['materialId','productId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && d.configType == 'nir_validation_settings'
+        && payloadCore_nirValidationSettings(d)
+        && (d.parentRefs.get('materialId', null) == null ? true : parentValid(orgId, d, 'materialId', 'referenceMaterial', 'referenceMaterials', ''))
+        && (d.parentRefs.get('productId', null) == null ? true : parentValid(orgId, d, 'productId', 'labProduct', 'labConfig', 'lab_products'))
+        && secureSource(orgId, d)
+        && (resource == null && d.get('deletedAt', null) == null || resource != null && secureNirMigration(orgId, d))
+        && (d.get('referenceVersion', null) == null
+    ? (d.parentRefs.size() == 0 && d.get('materialId', null) == null && d.get('productId', null) == null)
+    : (d.referenceVersion == 1 && (
+      (d.get('scope', '') == '' && d.parentRefs.size() == 0 && d.get('materialId', null) == null && d.get('productId', null) == null)
+      || (d.get('scope', '') == 'raw_material' && d.parameter.size() > 0 && d.parentRefs.get('materialId', null) != null && d.parentRefs.get('productId', null) == null && d.get('productId', null) == null)
+      || (d.get('scope', '') == 'product' && d.parameter.size() > 0 && d.parentRefs.get('productId', null) != null && d.parentRefs.get('materialId', null) == null && d.get('materialId', null) == null))));
+    }
+    function keys_secureFieldSubmission(d) { return []; }
+    function payloadCore_secureFieldSubmission(d) { return optional_int(d.get('inspectionId', null)) && optional_int(d.get('batchSampleId', null)) && optional_int(d.get('sampleTestId', null)) && d.sourceKind is string && d.sourceVersion is int && d.fieldsJson is string && optional_string(d.get('securePolicyJob', null)) && optional_int(d.get('nirResetId', null)) && optional_int(d.get('formulationId', null)) && optional_string(d.get('originalSnapshotJson', null)) && optional_string(d.get('originalParameter', null)) && optional_string(d.get('originalNote', null)); }
+    function payloadTypes_secureFieldSubmission(d) { return true; }
+    function shape_secureFieldSubmission(orgId, d) {
+      let uniqueKeys = keys_secureFieldSubmission(d);
+      return d.keys().hasOnly('batchSampleId,configType,createdAt,createdBy,deletedAt,deviceId,fieldsJson,formulationId,inspectionId,localId,nirResetId,organizationId,originalNote,originalParameter,originalSnapshotJson,remoteId,sampleTestId,securePolicyJob,sourceKind,sourceVersion,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'secureFieldSubmission'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inspectionId','batchSampleId','sampleTestId','nirResetId','formulationId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && d.configType == 'secure_field_submissions'
+        && payloadCore_secureFieldSubmission(d)
+        && secureSubmission(orgId, d)
+        && compactTableEffect(orgId, d, 'secureFieldSubmission', 'labConfig');
+    }
+    function keys_qcCustomTable(d) { return []; }
+    function payloadCore_qcCustomTable(d) { return d.title is string && optional_string(d.get('description', null)) && optional_int(d.get('sortOrder', null)); }
+    function payloadTypes_qcCustomTable(d) { return true; }
+    function shape_qcCustomTable(orgId, d) {
+      let uniqueKeys = keys_qcCustomTable(d);
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,description,deviceId,localId,organizationId,remoteId,sortOrder,title,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcCustomTable'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcCustomTable(d)
+        && compactTableEffect(orgId, d, 'qcCustomTable', 'qcCustomTables');
+    }
+    function keys_qcCustomTableField(d) { return []; }
+    function payloadCore_qcCustomTableField(d) { return optional_int(d.get('tableId', null)) && optional_string(d.get('tableRemoteId', null)) && d.label is string && d.colType is string && optional_int(d.get('required', null)) && optional_int(d.get('sortOrder', null)); }
+    function payloadTypes_qcCustomTableField(d) { return true; }
+    function shape_qcCustomTableField(orgId, d) {
+      let uniqueKeys = keys_qcCustomTableField(d);
+      return d.keys().hasOnly('colType,createdAt,createdBy,deletedAt,deviceId,label,localId,organizationId,remoteId,required,sortOrder,tableId,tableRemoteId,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcCustomTableField'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['tableId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcCustomTableField(d)
+        && qcParentValid(orgId, d, 'tableId', 'qcCustomTable', 'qcCustomTables')
+        && compactTableEffect(orgId, d, 'qcCustomTableField', 'qcCustomTableFields');
+    }
+    function keys_qcCustomTableRow(d) { return []; }
+    function payloadCore_qcCustomTableRow(d) { return optional_int(d.get('tableId', null)) && optional_string(d.get('tableRemoteId', null)) && optional_string(d.get('valuesJson', null)) && optional_string(d.get('note', null)) && d.recordedAt is string && optional_string(d.get('recordedBy', null)) && optional_string(d.get('recordedByName', null)); }
+    function payloadTypes_qcCustomTableRow(d) { return true; }
+    function shape_qcCustomTableRow(orgId, d) {
+      let uniqueKeys = keys_qcCustomTableRow(d);
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,deviceId,localId,note,organizationId,recordedAt,recordedBy,recordedByName,remoteId,tableId,tableRemoteId,updatedAt,updatedBy,valuesJson,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcCustomTableRow'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['tableId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcCustomTableRow(d)
+        && qcParentValid(orgId, d, 'tableId', 'qcCustomTable', 'qcCustomTables')
+        && compactTableEffect(orgId, d, 'qcCustomTableRow', 'qcCustomTableRows');
+    }
+    function unique_qcTemplate_0(d) {
+      return d.get('code', null) != null
+        ? [hashing.sha256('u2|qcTemplate|0|' + keyPart(d.get('code', null))).toHexString().lower()] : [];
+    }
+    function keys_qcTemplate(d) { return unique_qcTemplate_0(d); }
+    function payloadCore_qcTemplate(d) { return d.name is string && optional_string(d.get('code', null)) && optional_string(d.get('type', null)) && optional_string(d.get('dept', null)) && optional_string(d.get('site', null)) && optional_string(d.get('category', null)) && optional_string(d.get('description', null)) && optional_int(d.get('isPublished', null)) && optional_int(d.get('isArchived', null)) && optional_int(d.get('requiresApprovalOnSubmit', null)) && optional_int(d.get('allowNa', null)) && optional_int(d.get('enforceEvidenceOnFail', null)) && optional_int(d.get('blockSubmitIfCriticalFail', null)) && optional_string(d.get('ownerId', null)) && optional_string(d.get('publishedBy', null)) && optional_string(d.get('publishedAt', null)) && optional_string(d.get('effectiveDate', null)) && optional_string(d.get('expiryDate', null)) && optional_string(d.get('tags', null)) && optional_string(d.get('revisionNote', null)) && optional_string(d.get('recurrence', null)); }
+    function payloadTypes_qcTemplate(d) { return true; }
+    function shape_qcTemplate(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('allowNa,blockSubmitIfCriticalFail,businessVersion,category,code,createdAt,createdBy,deletedAt,dept,description,deviceId,effectiveDate,enforceEvidenceOnFail,expiryDate,isArchived,isPublished,localId,name,organizationId,ownerId,publishedAt,publishedBy,recurrence,remoteId,requiresApprovalOnSubmit,revisionNote,site,tags,type,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcTemplate'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == keys_qcTemplate(d)
+        && payloadCore_qcTemplate(d)
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && qcOperationAudited(orgId, d);
+    }
+    function keys_qcSection(d) { return []; }
+    function payloadCore_qcSection(d) { return optional_int(d.get('templateId', null)) && d.title is string && optional_string(d.get('description', null)) && optional_int(d.get('orderIndex', null)) && optional_int(d.get('isCollapsible', null)) && optional_int(d.get('requiredAll', null)) && optional_string(d.get('conditionalRuleJson', null)) && optional_string(d.get('templateRemoteId', null)); }
+    function payloadTypes_qcSection(d) { return true; }
+    function shape_qcSection(orgId, d) {
+      let uniqueKeys = keys_qcSection(d);
+      return d.keys().hasOnly('conditionalRuleJson,createdAt,createdBy,deletedAt,description,deviceId,isCollapsible,localId,orderIndex,organizationId,remoteId,requiredAll,templateId,templateRemoteId,title,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcSection'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['templateId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcSection(d)
+        && qcParentValid(orgId, d, 'templateId', 'qcTemplate', 'qcTemplates')
+        && qcOperationAudited(orgId, d);
+    }
+    function keys_qcItem(d) { return []; }
+    function payloadCore_qcItem(d) { return optional_int(d.get('sectionId', null)) && optional_int(d.get('templateId', null)) && d.label is string && optional_string(d.get('itemType', null)) && optional_int(d.get('orderIndex', null)) && optional_int(d.get('required', null)) && optional_int(d.get('allowNa', null)) && optional_int(d.get('isCritical', null)) && optional_int(d.get('requireEvidenceIfFail', null)) && optional_int(d.get('requireEvidenceIfValue', null)) && optional_string(d.get('defaultValue', null)) && optional_string(d.get('optionsJson', null)) && optional_string(d.get('unit', null)) && optional_number(d.get('minValue', null)) && optional_number(d.get('maxValue', null)) && optional_number(d.get('tolerance', null)) && optional_string(d.get('toleranceType', null)) && optional_string(d.get('validationRuleJson', null)) && optional_string(d.get('conditionalShowJson', null)) && optional_string(d.get('failTriggerJson', null)) && optional_string(d.get('helpText', null)) && optional_string(d.get('defectCode', null)) && optional_string(d.get('templateRemoteId', null)) && optional_string(d.get('sectionRemoteId', null)); }
+    function payloadTypes_qcItem(d) { return true; }
+    function shape_qcItem(orgId, d) {
+      let uniqueKeys = keys_qcItem(d);
+      return d.keys().hasOnly('allowNa,conditionalShowJson,createdAt,createdBy,defaultValue,defectCode,deletedAt,deviceId,failTriggerJson,helpText,isCritical,itemType,label,localId,maxValue,minValue,optionsJson,orderIndex,organizationId,remoteId,requireEvidenceIfFail,requireEvidenceIfValue,required,sectionId,sectionRemoteId,templateId,templateRemoteId,tolerance,toleranceType,unit,updatedAt,updatedBy,validationRuleJson,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcItem'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['sectionId','templateId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcItem(d)
+        && qcParentValid(orgId, d, 'sectionId', 'qcSection', 'qcSections')
+        && qcParentValid(orgId, d, 'templateId', 'qcTemplate', 'qcTemplates')
+        && qcOperationAudited(orgId, d);
+    }
+    function keys_qcInspection(d) { return []; }
+    function payloadCore_qcInspection(d) { return optional_int(d.get('templateId', null)) && optional_string(d.get('refType', null)) && optional_string(d.get('lotNo', null)) && optional_string(d.get('poNo', null)) && optional_number(d.get('qtyInspected', null)) && optional_string(d.get('dept', null)) && optional_string(d.get('location', null)) && optional_string(d.get('workCenter', null)) && optional_string(d.get('resultOverall', null)) && optional_int(d.get('hasNc', null)) && optional_int(d.get('criticalNcCount', null)) && optional_int(d.get('minorNcCount', null)) && optional_string(d.get('inspectorName', null)) && optional_string(d.get('reviewerName', null)) && optional_string(d.get('approvedByName', null)) && optional_string(d.get('reviewedAt', null)) && optional_string(d.get('rejectedAt', null)) && d.inspectionDate is string && optional_string(d.get('endAt', null)) && optional_string(d.get('remarks', null)) && optional_string(d.get('rejectionReason', null)); }
+    function payloadTypes_qcInspection(d) { return optional_int(d.get('templateVersion', null)) && optional_string(d.get('refId', null)) && optional_string(d.get('batchNo', null)) && optional_string(d.get('grnNo', null)) && optional_string(d.get('qtyUnit', null)) && optional_string(d.get('site', null)) && optional_string(d.get('line', null)) && optional_string(d.get('status', null)) && optional_number(d.get('scorePct', null)) && optional_int(d.get('ncCount', null)) && optional_int(d.get('majorNcCount', null)) && optional_string(d.get('inspectorId', null)) && optional_string(d.get('reviewerId', null)) && optional_string(d.get('approvedBy', null)) && optional_string(d.get('submittedAt', null)) && optional_string(d.get('approvedAt', null)) && optional_string(d.get('closedAt', null)) && optional_string(d.get('startAt', null)) && optional_string(d.get('shift', null)) && optional_string(d.get('reviewComments', null)) && optional_string(d.get('templateRemoteId', null)); }
+    function shape_qcInspection(orgId, d) {
+      let uniqueKeys = keys_qcInspection(d);
+      return d.keys().hasOnly('approvedAt,approvedBy,approvedByName,batchNo,businessVersion,closedAt,createdAt,createdBy,criticalNcCount,deletedAt,dept,deviceId,endAt,grnNo,hasNc,inspectionDate,inspectorId,inspectorName,line,localId,location,lotNo,majorNcCount,minorNcCount,ncCount,organizationId,poNo,qtyInspected,qtyUnit,refId,refType,rejectedAt,rejectionReason,remarks,remoteId,resultOverall,reviewComments,reviewedAt,reviewerId,reviewerName,scorePct,shift,site,startAt,status,submittedAt,templateId,templateRemoteId,templateVersion,updatedAt,updatedBy,version,workCenter,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcInspection'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['templateId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcInspection(d)
+        && (d.protocol.get('effect', null) == null || payloadTypes_qcInspection(d))
+        && qcParentValid(orgId, d, 'templateId', 'qcTemplate', 'qcTemplates')
+        && qcOperationAudited(orgId, d)
+        && qcInspectionDecision(d);
+    }
+    function unique_qcResponse_0(d) {
+      return d.parentRefs.get('inspectionId', null) != null && d.parentRefs.get('itemId', null) != null
+        ? [hashing.sha256('u2|qcResponse|0|' + keyPart(d.parentRefs.inspectionId.entityType + '/' + d.parentRefs.inspectionId.entityId) + keyPart(d.parentRefs.itemId.entityType + '/' + d.parentRefs.itemId.entityId)).toHexString().lower()] : [];
+    }
+    function keys_qcResponse(d) { return unique_qcResponse_0(d); }
+    function payloadCore_qcResponse(d) { return optional_int(d.get('inspectionId', null)) && optional_int(d.get('sectionId', null)) && optional_string(d.get('value', null)) && optional_string(d.get('notes', null)) && optional_string(d.get('signatureBase64', null)) && optional_number(d.get('measuredValue', null)) && optional_int(d.get('isCriticalFailure', null)) && optional_string(d.get('answeredByName', null)) && optional_string(d.get('itemRemoteId', null)); }
+    function payloadTypes_qcResponse(d) { return optional_int(d.get('itemId', null)) && d.result is string && optional_string(d.get('valueType', null)) && optional_string(d.get('photosJson', null)) && optional_string(d.get('measuredAt', null)) && optional_string(d.get('defectCode', null)) && optional_string(d.get('answeredBy', null)) && optional_string(d.get('inspectionRemoteId', null)) && optional_string(d.get('sectionRemoteId', null)); }
+    function shape_qcResponse(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('answeredBy,answeredByName,createdAt,createdBy,defectCode,deletedAt,deviceId,inspectionId,inspectionRemoteId,isCriticalFailure,itemId,itemRemoteId,localId,measuredAt,measuredValue,notes,organizationId,photosJson,remoteId,result,sectionId,sectionRemoteId,signatureBase64,updatedAt,updatedBy,value,valueType,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcResponse'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inspectionId','itemId','sectionId'])
+        && d.protocol.uniqueKeys == keys_qcResponse(d)
+        && payloadCore_qcResponse(d)
+        && (d.protocol.get('effect', null) == null || payloadTypes_qcResponse(d))
+        && qcParentValid(orgId, d, 'inspectionId', 'qcInspection', 'qcInspections')
+        && qcParentValid(orgId, d, 'itemId', 'qcItem', 'qcItems')
+        && qcParentValid(orgId, d, 'sectionId', 'qcSection', 'qcSections')
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && qcOperationAudited(orgId, d);
+    }
+    function keys_qcTaskLog(d) { return []; }
+    function payloadCore_qcTaskLog(d) { return optional_int(d.get('inspectionId', null)) && optional_int(d.get('templateId', null)) && optional_int(d.get('itemId', null)) && optional_string(d.get('note', null)) && optional_string(d.get('loggedBy', null)) && optional_string(d.get('loggedByName', null)) && d.loggedAt is string && optional_string(d.get('inspectionRemoteId', null)) && optional_string(d.get('templateRemoteId', null)) && optional_string(d.get('itemRemoteId', null)); }
+    function payloadTypes_qcTaskLog(d) { return true; }
+    function shape_qcTaskLog(orgId, d) {
+      let uniqueKeys = keys_qcTaskLog(d);
+      return d.keys().hasOnly('createdAt,createdBy,deletedAt,deviceId,inspectionId,inspectionRemoteId,itemId,itemRemoteId,localId,loggedAt,loggedBy,loggedByName,note,organizationId,remoteId,templateId,templateRemoteId,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcTaskLog'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['inspectionId','templateId','itemId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcTaskLog(d)
+        && qcParentValid(orgId, d, 'inspectionId', 'qcInspection', 'qcInspections')
+        && qcParentValid(orgId, d, 'templateId', 'qcTemplate', 'qcTemplates')
+        && qcParentValid(orgId, d, 'itemId', 'qcItem', 'qcItems')
+        && qcOperationAudited(orgId, d);
+    }
+    function keys_qcFindingNc(d) { return []; }
+    function payloadCore_qcFindingNc(d) { return optional_int(d.get('inspectionId', null)) && optional_int(d.get('itemId', null)) && optional_int(d.get('respId', null)) && optional_string(d.get('code', null)) && d.severity is string && optional_string(d.get('category', null)) && d.description is string && optional_string(d.get('status', null)) && optional_string(d.get('type', null)) && optional_string(d.get('dueDate', null)) && optional_string(d.get('assignedTo', null)) && optional_string(d.get('assignedToName', null)) && optional_string(d.get('assignedAt', null)) && optional_string(d.get('rootCause', null)) && optional_string(d.get('actionPlan', null)) && optional_string(d.get('proposedAction', null)) && optional_number(d.get('qtyAffected', null)) && optional_string(d.get('qtyUnit', null)) && optional_string(d.get('disposition', null)) && optional_string(d.get('verifiedBy', null)) && optional_string(d.get('verifiedByName', null)) && optional_string(d.get('verifiedAt', null)) && optional_string(d.get('closedAt', null)) && optional_string(d.get('closedBy', null)) && optional_string(d.get('rejectedAt', null)) && optional_string(d.get('rejectionReason', null)) && optional_string(d.get('evidenceJson', null)) && optional_int(d.get('capaId', null)) && optional_int(d.get('productSampleId', null)) && optional_string(d.get('productSampleRemoteId', null)) && optional_string(d.get('inspectionRemoteId', null)) && optional_string(d.get('itemRemoteId', null)) && optional_string(d.get('respRemoteId', null)) && optional_string(d.get('capaRemoteId', null)); }
+    function payloadTypes_qcFindingNc(d) { return true; }
+    function shape_qcFindingNc(orgId, d) {
+      let uniqueKeys = keys_qcFindingNc(d);
+      return d.keys().hasOnly('actionPlan,assignedAt,assignedTo,assignedToName,capaId,capaRemoteId,category,closedAt,closedBy,code,createdAt,createdBy,deletedAt,description,deviceId,disposition,dueDate,evidenceJson,inspectionId,inspectionRemoteId,itemId,itemRemoteId,localId,organizationId,productSampleId,productSampleRemoteId,proposedAction,qtyAffected,qtyUnit,rejectedAt,rejectionReason,remoteId,respId,respRemoteId,rootCause,severity,status,type,updatedAt,updatedBy,verifiedAt,verifiedBy,verifiedByName,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcFindingNc'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['productSampleId','inspectionId','itemId','respId','capaId'])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcFindingNc(d)
+        && (d.parentRefs.get('productSampleId', null) == null ? true : parentValid(orgId, d, 'productSampleId', 'productBatchSample', 'productBatchSamples', ''))
+        && (d.parentRefs.get('inspectionId', null) == null ? true : qcParentValid(orgId, d, 'inspectionId', 'qcInspection', 'qcInspections'))
+        && (d.parentRefs.get('itemId', null) == null ? true : qcParentValid(orgId, d, 'itemId', 'qcItem', 'qcItems'))
+        && (d.parentRefs.get('respId', null) == null ? true : qcParentValid(orgId, d, 'respId', 'qcResponse', 'qcResponses'))
+        && (d.parentRefs.get('capaId', null) == null ? true : qcParentValid(orgId, d, 'capaId', 'qcCapa', 'qcCapa'))
+        && productFindingLinkValid(orgId, d)
+        && qcOperationAudited(orgId, d);
+    }
+    function unique_qcCapa_0(d) {
+      return d.get('capaNo', null) != null
+        ? [hashing.sha256('u2|qcCapa|0|' + keyPart(d.get('capaNo', null))).toHexString().lower()] : [];
+    }
+    function keys_qcCapa(d) { return unique_qcCapa_0(d); }
+    function payloadCore_qcCapa(d) { return optional_int(d.get('findingId', null)) && optional_string(d.get('capaNo', null)) && optional_string(d.get('type', null)) && optional_string(d.get('title', null)) && optional_string(d.get('description', null)) && optional_string(d.get('rootCause', null)) && optional_string(d.get('rootCauseMethod', null)) && d.actionPlan is string && optional_string(d.get('actionStepsJson', null)) && optional_string(d.get('assignedTo', null)) && optional_string(d.get('assignedToName', null)) && optional_string(d.get('dept', null)) && optional_string(d.get('status', null)) && optional_string(d.get('priority', null)) && optional_string(d.get('dueAt', null)) && optional_string(d.get('targetCompletionAt', null)) && optional_string(d.get('actionCompletedAt', null)) && optional_string(d.get('actionCompletedBy', null)) && optional_string(d.get('actionCompletionNotes', null)) && optional_string(d.get('verifiedBy', null)) && optional_string(d.get('verifiedByName', null)) && optional_string(d.get('verifiedAt', null)) && optional_string(d.get('verificationNotes', null)) && optional_int(d.get('isEffective', null)) && optional_string(d.get('effectivenessCheckedAt', null)) && optional_string(d.get('effectivenessNotes', null)) && optional_string(d.get('closureNotes', null)) && optional_string(d.get('closedAt', null)) && optional_string(d.get('closedBy', null)) && optional_string(d.get('rejectedAt', null)) && optional_string(d.get('rejectionReason', null)) && optional_string(d.get('evidenceJson', null)) && optional_string(d.get('findingRemoteId', null)); }
+    function payloadTypes_qcCapa(d) { return true; }
+    function shape_qcCapa(orgId, d) {
+      let uniqueKeys = d.protocol.uniqueKeys;
+      return d.keys().hasOnly('actionCompletedAt,actionCompletedBy,actionCompletionNotes,actionPlan,actionStepsJson,assignedTo,assignedToName,capaNo,closedAt,closedBy,closureNotes,createdAt,createdBy,deletedAt,dept,description,deviceId,dueAt,effectivenessCheckedAt,effectivenessNotes,evidenceJson,findingId,findingRemoteId,isEffective,localId,organizationId,priority,rejectedAt,rejectionReason,remoteId,rootCause,rootCauseMethod,status,targetCompletionAt,title,type,updatedAt,updatedBy,verificationNotes,verifiedAt,verifiedBy,verifiedByName,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcCapa'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly(['findingId'])
+        && d.protocol.uniqueKeys == keys_qcCapa(d)
+        && payloadCore_qcCapa(d)
+        && qcParentValid(orgId, d, 'findingId', 'qcFindingNc', 'qcFindingsNc')
+        && (uniqueKeys.size() <= 0 || heldUnique(orgId, d, uniqueKeys[0]))
+        && qcOperationAudited(orgId, d);
+    }
+    function keys_qcAudit(d) { return []; }
+    function payloadCore_qcAudit(d) { return d.entityType is string && optional_string(d.get('entityId', null)) && d.action is string && optional_string(d.get('byUserId', null)) && optional_string(d.get('byUserName', null)) && d.at is string && optional_string(d.get('beforeJson', null)) && optional_string(d.get('afterJson', null)) && optional_string(d.get('metaJson', null)) && optional_string(d.get('prevHash', null)) && optional_string(d.get('hash', null)) && optional_int(d.get('immutable', null)) && optional_string(d.get('ipAddress', null)) && optional_string(d.get('targetEntityType', null)) && optional_string(d.get('targetGlobalId', null)) && optional_string(d.get('previousAuditId', null)); }
+    function payloadTypes_qcAudit(d) { return true; }
+    function shape_qcAudit(orgId, d) {
+      let uniqueKeys = keys_qcAudit(d);
+      return d.keys().hasOnly('action,afterJson,at,beforeJson,byUserId,byUserName,createdAt,createdBy,deletedAt,deviceId,entityId,entityType,hash,immutable,ipAddress,localId,metaJson,organizationId,prevHash,previousAuditId,remoteId,targetEntityType,targetGlobalId,updatedAt,updatedBy,version,protocol,parentRefs,centralSequence'.split(','))
+        && d.protocol.entityType == 'qcAudit'
+        && d.parentRefs is map
+        && d.parentRefs.keys().hasOnly([])
+        && d.protocol.uniqueKeys == uniqueKeys
+        && payloadCore_qcAudit(d)
+        && qcAuditLinked(orgId, d);
+    }
+    // END GENERATED DIRECT DOMAIN RULES
+
+    // BEGIN SECURE FIELD CONTRACT
+    function secureManager(orgId) {
+      return activeInOrg(orgId) && myRoles().hasAny(['admin','trial_owner','quality_manager']);
+    }
+    function secureReveal(orgId) {
+      let view = get(/databases/$(database)/documents/organizations/$(orgId)/secureVisibility/$(request.auth.uid));
+      return secureManager(orgId) && view != null && view.data.enabled == true
+        && view.data.authTime == request.auth.token.auth_time
+        && activeOwnedDevice(orgId, view.data.deviceId);
+    }
+    function secureMaintenance(orgId, d) {
+      let gate = get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol;
+      return gate.get('secureMaintenanceJob', null) == null ? false : secureManager(orgId) && d.protocol.get('secureMigration', '') == gate.secureMaintenanceJob
+        && d.deviceId == gate.secureMaintenanceDevice
+        && (d.protocol.entityType in ['sample','productBatchSample','labResult','secureFieldSubmission','nirValidationSettings','nutritionFormulation']
+          || (d.protocol.entityType in ['referenceMaterial','labProduct'] && d.remoteId == gate.secureMaintenanceTarget)
+          || (d.protocol.entityType in ['materialBound','parameter','labMaterialAnalysis','labProductAnalysis','labUnit'] ? secureDefinitionCompanion(orgId, d, gate) : false));
+    }
+    function secureDefinitionCompanion(orgId, d, gate) {
+      let collection = gate.secureMaintenanceTargetType == 'referenceMaterial' ? 'referenceMaterials' : 'labConfig';
+      let root = getAfter(/databases/$(database)/documents/organizations/$(orgId)/$(collection)/$(gate.secureMaintenanceTarget));
+      return gate.secureMaintenanceComplete == true && root != null
+        && root.data.protocol.operationId == d.protocol.operationId
+        && root.data.securePolicyJob == gate.secureMaintenanceJob;
+    }
+    function secureWriteFence(orgId, d) {
+      let gate = get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol;
+      return gate.get('secureMaintenanceJob', null) == null ? true : secureMaintenance(orgId, d);
+    }
+    function secureDefinition(orgId, d) {
+      let was = resource == null ? 0 : resource.data.get('secureConfigured', 0);
+      let now = d.get('secureConfigured', 0);
+      return now in [0,1] && (was == 0 && now == 0 || (secureManager(orgId)
+        && (resource != null && now == was
+          && d.get('physicalReferenceJson', '') == resource.data.get('physicalReferenceJson', '')
+          && d.get('chemicalReferenceJson', '') == resource.data.get('chemicalReferenceJson', '')
+          || (secureMaintenance(orgId, d)
+            && get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol.secureMaintenanceComplete == true))));
+    }
+    function secureSource(orgId, d) {
+      let enabled = get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol.get('secureFieldsEnabled', false);
+      return enabled ? secureProtectedSource(orgId, d)
+        : (d.get('secureEntryId', null) == null && (resource == null || resource.data.get('secureEntryId', null) == null));
+    }
+    function secureProtectedSource(orgId, d) {
+      let gate = get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol;
+      let expected = d.protocol.get('secureMigration', '') != '' ? gate.get('secureMaintenanceEpoch', 0) : gate.get('publicPrivacyEpoch', 0);
+      return d.get('publicPrivacyEpoch', 0) == expected
+        && (resource == null ? secureNewSource(orgId, d) : secureExistingSource(orgId, d));
+    }
+    function secureNewSource(orgId, d) {
+      let next = d.get('secureEntryId', null);
+      return next == null ? secureSourceTemplate(orgId, d)
+        : d.protocol.get('secureFieldsAware', false) == true && securePointer(orgId, d, next);
+    }
+    function secureExistingSource(orgId, d) {
+      let prior = resource.data.get('secureEntryId', null);
+      let next = d.get('secureEntryId', null);
+      return secureSourceTemplate(orgId, d)
+        && (prior == null && next == null || d.protocol.get('secureFieldsAware', false) == true)
+        && (d.get('secureResult', 0) == resource.data.get('secureResult', 0) || secureMaintenance(orgId, d))
+        && (prior == next || (next == null ? secureMaintenance(orgId, d) : securePointer(orgId, d, next)));
+    }
+    function secureSourceTemplate(orgId, d) {
+      return d.protocol.entityType == 'sample' ? secureSampleTemplate(orgId, d)
+        : d.protocol.entityType == 'productBatchSample' ? secureBatchTemplate(orgId, d)
+        : d.protocol.entityType != 'labResult' || get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol.get('secureFieldsEnabled', false) != true || d.protocol.get('secureFieldsAware', false) == true;
+    }
+    function secureSampleTemplate(orgId, d) {
+      let product = d.get('inspectionKind', 'raw') == 'product';
+      let ref = d.parentRefs.get(product ? 'productId' : 'materialId', {});
+      let collection = product ? 'labConfig' : 'referenceMaterials';
+      let parent = ref.get('entityId', '') == '' ? null : getAfter(/databases/$(database)/documents/organizations/$(orgId)/$(collection)/$(ref.entityId));
+      return parent == null || parent.data.get('secureConfigured', 0) == 0 || secureMaintenance(orgId, d)
+        || (d.protocol.get('secureFieldsAware', false) == true && d.get('secureEntryId', null) is string);
+    }
+    function secureBatchTemplate(orgId, d) {
+      let parent = getAfter(/databases/$(database)/documents/organizations/$(orgId)/samples/$(d.parentRefs.batchId.entityId));
+      return parent.data.get('secureTemplateJson', null) == null ||
+        (d.protocol.get('secureFieldsAware', false) == true && d.get('secureEntryId', null) is string);
+    }
+    function securePointer(orgId, d, id) {
+      let child = getAfter(/databases/$(database)/documents/organizations/$(orgId)/labConfig/$(id));
+      let data = child.data;
+      let field = d.protocol.entityType == 'sample' ? 'inspectionId' : d.protocol.entityType == 'productBatchSample' ? 'batchSampleId' : d.protocol.entityType == 'labResult' ? 'sampleTestId' : d.protocol.entityType == 'nirValidationSettings' ? 'nirResetId' : 'formulationId';
+      return child != null && data.configType == 'secure_field_submissions'
+        && data.sourceKind == d.protocol.entityType && data.sourceVersion == d.version
+        && data.parentRefs[field].entityId == d.remoteId
+        && data.protocol.operationId == d.protocol.operationId
+        && (resource == null || secureMaintenance(orgId, d));
+    }
+    function secureSubmission(orgId, d) {
+      let field = d.sourceKind == 'sample' ? 'inspectionId' : d.sourceKind == 'productBatchSample' ? 'batchSampleId' : d.sourceKind == 'labResult' ? 'sampleTestId' : d.sourceKind == 'nirValidationSettings' ? 'nirResetId' : 'formulationId';
+      let collection = d.sourceKind == 'sample' ? 'samples' : d.sourceKind == 'productBatchSample' ? 'productBatchSamples' : d.sourceKind == 'labResult' ? 'labResults' : 'labConfig';
+      let ref = d.parentRefs.get(field, {});
+      let source = getAfter(/databases/$(database)/documents/organizations/$(orgId)/$(collection)/$(ref.entityId));
+      return resource == null && d.deletedAt == null && d.fieldsJson.size() <= 750000
+        && d.sourceKind in ['sample','productBatchSample','labResult','nirValidationSettings','nutritionFormulation']
+        && d.parentRefs.size() == 1 && ref == {'entityType':d.sourceKind,'entityId':source.data.remoteId,'version':source.data.version}
+        && source.data.organizationId == orgId && source.data.secureEntryId == d.remoteId
+        && source.data.version == d.sourceVersion && source.data.protocol.operationId == d.protocol.operationId
+        && (source.data.version == 1 || secureMaintenance(orgId, d))
+        && (d.sourceKind != 'nirValidationSettings' || d.sourceVersion == 1 || secureNirOriginal(orgId, d, ref.entityId));
+    }
+    function secureNirOriginal(orgId, d, sourceId) {
+      let prior = get(/databases/$(database)/documents/organizations/$(orgId)/labConfig/$(sourceId));
+      let id = prior.data.get('secureEntryId', null);
+      let archived = id == null ? null : get(/databases/$(database)/documents/organizations/$(orgId)/labConfig/$(id));
+      return d.originalSnapshotJson == (archived == null ? prior.data.get('calibrationSnapshotJson', null) : archived.data.originalSnapshotJson)
+        && d.originalParameter == (archived == null ? prior.data.parameter : archived.data.originalParameter)
+        && d.originalNote == (archived == null ? prior.data.get('resetNote', null) : archived.data.get('originalNote', null));
+    }
+    function secureNirMigration(orgId, d) {
+      let id = resource.data.get('secureEntryId', null);
+      let archived = id == null ? null : get(/databases/$(database)/documents/organizations/$(orgId)/labConfig/$(id));
+      return secureMaintenance(orgId, d) && d.deletedAt == resource.data.deletedAt
+        && d.diff(resource.data).affectedKeys().hasOnly(['calibrationSnapshotJson','parameter','resetNote','secureEntryId','secureResult','securePolicyJob','publicPrivacyEpoch','version','updatedAt','updatedBy','deviceId','protocol','centralSequence','parentRefs'])
+        && (d.get('secureEntryId', null) != null || (
+          d.get('calibrationSnapshotJson', null) == (archived == null ? resource.data.get('calibrationSnapshotJson', null) : archived.data.originalSnapshotJson)
+          && d.parameter == (archived == null ? resource.data.parameter : archived.data.originalParameter)
+          && d.get('resetNote', null) == (archived == null ? resource.data.get('resetNote', null) : archived.data.get('originalNote', null))));
+    }
+    function secureFormulationMigration(orgId, d) {
+      return secureMaintenance(orgId, d) && d.deletedAt == resource.data.deletedAt
+        && d.configType == 'nutrition_formulations'
+        && d.diff(resource.data).affectedKeys().hasOnly(['parametersJson','calculationJson','sourceSnapshotJson','graphParametersJson','secureEntryId','secureTemplateJson','securePolicyJob','publicPrivacyEpoch','version','updatedAt','updatedBy','deviceId','protocol','centralSequence','parentRefs']);
+    }
+    function secureControlEdit(orgId) {
+      let d = request.resource.data;
+      return secureManager(orgId) && writerDevice(orgId)
+        && d.keys().hasOnly(['pending','complete','jobId','targetId','targetType','parameterNames','deviceId','updatedAt','privacyEpoch'])
+        && d.privacyEpoch is int && d.privacyEpoch > 0
+        && d.pending is bool && d.complete is bool && d.jobId is string && d.targetId is string
+        && d.targetType in ['referenceMaterial','labProduct'] && d.parameterNames is list
+        && d.updatedAt == request.time
+        && getAfter(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol.get('secureMaintenanceJob', null) == (d.pending ? d.jobId : null)
+        && (resource == null || resource.data.pending == false || (d.jobId == resource.data.jobId && d.targetId == resource.data.targetId && d.deviceId == resource.data.deviceId));
+    }
+    function secureOrganizationEdit(orgId) {
+      let d = request.resource.data;
+      let g = d.commandProtocol;
+      let state = getAfter(/databases/$(database)/documents/organizations/$(orgId)/secureControl/state);
+      return secureManager(orgId) && d.diff(resource.data).affectedKeys().hasOnly(['commandProtocol'])
+        && g.diff(resource.data.commandProtocol).affectedKeys().hasOnly(['secureFieldsEnabled','secureMaintenanceJob','secureMaintenanceDevice','secureMaintenanceTarget','secureMaintenanceTargetType','secureMaintenanceComplete','secureMaintenanceEpoch','publicPrivacyEpoch'])
+        && g.get('secureFieldsEnabled', false) is bool
+        && (resource.data.commandProtocol.get('secureFieldsEnabled', false) != true || g.secureFieldsEnabled == true)
+        && (state.data.parameterNames.size() == 0 || g.secureFieldsEnabled == true)
+        && state != null && state.data.privacyEpoch == g.secureMaintenanceEpoch
+        && g.secureMaintenanceEpoch is int && g.secureMaintenanceEpoch > 0
+        && (state.data.pending
+          ? g.get('publicPrivacyEpoch', 0) == resource.data.commandProtocol.get('publicPrivacyEpoch', 0)
+          : state.data.complete && g.publicPrivacyEpoch == state.data.privacyEpoch)
+        && (resource.data.commandProtocol.get('secureMaintenanceJob', null) == null
+          ? g.secureMaintenanceEpoch == resource.data.commandProtocol.get('publicPrivacyEpoch', 0) + 1
+          : g.secureMaintenanceEpoch == resource.data.commandProtocol.secureMaintenanceEpoch)
+        && state.data.deviceId == g.secureMaintenanceDevice
+        && state.data.targetId == g.secureMaintenanceTarget && state.data.targetType == g.secureMaintenanceTargetType && state.data.complete == g.secureMaintenanceComplete
+        && g.secureMaintenanceJob == (state.data.pending ? state.data.jobId : null);
+    }
+    // END SECURE FIELD CONTRACT
 
     // ── identity helpers ─────────────────────────────────────────────────
     function signedIn() {
@@ -96,12 +1488,13 @@ service cloud.firestore {
         'reports.read','reports.create','reports.export','devices.register','audit.read',
         'formulations.read'
       ] : role == 'lab' ? [
-        'org.read',
+        'org.read','users.read',
         'samples.read','samples.create','samples.update',
         'lab_results.read','lab_results.create','lab_results.update',
-        'reports.read','devices.register','formulations.read'
+        'qc.read','qc.write','qc.approve','qc.reject',
+        'reports.read','reports.create','reports.export','devices.register','audit.read','formulations.read'
       ] : role == 'viewer' ? [
-        'org.read','samples.read','lab_results.read','qc.read','reports.read','devices.register',
+        'org.read','samples.read','lab_results.read','qc.read','reports.read','reports.export','devices.register',
         'formulations.read'
       ] : role == 'nutritionist' ? [
         'org.read','samples.read','lab_results.read','reports.read','devices.register',
@@ -121,29 +1514,49 @@ service cloud.firestore {
     // reads and writes below, even though the member row itself is `active`.
     // The owner can still `get` the org document itself (see below) so the
     // app can show the trial-expired screen. Status flips
-    // (`trial` → `suspended` → `active`) happen only through the Admin SDK
-    // (scheduled cron / manual activation), which bypasses these rules; no
-    // client may change any lifecycle field.
+    // Lifecycle changes require reviewed administration; expiry itself is
+    // enforced below using request.time, without a scheduled function.
     function orgUsable(orgId) {
       let org = get(/databases/$(database)/documents/organizations/$(orgId));
-      return org != null && org.data.status in ['trial', 'active'];
+      let end = org.data.get('trialEndsAt', null);
+      return org != null && org.data.status in ['trial', 'active']
+        && (org.data.status != 'trial' || org.data.get('manuallyActivated', false) == true
+          || (end is timestamp && request.time < end));
     }
 
     function activeInOrg(orgId) {
-      return inOrg(orgId) && myStatus() == 'active' && orgUsable(orgId);
+      let profile = signedIn() ? userDoc(request.auth.uid) : null;
+      let org = get(/databases/$(database)/documents/organizations/$(orgId));
+      let end = org.data.get('trialEndsAt', null);
+      return profile != null && profile.data.organizationId == orgId
+        && profile.data.status == 'active' && org != null
+        && org.data.status in ['trial','active']
+        && (org.data.status != 'trial' || org.data.get('manuallyActivated', false) == true
+          || (end is timestamp && request.time < end))
+        && (request.method in ['get', 'list'] || org.data.get('commandProtocol', {}).get('maintenance', false) != true);
     }
 
+    function roleCan(perm) {
+      let doc = userDoc(request.auth.uid);
+      return doc == null ? false : (doc.data.role == 'admin' ? true
+        : (perm in ['qc.write','lab_results.create','lab_results.update','samples.create','samples.update']
+            && doc.data.role in ['quality_manager','lab','trial_owner']) ? true
+        : (perm in ['qc.approve','qc.reject'] && doc.data.role in ['quality_manager','lab']) ? true
+        : roleCanRoles(perm, doc.data));
+    }
+    function roleCanRoles(perm, data) {
+      let roles = rolesOf(data);
+      return roles.size() == 1 ? rolePermissionGranted(roles[0], perm) : ('admin' in roles
+        || ('trial_owner' in roles && rolePermissionGranted('trial_owner', perm))
+        || ('quality_manager' in roles && rolePermissionGranted('quality_manager', perm))
+        || ('lab' in roles && rolePermissionGranted('lab', perm))
+        || ('nutritionist' in roles && rolePermissionGranted('nutritionist', perm))
+        || ('viewer' in roles && rolePermissionGranted('viewer', perm)));
+    }
     function can(orgId, perm) {
-      let roles = myRoles();
-      return activeInOrg(orgId)
-        && validRoleSet(roles, myRole())
-        && (
-        ('admin' in roles && perm in rolePermissions('admin'))
-        || ('trial_owner' in roles && perm in rolePermissions('trial_owner'))
-        || ('quality_manager' in roles && perm in rolePermissions('quality_manager'))
-        || ('lab' in roles && perm in rolePermissions('lab'))
-        || ('nutritionist' in roles && perm in rolePermissions('nutritionist'))
-        || ('viewer' in roles && perm in rolePermissions('viewer')));
+      let doc = signedIn() ? userDoc(request.auth.uid) : null;
+      let profile = doc != null ? doc.data : {};
+      return activeInOrg(orgId) && validRoleSet(rolesOf(profile), profile.role) && roleCan(perm);
     }
 
     function canManage(uid) {
@@ -208,29 +1621,113 @@ service cloud.firestore {
     }
 
     function legacyDomainWritesAllowed(orgId) {
+      return directBusinessLinked(orgId) && secureWriteFence(orgId, request.resource.data);
+    }
+
+    function directEnabled(orgId) {
       let org = get(/databases/$(database)/documents/organizations/$(orgId));
-      return org != null && org.data.get('commandProtocol', {}).get('enabled', false) != true;
+      let gate = org.data.get('commandProtocol', {});
+      return activeInOrg(orgId) && gate.get('enabled', false) == true
+        && gate.get('mode', '') == 'firestore_direct_v2'
+        && gate.get('schemaVersion', 0) == 3
+        && gate.get('writePolicy', '') == 'multi_authorized'
+        && gate.get('maintenance', true) == false
+        && gate.get('domainManifestVersion', 0) == 1
+        && gate.get('globalReferencesReady', false) == true
+        && gate.get('uniqueAdmissionComplete', false) == true;
+    }
+
+    function directWriter(orgId, deviceId) {
+      let org = get(/databases/$(database)/documents/organizations/$(orgId));
+      let device = get(/databases/$(database)/documents/organizations/$(orgId)/devices/$(deviceId));
+      let profile = userDoc(request.auth.uid);
+      return directEnabled(orgId)
+        && validRoleSet(rolesOf(profile.data), profile.data.role) && device != null
+        && device.data.uid == request.auth.uid && device.data.get('status', 'active') == 'active'
+        && device.data.get('readOnly', true) == false;
+    }
+
+    // Every direct business effect is tied to the same immutable receipt,
+    // event and incremented sequence; an older client cannot skip the feed.
+    // A newly created small event already validates the authenticated receipt
+    // through directMetadataLinked and every source image through exactEffects.
+    // Require its commit timestamp here: an existing event cannot authorize a
+    // later unreported write. Expanded events retain their separate proof.
+    function directBusinessLinked(orgId) {
+      return request.resource.data.protocol.get('effect', null) == null ? smallBusinessLinked(orgId)
+        : expandedDomainLinked(orgId, request.resource.data);
+    }
+    function expandedDomainLinked(orgId, d) {
+      return d.protocol.entityType == 'labProductAnalysis'
+        || (d.protocol.get('ledgerMode', '') == 'consumption_v1' && d.protocol.entityType != 'labResult')
+        ? compactChildLinked(orgId) : expandedBusinessLinked(orgId);
+    }
+    function smallBusinessLinked(orgId) {
+      let d = request.resource.data;
+      let event = getAfter(/databases/$(database)/documents/organizations/$(orgId)/changeEvents/$(('event_' + string(d.centralSequence))));
+      return event.data.records.size() <= 4
+        && event.data.committedAt == request.time
+        && event.data.operationId == d.protocol.operationId
+        && event.data.deviceId == d.deviceId
+        && event.data.recordPaths.hasAny([request.path])
+        && d.protocol.mode == 'firestore_direct_v2' && d.protocol.schemaVersion == 3
+        && d.protocol.migrationId == get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol.migrationId;
+    }
+    function compactChildLinked(orgId) {
+      let d = request.resource.data;
+      let event = getAfter(/databases/$(database)/documents/organizations/$(orgId)/changeEvents/$(('event_' + string(d.centralSequence))));
+      return event.data.records.size() <= 10
+        && event.data.committedAt == request.time
+        && event.data.operationId == d.protocol.operationId
+        && event.data.deviceId == d.deviceId
+        && event.data.recordPaths.hasAny([request.path])
+        && d.protocol.mode == 'firestore_direct_v2' && d.protocol.schemaVersion == 3
+        && d.protocol.migrationId == get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol.migrationId;
+    }
+
+    function expandedBusinessLinked(orgId) {
+      let d = request.resource.data;
+      let operation = d.protocol.operationId;
+      let receipt = getAfter(/databases/$(database)/documents/organizations/$(orgId)/commandReceipts/$(operation));
+      let event = getAfter(/databases/$(database)/documents/organizations/$(orgId)/changeEvents/$(('event_' + string(d.centralSequence))));
+      return receipt.data.uid == request.auth.uid && receipt.data.deviceId == d.deviceId
+        && receipt.data.changeSequence == d.centralSequence && receipt.data.committedAt == request.time
+        && d.protocol.mode == 'firestore_direct_v2' && d.protocol.schemaVersion == 3
+        && d.protocol.migrationId == receipt.data.migrationId
+        && event.data.operationId == operation && event.data.recordPaths.hasAny([request.path]);
+    }
+
+    function directMetadataLinked(orgId) {
+      let d = request.resource.data;
+      let receipt = getAfter(/databases/$(database)/documents/organizations/$(orgId)/commandReceipts/$(d.operationId));
+      return d.organizationId == orgId && receipt.data.uid == request.auth.uid
+        && receipt.data.deviceId == d.deviceId && receipt.data.changeSequence == d.sequence
+        && receipt.data.committedAt == request.time;
     }
 
     function hasEnvelope(orgId) {
-      return legacyDomainWritesAllowed(orgId) && writerDevice(orgId) && request.resource.data.organizationId == orgId
+      return legacyDomainWritesAllowed(orgId) && request.resource.data.organizationId == orgId
         && request.resource.data.keys().hasAll([
              'organizationId','version','createdAt','updatedAt',
              'updatedBy','createdBy','deviceId','localId'])
         && request.resource.data.version == 1
         && request.resource.data.updatedBy == request.auth.uid
-        && request.resource.data.createdBy is string
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
         && request.resource.data.localId != null;
     }
 
     function bumped(orgId) {
-      return legacyDomainWritesAllowed(orgId) && writerDevice(orgId) && request.resource.data.version == resource.data.version + 1
+      return legacyDomainWritesAllowed(orgId) && request.resource.data.version == resource.data.version + 1
         && request.resource.data.organizationId == orgId
         && request.resource.data.organizationId == resource.data.organizationId
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.localId == resource.data.localId
         && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.remoteId == resource.data.remoteId
         && (resource.data.get('deletedAt', null) == null || request.resource.data.get('deletedAt', null) != null);
     }
 
@@ -262,6 +1759,15 @@ service cloud.firestore {
           && member.data.status == request.resource.data.status;
       }
 
+      function disabledMemberAfterMatchesProfile() {
+        let member = getAfter(/databases/$(database)/documents/organizations/
+          $(resource.data.organizationId)/members/$(resource.data.memberId));
+        return member != null && member.data.uid == uid
+          && member.data.status == 'disabled'
+          && member.data.role == resource.data.role
+          && rolesMatch(member.data, resource.data);
+      }
+
       // (a) claimed invitation: the invite document decides the organization,
       // the role and the member id - the client cannot choose them. The member
       // signed in (password or Google) and now waits for manager activation,
@@ -278,15 +1784,13 @@ service cloud.firestore {
           && invite.data.memberId == request.resource.data.memberId;
       }
 
-      // (b) organization founder: the only way to become `active` is to own an
-      // organization that already exists and lists this uid as `ownerUid`.
-      // `get()` returns null for a missing document, so a self-declared
-      // organization that does not exist yet fails here. A trial company
+      // (b) The founder must own the organization in this atomic commit.
+      // The organization create rule independently validates genesis. A trial company
       // (`status == 'trial'`) yields `trial_owner`; a full company yields
       // `admin`. A later approval action promotes trial → active / owner.
       function foundedOrganization() {
         let orgId = request.resource.data.organizationId;
-        let org = get(/databases/$(database)/documents/organizations/$(orgId));
+        let org = getAfter(/databases/$(database)/documents/organizations/$(orgId));
         return request.resource.data.status == 'active'
           && org != null
           && org.data.ownerUid == request.auth.uid
@@ -316,7 +1820,10 @@ service cloud.firestore {
               && request.resource.data.status == resource.data.status
               && request.resource.data.memberId == resource.data.memberId
               && request.resource.data.email == resource.data.email)
-          || (canManage(uid)
+          || ((request.resource.data.status == resource.data.status
+                 || (resource.data.status in ['invited','pending_activation']
+                     && request.resource.data.status == 'active'))
+               && canManage(uid)
                && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                     'role','roles','status','displayName','activatedAt','activatedBy',
                     'organizationId','updatedBy','updatedAt','version'])
@@ -340,9 +1847,11 @@ service cloud.firestore {
                // returns to `no_company`. Gated on `users.disable` (not the
                // `canManage`/users.update gate above), same tombstone shape
                // as the self-leave branch.
-               can(userDoc(uid).data.organizationId, 'users.disable')
+               request.auth.uid != uid
+               && can(userDoc(uid).data.organizationId, 'users.disable')
                && resource.data.status in ['invited','pending_activation','active']
                && request.resource.data.status == 'disabled'
+               && disabledMemberAfterMatchesProfile()
                && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                     'role','roles','status','displayName','activatedAt','activatedBy',
                     'organizationId','memberId','updatedBy','updatedAt','version'])
@@ -357,6 +1866,7 @@ service cloud.firestore {
                request.auth.uid == uid
                && resource.data.status in ['invited','pending_activation','active']
                && request.resource.data.status == 'disabled'
+               && disabledMemberAfterMatchesProfile()
                && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                     'status','organizationId','memberId','updatedBy','updatedAt','version'])
                && !request.resource.data.keys().hasAll(['organizationId'])
@@ -379,10 +1889,8 @@ service cloud.firestore {
       // Single-company policy (§2): a bound account
       // (invited/pending_activation/active) cannot create a second company —
       //sign-out alone never unblocks this, only leaving does. New companies
-      // start as `trial` with a one-time 30-day window (`trialStartedAt`,
-      // `trialEndsAt`); expiry flips them to `suspended` via the server cron
-      // and manual activation by support (`manuallyActivated=true`) is
-      // permanent and never auto-suspended again.
+      // start active with a full admin founder. Existing trial organizations
+      // retain their lifecycle restrictions; clients cannot promote them.
       //
       // The owner may always `get` the org document itself — even when
       // suspended — so the app can render the trial-expired + support screen.
@@ -392,7 +1900,9 @@ service cloud.firestore {
       // companies keep the previous behavior (`activeInOrg` or nothing), so an
       // invited/pending member still reads nothing.
       // Everything below the org document stays locked by `activeInOrg`.
-      allow get: if activeInOrg(orgId)
+      allow get: if (resource == null && signedIn() && verifiedEmail()
+          && !blocksNewCompany(request.auth.uid))
+        || activeInOrg(orgId)
         || (signedIn() && resource.data.ownerUid == request.auth.uid)
         || (signedIn() && hasProfile() && myOrg() == orgId
             && resource.data.status == 'suspended');
@@ -404,20 +1914,39 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly([
              'name','ownerUid','status','createdAt','createdBy','schemaVersion',
              'updatedBy','updatedAt','version',
-             'trialStartedAt','trialEndsAt','trialConsumed','manuallyActivated'])
+             'trialStartedAt','trialEndsAt','trialConsumed','manuallyActivated','commandProtocol'])
         && request.resource.data.name is string
         && request.resource.data.name.size() > 1
         && request.resource.data.name.size() <= 120
         && request.resource.data.ownerUid == request.auth.uid
-        && request.resource.data.status == 'trial'
-        && request.resource.data.trialConsumed == false
+        && request.resource.data.status == 'active'
+        && request.resource.data.trialConsumed == true
         && request.resource.data.manuallyActivated == false
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.updatedBy == request.auth.uid
+        && request.resource.data.schemaVersion == 3
+        && request.resource.data.commandProtocol == {
+          'enabled': true, 'schemaVersion': 3, 'domainManifestVersion': 1,
+          'migrationId': 'fresh_' + orgId, 'mode': 'firestore_direct_v2',
+          'writePolicy': 'multi_authorized', 'maintenance': false,
+          'globalReferencesReady': true, 'uniqueAdmissionComplete': true
+        }
+        && getAfter(/databases/$(database)/documents/organizations/$(orgId)/counters/changeSequence).data
+          == {'organizationId': orgId, 'value': 0}
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.organizationId == orgId
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'
+        && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active'
+        && getAfter(/databases/$(database)/documents/organizations/$(orgId)/members/$(getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.memberId)).data.uid == request.auth.uid
+        && request.resource.data.get('trialStartedAt', null) == null
+        && request.resource.data.get('trialEndsAt', null) == null
         && request.resource.data.version == 1;
       // No client may change the organization lifecycle: `status`,
       // `trialStartedAt`, `trialEndsAt`, `trialConsumed` and
-      // `manuallyActivated` are pinned. `trial` → `suspended` (server cron)
-      // and `suspended` → `active` (manual activation by support) run through
-      // the Admin SDK, which bypasses these rules. An active admin of a usable
+      // `manuallyActivated` are pinned. Reviewed lifecycle administration
+      // uses trusted credentials; no cron or Functions are required.
+      // An active admin of a usable
       // org may still rename it or bump the schema version.
       allow update: if can(orgId, 'org.update')
         && request.resource.data.ownerUid == resource.data.ownerUid
@@ -429,6 +1958,24 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['name','schemaVersion','updatedBy','updatedAt','version']);
       allow delete: if false;
+
+      // BEGIN SECURE METADATA
+      allow update: if secureOrganizationEdit(orgId);
+      match /secureVisibility/{uid} {
+        allow get: if activeInOrg(orgId) && request.auth.uid == uid;
+        allow list, delete: if false;
+        allow create, update: if request.auth.uid == uid && secureManager(orgId) && writerDevice(orgId)
+          && request.resource.data.keys().hasOnly(['enabled','authTime','deviceId','updatedAt'])
+          && request.resource.data.enabled is bool
+          && request.resource.data.authTime == request.auth.token.auth_time
+          && request.resource.data.updatedAt == request.time;
+      }
+      match /secureControl/{id} {
+        allow get: if id == 'state' && activeInOrg(orgId);
+        allow list, delete: if false;
+        allow create, update: if id == 'state' && secureControlEdit(orgId);
+      }
+      // END SECURE METADATA
 
       // Heartbeat written by the sync engine.
       match /meta/{docId} {
@@ -454,6 +2001,37 @@ service cloud.firestore {
       // another org's roster would need both its org id and a matching token
       // e-mail. Cross-org reads stay denied (emulator: invite confidentiality).
       // Admins of the owning org are also allowed, to resolve one by key.
+      // Immutable validation witnesses for one atomic analysis definition.
+      // Root data is the read model; these documents only distribute the
+      // inventory checks across writes within Firestore's per-write budget.
+      match /simpleOperationProofs/{proofId} {
+        allow create: if signedIn() && proofId == request.resource.data.operationId
+          && simpleProofAllowed(orgId, request.resource.data);
+        allow read, update, delete: if false;
+      }
+      match /analysisDefinitionProofs/{proofId} {
+        function approvedAnalysisProof() {
+          let d = request.resource.data;
+          let a = getAfter(/databases/$(database)/documents/organizations/$(orgId)/labConfig/$(d.analysisId)).data;
+          return signedIn() && d.keys().hasOnly(['analysisId','operationId','summary','block','blocks','committedAt'])
+            && a.organizationId == orgId && a.protocol.entityType == 'labAnalysis'
+            && a.updatedBy == request.auth.uid && a.updatedAt == request.time
+            && a.protocol.operationId == d.operationId && d.committedAt == request.time
+            && (d.summary == true
+              ? proofId == d.operationId + '_' + d.analysisId + '_summary'
+                && chemicalAllBlocks(orgId, a, d.blocks)
+              : d.summary == false && d.block is int && d.block >= 0 && d.block < 9
+                && proofId == d.operationId + '_' + d.analysisId + '_' + string(d.block)
+                && d.block * 4 < a.chemicalDefinitions.size()
+                && chemicalAt(orgId, a, d.block * 4)
+                && chemicalAt(orgId, a, d.block * 4 + 1)
+                && chemicalAt(orgId, a, d.block * 4 + 2)
+                && chemicalAt(orgId, a, d.block * 4 + 3));
+        }
+        allow create: if approvedAnalysisProof();
+        allow read, update, delete: if false;
+      }
+
       match /invites/{inviteKey} {
         allow get: if can(orgId, 'users.read')
           || (verifiedEmail()
@@ -518,6 +2096,16 @@ service cloud.firestore {
             || profileDocumentMatchesMember(memberUid);
         }
 
+        function disabledProfileAfterMatchesMember() {
+          let memberUid = resource.data.get('uid', '');
+          let profile = memberUid == '' ? null : getAfter(/databases/$(database)/documents/users/$(memberUid));
+          return memberUid == '' || (profile != null
+            && profile.data.status == 'disabled'
+            && !profile.data.keys().hasAny(['organizationId','memberId'])
+            && profile.data.role == resource.data.role
+            && rolesMatch(profile.data, resource.data));
+        }
+
         // Admin inviting a member: the member document may only be created in
         // the `invited` state - an admin cannot mint an active member.
         function invitedByAdmin() {
@@ -529,8 +2117,13 @@ service cloud.firestore {
         // Organization founder writing its own member document: an active
         // `admin` for a full company, an active `trial_owner` for a trial.
         function founderMember() {
-          let org = get(/databases/$(database)/documents/organizations/$(orgId));
+          let org = getAfter(/databases/$(database)/documents/organizations/$(orgId));
           return request.resource.data.uid == request.auth.uid
+            && memberKeysOk()
+            && request.resource.data.email.lower() == request.auth.token.email.lower()
+            && request.resource.data.createdAt == request.time
+            && request.resource.data.updatedAt == request.time
+            && request.resource.data.updatedBy == request.auth.uid
             && request.resource.data.status == 'active'
             && org != null
             && org.data.ownerUid == request.auth.uid
@@ -551,7 +2144,10 @@ service cloud.firestore {
               // a member can never activate itself (see the claim branch: it
               // cannot touch `status` at all). Refreshing an invite
               // (resend: version/updated bump while `invited`) is also here.
-              can(orgId, 'users.update')
+              (request.resource.data.status == resource.data.status
+                || (resource.data.status in ['invited','pending_activation']
+                    && request.resource.data.status == 'active'))
+              && can(orgId, 'users.update')
               && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
                    'role','roles','status','displayName','activatedAt','activatedBy',
                    'updatedBy','updatedAt','version','deletedAt',
@@ -568,9 +2164,11 @@ service cloud.firestore {
               // `invited`/`pending_activation`/`active` row moves to
               // `disabled`. Gated on `users.disable`, never on `users.update`,
               // so a role with only `users.update` cannot revoke access.
-              can(orgId, 'users.disable')
+              resource.data.uid != request.auth.uid
+              && can(orgId, 'users.disable')
               && resource.data.status in ['invited','pending_activation','active']
               && request.resource.data.status == 'disabled'
+              && disabledProfileAfterMatchesMember()
               && request.resource.data.diff(resource.data).affectedKeys()
                    .hasOnly(['status','deletedAt','updatedBy','updatedAt','version'])
               && request.resource.data.uid == resource.data.uid
@@ -607,6 +2205,7 @@ service cloud.firestore {
               && resource.data.status in ['invited','pending_activation','active']
               && resource.data.uid == request.auth.uid
               && request.resource.data.status == 'disabled'
+              && disabledProfileAfterMatchesMember()
               && request.resource.data.diff(resource.data).affectedKeys()
                    .hasOnly(['status','deletedAt','updatedBy','updatedAt','version'])
               && request.resource.data.uid == resource.data.uid
@@ -621,61 +2220,84 @@ service cloud.firestore {
 
       // ── synced domain documents (plan §6.1) ───────────────────────────
       match /parameters/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_parameter(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'samples.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
       match /materialBounds/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_materialBound(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'samples.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
       match /organizationSettings/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_organizationSetting(orgId, request.resource.data));
+        }
         function sharedKey() {
           return request.resource.data.key in [
             'department_label','report_logo_data_uri','qa_form_no',
             'inspection_report_form_no','inspection_label_form_no',
             'equipment_label_form_no','daily_report_form_no','monthly_report_form_no',
-            'yearly_report_form_no','followup_report_form_no','lab_daily_report_form_no',
+            'yearly_report_form_no','product_daily_report_form_no',
+            'product_monthly_report_form_no','product_yearly_report_form_no',
+            'followup_report_form_no','lab_daily_report_form_no',
             'lab_monthly_report_form_no','lab_yearly_report_form_no','ncr_report_form_no'];
         }
         allow read: if can(orgId, 'reports.read');
-        allow create: if can(orgId, 'reports.create') && hasEnvelope(orgId)
-          && sharedKey() && request.resource.data.value is string;
-        allow update: if can(orgId, 'reports.create') && bumped(orgId)
+        allow create: if roleCan('reports.create') && hasEnvelope(orgId)
+          && sharedKey() && request.resource.data.value is string && directShape();
+        allow update: if roleCan('reports.create') && bumped(orgId)
           && sharedKey() && request.resource.data.key == resource.data.key
-          && request.resource.data.value is string;
+          && request.resource.data.value is string && directShape();
         allow delete: if false;
       }
       match /qcSops/{docId} {
+        function directShape() {
+          return (shape_qcSop(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId)
-          && (!(request.resource.data.status in ['Approved','Published']) || can(orgId, 'qc.approve'));
-        allow update: if can(orgId, 'qc.write') && bumped(orgId)
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId)
+          && (!(request.resource.data.status in ['Approved','Published']) || roleCan('qc.approve')) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId)
           && (request.resource.data.status == resource.data.status
               || !(request.resource.data.status in ['Approved','Published'])
-              || can(orgId, 'qc.approve'));
+              || roleCan('qc.approve')) && directShape();
         allow delete: if false;
       }
       match /qcSopRevisions/{docId} {
+        function directShape() {
+          return (shape_qcSopRevision(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.approve') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.approve') && bumped(orgId);
+        allow create: if roleCan('qc.approve') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.approve') && bumped(orgId) && directShape();
         allow delete: if false;
       }
       match /qcSopReads/{docId} {
+        function directShape() {
+          return (shape_qcSopRead(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /samples/{docId} {
+        function directShape() {
+          return (shape_sample(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'samples.read');
-        allow create: if can(orgId, 'samples.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'samples.update') && bumped(orgId);
+        allow create: if roleCan('samples.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('samples.update') && bumped(orgId) && directShape();
         allow delete: if false; // tombstone only (`deletedAt`)
       }
 
@@ -687,35 +2309,58 @@ service cloud.firestore {
       // could write a bogus/near-miss decision state into the ledger. Approvals
       // require `qc.approve`, rejections require `qc.reject`.
       match /qualityChecks/{docId} {
-        allow read: if can(orgId, 'qc.read');
+        function directShape() {
+          return (shape_qualityCheck(orgId, request.resource.data));
+        }
+        allow read: if can(orgId, 'samples.read');
         allow create: if hasEnvelope(orgId)
           && request.resource.data.newStatus in [
                'APPROVED','CONDITIONAL_APPROVAL','PARTIAL_REJECTION','FULL_REJECTION']
           && ((request.resource.data.newStatus in ['APPROVED','CONDITIONAL_APPROVAL']
-                 && can(orgId, 'qc.approve'))
+                 && roleCan('qc.approve'))
               || (request.resource.data.newStatus in ['PARTIAL_REJECTION','FULL_REJECTION']
-                 && can(orgId, 'qc.reject')));
-        allow update: if false;
+                 && roleCan('qc.reject'))) && directShape();
+        allow update: if false && directShape();
         allow delete: if false;
       }
 
       match /labResults/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_labResult(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /labConfig/{docId} {
-        allow read: if resource.data.configType.matches('nutrition_.*')
-          ? can(orgId, 'formulations.read') : can(orgId, 'samples.read');
+        // SECURE FORMULA MIGRATION
+        allow update: if secureFormulationMigration(orgId, request.resource.data) && bumped(orgId) && directShape();
+        function directShape() {
+          return request.resource.data.remoteId == docId && ((request.resource.data.configType == 'secure_field_submissions' && shape_secureFieldSubmission(orgId, request.resource.data))
+            || (request.resource.data.configType == 'lab_analyses' && shape_labAnalysis(orgId, request.resource.data))
+            || (request.resource.data.configType == 'lab_analysis_items' && shape_labAnalysisItem(orgId, request.resource.data))
+            || (request.resource.data.configType == 'lab_field_chemical_links' && shape_labFieldLink(orgId, request.resource.data))
+            || (request.resource.data.configType == 'lab_constants' && shape_labConstant(orgId, request.resource.data))
+            || (request.resource.data.configType == 'lab_products' && shape_labProduct(orgId, request.resource.data))
+            || (request.resource.data.configType == 'nutrition_formulations' && shape_nutritionFormulation(orgId, request.resource.data))
+            || (request.resource.data.configType == 'lab_product_analyses' && shape_labProductAnalysis(orgId, request.resource.data))
+            || (request.resource.data.configType == 'lab_units' && shape_labUnit(orgId, request.resource.data))
+            || (request.resource.data.configType == 'lab_material_analyses' && shape_labMaterialAnalysis(orgId, request.resource.data))
+            || (request.resource.data.configType == 'nir_validation_settings' && shape_nirValidationSettings(orgId, request.resource.data)));
+        }
+        allow get: if resource == null && (can(orgId, 'lab_results.read') || can(orgId, 'formulations.read'));
+        allow read: if resource != null && (resource.data.configType == 'secure_field_submissions'
+          ? secureReveal(orgId) : (resource.data.configType.matches('nutrition_.*')
+            ? can(orgId, 'formulations.read') : can(orgId, 'samples.read')));
         allow create: if (request.resource.data.configType.matches('nutrition_.*')
-          ? can(orgId, 'formulations.create') : can(orgId, 'lab_results.create'))
-          && hasEnvelope(orgId);
+          ? roleCan('formulations.create') : roleCan('lab_results.create'))
+          && hasEnvelope(orgId) && directShape();
         allow update: if (request.resource.data.configType.matches('nutrition_.*')
-          ? can(orgId, 'formulations.update') : can(orgId, 'lab_results.update'))
+          ? roleCan('formulations.update') : roleCan('lab_results.update'))
           && request.resource.data.configType == resource.data.configType
-          && bumped(orgId);
+          && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
@@ -723,65 +2368,92 @@ service cloud.firestore {
       // worksheets / reference. Same envelope + version-bump contract as
       // the core collections; append-only ledgers reject update/delete.
       match /inventoryItems/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_inventoryItem(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /inventoryTransactions/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_inventoryTransaction(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if false;
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if false && directShape();
         allow delete: if false;
       }
 
       match /inventoryLots/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_inventoryLot(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /consumption/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_consumption(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if false;
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if false && directShape();
         allow delete: if false;
       }
 
       match /stockAdjustments/{docId} {
+        function directShape() {
+          return (shape_stockAdjustment(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if false;
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if false && directShape();
         allow delete: if false;
       }
 
       match /equipment/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_equipment(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /equipmentEvents/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_equipmentEvent(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /worksheets/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_worksheet(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /referenceMaterials/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_referenceMaterial(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'samples.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
@@ -789,9 +2461,12 @@ service cloud.firestore {
       // Same envelope + version-bump contract as labResults; derived
       // artifacts (PDF/HTML) are never stored here — rebuilt on-device.
       match /productBatchSamples/{docId} {
+        function directShape() {
+          return (shape_productBatchSample(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'lab_results.read');
-        allow create: if can(orgId, 'lab_results.create') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'lab_results.update') && bumped(orgId);
+        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
@@ -800,23 +2475,32 @@ service cloud.firestore {
       // children carry the parent's remote id so the pull remaps the
       // per-device `table_id`. Deletes stay tombstone-only.
       match /qcCustomTables/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_qcCustomTable(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /qcCustomTableFields/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_qcCustomTableField(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /qcCustomTableRows/{docId} {
+        function directShape() {
+          return request.resource.data.remoteId == docId && (shape_qcCustomTableRow(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
@@ -826,61 +2510,96 @@ service cloud.firestore {
       // `inspection_remote_id`, ...) so the pull remaps the per-device
       // autoincrement foreign keys.
       match /qcTemplates/{docId} {
+        function directShape() {
+          return (shape_qcTemplate(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /qcSections/{docId} {
+        function directShape() {
+          return (shape_qcSection(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /qcItems/{docId} {
+        function directShape() {
+          return (shape_qcItem(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /qcInspections/{docId} {
+        function directShape() {
+          return (shape_qcInspection(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /qcResponses/{docId} {
+        function directShape() {
+          return (shape_qcResponse(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       // Every press of the per-task "done" button appends one row: there is
       // no edit path, so the collection is append-only.
       match /qcTaskLogs/{docId} {
+        function directShape() {
+          return (shape_qcTaskLog(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if false;
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if false && directShape();
         allow delete: if false;
       }
 
       match /qcFindingsNc/{docId} {
+        function directShape() {
+          return (shape_qcFindingNc(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 
       match /qcCapa/{docId} {
+        function directShape() {
+          return (shape_qcCapa(orgId, request.resource.data));
+        }
         allow read: if can(orgId, 'qc.read');
-        allow create: if can(orgId, 'qc.write') && hasEnvelope(orgId);
-        allow update: if can(orgId, 'qc.write') && bumped(orgId);
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('qc.write') && bumped(orgId) && directShape();
         allow delete: if false;
+      }
+
+      // Push tokens are private per-device infrastructure. Read-only viewers
+      match /qcAudits/{docId} {
+        function directShape() {
+          return (shape_qcAudit(orgId, request.resource.data));
+        }
+        allow read: if can(orgId, 'qc.read');
+        // Fail closed until the generated target/hash/operation contract is present.
+        allow create: if roleCan('qc.write') && hasEnvelope(orgId) && directShape();
+        allow update, delete: if false;
       }
 
       // Push tokens are private per-device infrastructure. Read-only viewers
@@ -927,7 +2646,8 @@ service cloud.firestore {
         // able to list every member's uid, e-mail, platform and role.
         // `list` needs `devices.read` (admins); `get` additionally allows the
         // owner to read their own document (heartbeat/register needs it).
-        allow get: if can(orgId, 'devices.read')
+        allow get: if (resource == null && can(orgId, 'devices.register'))
+          || can(orgId, 'devices.read')
           || (activeInOrg(orgId)
               && resource.data.uid == request.auth.uid);
         allow list: if can(orgId, 'devices.read');
@@ -990,17 +2710,19 @@ service cloud.firestore {
 
       match /auditLogs/{docId} {
         allow read: if can(orgId, 'audit.read');
-        allow create: if activeInOrg(orgId)
-          && activeOwnedDevice(orgId, request.resource.data.get('deviceId', ''))
-          && request.resource.data.keys().hasOnly([
-               'userId','userName','organizationId','action','entityType','entityId',
-               'detailsJson','deviceId','occurredAt','version'])
-          && request.resource.data.userId == request.auth.uid
+        allow create: if request.resource.data.userId == request.auth.uid
           && request.resource.data.organizationId == orgId
-          && request.resource.data.action is string
-          && validAuditAction(request.resource.data.action)
-          && request.resource.data.version == 1;
-        allow update, delete: if false; // append-only
+          && request.resource.data.version == 1
+          && request.resource.data.keys().hasOnly(['userId','userName','organizationId','action','entityType','entityId','detailsJson','deviceId','occurredAt','version','operationId','sequence','records'])
+          && (request.resource.data.action == 'DOMAIN_COMMITTED'
+            ? (directMetadataLinked(orgId) && docId == 'cmd_' + request.resource.data.operationId
+              && request.resource.data.occurredAt == request.time
+              && request.resource.data.detailsJson == ''
+              && request.resource.data.entityType == 'domainTransaction'
+              && request.resource.data.records == getAfter(/databases/$(database)/documents/organizations/$(orgId)/changeEvents/$(('event_' + string(request.resource.data.sequence)))).data.records)
+            : (activeInOrg(orgId) && activeOwnedDevice(orgId, request.resource.data.deviceId)
+              && validAuditAction(request.resource.data.action)));
+        allow update, delete: if false;
       }
 
       // ── Central command protocol (plan 2026-10-25 §6/§9) ────────────────
@@ -1016,20 +2738,92 @@ service cloud.firestore {
         // Receipt recovery after "resend the same request": the same actor
         // may read its own receipts; hashes live here, no lab data.
         allow get: if activeInOrg(orgId)
-          && resource.data.uid == request.auth.uid;
+          && (resource == null || resource.data.uid == request.auth.uid);
         allow list: if activeInOrg(orgId) && can(orgId, 'audit.read');
-        allow create, update, delete: if false;
+        allow create: if directWriter(orgId, request.resource.data.deviceId) && directMetadataLinked(orgId)
+          && getAfter(/databases/$(database)/documents/organizations/$(orgId)/counters/changeSequence).data.value == request.resource.data.sequence
+          && getAfter(/databases/$(database)/documents/organizations/$(orgId)/counters/changeSequence).data.operationId == operationId
+          && getAfter(/databases/$(database)/documents/organizations/$(orgId)/changeEvents/$(('event_' + string(request.resource.data.sequence)))).data.operationId == operationId
+          && getAfter(/databases/$(database)/documents/organizations/$(orgId)/auditLogs/$(('cmd_' + operationId))).data.operationId == operationId
+          && request.resource.data.keys().hasOnly([
+            'organizationId','deviceId','operationId','sequence','uid','requestHash','payloadHash',
+            'status','entityId','committedVersion','changeSequence','committedAt','migrationId'])
+          && request.resource.data.migrationId == get(/databases/$(database)/documents/organizations/$(orgId)).data.commandProtocol.migrationId
+          && operationId == request.resource.data.operationId
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.status == 'approved'
+          && request.resource.data.committedVersion == 1
+          && request.resource.data.changeSequence == request.resource.data.sequence
+          && request.resource.data.committedAt == request.time
+          && request.resource.data.requestHash.matches('^[a-f0-9]{64}$')
+          && request.resource.data.payloadHash.matches('^[a-f0-9]{64}$');
+        allow update, delete: if false;
       }
       match /changeEvents/{eventId} {
         // Unified reading (§8): members read the change feed for their own
         // organization; every write belongs to the command service.
-        allow read: if can(orgId, 'samples.read') && resource.data.entityType == 'sample';
-        allow create, update, delete: if false;
+        allow read: if (can(orgId, 'samples.read') && resource.data.get('entityType', '') == 'sample')
+          || (directEnabled(orgId) && resource.data.get('mode', '') == 'firestore_direct_v2');
+        allow create: if (request.resource.data.records.size() <= 4 ? directMetadataLinked(orgId) : signedIn())
+          && request.resource.data.keys().hasOnly([
+            'organizationId','deviceId','operationId','sequence','mode','seq','records','recordPaths','committedAt'])
+          && request.resource.data.mode == 'firestore_direct_v2'
+          && request.resource.data.seq == request.resource.data.sequence
+          && eventId == 'event_' + string(request.resource.data.seq)
+          && request.resource.data.committedAt == request.time
+          && request.resource.data.recordPaths is list
+          && request.resource.data.records is list
+          && request.resource.data.recordPaths.size() > 0
+          && request.resource.data.recordPaths.size() <= 12
+          && request.resource.data.recordPaths.toSet().size() == request.resource.data.recordPaths.size()
+          && request.resource.data.records.size() == request.resource.data.recordPaths.size()
+          && exactEffects(orgId, request.resource.data);
+        allow update, delete: if false;
       }
       match /counters/{counterId} {
         // Server-shared sequence counters — this is THE identity data
         // (official numbers); clients read nothing, write nothing.
-        allow read, write: if false;
+        allow get: if directEnabled(orgId) && counterId == 'changeSequence';
+        allow update: if counterId == 'changeSequence' && directMetadataLinked(orgId)
+          && request.resource.data.keys().hasOnly(['value','organizationId','deviceId','operationId','sequence'])
+          && request.resource.data.value is int
+          && request.resource.data.value == resource.data.value + 1
+          && request.resource.data.value == request.resource.data.sequence;
+        // Empty-organization genesis only. Existing organizations cannot use
+        // this branch to reset their sequence or bypass reviewed migration.
+        allow create: if counterId == 'changeSequence' && signedIn() && verifiedEmail()
+          && !exists(/databases/$(database)/documents/organizations/$(orgId))
+          && getAfter(/databases/$(database)/documents/organizations/$(orgId)).data.ownerUid == request.auth.uid
+          && getAfter(/databases/$(database)/documents/organizations/$(orgId)).data.createdAt == request.time
+          && request.resource.data == {'organizationId': orgId, 'value': 0};
+        allow list, delete: if false;
+      }
+      match /uniqueReservations/{reservationId} {
+        function reservationEffect() {
+          let d = request.resource.data;
+          let collection = d.collection;
+          let record = getAfter(d.recordPath);
+          return d.recordPath == /databases/$(database)/documents/organizations/$(orgId)/$(collection)/$(d.entityId)
+            && record != null && record.data.updatedAt == request.time
+            && record.data.protocol.operationId == d.operationId
+            && record.data.protocol.entityType == d.entityType
+            && (d.released == false ? record.data.protocol.uniqueKeys.hasAny([reservationId])
+              : (resource != null && resource.data.recordPath == d.recordPath
+                  && !record.data.protocol.uniqueKeys.hasAny([reservationId])));
+        }
+        allow get: if directEnabled(orgId);
+        allow create, update: if directMetadataLinked(orgId)
+          && reservationId.matches('^[a-f0-9]{64}$')
+          && request.resource.data.keys().hasOnly([
+            'entityType','entityId','organizationId','deviceId','operationId','sequence','released','recordPath','collection'])
+          && request.resource.data.entityType is string
+          && request.resource.data.entityId is string
+          && request.resource.data.released is bool
+          && reservationEffect()
+          && (resource == null || resource.data.get('released', false) == true
+            || (resource.data.entityType == request.resource.data.entityType
+                && resource.data.entityId == request.resource.data.entityId));
+        allow list, delete: if false;
       }
       match /notifyRequests/{requestId} {
         // Notification fan-out requests, consumed by the push delivery

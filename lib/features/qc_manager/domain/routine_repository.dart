@@ -2,7 +2,7 @@ import 'qc_enums.dart';
 import 'qc_inspection.dart';
 import 'qc_template.dart';
 
-/// Domain models and the repository contract for the simple daily/monthly
+/// Domain models and the repository contract for daily/monthly/yearly
 /// routine lists (QC checklists without versions, publishing or archiving).
 ///
 /// Implementation: `data/routine_lists_repository.dart`
@@ -28,6 +28,7 @@ class RoutineList {
   final int? sheetId;
 
   bool get isMonthly => template.recurrence == QcRecurrence.monthly;
+  bool get isYearly => template.recurrence == QcRecurrence.yearly;
   bool get isComplete => totalItems > 0 && doneCount >= totalItems;
 }
 
@@ -246,8 +247,8 @@ class RoutineHistoryFilters {
 /// edited in place; opening it resolves this period's sheet (auto-created);
 /// checking a box stamps who did it; past periods are immutable history.
 ///
-/// QC stays offline-local (no `sync_queue` rows): see the note on the
-/// offline-first QC facades about why QC never enqueues.
+/// Shared QC changes require explicit submission and a verified server receipt.
+/// SQLite supplies approved reads; disconnected changes stay manual drafts.
 abstract class RoutineListsRepository {
   /// Every non-deleted list with its progress in the current period.
   /// Templates on `once`/`weekly` behave as daily (period = day).

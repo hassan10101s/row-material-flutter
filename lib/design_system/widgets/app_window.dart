@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import 'app_adaptive.dart';
+import 'app_top_app_bar.dart';
+import '../animations/app_animations.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
 
@@ -15,9 +17,9 @@ import '../tokens/app_spacing.dart';
 ///
 /// * Desktop / wide screens: [showAppWindow] centers the window with a
 ///   [AppWindowSize] max width.
-/// * Phones: [showAppOverlay] keeps the native-feeling bottom sheet with the
-///   same header/body/actions content, so the mobile experience does not turn
-///   into a cramped desktop dialog.
+/// * Large content: [showAppContent] pushes a full page on phones and uses
+///   the same window on desktop.
+/// * Short interactions: [showAppOverlay] uses a mobile bottom sheet.
 enum AppWindowSize {
   /// Small forms (unit / parameter / confirm editors): 440dp.
   sm(440),
@@ -48,6 +50,8 @@ class AppWindow extends StatelessWidget {
     this.height,
     this.showClose = true,
     this.scrollBody = true,
+    this.fullScreen = false,
+    this.onRequestClose,
   });
 
   final String title;
@@ -74,8 +78,63 @@ class AppWindow extends StatelessWidget {
   /// `Expanded` would take unbounded constraints and explode.
   final bool scrollBody;
 
+  /// Selected by the feature's platform authority. Large mobile content
+  /// occupies a pushed page; desktop keeps the same window chrome.
+  final bool fullScreen;
+
+  /// Replaces the direct pop of the close button. Provided by guarded
+  /// surfaces (`showAppContent` with an [AppContentGuard]): the editor sets
+  /// [AppContentGuard.canClose] false while there is unsaved input and the
+  /// consult happens here, so the header close button follows the same
+  /// rules as the system back gesture.
+  final void Function()? onRequestClose;
+
   @override
   Widget build(BuildContext context) {
+    if (fullScreen) {
+      return Scaffold(
+        backgroundColor: AppColors.surface,
+        appBar: AppTopAppBar(title: title),
+        body: SafeArea(
+          top: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (subtitle?.isNotEmpty == true)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.pageMobile,
+                    AppSpacing.sm,
+                    AppSpacing.pageMobile,
+                    0,
+                  ),
+                  child: Text(
+                    subtitle!,
+                    style: TextStyle(color: AppColors.textMuted),
+                  ),
+                ),
+              Expanded(
+                child: scrollBody
+                    ? SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(
+                          AppSpacing.pageMobile,
+                          AppSpacing.sm,
+                          AppSpacing.pageMobile,
+                          AppSpacing.pageMobile,
+                        ),
+                        child: child,
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.all(AppSpacing.pageMobile),
+                        child: child,
+                      ),
+              ),
+              if (_hasFooter) footer(leading: leadingActions, actions: actions),
+            ],
+          ),
+        ),
+      );
+    }
     final width = maxWidth ?? size.maxWidth;
     return Dialog(
       insetPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
@@ -103,6 +162,7 @@ class AppWindow extends StatelessWidget {
                 icon: icon,
                 accent: accent,
                 showClose: showClose,
+                onRequestClose: onRequestClose,
               ),
               Divider(height: 1, color: AppColors.borderMuted),
               if (scrollBody)
@@ -248,6 +308,7 @@ class _AppWindowHeader extends StatelessWidget {
     this.icon,
     this.accent,
     this.showClose = true,
+    this.onRequestClose,
   });
 
   final String title;
@@ -255,6 +316,7 @@ class _AppWindowHeader extends StatelessWidget {
   final IconData? icon;
   final Color? accent;
   final bool showClose;
+  final void Function()? onRequestClose;
 
   @override
   Widget build(BuildContext context) {
@@ -316,7 +378,8 @@ class _AppWindowHeader extends StatelessWidget {
                 width: appControlHeight(context),
                 height: appControlHeight(context),
               ),
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed:
+                  onRequestClose ?? () => Navigator.of(context).maybePop(),
               icon: const Icon(Icons.close),
             ),
         ],
@@ -426,8 +489,167 @@ Future<T?> showAppDialog<T>(
         builder: builder,
       );
 
-/// Shows [child] inside the unified [AppWindow] chrome and completes with
-/// whatever the window pops with (same contract as [showDialog]).
+/// Mutable back/close guard for a unified editor surface (`showAppContent`).
+///
+/// The editor flips [canClose] as its dirty state changes — the surface
+/// rebuilds around it, so a plain assignment (no `setState`) is enough.
+/// While [canClose] is false, both the system back gesture and the window
+/// close button are intercepted and [confirmDiscard] decides: a confirmed
+/// discard pops the surface, cancelling keeps it open with all input intact.
+class AppContentGuard extends ChangeNotifier {
+  AppContentGuard({this.confirmDiscard});
+
+  /// Called when a pop is attempted with unsaved input. Return `true` to
+  /// discard and pop, `false` to stay open. Typically `showAppConfirm`
+  /// ("تجاهل التعديلات؟").
+  final Future<bool> Function()? confirmDiscard;
+
+  bool _canClose = true;
+  bool _confirming = false;
+
+  /// Whether the surface may pop right now. Editors set this to `false`
+  /// from `_markDirty` and back to `true` after a successful save/reset.
+  bool get canClose => _canClose;
+
+  set canClose(bool value) {
+    if (_canClose == value) return;
+    _canClose = value;
+    notifyListeners();
+  }
+
+  /// Consulted by the surface before a close (system back or the header
+  /// close button). Returns immediately when [canClose]; otherwise awaits
+  /// the discard confirmation. When it resolves `true` the caller pops the
+  /// surface itself.
+  Future<bool> resolveClose() async {
+    if (_confirming) return false;
+    if (_canClose) return true;
+    _confirming = true;
+    try {
+      return confirmDiscard == null ? false : await confirmDiscard!();
+    } finally {
+      _confirming = false;
+    }
+  }
+}
+
+/// Registers [guard] on the enclosing route so back gestures follow
+/// [AppContentGuard.canClose]. Also public for editors embedded in an owned
+/// route (a full page pushed by the feature itself) that still want the
+/// shared guard behaviour.
+class AppContentPopScope<T> extends StatelessWidget {
+  const AppContentPopScope({
+    super.key,
+    required this.guard,
+    required this.child,
+  });
+
+  final AppContentGuard guard;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: guard,
+      builder: (context, _) => PopScope<Object?>(
+        canPop: guard.canClose,
+        onPopInvokedWithResult: (didPop, _) async {
+          if (didPop || guard.canClose) return;
+          if (await guard.resolveClose()) {
+            if (context.mounted) Navigator.of(context).pop();
+          }
+        },
+        child: child,
+      ),
+    );
+  }
+}
+
+/// The unified content surface: [child] inside the shared [AppWindow] chrome,
+/// completing with whatever the surface pops with (same contract as
+/// [showDialog]).
+///
+/// * Desktop windows: a centered [AppWindowSize] window.
+/// * Phones: a full page pushed on the navigator with back navigation —
+///   long forms and large details never turn into a cramped sheet. Short
+///   confirmations and temporary messages keep using showAppOverlay /
+///   showAppConfirm.
+///
+/// [fullScreen] defaults to the platform authority (`appUsesDesktopChrome`),
+/// so call sites rarely need to pass it: only flows whose content is large
+/// on *both* forms (or explicitly windowed on both) override it.
+///
+/// Pass a [guard] to protect unsaved input: the surface then follows
+/// [AppContentGuard.canClose] for the system back gesture and the window
+/// close button alike.
+Future<T?> showAppContent<T>(
+  BuildContext context, {
+  bool? fullScreen,
+  required String title,
+  required Widget Function(
+    BuildContext context,
+    void Function([T? result]) close,
+  )
+  builder,
+  IconData? icon,
+  String? subtitle,
+  AppWindowSize size = AppWindowSize.md,
+  double? maxWidth,
+  double? height,
+  bool scrollBody = true,
+  List<Widget> Function(BuildContext context, void Function([T? result]) close)?
+  actionsBuilder,
+  AppContentGuard? guard,
+}) {
+  final usesFullScreen = fullScreen ?? !appUsesDesktopChrome(context);
+  Widget surface(BuildContext ctx) {
+    void close([T? result]) => Navigator.of(ctx).pop(result);
+    Widget window = AppWindow(
+      fullScreen: usesFullScreen,
+      title: title,
+      icon: icon,
+      subtitle: subtitle,
+      size: size,
+      maxWidth: maxWidth,
+      height: height,
+      scrollBody: scrollBody,
+      actions: actionsBuilder?.call(ctx, close),
+      onRequestClose: guard == null
+          ? null
+          : () async {
+              if (await guard.resolveClose()) {
+                if (ctx.mounted) Navigator.of(ctx).pop();
+              }
+            },
+      child: builder(ctx, close),
+    );
+    if (guard != null) {
+      window = AppContentPopScope<T>(guard: guard, child: window);
+    }
+    return window;
+  }
+
+  return showAppContentSurface<T>(
+    context,
+    fullScreen: usesFullScreen,
+    builder: (ctx, _) => surface(ctx),
+  );
+}
+
+/// Shared route selection for content that already owns its window/scaffold.
+/// This avoids nested headers in existing feature screens.
+Future<T?> showAppContentSurface<T>(
+  BuildContext context, {
+  bool? fullScreen,
+  required Widget Function(BuildContext context, bool fullScreen) builder,
+}) {
+  final page = fullScreen ?? !appUsesDesktopChrome(context);
+  Widget surface(BuildContext ctx) => builder(ctx, page);
+  return page
+      ? Navigator.of(context).push<T>(AppPageRoute(builder: surface))
+      : showDialog<T>(context: context, builder: surface);
+}
+
 Future<T?> showAppWindow<T>(
   BuildContext context, {
   required String title,

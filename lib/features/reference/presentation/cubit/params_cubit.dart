@@ -44,7 +44,12 @@ class ParamsCubit extends AppCubit<ParamsState> {
   Future<void> load() async {
     final token = ++_token;
     safeEmit(
-      state.copyWith(loading: true, clearError: true, clearErrorMore: true),
+      state.copyWith(
+        loading: true,
+        loadingMore: false,
+        clearError: true,
+        clearErrorMore: true,
+      ),
     );
     try {
       final settled = await Future.wait([
@@ -73,7 +78,7 @@ class ParamsCubit extends AppCubit<ParamsState> {
       );
     } on AppError catch (e) {
       if (token != _token) return;
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       if (token != _token) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
@@ -82,6 +87,7 @@ class ParamsCubit extends AppCubit<ParamsState> {
 
   Future<void> loadMore() async {
     if (state.loading || state.loadingMore || !state.hasMore) return;
+    final token = _token;
     safeEmit(state.copyWith(loadingMore: true, clearErrorMore: true));
     try {
       final more = await repo.listParametersPaged(
@@ -90,6 +96,7 @@ class ParamsCubit extends AppCubit<ParamsState> {
         limit: pageSize,
         offset: state.rows.length,
       );
+      if (token != _token || isClosed) return;
       safeEmit(
         state.copyWith(
           loadingMore: false,
@@ -98,8 +105,12 @@ class ParamsCubit extends AppCubit<ParamsState> {
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loadingMore: false, errorMore: e.message));
+      if (token != _token || isClosed) return;
+      safeEmit(
+        state.copyWith(loadingMore: false, errorMore: AppError.friendly(e)),
+      );
     } catch (e) {
+      if (token != _token || isClosed) return;
       safeEmit(state.copyWith(loadingMore: false, errorMore: '$e'));
     }
   }

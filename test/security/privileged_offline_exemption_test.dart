@@ -151,7 +151,7 @@ void main() {
 
   group('role labels', () {
     test('the lab role reads as a quality specialist', () {
-      expect(AppRoles.label(AppRoles.lab), 'اخصائي جودة');
+      expect(AppRoles.label(AppRoles.lab), 'أخصائي جودة');
     });
 
     test('every role has its own non-empty label', () {

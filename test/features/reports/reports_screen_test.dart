@@ -34,8 +34,11 @@ void main() {
     // The cubit persists every report before announcing it; a bare filename
     // is what the old code handed to the export sheet (and nothing could
     // open it). Stub the write so the happy-path tests assert a real path.
-    when(() => repo.saveReport(any())).thenAnswer((invocation) async => File(
-        'C:/exports/${(invocation.positionalArguments.single as ReportDoc).filename}'));
+    when(() => repo.saveReport(any())).thenAnswer(
+      (invocation) async => File(
+        'C:/exports/${(invocation.positionalArguments.single as ReportDoc).filename}',
+      ),
+    );
   });
 
   tearDown(() => cubit.close());
@@ -47,32 +50,37 @@ void main() {
     tester.view.physicalSize = const Size(1280, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(ScreenUtilInit(
-      designSize: const Size(1280, 720),
-      minTextAdapt: true,
-      splitScreenMode: true,
-      builder: (_, _) => BlocProvider<ReportsCubit>.value(
-        value: cubit,
-        child: const MaterialApp(home: Scaffold(body: ReportsScreen())),
+    await tester.pumpWidget(
+      ScreenUtilInit(
+        designSize: const Size(1280, 720),
+        minTextAdapt: true,
+        splitScreenMode: true,
+        builder: (_, _) => BlocProvider<ReportsCubit>.value(
+          value: cubit,
+          child: const MaterialApp(home: Scaffold(body: ReportsScreen())),
+        ),
       ),
-    ));
+    );
   }
 
   /// AppField/AppDateField render their label as a sibling Text, not
   /// `labelText` data, so fields are addressed by the label shown on the
   /// widget itself.
-  Finder appField(String label) => find.byWidgetPredicate(
-        (w) =>
-            (w is AppField && w.label == label) ||
-            (w is AppDateField && w.label == label),
-        description: 'Field labelled "$label"',
-      );
+  Finder appField(String label) => find.descendant(
+    of: find.byKey(const ValueKey('raw-period-reports')),
+    matching: find.byWidgetPredicate(
+      (w) =>
+          (w is AppField && w.label == label) ||
+          (w is AppDateField && w.label == label),
+      description: 'Field labelled "$label"',
+    ),
+  );
 
   /// The EditableText inside a matching AppField (enterText's target).
   Finder field(String label) => find.descendant(
-        of: appField(label),
-        matching: find.byType(TextFormField),
-      );
+    of: appField(label),
+    matching: find.byType(TextFormField),
+  );
 
   /// The three export buttons, in screen order: daily, monthly, yearly.
   ///
@@ -83,9 +91,88 @@ void main() {
   /// unrelated report tests.
   Finder button(int index) => find.byType(AppButton).at(index);
 
+  for (final type in ['daily', 'monthly', 'yearly']) {
+    testWidgets('product $type card exports its own selected period', (
+      tester,
+    ) async {
+      await pump(tester);
+      final root = find.byKey(const ValueKey('product-period-reports'));
+      final fields = find.descendant(of: root, matching: find.byType(AppField));
+      final dates = find.descendant(
+        of: root,
+        matching: find.byType(AppDateField),
+      );
+      final buttons = find.descendant(
+        of: root,
+        matching: find.byType(AppButton),
+      );
+      final index = ['daily', 'monthly', 'yearly'].indexOf(type);
+      when(() => repo.productDailyReport(any())).thenAnswer(
+        (_) async => ReportDoc(filename: 'product.pdf', bytes: Uint8List(0)),
+      );
+      when(
+        () => repo.productMonthlyReport(
+          month: any(named: 'month'),
+          year: any(named: 'year'),
+        ),
+      ).thenAnswer(
+        (_) async => ReportDoc(filename: 'product.pdf', bytes: Uint8List(0)),
+      );
+      when(() => repo.productYearlyReport(year: any(named: 'year'))).thenAnswer(
+        (_) async => ReportDoc(filename: 'product.pdf', bytes: Uint8List(0)),
+      );
+      if (type == 'daily') {
+        await tester.ensureVisible(dates);
+        await tester.enterText(
+          find.descendant(of: dates, matching: find.byType(TextFormField)),
+          '2026-02-28',
+        );
+      } else if (type == 'monthly') {
+        await tester.ensureVisible(fields.at(0));
+        await tester.enterText(
+          find.descendant(
+            of: fields.at(0),
+            matching: find.byType(TextFormField),
+          ),
+          '3',
+        );
+        await tester.enterText(
+          find.descendant(
+            of: fields.at(1),
+            matching: find.byType(TextFormField),
+          ),
+          '2024',
+        );
+      } else {
+        await tester.ensureVisible(fields.at(2));
+        await tester.enterText(
+          find.descendant(
+            of: fields.at(2),
+            matching: find.byType(TextFormField),
+          ),
+          '2025',
+        );
+      }
+      await tester.ensureVisible(buttons.at(index));
+      await tester.tap(buttons.at(index));
+      await tester.pumpAndSettle();
+      if (type == 'daily') {
+        verify(() => repo.productDailyReport('2026-02-28')).called(1);
+      }
+      if (type == 'monthly') {
+        verify(() => repo.productMonthlyReport(month: 3, year: 2024)).called(1);
+      }
+      if (type == 'yearly') {
+        verify(() => repo.productYearlyReport(year: 2025)).called(1);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   group('report period fields', () {
-    testWidgets('the monthly and yearly year fields are independent',
-        (tester) async {
+    testWidgets('the monthly and yearly year fields are independent', (
+      tester,
+    ) async {
       await pump(tester);
 
       // Two "Year" fields, one per card. They used to share a controller, so
@@ -102,8 +189,9 @@ void main() {
       expect(years, ['2021', isNot('2021')]);
     });
 
-    testWidgets('a non-numeric year shows an error and exports nothing',
-        (tester) async {
+    testWidgets('a non-numeric year shows an error and exports nothing', (
+      tester,
+    ) async {
       await pump(tester);
 
       await tester.enterText(field('Year').last, '20O5');
@@ -120,7 +208,8 @@ void main() {
       await pump(tester);
 
       when(() => repo.yearlyReport(year: any(named: 'year'))).thenAnswer(
-          (_) async => ReportDoc(filename: 'y.pdf', bytes: Uint8List(0)));
+        (_) async => ReportDoc(filename: 'y.pdf', bytes: Uint8List(0)),
+      );
 
       await tester.enterText(field('Year').last, '2024');
       await tester.pump();
@@ -131,8 +220,9 @@ void main() {
       verify(() => repo.yearlyReport(year: 2024)).called(1);
     });
 
-    testWidgets('an out-of-range month is rejected instead of defaulting',
-        (tester) async {
+    testWidgets('an out-of-range month is rejected instead of defaulting', (
+      tester,
+    ) async {
       await pump(tester);
 
       await tester.enterText(field('Month (1-12)'), '13');
@@ -142,17 +232,27 @@ void main() {
       await tester.pump();
 
       expect(find.text('Enter a month between 1 and 12'), findsOneWidget);
-      verifyNever(() => repo.monthlyReport(
-          month: any(named: 'month'), year: any(named: 'year')));
+      verifyNever(
+        () => repo.monthlyReport(
+          month: any(named: 'month'),
+          year: any(named: 'year'),
+        ),
+      );
     });
 
-    testWidgets('a valid month and year export that exact period',
-        (tester) async {
+    testWidgets('a valid month and year export that exact period', (
+      tester,
+    ) async {
       await pump(tester);
 
-      when(() => repo.monthlyReport(month: any(named: 'month'), year: any(named: 'year')))
-          .thenAnswer(
-              (_) async => ReportDoc(filename: 'm.pdf', bytes: Uint8List(0)));
+      when(
+        () => repo.monthlyReport(
+          month: any(named: 'month'),
+          year: any(named: 'year'),
+        ),
+      ).thenAnswer(
+        (_) async => ReportDoc(filename: 'm.pdf', bytes: Uint8List(0)),
+      );
 
       await tester.enterText(field('Month (1-12)'), '3');
       await tester.enterText(field('Year').first, '2024');
@@ -181,8 +281,9 @@ void main() {
     testWidgets('a valid daily date is exported verbatim', (tester) async {
       await pump(tester);
 
-      when(() => repo.dailyReport(any()))
-          .thenAnswer((_) async => ReportDoc(filename: 'd.pdf', bytes: Uint8List(0)));
+      when(() => repo.dailyReport(any())).thenAnswer(
+        (_) async => ReportDoc(filename: 'd.pdf', bytes: Uint8List(0)),
+      );
 
       await tester.enterText(field('Date (YYYY-MM-DD)'), '2026-02-28');
       await tester.pump();
@@ -193,12 +294,14 @@ void main() {
       verify(() => repo.dailyReport('2026-02-28')).called(1);
     });
 
-    testWidgets('a finished report is saved to disk before announcing it',
-        (tester) async {
+    testWidgets('a finished report is saved to disk before announcing it', (
+      tester,
+    ) async {
       await pump(tester);
 
-      when(() => repo.dailyReport(any()))
-          .thenAnswer((_) async => ReportDoc(filename: 'd.pdf', bytes: Uint8List(0)));
+      when(() => repo.dailyReport(any())).thenAnswer(
+        (_) async => ReportDoc(filename: 'd.pdf', bytes: Uint8List(0)),
+      );
 
       await tester.enterText(field('Date (YYYY-MM-DD)'), '2026-02-28');
       await tester.pump();

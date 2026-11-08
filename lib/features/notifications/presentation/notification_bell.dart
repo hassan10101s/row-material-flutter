@@ -91,19 +91,15 @@ class NotificationBell extends StatelessWidget {
     if (ctl == null) return;
     await ctl.load();
     if (!context.mounted) return;
-    final selected = await showAppDialog<NotificationItem>(
+    final selected = await showAppContentSurface<NotificationItem>(
       context,
-      builder: (_) => NotificationList(controller: ctl),
+      builder: (_, fullScreen) =>
+          NotificationList(controller: ctl, fullScreen: fullScreen),
     );
     if (selected == null || !context.mounted) return;
     await ctl.markRead(selected);
     if (!context.mounted) return;
-    if (selected.type == NotificationType.inspection) {
-      context.go('/inspections?highlight=${selected.refId}');
-    } else if (selected.type == NotificationType.sync) {
-      context.go('/sync');
-    } else {
-      context.go('/lab?tab=0&highlight=${selected.refId}');
-    }
+    final target = await ctl.service.resolvePayload(selected.payload);
+    if (target != null && context.mounted) context.go(target);
   }
 }

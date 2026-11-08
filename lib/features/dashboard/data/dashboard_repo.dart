@@ -34,8 +34,7 @@ class DashboardRepo implements DashboardRepository {
   /// `DashboardCubit.load` fires `summary()` and `dashboardBundle()` together
   /// and both funnel into `_filtered` with the same filter key: without this,
   /// every dashboard load transferred the full 12-column filtered row set
-  /// across the single FFI isolate twice. Same pattern as
-  /// `SyncEngine._currentFlight`: concurrent callers share the flight, and the
+  /// across the single FFI isolate twice. Concurrent callers share the flight, and the
   /// entry clears on completion so sequential callers (fresh data after a
   /// write) always re-query. No TTL, no stale data — only overlapping calls
   /// coalesce.
@@ -748,37 +747,32 @@ class DashboardRepo implements DashboardRepository {
     List<ForecastPoint> forecast = const [];
     StabilityKpis stability = const StabilityKpis();
     DataQualityKpis dataQuality = const DataQualityKpis();
-    try {
-      supplierScores = analytics.buildSupplierScores(filtered);
-    } catch (_) {}
-    try {
-      materialPareto = analytics.buildPareto(
-        filtered,
-        (r) => '${r['material_name'] ?? ''}',
-      );
-    } catch (_) {}
-    try {
-      supplierPareto = analytics.buildPareto(
-        filtered,
-        (r) => '${r['supplier'] ?? ''}',
-      );
-    } catch (_) {}
-    try {
-      forecast = analytics.buildForecast(
-        labels: [for (final t in trend) t.label],
-        rates: [for (final t in trend) t.approvalRate],
-        hasData: [for (final t in trend) t.total > 0],
-      );
-    } catch (_) {}
-    try {
-      stability = analytics.buildStability(
-        [for (final t in trend) t.approvalRate],
-        [for (final t in trend) t.total > 0],
-      );
-    } catch (_) {}
-    try {
-      dataQuality = analytics.buildDataQuality(filtered);
-    } catch (_) {}
+
+    supplierScores = analytics.buildSupplierScores(filtered);
+
+    materialPareto = analytics.buildPareto(
+      filtered,
+      (r) => '${r['material_name'] ?? ''}',
+    );
+
+    supplierPareto = analytics.buildPareto(
+      filtered,
+      (r) => '${r['supplier'] ?? ''}',
+    );
+
+    forecast = analytics.buildForecast(
+      labels: [for (final t in trend) t.label],
+      rates: [for (final t in trend) t.approvalRate],
+      hasData: [for (final t in trend) t.total > 0],
+    );
+
+    stability = analytics.buildStability(
+      [for (final t in trend) t.approvalRate],
+      [for (final t in trend) t.total > 0],
+    );
+
+    dataQuality = analytics.buildDataQuality(filtered);
+
     return DashboardBundle(
       volume: volume,
       quality: quality,
@@ -814,17 +808,14 @@ class DashboardRepo implements DashboardRepository {
   Future<bool> _hasTable(Database db, String table) async {
     final cached = _tableExistsCache[table];
     if (cached != null) return cached;
-    try {
-      final rows = await db.rawQuery(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-        [table],
-      );
-      final exists = rows.isNotEmpty;
-      _tableExistsCache[table] = exists;
-      return exists;
-    } catch (_) {
-      return false;
-    }
+
+    final rows = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+      [table],
+    );
+    final exists = rows.isNotEmpty;
+    _tableExistsCache[table] = exists;
+    return exists;
   }
 
   /// Test hook: schema changes invalidate the sqlite_master cache.
@@ -866,9 +857,8 @@ class DashboardRepo implements DashboardRepository {
       }
     }
     // Four independent reads, one wait instead of four sequential round trips
-    // on the single FFI isolate. Fallbacks preserve the old sequential
-    // semantics exactly (follow-ups fall back to the in-memory count, total to
-    // the filtered length, week average and today rows to zeros).
+    // on the single FFI isolate. A failed read rejects the refresh so the UI
+    // can retain its previous successful bundle and show the failure.
     // Follow-up note is not projected by _filtered; count it directly.
     final weekCutoff = _day(DateTime.now().subtract(const Duration(days: 6)));
     final settled = await Future.wait([
@@ -876,22 +866,19 @@ class DashboardRepo implements DashboardRepository {
           .rawQuery(
             "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND decision_status IN ('CONDITIONAL_APPROVAL','CONDITIONAL') AND COALESCE(follow_up_note,'') <> ''",
           )
-          .then<Object?>((rows) => rows)
-          .catchError((_) => null),
+          .then<Object?>((rows) => rows),
       db
           .rawQuery(
             'SELECT substr(inspection_date,1,10) AS d, COUNT(*) AS c FROM inspections '
             "WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY d",
             [weekCutoff],
           )
-          .then<Object?>((rows) => rows)
-          .catchError((_) => null),
+          .then<Object?>((rows) => rows),
       db
           .rawQuery(
             "SELECT COUNT(*) AS c FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL",
           )
-          .then<Object?>((rows) => rows)
-          .catchError((_) => null),
+          .then<Object?>((rows) => rows),
       _todayRows(db),
     ]);
     final followRows = settled[0] as List<Map<String, Object?>>?;
@@ -925,24 +912,20 @@ class DashboardRepo implements DashboardRepository {
   }
 
   Future<List<int>> _todayRows(Database db) async {
-    try {
-      final today = _today();
-      // Day range on the plain column instead of `substr(...)=?`: sargable, so
-      // `idx_inspections_kind*` applies, and it matches both `YYYY-MM-DD` and
-      // `YYYY-MM-DDTHH:MM:SS` storage (lexicographic ISO comparison).
-      final tomorrow = _day(DateTime.now().add(const Duration(days: 1)));
-      // Single aggregation instead of fetching every row + Dart loop.
-      final row = (await db.rawQuery(
-        'SELECT COUNT(*) AS t, '
-        "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
-        "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
-        "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? AND inspection_date < ?",
-        [today, tomorrow],
-      )).first;
-      return [_int(row['t']), _int(row['a']), _int(row['r'])];
-    } catch (_) {
-      return [0, 0, 0];
-    }
+    final today = _today();
+    // Day range on the plain column instead of `substr(...)=?`: sargable, so
+    // `idx_inspections_kind*` applies, and it matches both `YYYY-MM-DD` and
+    // `YYYY-MM-DDTHH:MM:SS` storage (lexicographic ISO comparison).
+    final tomorrow = _day(DateTime.now().add(const Duration(days: 1)));
+    // Single aggregation instead of fetching every row + Dart loop.
+    final row = (await db.rawQuery(
+      'SELECT COUNT(*) AS t, '
+      "SUM(CASE WHEN decision_status IN ('APPROVED','CONDITIONAL_APPROVAL','CONDITIONAL') THEN 1 ELSE 0 END) AS a, "
+      "SUM(CASE WHEN decision_status IN ('FULL_REJECTION','PARTIAL_REJECTION','PARTIAL') THEN 1 ELSE 0 END) AS r "
+      "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? AND inspection_date < ?",
+      [today, tomorrow],
+    )).first;
+    return [_int(row['t']), _int(row['a']), _int(row['r'])];
   }
 
   QualityKpis _qualityKpis(List<Map<String, dynamic>> filtered) {
@@ -1022,125 +1005,119 @@ class DashboardRepo implements DashboardRepository {
 
   Future<LabKpis> _labKpis(Database db, String period) async {
     if (!await _hasTable(db, 'lab_sample_tests')) return const LabKpis();
-    try {
-      final cutoff = _cutoffFor(period);
-      // Plain-column range (ISO lexicographic): the old `substr(...)>=?`
-      // defeated `idx_sample_tests_tested` on every dashboard bundle load.
-      final where = cutoff == null ? null : 'tested_at >= ?';
-      final args = cutoff == null ? null : [cutoff];
-      // Parallel: total + evaluated + low-stock are independent.
-      final hasInventory = await _hasTable(db, 'lab_inventory');
-      final futures = <Future<Object?>>[
+
+    final cutoff = _cutoffFor(period);
+    // Plain-column range (ISO lexicographic): the old `substr(...)>=?`
+    // defeated `idx_sample_tests_tested` on every dashboard bundle load.
+    final where = cutoff == null
+        ? 'deleted_at IS NULL'
+        : 'deleted_at IS NULL AND tested_at >= ?';
+    final args = cutoff == null ? null : [cutoff];
+    // Parallel: total + evaluated + low-stock are independent.
+    final hasInventory = await _hasTable(db, 'lab_inventory');
+    final futures = <Future<Object?>>[
+      db.rawQuery(
+        'SELECT COUNT(*) AS c FROM lab_sample_tests WHERE $where',
+        args,
+      ),
+      db.rawQuery(
+        "SELECT COUNT(*) AS c FROM lab_sample_tests WHERE COALESCE(result_text,'') <> '' AND $where",
+        args,
+      ),
+      if (hasInventory)
         db.rawQuery(
-          'SELECT COUNT(*) AS c FROM lab_sample_tests${where == null ? '' : ' WHERE $where'}',
-          args,
+          'SELECT COUNT(*) AS c FROM lab_inventory WHERE current_qty < min_qty',
         ),
-        db.rawQuery(
-          "SELECT COUNT(*) AS c FROM lab_sample_tests WHERE COALESCE(result_text,'') <> ''${where == null ? '' : ' AND $where'}",
-          args,
-        ),
-        if (hasInventory)
-          db.rawQuery(
-            'SELECT COUNT(*) AS c FROM lab_inventory WHERE current_qty < min_qty',
-          ),
-      ];
-      final settled = await Future.wait(futures);
-      final total =
-          Sqflite.firstIntValue(settled[0] as List<Map<String, Object?>>) ?? 0;
-      var evaluated = 0;
-      try {
-        evaluated =
-            Sqflite.firstIntValue(settled[1] as List<Map<String, Object?>>) ??
-            0;
-      } catch (_) {}
-      var low = 0;
-      try {
-        if (hasInventory && settled.length > 2) {
-          low =
-              Sqflite.firstIntValue(settled[2] as List<Map<String, Object?>>) ??
-              0;
-        }
-      } catch (_) {}
-      return LabKpis(
-        totalTests: total,
-        evaluated: evaluated,
-        inRange: 0,
-        outOfRange: 0,
-        passRate: 0.0,
-        lowStockCount: low,
-      );
-    } catch (_) {
-      return const LabKpis();
+    ];
+    final settled = await Future.wait(futures);
+    final total =
+        Sqflite.firstIntValue(settled[0] as List<Map<String, Object?>>) ?? 0;
+    var evaluated = 0;
+
+    evaluated =
+        Sqflite.firstIntValue(settled[1] as List<Map<String, Object?>>) ?? 0;
+
+    var low = 0;
+
+    if (hasInventory && settled.length > 2) {
+      low =
+          Sqflite.firstIntValue(settled[2] as List<Map<String, Object?>>) ?? 0;
     }
+
+    return LabKpis(
+      totalTests: total,
+      evaluated: evaluated,
+      inRange: 0,
+      outOfRange: 0,
+      passRate: 0.0,
+      lowStockCount: low,
+    );
   }
 
   Future<QcCheckKpis> _qcCheckKpis(Database db, String period) async {
     if (!await _hasTable(db, 'qc_inspections')) return const QcCheckKpis();
-    try {
-      final cutoff = _cutoffFor(period);
-      // Bound args (was string-interpolated) + sargable plain-column range:
-      // `substr(COALESCE(...))` defeated `idx_qc_insps_date` and forced a full
-      // scan of every QC inspection on each bundle load.
-      List<Object?> qcArgs = const [];
-      final where = cutoff == null
-          ? "deleted_at IS NULL"
-          : "deleted_at IS NULL AND (inspection_date >= ? OR created_at >= ?)";
-      if (cutoff != null) qcArgs = [cutoff, cutoff];
-      final rows = await db.rawQuery(
-        'SELECT result_overall, score_pct, has_nc, critical_nc_count, major_nc_count, minor_nc_count FROM qc_inspections WHERE $where',
-        qcArgs,
-      );
-      var pass = 0, cond = 0, fail = 0, pending = 0, hasNc = 0;
-      var crit = 0, maj = 0, min = 0, scoreSum = 0.0, scored = 0;
-      for (final r in rows) {
-        switch ('${r['result_overall'] ?? ''}') {
-          case 'Pass':
-            pass++;
-            break;
-          case 'Conditional':
-            cond++;
-            break;
-          case 'Fail':
-            fail++;
-            break;
-          default:
-            pending++;
-        }
-        if (_int(r['has_nc']) == 1) hasNc++;
-        crit += _int(r['critical_nc_count']);
-        maj += _int(r['major_nc_count']);
-        min += _int(r['minor_nc_count']);
-        final s = r['score_pct'];
-        if (s != null && '$s'.isNotEmpty) {
-          scoreSum += _num(s);
-          scored++;
-        }
+
+    final cutoff = _cutoffFor(period);
+    // Bound args (was string-interpolated) + sargable plain-column range:
+    // `substr(COALESCE(...))` defeated `idx_qc_insps_date` and forced a full
+    // scan of every QC inspection on each bundle load.
+    List<Object?> qcArgs = const [];
+    final where = cutoff == null
+        ? "deleted_at IS NULL"
+        : "deleted_at IS NULL AND (inspection_date >= ? OR created_at >= ?)";
+    if (cutoff != null) qcArgs = [cutoff, cutoff];
+    final rows = await db.rawQuery(
+      'SELECT result_overall, score_pct, has_nc, critical_nc_count, major_nc_count, minor_nc_count FROM qc_inspections WHERE $where',
+      qcArgs,
+    );
+    var pass = 0, cond = 0, fail = 0, pending = 0, hasNc = 0;
+    var crit = 0, maj = 0, min = 0, scoreSum = 0.0, scored = 0;
+    for (final r in rows) {
+      switch ('${r['result_overall'] ?? ''}') {
+        case 'Pass':
+          pass++;
+          break;
+        case 'Conditional':
+          cond++;
+          break;
+        case 'Fail':
+          fail++;
+          break;
+        default:
+          pending++;
       }
-      final n = rows.length;
-      return QcCheckKpis(
-        total: n,
-        pass: pass,
-        conditional: cond,
-        fail: fail,
-        pending: pending,
-        avgScore: scored == 0 ? 0.0 : _round1(scoreSum / scored),
-        hasNc: hasNc,
-        ncRate: n == 0 ? 0.0 : _round1(hasNc / n * 100),
-        critical: crit,
-        major: maj,
-        minor: min,
-      );
-    } catch (_) {
-      return const QcCheckKpis();
+      if (_int(r['has_nc']) == 1) hasNc++;
+      crit += _int(r['critical_nc_count']);
+      maj += _int(r['major_nc_count']);
+      min += _int(r['minor_nc_count']);
+      final s = r['score_pct'];
+      if (s != null && '$s'.isNotEmpty) {
+        scoreSum += _num(s);
+        scored++;
+      }
     }
+    final n = rows.length;
+    return QcCheckKpis(
+      total: n,
+      pass: pass,
+      conditional: cond,
+      fail: fail,
+      pending: pending,
+      avgScore: scored == 0 ? 0.0 : _round1(scoreSum / scored),
+      hasNc: hasNc,
+      ncRate: n == 0 ? 0.0 : _round1(hasNc / n * 100),
+      critical: crit,
+      major: maj,
+      minor: min,
+    );
   }
 
   Future<NcrKpisSummary> _ncrSummary(Database db) async {
     if (!await _hasTable(db, 'qc_findings_nc')) return const NcrKpisSummary();
-    try {
-      final today = _today();
-      final row = (await db.rawQuery(
-        '''
+
+    final today = _today();
+    final row = (await db.rawQuery(
+      '''
 SELECT COUNT(*) AS total,
  SUM(CASE WHEN fn.status NOT IN ('Closed','Rejected') THEN 1 ELSE 0 END) AS open_c,
  SUM(CASE WHEN fn.status NOT IN ('Closed','Rejected') AND COALESCE(fn.due_date,'') <> '' AND substr(fn.due_date,1,10) < ? THEN 1 ELSE 0 END) AS overdue_c,
@@ -1153,65 +1130,56 @@ SELECT COUNT(*) AS total,
  AVG(CASE WHEN COALESCE(fn.verified_at,'') <> '' THEN julianday(substr(fn.verified_at,1,10)) - julianday(substr(fn.created_at,1,10)) ELSE NULL END) AS mttv
 FROM qc_findings_nc fn WHERE fn.deleted_at IS NULL
 ''',
-        [today],
-      )).first;
-      final hasCapa = await _hasTable(db, 'qc_capa');
-      var linked = 0, capaOver = 0;
-      final total = _int(row['total']);
-      if (hasCapa && total > 0) {
-        try {
-          final c = (await db.rawQuery(
-            '''
+      [today],
+    )).first;
+    final hasCapa = await _hasTable(db, 'qc_capa');
+    var linked = 0, capaOver = 0;
+    final total = _int(row['total']);
+    if (hasCapa && total > 0) {
+      final c = (await db.rawQuery(
+        '''
 SELECT SUM(CASE WHEN c.capa_id IS NOT NULL AND c.status <> 'Rejected' THEN 1 ELSE 0 END) AS linked_c,
  SUM(CASE WHEN c.due_at IS NOT NULL AND c.due_at <> '' AND substr(c.due_at,1,10) < ? AND c.status NOT IN ('Closed','Rejected','VerifiedEffective') THEN 1 ELSE 0 END) AS over_c
 FROM qc_findings_nc fn LEFT JOIN qc_capa c ON c.finding_id = fn.finding_id AND c.deleted_at IS NULL
 WHERE fn.deleted_at IS NULL''',
-            [today],
-          )).first;
-          linked = _int(c['linked_c']);
-          capaOver = _int(c['over_c']);
-        } catch (_) {}
-      }
-      final closed = _int(row['closed_c']);
-      final ontime = _int(row['ontime_c']);
-      final overdue = _int(row['overdue_c']);
-      final mttc = row['mttc'] == null ? null : _num(row['mttc']);
-      final mttv = row['mttv'] == null ? null : _num(row['mttv']);
-      // Parallel: aging + top-defects are independent (was sequential).
-      final extra = await Future.wait([
-        _ncrAging(db, today),
-        _ncrTopDefects(db),
-      ]);
-      final aging = extra[0] as List<int>;
-      final defects = extra[1] as List<Map<String, dynamic>>;
-      return NcrKpisSummary(
-        total: total,
-        open: _int(row['open_c']),
-        overdue: overdue,
-        overduePct: total == 0 ? 0.0 : _round1(overdue / total * 100),
-        critical: _int(row['crit_c']),
-        major: _int(row['maj_c']),
-        minor: _int(row['min_c']),
-        closed: closed,
-        closedOnTime: ontime,
-        onTimePct: closed == 0 ? null : _round1(ontime / closed * 100),
-        mttcDays: mttc == null ? null : _round1(mttc),
-        mttvDays: mttv == null ? null : _round1(mttv),
-        capaLinked: linked,
-        capaCoveragePct: total == 0 ? 0.0 : _round1(linked / total * 100),
-        capaOverdue: capaOver,
-        aging: aging,
-        topDefects: defects,
-      );
-    } catch (_) {
-      return const NcrKpisSummary();
+        [today],
+      )).first;
+      linked = _int(c['linked_c']);
+      capaOver = _int(c['over_c']);
     }
+    final closed = _int(row['closed_c']);
+    final ontime = _int(row['ontime_c']);
+    final overdue = _int(row['overdue_c']);
+    final mttc = row['mttc'] == null ? null : _num(row['mttc']);
+    final mttv = row['mttv'] == null ? null : _num(row['mttv']);
+    // Parallel: aging + top-defects are independent (was sequential).
+    final extra = await Future.wait([_ncrAging(db, today), _ncrTopDefects(db)]);
+    final aging = extra[0] as List<int>;
+    final defects = extra[1] as List<Map<String, dynamic>>;
+    return NcrKpisSummary(
+      total: total,
+      open: _int(row['open_c']),
+      overdue: overdue,
+      overduePct: total == 0 ? 0.0 : _round1(overdue / total * 100),
+      critical: _int(row['crit_c']),
+      major: _int(row['maj_c']),
+      minor: _int(row['min_c']),
+      closed: closed,
+      closedOnTime: ontime,
+      onTimePct: closed == 0 ? null : _round1(ontime / closed * 100),
+      mttcDays: mttc == null ? null : _round1(mttc),
+      mttvDays: mttv == null ? null : _round1(mttv),
+      capaLinked: linked,
+      capaCoveragePct: total == 0 ? 0.0 : _round1(linked / total * 100),
+      capaOverdue: capaOver,
+      aging: aging,
+      topDefects: defects,
+    );
   }
 
   Future<List<int>> _ncrAging(Database db, String today) async {
-    try {
-      final rows = await db.rawQuery(
-        '''
+    final rows = await db.rawQuery(
+      '''
 SELECT
  SUM(CASE WHEN age BETWEEN 0 AND 7 THEN 1 ELSE 0 END) AS b0,
  SUM(CASE WHEN age BETWEEN 8 AND 14 THEN 1 ELSE 0 END) AS b1,
@@ -1220,65 +1188,58 @@ SELECT
  SUM(CASE WHEN age > 60 THEN 1 ELSE 0 END) AS b4
 FROM (SELECT CAST(julianday(?) - julianday(substr(COALESCE(created_at,''),1,10)) AS INTEGER) AS age
  FROM qc_findings_nc WHERE deleted_at IS NULL AND status NOT IN ('Closed','Rejected'))''',
-        [today],
-      );
-      final r = rows.first;
-      return [
-        _int(r['b0']),
-        _int(r['b1']),
-        _int(r['b2']),
-        _int(r['b3']),
-        _int(r['b4']),
-      ];
-    } catch (_) {
-      return [0, 0, 0, 0, 0];
-    }
+      [today],
+    );
+    final r = rows.first;
+    return [
+      _int(r['b0']),
+      _int(r['b1']),
+      _int(r['b2']),
+      _int(r['b3']),
+      _int(r['b4']),
+    ];
   }
 
   Future<List<Map<String, dynamic>>> _ncrTopDefects(Database db) async {
-    try {
-      final rows = await db.rawQuery('''
+    final rows = await db.rawQuery('''
 SELECT COALESCE(NULLIF(TRIM(code),''), category, '(uncoded)') AS label,
  COUNT(*) AS cnt,
  SUM(CASE WHEN severity='Critical' THEN 1 ELSE 0 END) AS crit
 FROM qc_findings_nc WHERE deleted_at IS NULL
 GROUP BY label ORDER BY cnt DESC LIMIT 8''');
-      return [
-        for (final r in rows)
-          {
-            'label': '${r['label']}',
-            'count': _int(r['cnt']),
-            'critical': _int(r['crit']),
-          },
-      ];
-    } catch (_) {
-      return [];
-    }
+    return [
+      for (final r in rows)
+        {
+          'label': '${r['label']}',
+          'count': _int(r['cnt']),
+          'critical': _int(r['crit']),
+        },
+    ];
   }
 
   Future<SopKpis> _sopKpis(Database db) async {
     var sopTotal = 0, pub = 0, exp = 0, expSoon = 0, pend = 0;
-    try {
-      if (await _hasTable(db, 'qc_sops')) {
-        final today = _today();
-        final soon = _day(DateTime.now().add(const Duration(days: 30)));
-        final r = (await db.rawQuery(
-          '''
+
+    if (await _hasTable(db, 'qc_sops')) {
+      final today = _today();
+      final soon = _day(DateTime.now().add(const Duration(days: 30)));
+      final r = (await db.rawQuery(
+        '''
 SELECT COUNT(*) AS t,
  SUM(CASE WHEN status='Published' THEN 1 ELSE 0 END) AS p,
  SUM(CASE WHEN status='Published' AND COALESCE(expiry_date,'') <> '' AND substr(expiry_date,1,10) < ? THEN 1 ELSE 0 END) AS e,
  SUM(CASE WHEN status='Published' AND COALESCE(expiry_date,'') <> '' AND substr(expiry_date,1,10) >= ? AND substr(expiry_date,1,10) <= ? THEN 1 ELSE 0 END) AS s,
  SUM(CASE WHEN status='Pending' THEN 1 ELSE 0 END) AS q
 FROM qc_sops WHERE COALESCE(deleted_at,'') = '' ''',
-          [today, today, soon],
-        )).first;
-        sopTotal = _int(r['t']);
-        pub = _int(r['p']);
-        exp = _int(r['e']);
-        expSoon = _int(r['s']);
-        pend = _int(r['q']);
-      }
-    } catch (_) {}
+        [today, today, soon],
+      )).first;
+      sopTotal = _int(r['t']);
+      pub = _int(r['p']);
+      exp = _int(r['e']);
+      expSoon = _int(r['s']);
+      pend = _int(r['q']);
+    }
+
     return SopKpis(
       sopTotal: sopTotal,
       sopPublished: pub,
@@ -1290,84 +1251,76 @@ FROM qc_sops WHERE COALESCE(deleted_at,'') = '' ''',
 
   Future<InventoryKpis> _inventoryKpis(Database db) async {
     if (!await _hasTable(db, 'lab_inventory')) return const InventoryKpis();
-    try {
-      final row = (await db.rawQuery('''
+
+    final row = (await db.rawQuery('''
 SELECT COUNT(*) AS t,
  SUM(CASE WHEN current_qty <= 0 THEN 1 ELSE 0 END) AS e,
  SUM(CASE WHEN current_qty > 0 AND current_qty < min_qty THEN 1 ELSE 0 END) AS l
 FROM lab_inventory''')).first;
-      final t = _int(row['t']);
-      final e = _int(row['e']);
-      final l = _int(row['l']);
-      var items = <Map<String, dynamic>>[];
-      try {
-        final rows = await db.rawQuery(
-          'SELECT name, current_qty, min_qty, unit FROM lab_inventory WHERE current_qty < min_qty ORDER BY (min_qty - current_qty) DESC LIMIT 6',
-        );
-        items = [for (final r in rows) Map<String, dynamic>.from(r)];
-      } catch (_) {}
-      return InventoryKpis(
-        skus: t,
-        low: l,
-        empty: e,
-        ok: (t - l - e).clamp(0, t),
-        lowItems: items,
-      );
-    } catch (_) {
-      return const InventoryKpis();
-    }
+    final t = _int(row['t']);
+    final e = _int(row['e']);
+    final l = _int(row['l']);
+    var items = <Map<String, dynamic>>[];
+
+    final rows = await db.rawQuery(
+      'SELECT name, current_qty, min_qty, unit FROM lab_inventory WHERE current_qty < min_qty ORDER BY (min_qty - current_qty) DESC LIMIT 6',
+    );
+    items = [for (final r in rows) Map<String, dynamic>.from(r)];
+
+    return InventoryKpis(
+      skus: t,
+      low: l,
+      empty: e,
+      ok: (t - l - e).clamp(0, t),
+      lowItems: items,
+    );
   }
 
   Future<List<TrendPoint>> _trendPoints(Database db, String period) async {
-    try {
-      final names = {
-        '01': AppText.t('يناير', 'Jan'),
-        '02': AppText.t('فبراير', 'Feb'),
-        '03': AppText.t('مارس', 'Mar'),
-        '04': AppText.t('أبريل', 'Apr'),
-        '05': AppText.t('مايو', 'May'),
-        '06': AppText.t('يونيو', 'Jun'),
-        '07': AppText.t('يوليو', 'Jul'),
-        '08': AppText.t('أغسطس', 'Aug'),
-        '09': AppText.t('سبتمبر', 'Sep'),
-        '10': AppText.t('أكتوبر', 'Oct'),
-        '11': AppText.t('نوفمبر', 'Nov'),
-        '12': AppText.t('ديسمبر', 'Dec'),
-      };
-      final now = DateTime.now();
-      // Single GROUP BY for the 6-month window (was 6 sequential COUNTs).
-      final first = DateTime(now.year, now.month - 5, 1);
-      final firstKey =
-          '${first.year}-${first.month.toString().padLeft(2, '0')}';
-      final grouped = await db.rawQuery(
-        "SELECT substr(inspection_date,1,7) AS m, COUNT(*) AS t, "
-        "SUM(CASE WHEN decision_status='APPROVED' THEN 1 ELSE 0 END) AS a "
-        "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY m",
-        ['$firstKey-01'],
+    final names = {
+      '01': AppText.t('يناير', 'Jan'),
+      '02': AppText.t('فبراير', 'Feb'),
+      '03': AppText.t('مارس', 'Mar'),
+      '04': AppText.t('أبريل', 'Apr'),
+      '05': AppText.t('مايو', 'May'),
+      '06': AppText.t('يونيو', 'Jun'),
+      '07': AppText.t('يوليو', 'Jul'),
+      '08': AppText.t('أغسطس', 'Aug'),
+      '09': AppText.t('سبتمبر', 'Sep'),
+      '10': AppText.t('أكتوبر', 'Oct'),
+      '11': AppText.t('نوفمبر', 'Nov'),
+      '12': AppText.t('ديسمبر', 'Dec'),
+    };
+    final now = DateTime.now();
+    // Single GROUP BY for the 6-month window (was 6 sequential COUNTs).
+    final first = DateTime(now.year, now.month - 5, 1);
+    final firstKey = '${first.year}-${first.month.toString().padLeft(2, '0')}';
+    final grouped = await db.rawQuery(
+      "SELECT substr(inspection_date,1,7) AS m, COUNT(*) AS t, "
+      "SUM(CASE WHEN decision_status='APPROVED' THEN 1 ELSE 0 END) AS a "
+      "FROM inspections WHERE inspection_kind = 'raw' AND deleted_at IS NULL AND inspection_date >= ? GROUP BY m",
+      ['$firstKey-01'],
+    );
+    final byMonth = <String, Map<String, int>>{
+      for (final r in grouped)
+        '${r['m']}': {'t': _int(r['t']), 'a': _int(r['a'])},
+    };
+    final out = <TrendPoint>[];
+    for (var back = 5; back >= 0; back--) {
+      final d = DateTime(now.year, now.month - back, 1);
+      final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
+      final total = byMonth[key]?['t'] ?? 0;
+      final approved = byMonth[key]?['a'] ?? 0;
+      final rate = total == 0 ? 0.0 : _round1(approved / total * 100);
+      out.add(
+        TrendPoint(
+          label: '${names[key.substring(5)] ?? key} ${key.substring(0, 4)}',
+          total: total,
+          approvalRate: rate,
+          passRate: rate,
+        ),
       );
-      final byMonth = <String, Map<String, int>>{
-        for (final r in grouped)
-          '${r['m']}': {'t': _int(r['t']), 'a': _int(r['a'])},
-      };
-      final out = <TrendPoint>[];
-      for (var back = 5; back >= 0; back--) {
-        final d = DateTime(now.year, now.month - back, 1);
-        final key = '${d.year}-${d.month.toString().padLeft(2, '0')}';
-        final total = byMonth[key]?['t'] ?? 0;
-        final approved = byMonth[key]?['a'] ?? 0;
-        final rate = total == 0 ? 0.0 : _round1(approved / total * 100);
-        out.add(
-          TrendPoint(
-            label: '${names[key.substring(5)] ?? key} ${key.substring(0, 4)}',
-            total: total,
-            approvalRate: rate,
-            passRate: rate,
-          ),
-        );
-      }
-      return out;
-    } catch (_) {
-      return [];
     }
+    return out;
   }
 }

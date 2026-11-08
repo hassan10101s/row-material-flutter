@@ -67,7 +67,7 @@ class QcCustomTablesCubit extends AppCubit<QcCustomTablesState> {
       // reloads - clearing it here would eat that signal.
       safeEmit(state.copyWith(tables: tables, loading: false));
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
@@ -95,7 +95,7 @@ class QcCustomTablesCubit extends AppCubit<QcCustomTablesState> {
       safeEmit(state.copyWith(saving: false, saved: true));
       await load();
     } on AppError catch (e) {
-      safeEmit(state.copyWith(saving: false, error: e.message));
+      safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
     }

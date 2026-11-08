@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
+import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/design_system/widgets/app_button.dart';
 import 'package:material_lab/design_system/widgets/app_field.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_enums.dart';
@@ -120,8 +121,14 @@ Finder _dialogField(String label) => find
     .first;
 
 void main() {
-  setUp(() => AppText.arabic = false);
-  tearDownAll(() => AppText.arabic = true);
+  setUp(() {
+    AppText.arabic = false;
+    FormFactor.debugSet(AppFormFactor.desktop);
+  });
+  tearDownAll(() {
+    AppText.arabic = true;
+    FormFactor.debugSet(null);
+  });
 
   // Cubits surface raw throwables through `AppError.friendly`, which
   // collapses anything that is not a `UserFacingError` (driver

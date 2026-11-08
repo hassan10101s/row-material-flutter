@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -12,6 +13,7 @@ import 'package:material_lab/design_system/widgets/app_autocomplete_overlay.dart
 /// the empty query serves the whole list, typing narrows it, a committed choice
 /// is read-only, a miss shows an empty label, and the caret re-opens the list.
 void main() {
+  _watchedHostTests();
   const materials = <(int, String)>[
     (1, 'Water'),
     (2, 'Glass'),
@@ -194,4 +196,153 @@ void main() {
       findsOneWidget,
     );
   });
+}
+
+/// Regression harness for the inspection-form crash the picker once caused:
+/// a host that owns the controller AND listens to it (the form screens' dirty
+/// guards) got notified from `didUpdateWidget` while the framework was
+/// building the host's subtree, and the resulting `setState` tripped
+/// markNeedsBuild-during-build on this ancestor. The initial-mount sync is
+/// deliberately mid-build (see the widget's `initState` comment), so the host
+/// copies the hardened dirty guard: it defers a mid-frame `setState` past the
+/// frame and records the scheduler phase of every notification.
+class _WatchedHost extends StatefulWidget {
+  const _WatchedHost({super.key, required this.selected});
+
+  final ValueNotifier<(int, String)?> selected;
+
+  @override
+  State<_WatchedHost> createState() => _WatchedHostState();
+}
+
+class _WatchedHostState extends State<_WatchedHost> {
+  final TextEditingController _controller = TextEditingController();
+  final List<String> _notifyPhases = [];
+
+  /// True once the controller notified — the dirty-guard signal the form
+  /// screens derive for `PopScope.canPop`.
+  bool dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.selected.addListener(_onSelectionChanged);
+    _controller.addListener(_onControllerChanged);
+  }
+
+  void _onSelectionChanged() => setState(() {});
+
+  void _onControllerChanged() {
+    _notifyPhases.add(SchedulerBinding.instance.schedulerPhase.name);
+    if (dirty) return;
+    if (SchedulerBinding.instance.schedulerPhase != SchedulerPhase.idle) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (dirty || !mounted) return;
+        setState(() => dirty = true);
+      });
+      return;
+    }
+    setState(() => dirty = true);
+  }
+
+  @override
+  void dispose() {
+    widget.selected.removeListener(_onSelectionChanged);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScreenUtilInit(
+      designSize: const Size(1280, 720),
+      minTextAdapt: true,
+      splitScreenMode: true,
+      builder: (context, _) => MaterialApp(
+        home: Scaffold(
+          body: Padding(
+            padding: const EdgeInsets.all(16),
+            child: AppAutocomplete<(int, String)>(
+              options: const [
+                (1, 'Water'),
+                (2, 'Glass'),
+                (3, 'Water softener'),
+              ],
+              selected: widget.selected.value,
+              displayString: (option) => option.$2,
+              filter: (option, query) =>
+                  option.$2.toLowerCase().contains(query),
+              onSelected: (_) {},
+              controller: _controller,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+void _watchedHostTests() {
+  testWidgets(
+    'a parent-watched controller is never notified mid-build by an external pick',
+    (tester) async {
+      final selected = ValueNotifier<(int, String)?>((1, 'Water'));
+      final host = GlobalKey<_WatchedHostState>();
+      await tester.pumpWidget(_WatchedHost(key: host, selected: selected));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      // The initial sync is documented as mid-build (initState runs before
+      // the RawAutocomplete descendant mounts), invites the hardened host to
+      // defer; the write lands visibly anyway.
+      expect(
+        host.currentState!._notifyPhases,
+        everyElement(SchedulerPhase.persistentCallbacks.name),
+      );
+      expect(host.currentState!.dirty, isTrue);
+      expect(
+        find.descendant(of: find.byType(TextField), matching: find.text('Water')),
+        findsOneWidget,
+      );
+      host.currentState!._notifyPhases.clear();
+
+      // External pick: the host rebuilds, the picker syncs the watched
+      // controller — a mid-build notification here is the pinned crash.
+      selected.value = (2, 'Glass');
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.pumpAndSettle();
+      expect(
+        host.currentState!._notifyPhases,
+        everyElement(isNot(SchedulerPhase.persistentCallbacks.name)),
+      );
+      host.currentState!._notifyPhases.clear();
+      expect(
+        find.descendant(of: find.byType(TextField), matching: find.text('Glass')),
+        findsOneWidget,
+      );
+      expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isTrue);
+
+      // External clear: the no-hit helper stays quiet during the pending
+      // frame (the field still carries the old committed text), then the
+      // deferred sync empties the field and re-opens it for picking.
+      selected.value = null;
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(
+        host.currentState!._notifyPhases,
+        everyElement(isNot(SchedulerPhase.persistentCallbacks.name)),
+      );
+      expect(find.text('No matches'), findsNothing);
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(of: find.byType(TextField), matching: find.text('Glass')),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: find.byType(TextField), matching: find.text('Water')),
+        findsNothing,
+      );
+      expect(tester.widget<TextField>(find.byType(TextField)).readOnly, isFalse);
+    },
+  );
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../../../design_system/widgets/app_tooltip.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../../core/constants/app_strings.dart';
@@ -383,7 +384,9 @@ class TestHistoryTable extends StatelessWidget {
 
   /// One row's cells, in the same column order as the headers above.
   List<Widget> _rowCells(Map<String, dynamic> r, int index) {
-    final out = '${r['range_state'] ?? ''}' == 'out';
+    final out =
+        '${r['range_state'] ?? ''}' == 'out' ||
+        isFailedLabResult(r['result_text']);
     final range = r['min'] == null && r['max'] == null
         ? '-'
         : '${r['min'] ?? ''} – ${r['max'] ?? ''} '
@@ -407,14 +410,24 @@ class TestHistoryTable extends StatelessWidget {
             ? null
             : () => onOpenReport!(r),
       ),
-      Text(
-        formatLabResult(r['result_text']),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontWeight: FontWeight.w600,
-          color: out ? AppColors.danger : null,
-        ),
+      Row(
+        children: [
+          if (isFailedLabResult(r['result_text'])) ...[
+            Icon(Icons.cancel_outlined, size: 16, color: AppColors.danger),
+            const SizedBox(width: 4),
+          ],
+          Flexible(
+            child: Text(
+              formatLabResult(r['result_text']),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: out ? AppColors.danger : null,
+              ),
+            ),
+          ),
+        ],
       ),
       Text(
         range,
@@ -434,14 +447,16 @@ class TestHistoryTable extends StatelessWidget {
   /// Faint out-of-range / in-range row tint (the pre-rebuild DataRow colour).
   Color? _rowTint(Map<String, dynamic> r) {
     final state = '${r['range_state'] ?? ''}';
-    if (state == 'out') return AppColors.danger.withValues(alpha: 0.06);
+    if (state == 'out' || state == 'failed') {
+      return AppColors.danger.withValues(alpha: 0.06);
+    }
     if (state == 'in') return AppColors.success.withValues(alpha: 0.06);
     return null;
   }
 
   Widget _statusPill(Map<String, dynamic> r) {
     final state = '${r['range_state'] ?? ''}';
-    final color = state == 'out'
+    final color = state == 'out' || state == 'failed'
         ? AppColors.danger
         : state == 'in'
         ? AppColors.success
@@ -566,7 +581,7 @@ Widget _sourceEntryCell(Map<String, dynamic> r, {VoidCallback? onOpenReport}) {
   return InkWell(
     onTap: onOpenReport,
     borderRadius: BorderRadius.circular(6),
-    child: Tooltip(
+    child: AppTooltip(
       message: AppText.t('فتح المحضر المرتبط', 'Open the linked report'),
       child: body,
     ),
@@ -659,7 +674,9 @@ class TestHistoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final out = '${row['range_state'] ?? ''}' == 'out';
+    final out =
+        '${row['range_state'] ?? ''}' == 'out' ||
+        isFailedLabResult(row['result_text']);
     final inn = '${row['range_state'] ?? ''}' == 'in';
     final stateColor = out
         ? AppColors.danger
@@ -757,6 +774,10 @@ class TestHistoryCard extends StatelessWidget {
           const Divider(height: AppSpacing.lg),
           Row(
             children: [
+              if (isFailedLabResult(row['result_text'])) ...[
+                Icon(Icons.cancel_outlined, size: 18, color: AppColors.danger),
+                const SizedBox(width: 4),
+              ],
               Expanded(
                 child: RichText(
                   maxLines: 1,
@@ -769,14 +790,15 @@ class TestHistoryCard extends StatelessWidget {
                       color: out ? AppColors.danger : AppColors.textStrong,
                     ),
                     children: [
-                      TextSpan(
-                        text: ' $unit',
-                        style: TextStyle(
-                          fontSize: 12.spMax,
-                          fontWeight: FontWeight.w400,
-                          color: AppColors.textMuted,
+                      if (!isFailedLabResult(row['result_text']))
+                        TextSpan(
+                          text: ' $unit',
+                          style: TextStyle(
+                            fontSize: 12.spMax,
+                            fontWeight: FontWeight.w400,
+                            color: AppColors.textMuted,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -950,7 +972,7 @@ Widget _sourceEntryLine(
   return InkWell(
     onTap: onOpenReport,
     borderRadius: BorderRadius.circular(6),
-    child: Tooltip(
+    child: AppTooltip(
       message: AppText.t('فتح المحضر المرتبط', 'Open the linked report'),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),

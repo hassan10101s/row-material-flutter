@@ -5,9 +5,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/remote/remote_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
@@ -91,8 +91,10 @@ void main() {
 
   test('reset push → pull round-trip restores the horizon', () async {
     // ── Device A: record the reset ──
-    final settings =
-        await repo.resetValidation('2026-01-01', note: 'بعد التحسين');
+    final settings = await repo.resetValidation(
+      '2026-01-01',
+      note: 'بعد التحسين',
+    );
     expect(settings.startDate, '2026-01-01');
 
     // The queued push payload is a proper labConfig document: its id names
@@ -103,8 +105,10 @@ void main() {
       whereArgs: ['nirValidationSettings'],
     );
     expect(queued, hasLength(1));
-    expect('${queued.single['entity_id']}',
-        startsWith('lc_nir_validation_settings_'));
+    expect(
+      '${queued.single['entity_id']}',
+      startsWith('lc_nir_validation_settings_'),
+    );
 
     // ── Push worker: the doc lands on the remote with the full envelope ──
     final push = await PushWorker(
@@ -167,7 +171,7 @@ void main() {
     await repo.resetValidation(
       '2026-02-01',
       scope: NirScope.rawMaterial,
-      entityId: 7,
+      entityId: 1,
       entityName: 'Cement',
       parameter: 'Protein',
     );
@@ -192,7 +196,9 @@ void main() {
     );
     final nested = jsonDecode(doc.data['payload'] as String) as Map;
     expect(nested['scope'], 'raw_material');
-    expect(nested['entity_id'], 7);
+    expect(nested['entity_id'], 1);
+    expect(nested['material_id'], 1);
+    expect(nested['calibration_snapshot_json'], isA<String>());
     expect(nested['entity_name'], 'Cement');
     expect(nested['parameter'], 'Protein');
 
@@ -208,7 +214,9 @@ void main() {
     final restored = (await repo.listResetHistory()).single;
     expect(restored.startDate, '2026-02-01');
     expect(restored.scope, 'raw_material');
-    expect(restored.entityId, 7);
+    expect(restored.entityId, 1);
+    expect(restored.materialId, 1);
+    expect(restored.calibrationSnapshot, isNotNull);
     expect(restored.entityName, 'Cement');
     expect(restored.parameter, 'Protein');
     // A scoped horizon must never masquerade as the global zero point.

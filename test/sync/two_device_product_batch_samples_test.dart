@@ -6,17 +6,17 @@ import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/permissions.dart';
 import 'package:material_lab/core/auth/session_source.dart';
 import 'package:material_lab/core/sync/audit_logger.dart';
-import 'package:material_lab/core/sync/backfill_service.dart';
-import 'package:material_lab/core/sync/conflict_resolver.dart';
+import '../support/retired/core/sync/backfill_service.dart';
+import '../support/retired/core/sync/conflict_resolver.dart';
 import 'package:material_lab/core/sync/entity_registry.dart';
-import 'package:material_lab/core/sync/pull_worker.dart';
-import 'package:material_lab/core/sync/push_worker.dart';
+import '../support/retired/core/sync/pull_worker.dart';
+import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart' show Database;
 import 'package:material_lab/features/lab/data/lab_repo.dart';
-import 'package:material_lab/features/lab/data/offline_first_lab_repository.dart';
+import 'package:material_lab/features/lab/data/server_confirmed_lab_repository.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 
 import 'sync_test_fixture.dart';
@@ -46,7 +46,7 @@ class _Device {
   );
   late bool online = true;
 
-  LabRepo writer() => OfflineFirstLabRepository(
+  LabRepo writer() => ServerConfirmedLabRepository(
     dbHelper: fixture.helper,
     guard: _WriteGuard(this),
     queue: queue,

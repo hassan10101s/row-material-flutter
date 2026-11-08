@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
 <head>
     <meta charset="UTF-8">
     <title>{% if is_en %}Material Quality Follow-Up Report - {% else %}تقرير متابعة جودة الخامات - {% endif %}{{ date_str }}</title>
@@ -440,7 +440,60 @@
                 break-inside: avoid;
             }
         }
-    </style>
+
+/* Institutional print layout: compact summaries, restrained decoration. */
+.sheet, .report-shell { border-radius: 8px !important; background: #fff !important; box-shadow: none !important; }
+.sheet { border: 0 !important; min-height: 0 !important; }
+.watermark, .corner-tr, .corner-bl { display: none !important; }
+.top-band, .accent-strip { height: 3px !important; background: #294961 !important; }
+.header { padding: 12px 14px !important; background: #fff !important; border-bottom: 1px solid #d7dee7 !important; }
+.header-grid { gap: 10px !important; }
+.header h1, .header .title { font-size: 18px !important; line-height: 1.35 !important; margin: 3px 0 !important; color: #172b4d !important; }
+.brand-logo, .report-logo { max-height: 42px !important; height: auto !important; max-width: 112px !important; box-shadow: none !important; }
+.organization-name { font-size: 12px !important; line-height: 1.35; margin: 4px auto 5px !important; color: #24364b; }
+.subtitle, .header-main > p { font-size: 11px !important; margin-top: 3px !important; }
+.eyebrow { border-radius: 8px !important; background: #f1f4f7 !important; color: #526171 !important; padding: 3px 7px !important; font-size: 9px !important; }
+.body { padding: 10px 12px 12px !important; }
+.meta-strip, .meta-grid, .summary-grid, .quarter-grid { gap: 6px !important; margin-top: 8px !important; margin-bottom: 8px !important; }
+.meta-card, .summary-card, .quarter-card, .material-kpi { min-height: 0 !important; height: auto !important; padding: 7px 9px !important; border-radius: 8px !important; border: 1px solid #d7dee7 !important; background: #fff !important; box-shadow: none !important; }
+.meta-card::before, .meta-card::after, .quarter-card::before, .quarter-card::after { display: none !important; }
+.meta-card .label, .summary-card .summary-label, .q-name, .kpi-label { font-size: 10px !important; margin-bottom: 3px !important; color: #64748b !important; font-weight: 600 !important; }
+.meta-card .value { font-size: 12px !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-value, .q-total { font-size: 18px !important; line-height: 1.15 !important; font-weight: 700 !important; color: #172b4d !important; }
+.summary-card .summary-note { font-size: 10px !important; margin-top: 3px !important; line-height: 1.35; color: #64748b !important; font-weight: 500 !important; }
+.summary-card.success .summary-value { color: #276749 !important; }
+.summary-card.danger .summary-value { color: #9b2c2c !important; }
+.summary-card.warning .summary-value { color: #875c15 !important; }
+.section-head { margin: 10px 0 6px !important; gap: 8px !important; }
+.section-title { font-size: 13px !important; }
+.materials-list { gap: 9px !important; }
+.material-card, .source-card, .panel-card, .section { border-radius: 8px !important; border: 1px solid #d7dee7 !important; box-shadow: none !important; background: #fff !important; }
+.material-header, .source-header, .section-physical, .section-chemical { padding: 7px 9px !important; background: #edf1f5 !important; color: #24364b !important; border-bottom: 1px solid #d7dee7 !important; }
+.material-title, .source-title { font-size: 12px !important; color: #24364b !important; }
+.material-badge, .badge { border-radius: 8px !important; padding: 3px 7px !important; box-shadow: none !important; background: #f5f7f9 !important; border: 1px solid #d7dee7 !important; color: #334155 !important; }
+.material-kpis { padding: 6px 8px !important; gap: 5px !important; }
+.material-kpi { padding: 5px 6px !important; }
+.kpi-value { font-size: 14px !important; font-weight: 700 !important; }
+.table-wrap { padding: 7px 9px !important; }
+table { font-size: 11px !important; line-height: 1.35; }
+th, td { padding: 4px 6px !important; }
+th { background: #edf1f5 !important; color: #24364b !important; }
+.decision-box { padding: 8px 10px !important; border-radius: 8px !important; box-shadow: none !important; }
+.decision-box .decision-status { font-size: 14px !important; }
+.footer { padding: 8px 12px !important; background: #fff !important; border-top: 1px solid #d7dee7 !important; color: #64748b !important; }
+
+
+.sheet::before, .sheet::after { display: none !important; }
+.section-title { background: #edf1f5 !important; color: #24364b !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; padding: 6px 9px !important; }
+.section-title::after { display: none !important; }
+.material-item { background: #fff !important; border: 1px solid #d7dee7 !important; border-radius: 8px !important; box-shadow: none !important; margin-bottom: 9px !important; }
+.material-name { padding: 7px 9px !important; background: #f5f7f9 !important; font-size: 12px !important; }
+.material-stats { gap: 4px !important; padding: 6px !important; }
+
+
+html[dir="ltr"] body { direction:ltr; text-align:left; }
+html[dir="rtl"] body { direction:rtl; text-align:right; }
+</style>
 </head>
 <body>
     <div class="page">
@@ -453,13 +506,14 @@
                         {% if report_logo_data_uri %}
                         <img class="brand-logo" src="{{ report_logo_data_uri }}" alt="Report Logo">
                         {% endif %}
+{% if organization_name %}<div class="organization-name" style="font-size:12px;font-weight:700;margin-top:6px;text-align:center;overflow-wrap:anywhere;">{{ organization_name }}</div>{% endif %}
                     </div>
 
                     <div class="brand-center">
-                        <div class="eyebrow">Quality Follow-Up Report</div>
-                        <h1 class="title">{% if is_en %}Quality Follow-Up Report{% else %}تقرير متابعة جودة الخامات | Quality Follow-Up Report{% endif %}</h1>
+                        <div class="eyebrow">{% if is_en %}Quality Follow-Up Report{% else %}تقرير متابعة الجودة{% endif %}</div>
+                        <h1 class="title">{% if is_en %}Quality Follow-Up Report{% else %}تقرير متابعة جودة الخامات{% endif %}</h1>
                         <p class="subtitle">{{ department_label }}</p>
-                        {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم / Form No: {% endif %}{{ form_no }}</p>{% endif %}
+                        {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
                         <p class="subtitle">{{ formatted_date }} | {{ date_str }}</p>
                         {% if shift_label %}
                         <p class="subtitle" style="font-size: 11px; color: #6d7f93; margin-top: 4px;">🕐 {% if is_en %}Coverage: {% else %}نطاق التغطية: {% endif %}{{ shift_label }}</p>
@@ -471,19 +525,19 @@
 
                 <div class="meta-strip">
                     <div class="meta-card">
-                        <span class="label">Report Scope</span>
-                        <span class="value">Custom Filtered Follow-up</span>
+                        <span class="label">{% if is_en %}Report Scope{% else %}نطاق التقرير{% endif %}</span>
+                        <span class="value">{% if is_en %}Custom Filtered Follow-up{% else %}متابعة حسب التصفية{% endif %}</span>
                     </div>
                     <div class="meta-card">
-                        <span class="label">Coverage Period</span>
+                        <span class="label">{% if is_en %}Coverage Period{% else %}فترة التغطية{% endif %}</span>
                         <span class="value" style="font-size: 12px;">{% if shift_label %}{{ shift_label }}{% else %}{{ date_str }}{% endif %}</span>
                     </div>
                     <div class="meta-card">
-                        <span class="label">Generated At</span>
+                        <span class="label">{% if is_en %}Generated At{% else %}تاريخ الإنشاء{% endif %}</span>
                         <span class="value">{{ generation_time }}</span>
                     </div>
                     <div class="meta-card">
-                        <span class="label">Reference</span>
+                        <span class="label">{% if is_en %}Reference{% else %}المرجع{% endif %}</span>
                         <span class="value">MAT-LAB-FOLLOWUP</span>
                     </div>
                 </div>
@@ -492,32 +546,32 @@
             <div class="body">
                 <div class="summary-grid">
                     <div class="summary-card primary">
-                        <span class="summary-label">Total Inspections</span>
+                        <span class="summary-label">{% if is_en %}Total Inspections{% else %}إجمالي الفحوص{% endif %}</span>
                         <span class="summary-value">{{ total }}</span>
                         <span class="summary-note">{% if is_en %}Total Inspections{% else %}إجمالي الفحص{% endif %}   </span>
                     </div>
                     <div class="summary-card success">
-                        <span class="summary-label">Accepted</span>
+                        <span class="summary-label">{% if is_en %}Accepted{% else %}مقبول{% endif %}</span>
                         <span class="summary-value">{{ accepted_total }}</span>
                         <span class="summary-note">{% if is_en %}Approved or conditionally approved{% else %}قبول نهائي أو قبول مع متابعة{% endif %}</span>
                     </div>
                     <div class="summary-card warning">
-                        <span class="summary-label">Under Follow-Up</span>
+                        <span class="summary-label">{% if is_en %}Under Follow-Up{% else %}قيد المتابعة{% endif %}</span>
                         <span class="summary-value">{{ conditional_partial }}</span>
                         <span class="summary-note">{% if is_en %}Follow-up or partial rejection cases{% else %}حالات المتابعة أو الرفض الجزئي{% endif %}</span>
                     </div>
                     <div class="summary-card danger">
-                        <span class="summary-label">Rejected</span>
+                        <span class="summary-label">{% if is_en %}Rejected{% else %}مرفوض{% endif %}</span>
                         <span class="summary-value">{{ rejected }}</span>
                         <span class="summary-note">{% if is_en %}Total full rejections{% else %}عدد حالات الرفض الكلي{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Unique Materials</span>
+                        <span class="summary-label">{% if is_en %}Unique Materials{% else %}عدد الخامات{% endif %}</span>
                         <span class="summary-value">{{ unique_materials }}</span>
                         <span class="summary-note">{% if is_en %}Materials Count{% else %}عدد الخامات{% endif %} </span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Total Quantity</span>
+                        <span class="summary-label">{% if is_en %}Total Quantity{% else %}إجمالي الكمية{% endif %}</span>
                         <span class="summary-value">{{ total_quantity }}</span>
                         <span class="summary-note">{% if is_en %}Total Quantities{% else %}مجموع الكميات{% endif %} </span>
                     </div>
@@ -525,30 +579,30 @@
 
                 <div class="summary-grid" style="grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: -4px;">
                     <div class="summary-card">
-                        <span class="summary-label">Accepted Quantity</span>
+                        <span class="summary-label">{% if is_en %}Accepted Quantity{% else %}الكمية المقبولة{% endif %}</span>
                         <span class="summary-value">{{ total_accepted_quantity }}</span>
                         <span class="summary-note">{% if is_en %}Total Accepted Quantity{% else %}إجمالي الكمية المقبولة{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Approximate Rejected Quantity</span>
+                        <span class="summary-label">{% if is_en %}Approximate Rejected Quantity{% else %}الكمية المرفوضة التقديرية{% endif %}</span>
                         <span class="summary-value">{{ total_rejected_quantity }}</span>
                         <span class="summary-note">{% if is_en %}Total Rejected Quantity (approximate){% else %}إجمالي الكمية المرفوضة تقريبية{% endif %}</span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Approval Rate</span>
+                        <span class="summary-label">{% if is_en %}Approval Rate{% else %}معدل القبول{% endif %}</span>
                         <span class="summary-value">{{ approval_rate }}%</span>
                         <span class="summary-note">{% if is_en %}Acceptance Rate (from samples){% else %}نسبة القبول (من العينات){% endif %}</span>
                     </div>
                 </div>
-                
+
                 <div class="summary-grid" style="grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: -4px;">
                     <div class="summary-card">
-                        <span class="summary-label">Suppliers</span>
+                        <span class="summary-label">{% if is_en %}Suppliers{% else %}الموردون{% endif %}</span>
                         <span class="summary-value">{{ unique_suppliers }}</span>
                         <span class="summary-note">{% if is_en %}Suppliers Count{% else %}عدد الموردين{% endif %} </span>
                     </div>
                     <div class="summary-card">
-                        <span class="summary-label">Decision Spectrum</span>
+                        <span class="summary-label">{% if is_en %}Decision Spectrum{% else %}توزيع القرارات{% endif %}</span>
                         <span class="summary-value">{{ approved }}/{{ conditional_partial }}/{{ rejected }}</span>
                         <span class="summary-note">{% if is_en %}Accepted | Follow-up/Partial | Fully Rejected{% else %}قبول | متابعة/جزئي | رفض كلي{% endif %}</span>
                     </div>
@@ -556,7 +610,7 @@
 
                 <div class="section-head">
                     <h2 class="section-title">{% if is_en %}Inspection details by material{% else %}تفاصيل الفحص حسب الخامة{% endif %}</h2>
-                    <div class="section-caption">Material-Wise Follow-Up Details</div>
+                    <div class="section-caption">{% if is_en %}Material-Wise Follow-Up Details{% else %}تفاصيل المتابعة حسب الخامة{% endif %}</div>
                 </div>
 
                 {% if material_sections %}
@@ -570,31 +624,31 @@
 
                         <div class="material-kpis">
                             <div class="material-kpi">
-                                <span class="kpi-label">Records</span>
+                                <span class="kpi-label">{% if is_en %}Records{% else %}السجلات{% endif %}</span>
                                 <span class="kpi-value">{{ material.count }}</span>
                             </div>
                             <div class="material-kpi">
-                                <span class="kpi-label">Quantity</span>
+                                <span class="kpi-label">{% if is_en %}Quantity{% else %}الكمية{% endif %}</span>
                                 <span class="kpi-value">{{ material.total_quantity }}</span>
                             </div>
                             <div class="material-kpi">
-                                <span class="kpi-label">Accepted Qty</span>
+                                <span class="kpi-label">{% if is_en %}Accepted Qty{% else %}الكمية المقبولة{% endif %}</span>
                                 <span class="kpi-value" style="color: #10B981;">{{ material.accepted_quantity }}</span>
                             </div>
                             <div class="material-kpi">
-                                <span class="kpi-label">Rejected Qty</span>
+                                <span class="kpi-label">{% if is_en %}Rejected Qty{% else %}الكمية المرفوضة{% endif %}</span>
                                 <span class="kpi-value" style="color: #EF4444;">{{ material.rejected_quantity }}</span>
                             </div>
                             <div class="material-kpi">
-                                <span class="kpi-label">Approved</span>
+                                <span class="kpi-label">{% if is_en %}Approved{% else %}مقبول{% endif %}</span>
                                 <span class="kpi-value">{{ material.approved }}</span>
                             </div>
                             <div class="material-kpi">
-                                <span class="kpi-label">Follow-Up / Partial</span>
+                                <span class="kpi-label">{% if is_en %}Follow-Up / Partial{% else %}متابعة / رفض جزئي{% endif %}</span>
                                 <span class="kpi-value">{{ material.conditional_partial }}</span>
                             </div>
                             <div class="material-kpi">
-                                <span class="kpi-label">Rejected</span>
+                                <span class="kpi-label">{% if is_en %}Rejected{% else %}مرفوض{% endif %}</span>
                                 <span class="kpi-value">{{ material.rejected }}</span>
                             </div>
                         </div>
@@ -655,12 +709,12 @@
 
             <div class="footer">
                 <div><strong>Material Lab</strong> | {% if is_en %}Internal lab management system{% else %}نظام ادارة المعمل الداخلي{% endif %}</div>
-                <div>Prepared Automatically by {{ department_label }}</div>
+                <div>{% if is_en %}Prepared automatically by{% else %}أُعد تلقائيًا بواسطة{% endif %} {{ department_label }}</div>
             </div>
         </div>
     </div>
     <div style="text-align:center;font-size:8px;color:#999;margin-top:20px;padding-top:8px;border-top:1px solid #ddd;font-family:Arial,sans-serif">
-        Powered by Material Lab
+        {% if is_en %}Powered by Material Lab{% else %}تم الإنشاء بواسطة Material Lab{% endif %}
     </div>
 </body>
 </html>

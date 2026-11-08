@@ -1,4 +1,5 @@
 import '../../../../core/state/app_cubit.dart';
+import '../../../../core/domain/formulation_receipt_policy.dart';
 import '../../../../core/utils/app_exceptions.dart';
 import '../../../reports/domain/report_repository.dart';
 import '../../domain/inspection_repository.dart';
@@ -12,6 +13,7 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
     required this.repo,
     required this.reports,
     this.kind = 'raw',
+    this.formulationReceiptsOnly = false,
     // Phones pass `kMobileMaxPageSize` (25); desktop keeps the default (200).
     // A constructor parameter — not a `FormFactor` read — so the cubit stays
     // platform-agnostic and tests keep the old default.
@@ -27,7 +29,11 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
   }) : super(
          InspectionsState(
            pageSize: initialPageSize,
-           status: initialStatus,
+           status:
+               formulationReceiptsOnly &&
+                   !formulationAcceptedDecisions.contains(initialStatus)
+               ? ''
+               : initialStatus,
            supplier: initialSupplier,
            materialId: initialMaterialId,
            materialName: initialMaterialName,
@@ -43,10 +49,18 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
 
   /// Inspection kind this register shows (`raw` or `product`).
   final String kind;
+  final bool formulationReceiptsOnly;
+  String get _queryStatus =>
+      formulationReceiptsOnly &&
+          !formulationAcceptedDecisions.contains(state.status)
+      ? formulationAcceptedStatusFilter
+      : state.status;
 
   bool get isProduct => kind == 'product';
+  int _loadRequest = 0;
 
   Future<void> load({int page = 0}) async {
+    final request = ++_loadRequest;
     safeEmit(state.copyWith(loading: true, error: null, page: page));
     try {
       // Parallel: page rows + filtered total in one round. The shared
@@ -55,7 +69,7 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
       final settled = await Future.wait([
         repo.list(
           query: state.query,
-          status: state.status,
+          status: _queryStatus,
           reason: state.reason,
           limit: state.pageSize,
           offset: page * state.pageSize,
@@ -69,7 +83,7 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
         ),
         repo.count(
           query: state.query,
-          status: state.status,
+          status: _queryStatus,
           reason: state.reason,
           kind: kind,
           dateFrom: state.dateFrom,
@@ -79,6 +93,7 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
           productId: isProduct ? state.materialId : null,
         ),
       ]);
+      if (request != _loadRequest || isClosed) return;
       final rows = settled[0] as List<Map<String, dynamic>>;
       final total = settled[1] as int;
       safeEmit(
@@ -91,8 +106,10 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
         ),
       );
     } on AppError catch (e) {
-      safeEmit(state.copyWith(loading: false, error: e.message));
+      if (request != _loadRequest || isClosed) return;
+      safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     } catch (e) {
+      if (request != _loadRequest || isClosed) return;
       safeEmit(state.copyWith(loading: false, error: AppError.friendly(e)));
     }
   }
@@ -116,7 +133,15 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
   }
 
   Future<void> setStatus(String status) async {
-    safeEmit(state.copyWith(status: status));
+    safeEmit(
+      state.copyWith(
+        status:
+            formulationReceiptsOnly &&
+                !formulationAcceptedDecisions.contains(status)
+            ? ''
+            : status,
+      ),
+    );
     await load(page: 0);
   }
 
@@ -149,7 +174,11 @@ class InspectionsCubit extends AppCubit<InspectionsState> {
   }) async {
     safeEmit(
       state.copyWith(
-        status: status,
+        status:
+            formulationReceiptsOnly &&
+                !formulationAcceptedDecisions.contains(status)
+            ? ''
+            : status,
         reason: reason,
         dateFrom: dateFrom,
         dateTo: dateTo,

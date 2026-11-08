@@ -96,7 +96,7 @@ void main() {
           },
         ],
       };
-      when(() => settings.getSettings()).thenAnswer((_) async => {});
+      when(() => settings.getSettings()).thenAnswer((_) async => {'report_language': 'en'});
       when(() => inspections.getById(1)).thenAnswer((_) async => record);
       when(() => lab.injectLabTests(record)).thenAnswer((_) async => record);
       when(
