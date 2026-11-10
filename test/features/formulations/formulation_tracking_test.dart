@@ -152,46 +152,51 @@ void main() {
             },
           ),
       ];
-      for (final aggregation in [
-        FormulationAggregation.minimum,
-        FormulationAggregation.maximum,
+      for (final source in [
+        FormulationDataSource.all,
+        FormulationDataSource.lab,
       ]) {
-        final request = FormulationTrackingRequest(
-          ingredients: ingredients,
-          receipts: receipts,
-          from: from,
-          to: to,
-          buckets: buckets,
-          parameters: const {'protein'},
-          aggregation: aggregation,
-          dataSource: FormulationDataSource.all,
-        );
-        expect(request.needsIsolate, true);
-        var heartbeats = 0;
-        final timer = Timer.periodic(
-          const Duration(milliseconds: 1),
-          (_) => heartbeats++,
-        );
-        final watch = Stopwatch()..start();
-        late FormulationTrackingResult result;
-        try {
-          result = await compute(calculateFormulationTracking, request);
-        } finally {
-          timer.cancel();
+        for (final aggregation in [
+          FormulationAggregation.minimum,
+          FormulationAggregation.maximum,
+        ]) {
+          final request = FormulationTrackingRequest(
+            ingredients: ingredients,
+            receipts: receipts,
+            from: from,
+            to: to,
+            buckets: buckets,
+            parameters: const {'protein'},
+            aggregation: aggregation,
+            dataSource: source,
+          );
+          expect(request.needsIsolate, true);
+          var heartbeats = 0;
+          final timer = Timer.periodic(
+            const Duration(milliseconds: 1),
+            (_) => heartbeats++,
+          );
+          final watch = Stopwatch()..start();
+          late FormulationTrackingResult result;
+          try {
+            result = await compute(calculateFormulationTracking, request);
+          } finally {
+            timer.cancel();
+          }
+          expect(heartbeats, greaterThan(0));
+          expect(result.series['protein'], hasLength(365));
+          expect(
+            result.series['protein']!.every(
+              (value) => value != null && value.isFinite,
+            ),
+            true,
+          );
+          // Recorded for diagnosis; no machine-dependent timing assertion.
+          // ignore: avoid_print
+          print(
+            '${source.name}/${aggregation.name}: 600 receipts / 7200 observations / 365 points in ${watch.elapsedMilliseconds}ms; $heartbeats event-loop ticks',
+          );
         }
-        expect(heartbeats, greaterThan(0));
-        expect(result.series['protein'], hasLength(365));
-        expect(
-          result.series['protein']!.every(
-            (value) => value != null && value.isFinite,
-          ),
-          true,
-        );
-        // Recorded for diagnosis; no machine-dependent timing assertion.
-        // ignore: avoid_print
-        print(
-          '${aggregation.name}: 600 receipts / 7200 observations / 365 points in ${watch.elapsedMilliseconds}ms; $heartbeats event-loop ticks',
-        );
       }
     },
   );

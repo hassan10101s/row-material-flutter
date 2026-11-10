@@ -34,7 +34,7 @@ tbody tr:nth-child(even) { background:#f8fafc; } tr { break-inside:avoid; } tr:l
  <div class="brand">{% if report_logo_data_uri %}<img class="logo" src="{{ report_logo_data_uri }}" alt="">{% endif %}
  {% if organization_name %}<div class="organization-name">{{ organization_name }}</div>{% endif %}</div>
  <div><div class="department">{{ department_label }}</div><h1>{{ title }}</h1><div class="period"><bdi>{{ period }}</bdi></div></div>
- <div class="form">{% if is_en %}Form no.{% else %}رقم النموذج{% endif %}<br><bdi>{{ form_no }}</bdi></div>
+ <div class="form">Form no.<br><bdi>{{ form_no }}</bdi></div>
 </header>
 <div class="summary">
  <div class="metric"><span>{% if is_en %}Reports{% else %}المحاضر{% endif %}</span><strong>{{ report_count }}</strong></div>

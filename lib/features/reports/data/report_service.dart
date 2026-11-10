@@ -13,7 +13,6 @@ import '../../../core/security/local_secret.dart';
 import '../../../core/utils/app_dates.dart';
 import '../../../core/utils/app_exceptions.dart';
 import '../../../core/utils/app_format.dart';
-import '../../../design_system/export/table_html_export.dart';
 import '../../inspections/data/inspection_repo.dart';
 import '../../lab/data/lab_repo.dart';
 import '../../reference/data/reference_repo.dart';
@@ -713,15 +712,15 @@ class ReportService implements ReportRepository {
     );
   }
 
-  /// Generic register table (e.g. the test log) as a PDF. The same HTML
-  /// document the register's "print" action would write, converted through the
-  /// shared HTML→PDF pipeline on both desktop and Android.
+  /// Generic register table (e.g. the test log) as a PDF rendered from the
+  /// shared table-report template.
   @override
   Future<ReportDoc> tableReport({
     required String filename,
     required String title,
     required List<String> headers,
     required List<List<String>> rows,
+    String? subtitle,
   }) async {
     _checkExport();
     if (rows.isEmpty) {
@@ -729,9 +728,18 @@ class ReportService implements ReportRepository {
         AppText.t('لا توجد سجلات للتصدير.', 'No records to export.'),
       );
     }
-    final bytes = await _pdfFromHtml(
-      TableHtmlExport.buildHtml(title: title, headers: headers, rows: rows),
-    );
+    final html = await _renderHtmlTemplate('table_report_template.html', {
+      'title': title,
+      'subtitle': subtitle ?? '',
+      'headers': headers,
+      'rows': rows,
+      'row_count': rows.length,
+      'generated_at': DateTime.now().toString().substring(0, 16),
+      'report_label': AppText.t('تقرير جدول', 'Table report'),
+      'records_label': AppText.t('عدد السجلات', 'Records'),
+      'generated_label': AppText.t('تاريخ الإنشاء', 'Generated'),
+    });
+    final bytes = await _pdfFromHtml(html);
     return ReportDoc(filename: filename, bytes: bytes, title: title);
   }
 

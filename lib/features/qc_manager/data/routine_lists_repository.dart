@@ -116,42 +116,6 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     );
   }
 
-  /// Tombstones alive children (histories keep pointing at them) and queues
-  /// each — matching `_QcWrite.tombstoneChildren` in the QC facades.
-  Future<void> _tombstoneChildren(
-    DatabaseExecutor txn, {
-    required String table,
-    required String pk,
-    required String entityType,
-    required String containerColumn,
-    required int containerId,
-  }) async {
-    if (sync == null) return;
-    final stamp = nowIso();
-    final alive = await txn.query(
-      table,
-      columns: [pk],
-      where: 'deleted_at IS NULL AND $containerColumn = ?',
-      whereArgs: [containerId],
-    );
-    if (alive.isEmpty) return;
-    await txn.update(
-      table,
-      {'deleted_at': stamp},
-      where: 'deleted_at IS NULL AND $containerColumn = ?',
-      whereArgs: [containerId],
-    );
-    for (final r in alive) {
-      await _queueRow(
-        txn,
-        entityType: entityType,
-        table: table,
-        pk: pk,
-        id: (r[pk] as num?)?.toInt(),
-      );
-    }
-  }
-
   String get _uid => guard.uid;
 
   String _displayName() {
@@ -364,9 +328,8 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
     });
   }
 
-  /// Labels in list order become the items: matching rows are updated,
-  /// missing ones are retired (soft delete, history keeps pointing at
-  /// them), new ones are appended.
+  /// Labels in list order become the items. Unchanged labels retain their row
+  /// identity; removed rows are retired and new rows are appended.
   Future<void> _reconcileItems(
     DatabaseExecutor txn,
     int templateId,
@@ -384,44 +347,106 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
       for (final l in labels)
         if (l.trim().isNotEmpty) l.trim(),
     ];
+    final existingByLabel = <String, List<int>>{};
+    for (var i = 0; i < existing.length; i++) {
+      final label = '${existing[i]['label'] ?? ''}';
+      existingByLabel.putIfAbsent(label, () => []).add(i);
+    }
+
+    final matchedExisting = List<int?>.filled(clean.length, null);
+    final usedExisting = <int>{};
+    final labelOffsets = <String, int>{};
     for (var i = 0; i < clean.length; i++) {
-      if (i < existing.length) {
-        final id = (existing[i]['item_id'] as num).toInt();
-        if (existing[i]['label'] == clean[i] &&
-            existing[i]['order_index'] == i) {
-          continue;
-        }
-        await txn.update(
-          'qc_items',
-          {'label': clean[i], 'order_index': i},
-          where: 'item_id = ?',
-          whereArgs: [id],
-        );
-      } else {
-        await txn.insert('qc_items', {
-          'section_id': sectionId,
-          'template_id': templateId,
-          'label': clean[i],
-          'item_type': QcItemType.passFail,
-          'order_index': i,
-          'required': 1,
-          'allow_na': 1,
-          'is_critical': 0,
-          'require_evidence_if_fail': 0,
-          'require_evidence_if_value': 0,
-          'default_value': '',
-          'options_json': '',
-          'unit': '',
-          'tolerance_type': 'abs',
-          'validation_rule_json': '',
-          'conditional_show_json': '',
-          'fail_trigger_json': '',
-          'help_text': '',
-          'defect_code': '',
-        });
+      final candidates = existingByLabel[clean[i]];
+      final offset = labelOffsets[clean[i]] ?? 0;
+      if (candidates == null || offset >= candidates.length) continue;
+      final existingIndex = candidates[offset];
+      labelOffsets[clean[i]] = offset + 1;
+      matchedExisting[i] = existingIndex;
+      usedExisting.add(existingIndex);
+    }
+
+    final anchorOld = <int>[-1];
+    final anchorNew = <int>[-1];
+    for (var i = 0; i < matchedExisting.length; i++) {
+      final existingIndex = matchedExisting[i];
+      if (existingIndex == null) continue;
+      anchorOld.add(existingIndex);
+      anchorNew.add(i);
+    }
+    anchorOld.add(existing.length);
+    anchorNew.add(clean.length);
+
+    for (var anchor = 1; anchor < anchorOld.length; anchor++) {
+      final oldIndices = [
+        for (var i = anchorOld[anchor - 1] + 1; i < anchorOld[anchor]; i++)
+          if (!usedExisting.contains(i)) i,
+      ];
+      final newIndices = [
+        for (var i = anchorNew[anchor - 1] + 1; i < anchorNew[anchor]; i++)
+          if (matchedExisting[i] == null) i,
+      ];
+      final reusedCount = oldIndices.length < newIndices.length
+          ? oldIndices.length
+          : newIndices.length;
+      final hasRightAnchor = anchorNew[anchor] < clean.length;
+      for (var i = 0; i < reusedCount; i++) {
+        final oldOffset = hasRightAnchor
+            ? oldIndices.length - reusedCount + i
+            : i;
+        final newOffset = hasRightAnchor
+            ? newIndices.length - reusedCount + i
+            : i;
+        final oldIndex = oldIndices[oldOffset];
+        final newIndex = newIndices[newOffset];
+        matchedExisting[newIndex] = oldIndex;
+        usedExisting.add(oldIndex);
       }
     }
-    for (var i = clean.length; i < existing.length; i++) {
+
+    var nextOrderIndex = 0;
+    for (final row in existing) {
+      final orderIndex = (row['order_index'] as num?)?.toInt() ?? -1;
+      if (orderIndex >= nextOrderIndex) nextOrderIndex = orderIndex + 1;
+    }
+    for (var i = 0; i < clean.length; i++) {
+      final existingIndex = matchedExisting[i];
+      if (existingIndex != null) {
+        final row = existing[existingIndex];
+        if (row['label'] != clean[i]) {
+          await txn.update(
+            'qc_items',
+            {'label': clean[i]},
+            where: 'item_id = ?',
+            whereArgs: [(row['item_id'] as num).toInt()],
+          );
+        }
+        continue;
+      }
+      await txn.insert('qc_items', {
+        'section_id': sectionId,
+        'template_id': templateId,
+        'label': clean[i],
+        'item_type': QcItemType.passFail,
+        'order_index': nextOrderIndex++,
+        'required': 1,
+        'allow_na': 1,
+        'is_critical': 0,
+        'require_evidence_if_fail': 0,
+        'require_evidence_if_value': 0,
+        'default_value': '',
+        'options_json': '',
+        'unit': '',
+        'tolerance_type': 'abs',
+        'validation_rule_json': '',
+        'conditional_show_json': '',
+        'fail_trigger_json': '',
+        'help_text': '',
+        'defect_code': '',
+      });
+    }
+    for (var i = 0; i < existing.length; i++) {
+      if (usedExisting.contains(i)) continue;
       final id = (existing[i]['item_id'] as num).toInt();
       await txn.update(
         'qc_items',
@@ -461,22 +486,7 @@ class RoutineListsRepositoryImpl implements RoutineListsRepository {
         throw NotFoundError(AppText.t('السجل غير موجود', 'Record not found'));
       }
       await templates.deleteTemplate(templateId, exec: txn);
-      await _tombstoneChildren(
-        txn,
-        table: 'qc_sections',
-        pk: 'section_id',
-        entityType: 'qcSection',
-        containerColumn: 'template_id',
-        containerId: templateId,
-      );
-      await _tombstoneChildren(
-        txn,
-        table: 'qc_items',
-        pk: 'item_id',
-        entityType: 'qcItem',
-        containerColumn: 'template_id',
-        containerId: templateId,
-      );
+      // Historical sheets keep their item identities even after the list is retired.
       await audit.append(
         entityType: QcAuditEntity.template,
         entityId: '$templateId',

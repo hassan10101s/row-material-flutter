@@ -3,6 +3,10 @@ const labFailureResult = 'FAILURE';
 
 /// User-facing status stays English in the app and all report languages.
 const labFailureLabel = 'Failure';
+
+/// A saved result with no result text is an intentionally incomplete draft.
+bool isPendingLabResult(Object? value) => '${value ?? ''}'.trim().isEmpty;
+
 bool isFailedLabResult(Object? value) =>
     '${value ?? ''}'.trim().toUpperCase() == labFailureResult;
 

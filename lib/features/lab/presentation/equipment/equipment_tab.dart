@@ -1,12 +1,10 @@
 import '../../../../design_system/widgets/app_add_floating_action_button.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../../core/constants/app_strings.dart';
 import '../../../../core/constants/report_form_keys.dart';
 import '../../../../core/utils/app_exceptions.dart';
-import '../../../../design_system/animations/app_animations.dart';
 import '../../../../design_system/feedback/app_feedback.dart';
 import '../../../../design_system/feedback/app_feedback_export.dart';
 import '../../../../design_system/tokens/app_breakpoints.dart';
@@ -20,10 +18,9 @@ import '../../../../design_system/widgets/app_export_button.dart';
 import '../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../design_system/widgets/app_selection.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../design_system/export/table_html_export.dart';
+import '../../../../design_system/export/table_pdf_export.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../di/service_locator.dart';
-import '../../../inspections/presentation/qr/qr_scan_screen.dart';
 import '../../../reports/domain/report_repository.dart';
 import '../../domain/lab_local_repository.dart';
 import 'equipment_dialogs.dart';
@@ -229,7 +226,7 @@ class _MasterListState extends State<EquipmentMasterList> {
       for (var i = 0; i < widget.rows.length; i++)
         if (_selected.contains(i)) widget.rows[i],
     ];
-    await TableHtmlExport.export(
+    await TablePdfExport.export(
       context,
       filePrefix: 'equipment',
       title: EquipmentMasterList.exportTitle(),
@@ -272,19 +269,6 @@ class _MasterListState extends State<EquipmentMasterList> {
     final rows = widget.rows;
     final query = widget.query;
     final wide = widget.wide;
-    // Same platform guard as the inspections scan entry points: the camera
-    // scanner is Android-only (QrScanScreen itself degrades to manual search
-    // elsewhere, but the button is never built outside Android).
-    final scanAvailable =
-        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
-    // Pairs with AppExportIconButton in the narrow search row.
-    final scanButton = IconButton.outlined(
-      tooltip: AppText.t('مسح رمز', 'Scan QR'),
-      onPressed: () => Navigator.of(
-        context,
-      ).push(AppPageRoute(builder: (_) => const QrScanScreen())),
-      icon: Icon(Icons.qr_code_scanner_outlined, size: 20.r),
-    );
     final search = AppTextField(
       controller: query,
       onChanged: (_) {
@@ -315,7 +299,7 @@ class _MasterListState extends State<EquipmentMasterList> {
           : const BoxConstraints(minWidth: 48, minHeight: 48),
       onPressed: rows.isEmpty
           ? null
-          : () => TableHtmlExport.export(
+          : () => TablePdfExport.export(
               context,
               filePrefix: 'equipment',
               title: EquipmentMasterList.exportTitle(),
@@ -334,17 +318,6 @@ class _MasterListState extends State<EquipmentMasterList> {
               Expanded(child: search),
               const SizedBox(width: AppSpacing.sm),
               exportButton,
-              if (scanAvailable) ...[
-                AppButton(
-                  icon: Icon(Icons.qr_code_scanner_outlined, size: 18.r),
-                  label: AppText.t('مسح رمز', 'Scan QR'),
-                  style: AppButtonStyle.secondary,
-                  onPressed: () => Navigator.of(
-                    context,
-                  ).push(AppPageRoute(builder: (_) => const QrScanScreen())),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-              ],
               AppButton(
                 small: true,
                 label: AppText.t('إضافة جهاز', 'Add equipment'),
@@ -364,14 +337,10 @@ class _MasterListState extends State<EquipmentMasterList> {
             export: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (scanAvailable) ...[
-                  scanButton,
-                  const SizedBox(width: AppSpacing.sm),
-                ],
                 AppExportIconButton(
                   onPressed: rows.isEmpty
                       ? null
-                      : () => TableHtmlExport.export(
+                      : () => TablePdfExport.export(
                           context,
                           filePrefix: 'equipment',
                           title: EquipmentMasterList.exportTitle(),

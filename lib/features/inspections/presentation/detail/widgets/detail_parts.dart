@@ -269,8 +269,54 @@ class DetailInfo extends StatelessWidget {
         if (!isProduct &&
             '${inspection['decision_reason'] ?? ''}'.trim().isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
-          Text(
-            '${AppText.t('سبب القرار', 'Reason')}: ${inspection['decision_reason']}',
+          AppCard(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.info_outline,
+                  size: 20.r,
+                  color: statusColorsPut(
+                    '${inspection['decision_status'] ?? ''}',
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              AppText.t('سبب القرار الحالي', 'Current reason'),
+                              style: TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 12.spMax,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          AppStatusBadge(
+                            '${inspection['decision_status'] ?? ''}',
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      SelectableText(
+                        '${inspection['decision_reason']}',
+                        style: TextStyle(
+                          color: AppColors.textStrong,
+                          fontSize: 14.spMax,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
         if (!isProduct &&
@@ -410,44 +456,101 @@ class HistoryCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             for (final row in history)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.timeline, size: 16.r),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: AppSpacing.sm,
-                        runSpacing: 4,
+                padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  decoration: BoxDecoration(
+                    color: AppColors.surfaceSoft,
+                    borderRadius: BorderRadius.circular(AppRadii.sm),
+                    border: Border.all(color: AppColors.borderMuted),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          AppStatusBadge('${row['new_status']}'),
-                          Text(
-                            '${AppText.t('النسخة', 'v')} ${row['version']} '
-                            '${AppText.t('بواسطة', 'by')} '
-                            '${row['changed_by_name']} — ${row['changed_at']}',
-                            style: TextStyle(
-                              color: AppColors.textMuted,
-                              fontSize: 12.spMax,
+                          Icon(Icons.timeline, size: 18.r),
+                          const SizedBox(width: AppSpacing.sm),
+                          Expanded(
+                            child: Text(
+                              _versionOf(row) == 1
+                                  ? AppText.t(
+                                      'القرار الأول',
+                                      'Initial decision',
+                                    )
+                                  : '${AppText.t('تحديث القرار', 'Decision update')} · '
+                                        '${AppText.t('النسخة', 'v')} ${row['version']}',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                              ),
                             ),
                           ),
-                          if ('${row['change_reason'] ?? ''}'.trim().isNotEmpty)
-                            Text(
-                              '${AppText.t('سبب', 'Reason')}: ${row['change_reason']}',
-                              style: TextStyle(fontSize: 12.spMax),
-                            ),
-                          if ('${row['follow_up_note'] ?? ''}'
-                              .trim()
-                              .isNotEmpty)
-                            Text(
-                              '${AppText.t('متابعة', 'Follow-up')}: ${row['follow_up_note']}',
-                              style: TextStyle(fontSize: 12.spMax),
-                            ),
+                          if (_versionOf(row) == 1)
+                            AppStatusBadge('${row['new_status'] ?? ''}'),
                         ],
                       ),
-                    ),
-                  ],
+                      if (_versionOf(row) != 1) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Wrap(
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: AppSpacing.sm,
+                          runSpacing: AppSpacing.xs,
+                          children: [
+                            if ('${row['old_status'] ?? ''}'.trim().isNotEmpty)
+                              AppStatusBadge('${row['old_status']}'),
+                            Icon(Icons.trending_flat, size: 18.r),
+                            AppStatusBadge('${row['new_status'] ?? ''}'),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(
+                        [
+                          if ('${row['changed_by_name'] ?? ''}'
+                              .trim()
+                              .isNotEmpty)
+                            '${AppText.t('بواسطة', 'by')} ${row['changed_by_name']}',
+                          if ('${row['changed_at'] ?? ''}'.trim().isNotEmpty)
+                            '${row['changed_at']}',
+                        ].join(' · '),
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 12.spMax,
+                        ),
+                      ),
+                      if ('${row['change_reason'] ?? ''}'
+                          .trim()
+                          .isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        Text(
+                          '${AppText.t('سبب القرار', 'Decision reason')}: '
+                          '${row['change_reason']}',
+                          style: TextStyle(fontSize: 13.spMax, height: 1.4),
+                        ),
+                      ],
+                      if ('${row['follow_up_note'] ?? ''}'
+                          .trim()
+                          .isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          '${AppText.t('متابعة', 'Follow-up')}: '
+                          '${row['follow_up_note']}',
+                          style: TextStyle(fontSize: 12.spMax),
+                        ),
+                      ],
+                      if ('${row['rejected_quantity'] ?? ''}'
+                          .trim()
+                          .isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          '${AppText.t('الكمية المرفوضة', 'Rejected quantity')}: '
+                          '${row['rejected_quantity']}',
+                          style: TextStyle(fontSize: 12.spMax),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
           ],
@@ -455,6 +558,11 @@ class HistoryCard extends StatelessWidget {
       ),
     );
   }
+
+  int _versionOf(Map<String, dynamic> row) =>
+      (row['version'] as num?)?.toInt() ??
+      int.tryParse('${row['version']}') ??
+      0;
 }
 
 /// Pass/fail icon for one reference bound + measured values.

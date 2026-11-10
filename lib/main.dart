@@ -24,6 +24,7 @@ import 'design_system/tokens/app_colors.dart';
 import 'design_system/tokens/app_text_theme.dart';
 import 'di/service_locator.dart';
 import 'features/reports/data/pdf_renderer.dart';
+import 'features/inspections/presentation/qr/mobile_qr_overlay.dart';
 import 'l10n/generated/app_localizations.dart';
 import 'router/app_router.dart';
 
@@ -116,8 +117,8 @@ Future<void> bootstrapAndRun() async {
         localeService,
       ]);
 
-      final router = AppRouter(authGate: getIt<AuthGate>()).router;
-      runApp(MaterialLabApp(router: router));
+      final routes = AppRouter(authGate: getIt<AuthGate>());
+      runApp(MaterialLabApp(router: routes.router, routes: routes));
 
       // Mobile-only bell + poll scheduling after the first frame (no-op on
       // desktop): plugin init and the bell scans interleave with the first paint
@@ -243,7 +244,8 @@ class _BootstrapSplash extends StatelessWidget {
 /// MaterialLabApp — RTL Arabic-first bilingual Material app (Windows desktop).
 class MaterialLabApp extends StatefulWidget {
   final GoRouter router;
-  const MaterialLabApp({super.key, required this.router});
+  final AppRouter? routes;
+  const MaterialLabApp({super.key, required this.router, this.routes});
 
   @override
   State<MaterialLabApp> createState() => _MaterialLabAppState();
@@ -377,7 +379,14 @@ class _MaterialLabAppState extends State<MaterialLabApp> {
                     data: MediaQuery.of(
                       context,
                     ).copyWith(textScaler: AppTextTheme.clampScaler(context)),
-                    child: child!,
+                    child: widget.routes == null
+                        ? child!
+                        : MobileQrOverlay(
+                            gate: getIt<AuthGate>(),
+                            navigation: widget.routes!.qrNavigation,
+                            navigatorKey: widget.routes!.navigatorKey,
+                            child: child!,
+                          ),
                   ),
                 ),
               );

@@ -10,7 +10,8 @@ import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
+import '../../reference_access.dart';
 
 /// Small list widgets for the products tab, composed by both variants.
 
@@ -35,7 +36,7 @@ class ProductsHeader extends StatelessWidget {
   /// Mobile-only count line under the title (desktop keeps title-only).
   final String? subtitle;
 
-  /// Export-all action (HTML table file). Shown when [canExport] is true.
+  /// Export-all action (templated PDF). Shown when [canExport] is true.
   final VoidCallback? onExportTable;
   final bool canExport;
 
@@ -59,12 +60,13 @@ class ProductsHeader extends StatelessWidget {
         children: [
           const Spacer(),
           exportButton,
-          AppButton(
-            small: true,
-            icon: Icon(Icons.add, size: 16.r),
-            label: AppText.t('منتج جديد', 'New Product'),
-            onPressed: onAdd,
-          ),
+          if (showAdd)
+            AppButton(
+              small: true,
+              icon: Icon(Icons.add, size: 16.r),
+              label: AppText.t('منتج جديد', 'New Product'),
+              onPressed: onAdd,
+            ),
         ],
       );
     }
@@ -157,7 +159,7 @@ class _ProductsTableState extends State<ProductsTable> {
       for (var i = 0; i < widget.rows.length; i++)
         if (_selected.contains(i)) widget.rows[i],
     ];
-    await TableHtmlExport.export(
+    await TablePdfExport.export(
       context,
       filePrefix: 'products',
       title: ProductsTable.exportTitle(),
@@ -215,22 +217,24 @@ class _ProductsTableState extends State<ProductsTable> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      IconButton(
-                        tooltip: AppStrings.edit,
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => widget.onEdit(p),
-                        icon: Icon(Icons.edit_outlined, size: 18.r),
-                      ),
-                      IconButton(
-                        tooltip: AppStrings.delete,
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () => widget.onDelete(p),
-                        icon: Icon(
-                          Icons.delete_outline,
-                          size: 18.r,
-                          color: AppColors.danger,
+                      if (ReferenceAccess.canManageReference(context))
+                        IconButton(
+                          tooltip: AppStrings.edit,
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => widget.onEdit(p),
+                          icon: Icon(Icons.edit_outlined, size: 18.r),
                         ),
-                      ),
+                      if (ReferenceAccess.canManageReference(context))
+                        IconButton(
+                          tooltip: AppStrings.delete,
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () => widget.onDelete(p),
+                          icon: Icon(
+                            Icons.delete_outline,
+                            size: 18.r,
+                            color: AppColors.danger,
+                          ),
+                        ),
                     ],
                   ),
                 ],
@@ -515,22 +519,30 @@ class ProductCard extends StatelessWidget {
                   ],
                 ),
               ),
-              IconButton(
-                tooltip: AppStrings.edit,
-                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                onPressed: onEdit,
-                icon: Icon(Icons.edit_outlined, size: 20.r),
-              ),
-              IconButton(
-                tooltip: AppStrings.delete,
-                constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                onPressed: onDelete,
-                icon: Icon(
-                  Icons.delete_outline,
-                  size: 20.r,
-                  color: AppColors.danger,
+              if (ReferenceAccess.canManageReference(context))
+                IconButton(
+                  tooltip: AppStrings.edit,
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                  onPressed: onEdit,
+                  icon: Icon(Icons.edit_outlined, size: 20.r),
                 ),
-              ),
+              if (ReferenceAccess.canManageReference(context))
+                IconButton(
+                  tooltip: AppStrings.delete,
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                  onPressed: onDelete,
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 20.r,
+                    color: AppColors.danger,
+                  ),
+                ),
             ],
           ),
           const Divider(height: AppSpacing.lg),

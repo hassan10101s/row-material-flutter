@@ -80,6 +80,9 @@ void main() {
     when(() => store.restore()).thenAnswer((_) async => cached);
     when(() => store.save(any())).thenAnswer((_) async {});
     when(() => store.clear()).thenAnswer((_) async {});
+    when(() => store.isSignOutPending()).thenAnswer((_) async => false);
+    when(() => store.markSignedOut()).thenAnswer((_) async {});
+    when(() => store.allowSignIn()).thenAnswer((_) async {});
     when(
       () => metadata.ensureDeviceId(any()),
     ).thenAnswer((_) async => 'device_windows_abc');
@@ -166,6 +169,30 @@ void main() {
 
     await auth.resolveProfile();
     expect(bound, ['org_abc', 'org_abc']);
+  });
+
+  test('restore never reuses Firebase after a recorded sign-out', () async {
+    when(() => store.isSignOutPending()).thenAnswer((_) async => true);
+    when(() => remote.signOut()).thenAnswer((_) async {});
+    final auth = build();
+
+    expect(await auth.restoreSession(), AuthState.signedOut);
+
+    verify(() => remote.signOut()).called(1);
+    verifyNever(() => remote.currentUser());
+    verify(() => store.markSignedOut()).called(1);
+  });
+
+  test('Firebase is signed out even when the database cannot unbind', () async {
+    when(() => remote.signOut()).thenAnswer((_) async {});
+    when(() => db.bindOrg(null)).thenThrow(StateError('database unavailable'));
+    final auth = build();
+
+    await auth.signOut();
+
+    expect(auth.state, AuthState.signedOut);
+    expect(auth.session.isSignedIn, isFalse);
+    verify(() => remote.signOut()).called(1);
   });
 
   test('a no-profile session binds no company at all', () async {

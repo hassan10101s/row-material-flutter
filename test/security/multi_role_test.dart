@@ -28,6 +28,38 @@ void main() {
       expect(grants, isNot(contains(Permission.usersUpdate)));
     },
   );
+
+  test('reference editing is limited to admin and quality specialists', () {
+    expect(
+      rolePermissions(AppRoles.admin),
+      contains(Permission.referenceUpdate),
+    );
+    expect(
+      rolePermissions(AppRoles.qualityManager),
+      contains(Permission.referenceUpdate),
+    );
+    expect(rolePermissions(AppRoles.lab), contains(Permission.referenceUpdate));
+    for (final role in [
+      AppRoles.nutritionist,
+      AppRoles.viewer,
+      AppRoles.trialOwner,
+    ]) {
+      expect(
+        rolePermissions(role),
+        isNot(contains(Permission.referenceUpdate)),
+        reason: role,
+      );
+    }
+    expect(
+      rolesPermissions([AppRoles.lab, AppRoles.viewer]),
+      contains(Permission.referenceUpdate),
+    );
+    expect(
+      rolesPermissions([AppRoles.nutritionist, AppRoles.viewer]),
+      isNot(contains(Permission.referenceUpdate)),
+    );
+  });
+
   const employee = AppSession(
     uid: 'employee',
     organizationId: 'org',
@@ -80,6 +112,30 @@ void main() {
     );
   });
 
+  test(
+    'viewer can be combined with an employee role without removing its grants',
+    () {
+      const roles = [AppRoles.nutritionist, AppRoles.viewer];
+      final session = AppSession(
+        uid: 'employee',
+        organizationId: 'org',
+        role: AppRoles.nutritionist,
+        roles: roles,
+        status: MemberStatus.active,
+      );
+
+      expect(AppRoles.isValidAssignment(roles), isTrue);
+      expect(session.canDo(Permission.formulationsCreate), isTrue);
+      expect(session.can(Permission.qcRead), isTrue);
+      expect(session.canWrite, isTrue);
+      expect(rolesAreReadOnly(roles), isFalse);
+      expect(
+        AppRoles.isValidAssignment([AppRoles.admin, AppRoles.viewer]),
+        isFalse,
+      );
+    },
+  );
+
   test('malformed role arrays never recover primary write grants', () {
     for (final raw in <Object?>[
       [],
@@ -87,7 +143,7 @@ void main() {
       ['lab', 'unknown'],
       ['lab', 3],
       ['lab', 'admin'],
-      ['lab', 'viewer'],
+      ['lab', 'trial_owner'],
       ['nutritionist', 'lab'],
       'lab',
       <String, Object>{},

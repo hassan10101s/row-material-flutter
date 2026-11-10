@@ -14,6 +14,9 @@ import 'package:material_lab/design_system/widgets/app_field.dart';
 import 'package:material_lab/features/reports/domain/report_repository.dart';
 import 'package:material_lab/features/reports/presentation/cubit/reports_cubit.dart';
 import 'package:material_lab/features/reports/presentation/report/reports_screen.dart';
+import 'package:material_lab/features/lab/presentation/cubit/lab_reports_cubit.dart';
+import 'package:material_lab/features/lab/presentation/lab_reports/lab_reports_tab.dart';
+import 'package:material_lab/core/utils/app_dates.dart';
 
 class _ReportServiceMock extends Mock implements ReportRepository {}
 
@@ -90,6 +93,55 @@ void main() {
   /// design system, and pinning a test to it means a change there breaks
   /// unrelated report tests.
   Finder button(int index) => find.byType(AppButton).at(index);
+
+  testWidgets(
+    'all aggregate reports start at today and the current month/year',
+    (tester) async {
+      await pump(tester);
+      final today = DateTime.now();
+      for (final key in ['raw-period-reports', 'product-period-reports']) {
+        final root = find.byKey(ValueKey(key));
+        final date = tester.widget<AppDateField>(
+          find.descendant(of: root, matching: find.byType(AppDateField)),
+        );
+        final fields = tester
+            .widgetList<AppField>(
+              find.descendant(of: root, matching: find.byType(AppField)),
+            )
+            .toList();
+        expect(date.controller.text, todayIso());
+        expect(fields.map((field) => field.controller!.text), [
+          '${today.month}',
+          '${today.year}',
+          '${today.year}',
+        ]);
+      }
+      final labCubit = LabReportsCubit(reports: repo);
+      addTearDown(labCubit.close);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: BlocProvider.value(
+            value: labCubit,
+            child: const Scaffold(body: LabReportsTab()),
+          ),
+        ),
+      );
+      final labDate = tester.widget<AppDateField>(find.byType(AppDateField));
+      final fields = tester
+          .widgetList<AppField>(find.byType(AppField))
+          .toList();
+      expect(labDate.controller.text, todayIso());
+      expect(fields.map((field) => field.controller!.text), [
+        '${today.month}',
+        '${today.year}',
+        '${today.year}',
+      ]);
+      fields[1].controller!.text = '2024';
+      await tester.pump();
+      expect(fields[2].controller!.text, '${today.year}');
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   for (final type in ['daily', 'monthly', 'yearly']) {
     testWidgets('product $type card exports its own selected period', (

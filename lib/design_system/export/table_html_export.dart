@@ -9,14 +9,7 @@ import '../feedback/app_feedback_export.dart';
 import '../../di/service_locator.dart';
 import '../../features/settings/domain/export_root_service.dart';
 
-/// Generic table → HTML file export (the same idea as `TestHistoryPrinter`).
-///
-/// Every register table in the app exports through here: one HTML document
-/// with a `<table>`, a `window.print()` button and `@media print` rules,
-/// written next to the other exports and offered through
-/// `AppFeedbackExport.actions` (open/share). Callers pass plain strings —
-/// headers already localized with `AppText.t`, cells already formatted — so
-/// this stays framework-free apart from the file/share step.
+/// HTML table document helpers for explicit browser-print flows.
 class TableHtmlExport {
   TableHtmlExport._();
 
@@ -117,37 +110,6 @@ class TableHtmlExport {
       if (context.mounted) AppFeedback.errorFrom(context, e);
       return null;
     }
-  }
-
-  /// Builds the document from [headers]/[rows] and exports it. Never throws
-  /// into the UI: an empty selection and I/O failures surface as banners.
-  static Future<String?> export(
-    BuildContext context, {
-    required String filePrefix,
-    required String title,
-    required List<String> headers,
-    required List<List<String>> rows,
-    String? subtitle,
-    String? emptyMessage,
-  }) async {
-    if (rows.isEmpty) {
-      AppFeedback.info(
-        context,
-        emptyMessage ??
-            AppText.t('لا توجد سجلات للتصدير.', 'No records to export.'),
-      );
-      return null;
-    }
-    return writeHtmlFile(
-      context,
-      filePrefix: filePrefix,
-      html: buildHtml(
-        title: title,
-        headers: headers,
-        rows: rows,
-        subtitle: subtitle,
-      ),
-    );
   }
 
   static String stamp(DateTime t) {

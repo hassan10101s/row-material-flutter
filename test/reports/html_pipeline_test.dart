@@ -96,7 +96,9 @@ void main() {
           },
         ],
       };
-      when(() => settings.getSettings()).thenAnswer((_) async => {'report_language': 'en'});
+      when(
+        () => settings.getSettings(),
+      ).thenAnswer((_) async => {'report_language': 'en'});
       when(() => inspections.getById(1)).thenAnswer((_) async => record);
       when(() => lab.injectLabTests(record)).thenAnswer((_) async => record);
       when(
@@ -120,4 +122,36 @@ void main() {
       expect(exporter.html, contains('ISO 123'));
     },
   );
+
+  test('generic register exports use the shared table PDF template', () async {
+    final settings = _Settings();
+    final exporter = _Exporter();
+    when(
+      () => settings.getSettings(),
+    ).thenAnswer((_) async => {'report_language': 'en'});
+    final service = ReportService(
+      dbHelper: _Db(),
+      settingsRepo: settings,
+      inspectionRepo: _Inspections(),
+      labRepo: _Lab(),
+      secret: _Secret(),
+      htmlPdf: exporter,
+    );
+
+    final doc = await service.tableReport(
+      filename: 'register.pdf',
+      title: '<Register>',
+      headers: ['<Name>'],
+      rows: [
+        ['Sample & one'],
+      ],
+    );
+
+    expect(doc.filename, 'register.pdf');
+    expect(doc.bytes, '%PDF-test'.codeUnits);
+    expect(exporter.html, contains('<title>&lt;Register&gt;</title>'));
+    expect(exporter.html, contains('<th>&lt;Name&gt;</th>'));
+    expect(exporter.html, contains('<td>Sample &amp; one</td>'));
+    expect(exporter.html, contains('Table report'));
+  });
 }

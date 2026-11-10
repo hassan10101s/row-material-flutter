@@ -321,7 +321,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// from the injected session rather than the locator.
   List<ShellNavEntry> _entries(User user) => shellNavEntries(
     canSeeSettings: user.canSeeSettings,
-    canReadReference: user.permissions.contains(Permission.usersRead),
+    canReadReference: user.permissions.contains(Permission.samplesRead),
     canReadMembers: user.permissions.contains(Permission.usersRead),
     canReadAudit: user.permissions.contains(Permission.auditRead),
     canReadQc: widget.gate.session.permissions.contains(Permission.qcRead),

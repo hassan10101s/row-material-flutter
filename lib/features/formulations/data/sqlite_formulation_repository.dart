@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
+import 'package:flutter/foundation.dart' show compute;
 
 import '../../../core/auth/permissions.dart';
 import '../../../core/database/database_helper.dart';
@@ -186,7 +187,7 @@ class SqliteFormulationRepository implements FormulationRepository {
     return [for (final row in rows) Map<String, dynamic>.from(row)];
   }
 
-  dynamic _decode(Object? value) {
+  static dynamic _decode(Object? value) {
     try {
       return value is String && value.isNotEmpty ? jsonDecode(value) : {};
     } on FormatException {
@@ -194,12 +195,12 @@ class SqliteFormulationRepository implements FormulationRepository {
     }
   }
 
-  DateTime? _date(Object? value) {
+  static DateTime? _date(Object? value) {
     final date = DateTime.tryParse('$value');
     return date == null ? null : DateTime(date.year, date.month, date.day);
   }
 
-  String _key(String name) {
+  static String _key(String name) {
     return formulationParameterKey(name);
   }
 
@@ -258,6 +259,7 @@ class SqliteFormulationRepository implements FormulationRepository {
         JOIN lab_analyses a ON a.id = t.analysis_id
         LEFT JOIN parameters p ON p.id = a.parameter_id
         WHERE t.deleted_at IS NULL AND t.source_type = 'raw_material'
+          AND TRIM(COALESCE(t.result_text, '')) <> ''
           AND t.entry_code IN (${List.filled(codes.length, '?').join(',')})
           AND date(t.tested_at) <= date(?)
         ORDER BY t.tested_at DESC, t.id DESC
@@ -266,6 +268,19 @@ class SqliteFormulationRepository implements FormulationRepository {
       );
       testRows.addAll(tests);
     }
+    // JSON decoding, sample deduplication and lab-history construction can
+    // be substantial even before the graph calculator starts its worker.
+    final payload = (rows, testRows);
+    if (rows.length + testRows.length >= 250) {
+      return compute(_hydrateReceipts, payload);
+    }
+    return _hydrateReceipts(payload);
+  }
+
+  static List<MaterialReceipt> _hydrateReceipts(
+    (List<Map<String, Object?>>, List<Map<String, Object?>>) payload,
+  ) {
+    final (rows, testRows) = payload;
     final testsByCode = <String, List<Map<String, Object?>>>{};
     for (final test in testRows) {
       (testsByCode['${test['entry_code']}'] ??= []).add(test);
@@ -556,6 +571,36 @@ class SqliteFormulationRepository implements FormulationRepository {
         guard: guard,
         where: 'id = ?',
         whereArgs: [id],
+      );
+    });
+  }
+
+  @override
+  Future<void> delete(int id) async {
+    _check(Permission.formulationsUpdate.id);
+    await dbHelper.businessTransaction((txn) async {
+      final now = DateTime.now().toIso8601String();
+      final changed = await txn.update(
+        'nutrition_formulations',
+        {'deleted_at': now, 'updated_at': now, 'updated_by': guard.uid},
+        where: 'id = ? AND deleted_at IS NULL',
+        whereArgs: [id],
+      );
+      if (changed == 0) throw const ValidationError('التركيبة غير موجودة.');
+      await queueSharedRows(
+        txn,
+        type: 'nutritionFormulation',
+        queue: queue,
+        guard: guard,
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      await audit.log(
+        txn,
+        action: AuditAction.settingsUpdated,
+        entityType: 'nutrition_formulation',
+        entityId: '$id',
+        details: {'operation': 'delete'},
       );
     });
   }

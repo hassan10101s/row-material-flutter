@@ -189,6 +189,9 @@ void main() {
       );
       when(() => store.save(any())).thenAnswer((_) async {});
       when(() => store.clear()).thenAnswer((_) async {});
+      when(() => store.isSignOutPending()).thenAnswer((_) async => false);
+      when(() => store.markSignedOut()).thenAnswer((_) async {});
+      when(() => store.allowSignIn()).thenAnswer((_) async {});
       when(
         () => metadata.ensureDeviceId(any()),
       ).thenAnswer((_) async => 'old-revoked');

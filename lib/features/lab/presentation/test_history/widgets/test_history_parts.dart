@@ -384,6 +384,7 @@ class TestHistoryTable extends StatelessWidget {
 
   /// One row's cells, in the same column order as the headers above.
   List<Widget> _rowCells(Map<String, dynamic> r, int index) {
+    final pending = isPendingLabResult(r['result_text']);
     final out =
         '${r['range_state'] ?? ''}' == 'out' ||
         isFailedLabResult(r['result_text']);
@@ -418,7 +419,9 @@ class TestHistoryTable extends StatelessWidget {
           ],
           Flexible(
             child: Text(
-              formatLabResult(r['result_text']),
+              pending
+                  ? AppText.t('مسودة', 'Draft')
+                  : formatLabResult(r['result_text']),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
@@ -455,12 +458,19 @@ class TestHistoryTable extends StatelessWidget {
   }
 
   Widget _statusPill(Map<String, dynamic> r) {
+    if (isPendingLabResult(r['result_text'])) {
+      return _pill(AppText.t('مسودة', 'Draft'), AppColors.textMuted);
+    }
     final state = '${r['range_state'] ?? ''}';
     final color = state == 'out' || state == 'failed'
         ? AppColors.danger
         : state == 'in'
         ? AppColors.success
         : AppColors.textMuted;
+    return _pill(thRangeLabel(state.isEmpty ? 'none' : state), color);
+  }
+
+  Widget _pill(String label, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -468,7 +478,7 @@ class TestHistoryTable extends StatelessWidget {
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
-        thRangeLabel(state.isEmpty ? 'none' : state),
+        label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: TextStyle(
@@ -674,11 +684,14 @@ class TestHistoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final pending = isPendingLabResult(row['result_text']);
     final out =
         '${row['range_state'] ?? ''}' == 'out' ||
         isFailedLabResult(row['result_text']);
     final inn = '${row['range_state'] ?? ''}' == 'in';
-    final stateColor = out
+    final stateColor = pending
+        ? AppColors.textMuted
+        : out
         ? AppColors.danger
         : inn
         ? AppColors.success
@@ -749,7 +762,9 @@ class TestHistoryCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  thRangeLabel('${row['range_state'] ?? 'none'}'),
+                  pending
+                      ? AppText.t('مسودة', 'Draft')
+                      : thRangeLabel('${row['range_state'] ?? 'none'}'),
                   style: TextStyle(
                     color: stateColor,
                     fontSize: 11.spMax,
@@ -783,7 +798,9 @@ class TestHistoryCard extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   text: TextSpan(
-                    text: formatLabResult(row['result_text']),
+                    text: pending
+                        ? AppText.t('مسودة', 'Draft')
+                        : formatLabResult(row['result_text']),
                     style: TextStyle(
                       fontSize: 16.spMax,
                       fontWeight: FontWeight.w700,

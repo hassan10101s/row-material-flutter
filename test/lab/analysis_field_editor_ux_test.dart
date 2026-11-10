@@ -6,6 +6,7 @@ import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/di/service_locator.dart';
 import 'package:material_lab/design_system/widgets/app_button.dart';
+import 'package:material_lab/design_system/widgets/app_text_field.dart';
 import 'package:material_lab/features/lab/domain/lab_local_repository.dart';
 import 'package:material_lab/features/lab/domain/lab_result_repository.dart';
 import 'package:material_lab/features/reference/domain/reference_repository.dart';
@@ -18,10 +19,14 @@ class _Stock extends Mock implements LabLocalRepository {}
 
 class _Reference extends Mock implements ReferenceRepository {}
 
+class _Results extends Mock implements LabResultRepository {}
+
 void main() {
   late _Config config;
+  late _Results results;
   setUp(() {
     config = _Config();
+    results = _Results();
     final stock = _Stock(), reference = _Reference();
     when(() => stock.listInventory()).thenAnswer(
       (_) async => [
@@ -30,7 +35,11 @@ void main() {
     );
     when(() => stock.listUnitSymbols()).thenAnswer((_) async => ['mL']);
     when(() => reference.listParameters()).thenAnswer((_) async => []);
+    when(
+      () => results.hasCompletedResultsForAnalysis(any()),
+    ).thenAnswer((_) async => false);
     getIt.registerSingleton<LabConfigurationRepository>(config);
+    getIt.registerSingleton<LabResultRepository>(results);
     getIt.registerSingleton<LabLocalRepository>(stock);
     getIt.registerSingleton<ReferenceRepository>(reference);
   });
@@ -44,6 +53,7 @@ void main() {
     WidgetTester tester,
     bool mobile, {
     bool arabic = false,
+    GlobalKey<AnalysisEditorState>? key,
   }) async {
     AppText.useLanguage(arabic ? 'ar' : 'en');
     FormFactor.debugSet(mobile ? AppFormFactor.mobile : AppFormFactor.desktop);
@@ -59,10 +69,11 @@ void main() {
             textDirection: arabic ? TextDirection.rtl : TextDirection.ltr,
             child: child!,
           ),
-          home: const Scaffold(
+          home: Scaffold(
             body: SingleChildScrollView(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.all(16),
               child: AnalysisEditor(
+                key: key,
                 analysis: {
                   'id': 1,
                   'name': 'Protein',
@@ -185,4 +196,116 @@ void main() {
       },
     );
   }
+
+  testWidgets('adding a field with completed records offers a new analysis', (
+    tester,
+  ) async {
+    final key = GlobalKey<AnalysisEditorState>();
+    await host(tester, false, key: key);
+    when(
+      () => results.hasCompletedResultsForAnalysis(1),
+    ).thenAnswer((_) async => true);
+    when(() => config.analysisNameExists(any())).thenAnswer((_) async => false);
+    when(
+      () => config.createAnalysis(
+        name: any(named: 'name'),
+        description: any(named: 'description'),
+        reference: any(named: 'reference'),
+        dynamicFields: any(named: 'dynamicFields'),
+        items: any(named: 'items'),
+        unit: any(named: 'unit'),
+        parameterId: any(named: 'parameterId'),
+        formula: any(named: 'formula'),
+        fieldChemicalLinks: any(named: 'fieldChemicalLinks'),
+      ),
+    ).thenAnswer((_) async => {});
+    final newField = find.descendant(
+      of: find.ancestor(
+        of: find.text('Add a field...'),
+        matching: find.byType(AppTextField),
+      ),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(newField, 'Moisture');
+    await tester.tap(find.widgetWithText(AppButton, 'Add'));
+    await tester.pumpAndSettle();
+    final saving = key.currentState!.save();
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Completed test records are linked'),
+      findsOneWidget,
+    );
+    await tester.tap(find.widgetWithText(AppButton, 'Create new analysis'));
+    await tester.pumpAndSettle();
+    await saving;
+    verify(
+      () => config.createAnalysis(
+        name: 'Protein (copy)',
+        description: '',
+        reference: '',
+        dynamicFields: ['Titre', 'Moisture'],
+        items: any(named: 'items'),
+        unit: '%',
+        parameterId: null,
+        formula: any(named: 'formula'),
+        fieldChemicalLinks: any(named: 'fieldChemicalLinks'),
+      ),
+    ).called(1);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('renaming a field does not show the structural warning', (
+    tester,
+  ) async {
+    final key = GlobalKey<AnalysisEditorState>();
+    await host(tester, false, key: key);
+    when(
+      () => results.hasCompletedResultsForAnalysis(1),
+    ).thenAnswer((_) async => true);
+    when(
+      () => config.updateAnalysis(
+        analysisId: any(named: 'analysisId'),
+        name: any(named: 'name'),
+        description: any(named: 'description'),
+        reference: any(named: 'reference'),
+        dynamicFields: any(named: 'dynamicFields'),
+        items: any(named: 'items'),
+        unit: any(named: 'unit'),
+        parameterId: any(named: 'parameterId'),
+        clearParameter: any(named: 'clearParameter'),
+        formula: any(named: 'formula'),
+        fieldChemicalLinks: any(named: 'fieldChemicalLinks'),
+      ),
+    ).thenAnswer((_) async => {});
+    final field = find.descendant(
+      of: find.ancestor(
+        of: find.text('Field name 1'),
+        matching: find.byType(AppTextField),
+      ),
+      matching: find.byType(TextField),
+    );
+    await tester.enterText(field, 'Titre renamed');
+    await key.currentState!.save();
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Completed test records are linked'),
+      findsNothing,
+    );
+    verify(
+      () => config.updateAnalysis(
+        analysisId: 1,
+        name: 'Protein',
+        description: '',
+        reference: '',
+        dynamicFields: ['Titre renamed'],
+        items: any(named: 'items'),
+        unit: '%',
+        parameterId: null,
+        clearParameter: false,
+        formula: '',
+        fieldChemicalLinks: any(named: 'fieldChemicalLinks'),
+      ),
+    ).called(1);
+    expect(tester.takeException(), isNull);
+  });
 }

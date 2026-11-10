@@ -1380,21 +1380,38 @@ class ServerConfirmedQcNcCapaRepository implements QcNcCapaRepository {
         findingId,
       );
       await _w.requireRow(before, 'No QC non-conformance with id $findingId');
-      if (before?['product_sample_id'] != null) {
+      // The exact inverse of `saveProductSampleFinding`: deleting the case
+      // clears the sample's decision again inside the same atomic command,
+      // instead of refusing the delete. Only the case the decision currently
+      // points back to resets it; any other state leaves the sample
+      // untouched (deleted sample rows carry no live decision).
+      final sampleId = before?['product_sample_id'];
+      var decisionReset = false;
+      if (sampleId != null) {
         final linked = await txn.query(
           'product_batch_samples',
-          where:
-              "id = ? AND deleted_at IS NULL AND decision_status = 'NON_CONFORMANCE' AND non_conformance_remote_id = ?",
-          whereArgs: [before!['product_sample_id'], before['remote_id']],
+          where: 'id = ?',
+          whereArgs: [sampleId],
           limit: 1,
         );
-        if (linked.isNotEmpty) {
-          throw ValidationError(
-            AppText.t(
-              'غيّر قرار العينة قبل حذف سجل عدم المطابقة المرتبط بها.',
-              'Change the sample decision before deleting its linked non-conformance.',
-            ),
+        if (linked.isNotEmpty &&
+            '${linked.single['decision_status'] ?? ''}' == 'NON_CONFORMANCE' &&
+            '${linked.single['non_conformance_remote_id'] ?? ''}' ==
+                '${before!['remote_id']}') {
+          _w.check(Permission.labResultsUpdate);
+          await txn.update(
+            'product_batch_samples',
+            {
+              'decision_status': '',
+              'decision_reason': '',
+              'non_conformance_remote_id': '',
+              'updated_at': nowIso(),
+              'updated_by': _w.guard.uid,
+            },
+            where: 'id = ?',
+            whereArgs: [sampleId],
           );
+          decisionReset = true;
         }
       }
       await localRepo.deleteFinding(findingId, exec: txn);
@@ -1410,6 +1427,14 @@ class ServerConfirmedQcNcCapaRepository implements QcNcCapaRepository {
           'finding_id',
           findingId,
         ),
+        meta: {
+          if (before != null && sampleId != null && decisionReset)
+            'productSampleId': sampleId,
+          if (before != null && sampleId != null && decisionReset)
+            'oldDecision': 'NON_CONFORMANCE',
+          if (before != null && sampleId != null && decisionReset)
+            'newDecision': '',
+        },
       );
       await _w.queueRow(
         txn,
@@ -1418,6 +1443,15 @@ class ServerConfirmedQcNcCapaRepository implements QcNcCapaRepository {
         pk: 'finding_id',
         id: findingId,
       );
+      if (decisionReset) {
+        await _w.queueRow(
+          txn,
+          entityType: 'productBatchSample',
+          table: 'product_batch_samples',
+          pk: 'id',
+          id: sampleId,
+        );
+      }
       // The recompute inside the delete may have lifted the verdict.
       await _w.queueRow(
         txn,

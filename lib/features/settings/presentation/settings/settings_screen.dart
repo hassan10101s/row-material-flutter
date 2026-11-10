@@ -25,6 +25,7 @@ import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../design_system/widgets/app_button.dart';
+import '../../../../design_system/widgets/app_control_strip.dart';
 import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_field.dart';
@@ -215,19 +216,10 @@ class _SettingsTabs extends StatelessWidget {
           ),
         ),
     ];
-    if (appUsesDesktopChrome(context)) {
-      return Wrap(spacing: 8, runSpacing: 8, children: tabs);
-    }
-    return SizedBox(
-      height: 54,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (final tab in tabs) ...[tab, const SizedBox(width: 8)],
-          ],
-        ),
-      ),
+    return AppControlStrip(
+      height: appUsesDesktopChrome(context) ? 48 : 56,
+      spacing: AppSpacing.sm,
+      children: tabs,
     );
   }
 }

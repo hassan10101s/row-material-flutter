@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/constants/app_strings.dart';
+import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/design_system/animations/app_animations.dart';
 
 void main() {
@@ -16,6 +17,7 @@ void main() {
     AppPageRoute.appearanceChanges = null;
     appearanceChanges.dispose();
     AppText.arabic = true;
+    FormFactor.debugSet(null);
   });
 
   for (final useMaterialRoute in [false, true]) {
@@ -33,9 +35,7 @@ void main() {
                   ? appMaterialPageRoute<void>(
                       builder: (_) => _AppearanceProbe(),
                     )
-                  : AppPageRoute<void>(
-                      builder: (_) => _AppearanceProbe(),
-                    ),
+                  : AppPageRoute<void>(builder: (_) => _AppearanceProbe()),
             ),
           ),
         );
@@ -54,7 +54,49 @@ void main() {
       },
     );
   }
+
+  testWidgets('desktop fade-only routes keep mobile slide behavior unchanged', (
+    tester,
+  ) async {
+    FormFactor.debugSet(AppFormFactor.desktop);
+    await tester.pumpWidget(
+      WidgetsApp(
+        color: Colors.blue,
+        pageRouteBuilder: _noTransitionPageRoute,
+        home: Navigator(
+          onGenerateRoute: (_) => AppPageRoute<void>(
+            builder: (_) => const SizedBox(),
+            desktopFadeOnly: true,
+          ),
+        ),
+      ),
+    );
+    expect(find.byType(SlideTransition), findsNothing);
+
+    FormFactor.debugSet(AppFormFactor.mobile);
+    await tester.pumpWidget(
+      WidgetsApp(
+        color: Colors.blue,
+        pageRouteBuilder: _noTransitionPageRoute,
+        home: Navigator(
+          onGenerateRoute: (_) => AppPageRoute<void>(
+            builder: (_) => const SizedBox(),
+            desktopFadeOnly: true,
+          ),
+        ),
+      ),
+    );
+    expect(find.byType(SlideTransition), findsOneWidget);
+  });
 }
+
+PageRoute<T> _noTransitionPageRoute<T>(
+  RouteSettings settings,
+  WidgetBuilder builder,
+) => PageRouteBuilder<T>(
+  settings: settings,
+  pageBuilder: (context, animation, secondaryAnimation) => builder(context),
+);
 
 class _AppearanceProbe extends StatefulWidget {
   // ignore: prefer_const_constructors_in_immutables — see note above.

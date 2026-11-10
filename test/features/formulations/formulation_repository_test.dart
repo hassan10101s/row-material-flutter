@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
@@ -40,6 +41,61 @@ void main() {
     );
   });
   tearDown(() => fixture.dispose());
+
+  test(
+    'large source hydration keeps the UI event loop responsive and preserves lab history',
+    () async {
+      final analysis = await fixture.db.insert('lab_analyses', {
+        'name': 'Protein',
+        'unit': '%',
+        'created_at': '2026-01-01',
+      });
+      final batch = fixture.db.batch();
+      for (var i = 0; i < 300; i++) {
+        batch.insert('inspections', {
+          ...sampleRow(entryCode: 'LOAD-$i', decisionStatus: 'APPROVED'),
+          'inspection_date': '2026-01-01',
+          'chemical_results_json': '{"protein":[10]}',
+        });
+        batch.insert('lab_sample_tests', {
+          'analysis_id': analysis,
+          'source_type': 'raw_material',
+          'source_ref_id': 1,
+          'source_name': 'Cement',
+          'sample_name': 'A',
+          'result_text': '22.5',
+          'entry_code': 'LOAD-$i',
+          'tested_by': 1,
+          'tested_at': '2026-01-02',
+        });
+      }
+      await batch.commit(noResult: true);
+      var ticks = 0;
+      final heartbeat = Timer.periodic(
+        const Duration(milliseconds: 1),
+        (_) => ticks++,
+      );
+      final watch = Stopwatch()..start();
+      late List<MaterialReceipt> receipts;
+      try {
+        receipts = await repo.receipts([1], DateTime(1900), DateTime(2026, 2));
+      } finally {
+        heartbeat.cancel();
+      }
+      expect(receipts, hasLength(300));
+      expect(
+        receipts.every(
+          (row) => row.labHistory['protein']!.single.value == 22.5,
+        ),
+        isTrue,
+      );
+      expect(ticks, greaterThan(0));
+      // ignore: avoid_print
+      print(
+        'hydrate 300 receipts / 300 lab tests: ${watch.elapsedMilliseconds}ms; $ticks UI ticks',
+      );
+    },
+  );
 
   test(
     'only final and conditional approvals enter sources and linked ledger, including fallback',
@@ -139,6 +195,43 @@ void main() {
         ),
         isNotEmpty,
       );
+    },
+  );
+  test(
+    'deletion retains a queued tombstone and leaves copies and source records intact',
+    () async {
+      final first = await repo.save(record());
+      final copy = await repo.save({
+        ...record(),
+        'name': 'Copy',
+        'copied_from_id': first,
+      });
+      await fixture.db.update(
+        'nutrition_formulations',
+        {'remote_version': 1, 'sync_state': 'synced'},
+        where: 'id = ?',
+        whereArgs: [first],
+      );
+      await fixture.db.delete('sync_queue');
+      final inspectionsBefore = await fixture.db.query('inspections');
+      final labBefore = await fixture.db.query('lab_sample_tests');
+      await repo.delete(first);
+      expect((await repo.list()).single['id'], copy);
+      final deleted = (await fixture.db.query(
+        'nutrition_formulations',
+        where: 'id = ?',
+        whereArgs: [first],
+      )).single;
+      expect(deleted['deleted_at'], isNotNull);
+      final queued = await fixture.db.query(
+        'sync_queue',
+        where: 'entity_type = ?',
+        whereArgs: ['nutritionFormulation'],
+      );
+      expect(queued.single['operation'], 'tombstone');
+      expect(await fixture.db.query('inspections'), inspectionsBefore);
+      expect(await fixture.db.query('lab_sample_tests'), labBefore);
+      await expectLater(repo.delete(first), throwsA(isA<ValidationError>()));
     },
   );
   test(

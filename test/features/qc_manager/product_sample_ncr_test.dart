@@ -123,31 +123,42 @@ void main() {
     },
   );
   test(
-    'duplicate finding and deleting the active linked finding are refused; changing decision clears pointer',
+    'duplicate finding is refused; deleting the linked case resets the sample decision atomically',
     () async {
       final id = await repo.saveProductSampleFinding(finding());
       await expectLater(
         repo.saveProductSampleFinding(finding()),
         throwsA(isA<ValidationError>()),
       );
-      await expectLater(
-        repo.deleteFinding(id),
-        throwsA(isA<ValidationError>()),
+      await repo.deleteFinding(id);
+      final after = (await fixture.db.query('product_batch_samples')).single;
+      expect(after['decision_status'], '');
+      expect(after['decision_reason'], '');
+      expect(after['non_conformance_remote_id'], '');
+      expect(
+        await fixture.db.query('qc_findings_nc', where: 'deleted_at IS NULL'),
+        isEmpty,
       );
+      // The freed sample is immediately decidable again: approve it, then
+      // raise a fresh non-conformance that back-links anew.
       final lab = LabRepo(dbHelper: fixture.helper);
       await lab.setBatchSampleDecision(sampleId, status: 'APPROVED');
       expect(
         (await fixture.db.query(
           'product_batch_samples',
-        )).single['non_conformance_remote_id'],
-        '',
+        )).single['decision_status'],
+        'APPROVED',
       );
-      await repo.deleteFinding(id);
+      await repo.saveProductSampleFinding(
+        finding(description: 'Fresh investigation'),
+      );
+      final next = (await fixture.db.query('product_batch_samples')).single;
+      expect(next['decision_status'], 'NON_CONFORMANCE');
       expect(
         await QcNcReportRepo(
           dbHelper: fixture.helper,
         ).count(const NcrFilters()),
-        0,
+        1,
       );
     },
   );

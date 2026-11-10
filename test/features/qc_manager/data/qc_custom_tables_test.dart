@@ -400,23 +400,50 @@ void main() {
     expect(second.map((r) => r.rowId).toList(), [2, 1]);
   });
 
-  test('deleteTable tombstones the definition and its children', () async {
+  test('deleteTable requires records to be deleted separately', () async {
     final tableIdx = await repo.createTable(newTable('Doomed'), [
       newField('X', QcCustomColType.text),
     ]);
     final bundle = (await repo.getTableBundle(tableIdx))!;
-    await repo.addRow(record(bundle.table, {bundle.fields[0].remoteId: 'x'}));
+    final rowId = await repo.addRow(
+      record(bundle.table, {bundle.fields[0].remoteId: 'x'}),
+    );
+    final initialQueue = await database.query('sync_queue');
 
+    await expectLater(
+      repo.deleteTable(tableIdx),
+      throwsA(isA<ValidationError>()),
+    );
+    expect(await database.query('sync_queue'), initialQueue);
+    expect(await repo.listTables(), hasLength(1));
+    expect(await repo.listRows(tableIdx), hasLength(1));
+
+    await repo.deleteRow(rowId);
+    final deletedRow = (await database.query(
+      'qc_custom_table_rows',
+      where: 'row_id = ?',
+      whereArgs: [rowId],
+    )).single;
+    final deletedRowUpdatedAt = deletedRow['updated_at'];
     await repo.deleteTable(tableIdx);
 
-    // Reads treat the whole subtree as gone.
+    // The table and its fields are tombstoned only after each record has
+    // completed its own server-confirmed delete operation.
     expect(await repo.listTables(), isEmpty);
     expect(await repo.getTableBundle(tableIdx), isNull);
     expect(await repo.listRows(tableIdx), isEmpty);
 
-    // But the rows are tombstones on disk, not erasures: the audit trail
-    // survives them.
+    // Historical records remain tombstones and are not rewritten as part of
+    // the table delete.
     expect(await database.query('qc_custom_table_rows'), hasLength(1));
+    expect(
+      (await database.query(
+        'qc_custom_table_rows',
+        where: 'row_id = ?',
+        whereArgs: [rowId],
+      )).single['updated_at'],
+      deletedRowUpdatedAt,
+    );
     expect(
       (await database.query('qc_custom_tables')).single['deleted_at'],
       isNotNull,

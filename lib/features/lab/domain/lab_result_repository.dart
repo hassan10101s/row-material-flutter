@@ -7,9 +7,8 @@ import 'package:sqflite/sqflite.dart';
 /// read-only reporting helpers stay on [LabRepo]: they never replicate, so they
 /// never need the queue.
 abstract interface class LabResultRepository {
-  /// Runs an analysis against a sample: writes the `lab_sample_tests` row,
-  /// consumes the chemicals from the inventory and appends the consumption log
-  /// - one atomic server-confirmed operation including its stock effects.
+  /// Writes an analysis against a sample. Drafts are shared immediately but
+  /// have no result and do not consume inventory until promoted to a run.
   Future<Map<String, dynamic>> runSampleTest({
     required int analysisId,
     required String sourceType,
@@ -21,17 +20,24 @@ abstract interface class LabResultRepository {
     Map<String, dynamic>? user,
     String entryCode = '',
     bool manualResult = false,
+    bool draftOnly = false,
     // Product batch samples only: keep the caller's `sourceRefId`.
     bool keepSourceRefId = false,
   });
 
   Future<Map<String, dynamic>> getSampleTest(int testId);
 
-  /// Updates an existing `lab_sample_tests` row (result text, sample name,
-  /// dynamic field values, entry code). Any resulting stock correction and
-  /// return-to-source effects join the same atomic business operation.
+  /// Completed results are immutable history; incomplete drafts do not count.
+  Future<bool> hasCompletedResultsForAnalysis(int analysisId);
+
+  /// Updates an existing `lab_sample_tests` row. Draft metadata can be edited
+  /// before completion; completed rows retain their analysis and source.
   Future<Map<String, dynamic>> updateSampleTest(
     int testId, {
+    int? analysisId,
+    String? sourceType,
+    int? sourceRefId,
+    String? sourceName,
     String? sampleName,
     String? resultText,
     Map<String, dynamic>? dynamicValues,
@@ -122,6 +128,8 @@ abstract interface class LabConfigurationRepository {
   Future<int> countProducts({String query = ''});
 
   Future<Map<String, dynamic>> getAnalysis(int analysisId);
+
+  Future<bool> analysisNameExists(String name);
 
   Future<List<Map<String, dynamic>>> getAnalysisItems(int analysisId);
 

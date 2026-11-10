@@ -81,13 +81,13 @@ abstract interface class ReportRepository {
   });
 
   /// Generic register table (e.g. the test log) as a PDF: [headers] + [rows]
-  /// of already-formatted strings. Rendered through the shared HTML→PDF
-  /// pipeline when a headless browser exists, else the native dart-pdf table.
+  /// of already-formatted strings rendered from the shared table template.
   Future<ReportDoc> tableReport({
     required String filename,
     required String title,
     required List<String> headers,
     required List<List<String>> rows,
+    String? subtitle,
   });
 
   // ── Disk output ────────────────────────────────────────────────

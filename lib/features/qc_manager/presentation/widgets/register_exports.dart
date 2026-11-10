@@ -1,22 +1,22 @@
 import 'package:flutter/material.dart';
 
 import '../../../../../core/constants/app_strings.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../domain/qc_inspection.dart';
 import '../../domain/qc_sop.dart';
 import '../../domain/qc_template.dart';
 
-/// HTML table exports for the QC card registers (inspections / SOPs /
-/// templates). These screens are card lists, not `AppPaginatedTable`s, so
-/// they cannot reuse the table's selection bar — but the exported file is the
-/// same shared HTML table document every other register produces.
+/// PDF exports for the QC card registers (inspections / SOPs / templates).
+/// These screens are card lists, not `AppPaginatedTable`s, so they cannot
+/// reuse the table's selection bar — but the exported file uses the same
+/// shared PDF template as every other register.
 class RegisterExports {
   RegisterExports._();
 
   static Future<void> inspections(
     BuildContext context,
     List<QcInspection> rows,
-  ) => TableHtmlExport.export(
+  ) => TablePdfExport.export(
     context,
     filePrefix: 'qc_inspections',
     title: AppText.t('فحوصات الجودة', 'Quality inspections'),
@@ -50,7 +50,7 @@ class RegisterExports {
   );
 
   static Future<void> sops(BuildContext context, List<QcSop> rows) =>
-      TableHtmlExport.export(
+      TablePdfExport.export(
         context,
         filePrefix: 'qc_sops',
         title: AppText.t('إجراءات التشغيل', 'SOPs'),
@@ -78,7 +78,7 @@ class RegisterExports {
       );
 
   static Future<void> templates(BuildContext context, List<QcTemplate> rows) =>
-      TableHtmlExport.export(
+      TablePdfExport.export(
         context,
         filePrefix: 'qc_templates',
         title: AppText.t('قوائم الفحص', 'Checklist templates'),

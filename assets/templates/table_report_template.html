@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="{% if is_en %}en{% else %}ar{% endif %}" dir="{% if is_en %}ltr{% else %}rtl{% endif %}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="fonts/fonts.css">
+  <style>
+    @page { size: A4 landscape; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #182537;
+      font-family: 'Inter', 'IBM Plex Sans Arabic', "Segoe UI", Tahoma, Arial, sans-serif;
+      font-size: 10px;
+      line-height: 1.45;
+    }
+    .top-band { height: 7px; background: #0f3b53; }
+    header {
+      padding: 16px 18px 12px;
+      border-bottom: 2px solid #0f3b53;
+      text-align: center;
+    }
+    .organization { margin: 0 0 5px; color: #43566d; font-size: 11px; }
+    .eyebrow {
+      margin: 0 0 4px;
+      color: #b08324;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: .8px;
+      text-transform: uppercase;
+    }
+    h1 { margin: 0; color: #0f3b53; font-size: 20px; }
+    .meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 12px 0;
+      color: #43566d;
+      font-size: 9px;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    thead { display: table-header-group; }
+    th, td {
+      padding: 6px 7px;
+      border: 1px solid #ccd6e2;
+      text-align: start;
+      overflow-wrap: anywhere;
+      vertical-align: top;
+    }
+    th { color: #fff; background: #0f3b53; font-weight: 700; }
+    tbody tr:nth-child(even) { background: #f3f6fa; }
+    tr { break-inside: avoid; }
+    .row-number { width: 32px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="top-band"></div>
+  <header>
+    {% if organization_name %}<p class="organization">{{ organization_name }}</p>{% endif %}
+    <p class="eyebrow">{{ report_label }}</p>
+    <h1>{{ title }}</h1>
+    {% if subtitle %}<p class="organization">{{ subtitle }}</p>{% endif %}
+  </header>
+  <div class="meta">
+    <span>{{ records_label }}: {{ row_count }}</span>
+    <span>{{ generated_label }}: {{ generated_at }}</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th class="row-number">#</th>
+        {% for header in headers %}<th>{{ header }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="row-number">{{ loop.index }}</td>
+        {% for cell in row %}<td>{{ cell }}</td>{% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

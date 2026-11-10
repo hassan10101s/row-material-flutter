@@ -18,10 +18,11 @@ import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_text_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../cubit/products_cubit.dart';
 import '../../cubit/products_state.dart';
 import 'product_editor.dart';
+import '../../reference_access.dart';
 import '../widgets/products_list.dart';
 
 /// Mobile products tab: searchable infinite cards with inline references +
@@ -110,10 +111,12 @@ class _MobileProductsTabState extends State<MobileProductsTab> {
       // Add floats like the raw-material register (heroTag null: sibling
       // tabs share one IndexedStack).
       child: Scaffold(
-        floatingActionButton: AppAddFloatingActionButton(
-          tooltip: AppText.t('منتج جديد', 'New Product'),
-          onPressed: () => _openEditor(context),
-        ),
+        floatingActionButton: ReferenceAccess.canManageReference(context)
+            ? AppAddFloatingActionButton(
+                tooltip: AppText.t('منتج جديد', 'New Product'),
+                onPressed: () => _openEditor(context),
+              )
+            : null,
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -130,7 +133,7 @@ class _MobileProductsTabState extends State<MobileProductsTab> {
                 export: AppExportIconButton(
                   onPressed: state.rows.isEmpty
                       ? null
-                      : () => TableHtmlExport.export(
+                      : () => TablePdfExport.export(
                           context,
                           filePrefix: 'products',
                           title: ProductsTable.exportTitle(),

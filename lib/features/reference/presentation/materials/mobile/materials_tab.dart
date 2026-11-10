@@ -9,7 +9,7 @@ import '../../../../../core/utils/app_exceptions.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
@@ -23,6 +23,7 @@ import '../../../../lab/domain/lab_result_repository.dart';
 import '../../../domain/reference_repository.dart';
 import '../../cubit/reference_cubit.dart';
 import '../../cubit/reference_state.dart';
+import '../../reference_access.dart';
 import '../desktop/materials_tab.dart' show DesktopMaterialsTab;
 import 'material_editor.dart';
 
@@ -108,10 +109,12 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
       // Add floats like the raw-material register (heroTag null: sibling
       // tabs share one IndexedStack).
       child: Scaffold(
-        floatingActionButton: AppAddFloatingActionButton(
-          tooltip: AppText.t('إضافة مادة', 'Add New Material'),
-          onPressed: () => _openEditor(),
-        ),
+        floatingActionButton: ReferenceAccess.canManageReference(context)
+            ? AppAddFloatingActionButton(
+                tooltip: AppText.t('إضافة مادة', 'Add New Material'),
+                onPressed: () => _openEditor(),
+              )
+            : null,
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -135,7 +138,7 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
                 export: AppExportIconButton(
                   onPressed: rows.isEmpty
                       ? null
-                      : () => TableHtmlExport.export(
+                      : () => TablePdfExport.export(
                           context,
                           filePrefix: 'materials',
                           title: DesktopMaterialsTab.exportTitle(),
@@ -290,7 +293,7 @@ class _MobileMaterialsTabState extends State<MobileMaterialsTab> {
             ),
           ),
           // Inactive rows stay read-only, as they do on desktop.
-          if (!inactive) ...[
+          if (!inactive && ReferenceAccess.canManageReference(context)) ...[
             IconButton(
               tooltip: AppStrings.edit,
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),

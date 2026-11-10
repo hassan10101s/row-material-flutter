@@ -6,6 +6,7 @@ import 'package:mocktail/mocktail.dart';
 
 import 'package:material_lab/core/constants/app_strings.dart';
 import 'package:material_lab/core/responsive/form_factor.dart';
+import 'package:material_lab/design_system/widgets/app_autocomplete_overlay.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_custom_table.dart';
 import 'package:material_lab/features/qc_manager/domain/qc_repositories.dart';
 import 'package:material_lab/features/qc_manager/presentation/cubit/qc_table_rows_cubit.dart';
@@ -139,4 +140,60 @@ void main() {
       },
     );
   }
+
+  testWidgets('suggests prior values only for text fields', (tester) async {
+    FormFactor.debugSet(AppFormFactor.desktop);
+    addTearDown(() => FormFactor.debugSet(AppFormFactor.desktop));
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 800);
+    addTearDown(tester.view.reset);
+
+    when(
+      () => repo.listRows(
+        1,
+        limit: any(named: 'limit'),
+        afterRowId: any(named: 'afterRowId'),
+      ),
+    ).thenAnswer(
+      (_) async => [
+        const QcCustomTableRow(
+          rowId: 10,
+          valuesJson: '{"f-sample":"Sample A","f-weight":3}',
+          recordedAt: _now,
+          createdAt: _now,
+          updatedAt: _now,
+        ),
+      ],
+    );
+    await cubit.load();
+
+    await tester.pumpWidget(_host(cubit));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('open form'));
+    await tester.pumpAndSettle();
+
+    final inputs = find.byType(TextFormField);
+    await tester.enterText(inputs.first, 'Sam');
+    await tester.pumpAndSettle();
+    expect(find.text('Sample A'), findsOneWidget);
+
+    await tester.tap(find.text('Sample A'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<TextFormField>(inputs.first).controller!.text,
+      'Sample A',
+    );
+
+    await tester.enterText(inputs.at(1), '8');
+    await tester.pumpAndSettle();
+    expect(find.byType(AppAutocompleteOverlay), findsNothing);
+
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    final saved =
+        verify(() => repo.addRow(captureAny())).captured.single
+            as QcCustomTableRow;
+    expect(saved.values['f-sample'], 'Sample A');
+    expect(saved.values['f-weight'], 8);
+  });
 }

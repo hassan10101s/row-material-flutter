@@ -44,7 +44,7 @@ class NcrExportBundle {
   final String generatedBy;
   final DateTime generatedAt;
 
-  /// Global QA form number printed on the report (`نموذج رقم / Form No:`).
+  /// Global QA form number printed on the report (`Form No:`).
   final String formNo;
 }
 

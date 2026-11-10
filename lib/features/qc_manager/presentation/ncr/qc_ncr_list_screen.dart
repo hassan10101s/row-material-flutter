@@ -7,6 +7,7 @@ import '../../../../router/app_router.dart';
 import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
 import '../../../../di/service_locator.dart';
+import '../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../design_system/widgets/app_mobile_add_layout.dart';
 import 'qc_ncr_create_screen.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
@@ -20,17 +21,23 @@ import '../../../../design_system/widgets/app_button.dart';
 import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_page_size.dart';
 import '../../../../design_system/widgets/app_top_app_bar.dart';
-import '../../../../design_system/export/table_html_export.dart';
+import '../../../../design_system/export/table_pdf_export.dart';
 import '../cubit/qc_ncr_cubit.dart';
 import 'widgets/ncr_list_parts.dart';
 import '../../../../design_system/widgets/app_text_field.dart';
 
-/// The NCR register: one card list on every form factor (unified mobile
-/// logic — no table/desktop split). Cards, filters, pills and the filter
-/// sheet are the shared pieces in [ncr_list_parts], so all experiences
-/// render the same data the same way.
+/// The NCR register: the shared `AppAdaptiveDataView` like every other
+/// register in the program — the design-system data table on desktop,
+/// the card list on phones. Cards, filters, pills and the filter sheet
+/// are the shared pieces in [ncr_list_parts], so all experiences render
+/// the same data the same way.
 class QcNcrListScreen extends StatelessWidget {
-  const QcNcrListScreen({super.key, this.cubit, this.onOpenFinding});
+  const QcNcrListScreen({
+    super.key,
+    this.cubit,
+    this.onOpenFinding,
+    this.embedded = false,
+  });
 
   /// Optional so the same widget works under a `BlocProvider` (the router,
   /// which then owns and closes the cubit) and standalone (tests, previews).
@@ -39,6 +46,12 @@ class QcNcrListScreen extends StatelessWidget {
   /// Called with the tapped finding's id. Optional so the list can be used
   /// in tests and embedded previews without a router.
   final void Function(int findingId)? onOpenFinding;
+
+  /// Embedded inside the quality hub: no [Scaffold]/app bar — the hub's
+  /// shell topbar already names the section, and a second app bar inside
+  /// a tab read as a foreign mobile-style page. The actions move to a
+  /// ghost-button toolbar instead (same pattern as `QcSopsScreen`).
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -50,229 +63,316 @@ class QcNcrListScreen extends StatelessWidget {
         try {
           canCreate = getIt<AuthGate>().canWrite(Permission.qcWrite);
         } catch (_) {}
-        return AppMobileAddLayout(
-          floating: FormFactor.current.isMobile,
-          tooltip: AppText.t('إنشاء عدم مطابقة', 'New non-conformance'),
-          onAdd: canCreate
-              ? () => QcNcrCreateScreen.open(
-                  context,
-                  cubit,
-                  assignees: state.options.assignees,
-                )
-              : null,
-          child: Scaffold(
-            appBar: AppTopAppBar(
-              title: AppText.t('حالات عدم المطابقة', 'Non-conformances'),
-              actions: [
-                if (canCreate && !FormFactor.current.isMobile)
-                  IconButton(
-                    tooltip: AppText.t(
-                      'إنشاء عدم مطابقة',
-                      'New non-conformance',
-                    ),
-                    icon: const Icon(Icons.add),
-                    onPressed: () => QcNcrCreateScreen.open(
-                      context,
-                      cubit,
-                      assignees: state.options.assignees,
-                    ),
-                  ),
-                IconButton(
-                  tooltip: AppText.t(
-                    'ملخص عدم المطابقة',
-                    'Non-conformance summary',
-                  ),
-                  icon: const Icon(Icons.analytics_outlined),
-                  onPressed: () => context.push(AppRoutes.qcNcr),
-                ),
-                IconButton(
-                  tooltip: AppText.t('تصدير جدول', 'Export table'),
-                  onPressed: cubit.state.rows.isEmpty
-                      ? null
-                      : () => TableHtmlExport.export(
-                          context,
-                          filePrefix: 'ncr',
-                          title: ncrExportTitle(),
-                          headers: ncrHeaders(),
-                          rows: ncrExportRows(cubit.state.rows),
-                        ),
-                  icon: const Icon(Icons.table_view_outlined),
-                ),
-                IconButton(
-                  tooltip: AppText.t('تصفية', 'Filters'),
-                  onPressed: () => openNcrFilters(context, state, cubit),
-                  icon: Badge(
-                    isLabelVisible: state.hasFilters,
-                    child: const Icon(Icons.filter_list),
-                  ),
-                ),
-                IconButton(
-                  tooltip: AppText.t('تحديث', 'Refresh'),
-                  onPressed: state.loading ? null : cubit.load,
-                  icon: const Icon(Icons.refresh),
-                ),
-              ],
+        Future<void> openCreate() => QcNcrCreateScreen.open(
+          context,
+          cubit,
+          assignees: state.options.assignees,
+        );
+
+        // The register body: search above, active-filter chips, the shared
+        // adaptive view, then the page-size / pager row.
+        final body = Column(
+          children: [
+            // Search sits above the register on every form factor. It writes
+            // the same `filters.query` the KPI cards and the list count, so
+            // the header total can never disagree with the visible rows.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.md,
+                AppSpacing.sm,
+                AppSpacing.md,
+                0,
+              ),
+              child: _NcrSearchField(cubit: cubit),
             ),
-            body: Column(
-              children: [
-                // Search sits above the register on every form factor. It writes
-                // the same `filters.query` the KPI cards and the list count, so
-                // the header total can never disagree with the visible rows.
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppSpacing.md,
-                    AppSpacing.sm,
-                    AppSpacing.md,
-                    0,
-                  ),
-                  child: _NcrSearchField(cubit: cubit),
-                ),
-                if (state.hasFilters) NcrActiveFilterChips(state: state),
-                Expanded(
-                  child: state.error != null && state.rows.isEmpty
-                      ? AppErrorState(
-                          title: AppText.t(
-                            'تعذر تحميل التقرير',
-                            'Report unavailable',
+            if (state.hasFilters) NcrActiveFilterChips(state: state),
+            Expanded(
+              child: state.error != null && state.rows.isEmpty
+                  ? AppErrorState(
+                      title: AppText.t(
+                        'تعذر تحميل التقرير',
+                        'Report unavailable',
+                      ),
+                      subtitle: state.error,
+                      onRetry: cubit.load,
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // The old table carried the total in its footer;
+                        // cards have no footer, so the count sits above
+                        // the list instead of disappearing.
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.md,
+                            AppSpacing.sm,
+                            AppSpacing.md,
+                            0,
                           ),
-                          subtitle: state.error,
-                          onRetry: cubit.load,
-                        )
-                      : Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // The old table carried the total in its footer;
-                            // cards have no footer, so the count sits above
-                            // the list instead of disappearing.
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                AppSpacing.md,
-                                AppSpacing.sm,
-                                AppSpacing.md,
-                                0,
-                              ),
-                              child: Text(
-                                state.total == 0
-                                    ? AppText.t('لا نتائج', 'No results')
-                                    : '${state.total}',
-                                style: TextStyle(
-                                  color: AppColors.textMuted,
-                                  fontSize: 12.spMax,
-                                ),
-                              ),
+                          child: Text(
+                            state.total == 0
+                                ? AppText.t('لا نتائج', 'No results')
+                                : '${state.total}',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 12.spMax,
                             ),
-                            Expanded(
-                              // Wide screens keep the readable card column
-                              // instead of stretching rows edge to edge.
-                              child: Center(
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxWidth: FormFactor.current.isMobile
-                                        ? 720
-                                        : 960,
-                                  ),
-                                  child: AppAdaptiveDataView(
-                                    compactMobile: true,
-                                    cardsOnly: true,
-                                    headers: ncrHeaders(),
-                                    rows: [
-                                      for (final r in state.rows)
-                                        AppDataRow(
-                                          cells: ncrCells(r),
-                                          onTap: onOpenFinding == null
-                                              ? null
-                                              : () =>
-                                                    onOpenFinding!(r.findingId),
-                                        ),
-                                    ],
-                                    onRowTap: onOpenFinding == null
-                                        ? null
-                                        : (index) => onOpenFinding!(
-                                            state.rows[index].findingId,
-                                          ),
-                                    loading: state.loading,
-                                    empty: AppEmptyState(
-                                      icon: Icons.inbox_outlined,
-                                      title: AppText.t(
-                                        'لا توجد حالات مطابقة',
-                                        'No non-conformances match',
-                                      ),
-                                      subtitle: state.hasFilters
-                                          ? AppText.t(
-                                              'وسّع نطاق التاريخ أو أزل بعض عوامل التصفية',
-                                              'Widen the date range or drop a filter',
-                                            )
-                                          : null,
+                          ),
+                        ),
+                        Expanded(
+                          // Phones keep the readable card column instead of
+                          // stretching rows edge to edge; desktop stretches
+                          // the data table like every other register.
+                          child: FormFactor.current.isMobile
+                              ? Center(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 720,
                                     ),
-                                    headerTrailing: state.loading
-                                        ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
+                                    child: _NcrDataView(
+                                      cubit: cubit,
+                                      state: state,
+                                      onOpenFinding: onOpenFinding,
+                                    ),
+                                  ),
+                                )
+                              : _NcrDataView(
+                                  cubit: cubit,
+                                  state: state,
+                                  onOpenFinding: onOpenFinding,
+                                ),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(
+                            AppSpacing.md,
+                            AppSpacing.sm,
+                            AppSpacing.md,
+                            AppSpacing.sm,
+                          ),
+                          child: Wrap(
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            alignment: WrapAlignment.spaceBetween,
+                            spacing: AppSpacing.sm,
+                            runSpacing: 4,
+                            children: [
+                              AppPageSizeSelector(
+                                value: cubit.pageSize,
+                                onChanged: (v) => cubit.setPageSize(v),
+                              ),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  AppButton(
+                                    small: true,
+                                    style: AppButtonStyle.ghost,
+                                    label: AppText.t('السابق', 'Previous'),
+                                    onPressed: state.hasPrevious
+                                        ? cubit.previousPage
                                         : null,
                                   ),
-                                ),
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                AppSpacing.md,
-                                AppSpacing.sm,
-                                AppSpacing.md,
-                                AppSpacing.sm,
-                              ),
-                              child: Wrap(
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                alignment: WrapAlignment.spaceBetween,
-                                spacing: AppSpacing.sm,
-                                runSpacing: 4,
-                                children: [
-                                  AppPageSizeSelector(
-                                    value: cubit.pageSize,
-                                    onChanged: (v) => cubit.setPageSize(v),
+                                  Text(
+                                    '${AppText.t('صفحة', 'Page')} ${state.page} / ${state.pageCount}',
+                                    style: TextStyle(
+                                      color: AppColors.textMuted,
+                                      fontSize: 12.spMax,
+                                    ),
                                   ),
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      AppButton(
-                                        small: true,
-                                        style: AppButtonStyle.ghost,
-                                        label: AppText.t('السابق', 'Previous'),
-                                        onPressed: state.hasPrevious
-                                            ? cubit.previousPage
-                                            : null,
-                                      ),
-                                      Text(
-                                        '${AppText.t('صفحة', 'Page')} ${state.page} / ${state.pageCount}',
-                                        style: TextStyle(
-                                          color: AppColors.textMuted,
-                                          fontSize: 12.spMax,
-                                        ),
-                                      ),
-                                      AppButton(
-                                        small: true,
-                                        style: AppButtonStyle.ghost,
-                                        label: AppText.t('التالي', 'Next'),
-                                        onPressed: state.hasNext
-                                            ? cubit.nextPage
-                                            : null,
-                                      ),
-                                    ],
+                                  AppButton(
+                                    small: true,
+                                    style: AppButtonStyle.ghost,
+                                    label: AppText.t('التالي', 'Next'),
+                                    onPressed: state.hasNext
+                                        ? cubit.nextPage
+                                        : null,
                                   ),
                                 ],
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
+                      ],
+                    ),
+            ),
+          ],
+        );
+
+        if (embedded) {
+          return AppMobileAddLayout(
+            floating: !appUsesDesktopChrome(context),
+            tooltip: AppText.t('إنشاء عدم مطابقة', 'New non-conformance'),
+            onAdd: canCreate ? openCreate : null,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.md,
+                  ),
+                  child: Row(
+                    children: [
+                      const Spacer(),
+                      AppButton(
+                        small: true,
+                        style: AppButtonStyle.ghost,
+                        icon: const Icon(Icons.analytics_outlined, size: 18),
+                        onPressed: () => context.push(AppRoutes.qcNcr),
+                      ),
+                      AppButton(
+                        small: true,
+                        style: AppButtonStyle.ghost,
+                        icon: const Icon(Icons.table_view_outlined, size: 18),
+                        onPressed: state.rows.isEmpty
+                            ? null
+                            : () => TablePdfExport.export(
+                                context,
+                                filePrefix: 'ncr',
+                                title: ncrExportTitle(),
+                                headers: ncrHeaders(),
+                                rows: ncrExportRows(state.rows),
+                              ),
+                      ),
+                      AppButton(
+                        small: true,
+                        style: AppButtonStyle.ghost,
+                        label: AppText.t('فلاتر', 'Filters'),
+                        icon: const Icon(Icons.tune, size: 18),
+                        onPressed: () =>
+                            openNcrFilters(context, state, cubit),
+                      ),
+                      AppButton(
+                        small: true,
+                        style: AppButtonStyle.ghost,
+                        icon: const Icon(Icons.refresh, size: 18),
+                        onPressed: state.loading ? null : cubit.load,
+                      ),
+                      if (canCreate && appUsesDesktopChrome(context))
+                        AppButton(
+                          small: true,
+                          style: AppButtonStyle.secondary,
+                          label: AppText.t('إنشاء عدم مطابقة', 'New NCR'),
+                          icon: const Icon(Icons.add, size: 18),
+                          onPressed: openCreate,
+                        ),
+                    ],
+                  ),
                 ),
+                Expanded(child: body),
               ],
             ),
+          );
+        }
+        return Scaffold(
+          appBar: AppTopAppBar(
+            title: AppText.t('حالات عدم المطابقة', 'Non-conformances'),
+            actions: [
+              if (canCreate && !FormFactor.current.isMobile)
+                IconButton(
+                  tooltip: AppText.t(
+                    'إنشاء عدم مطابقة',
+                    'New non-conformance',
+                  ),
+                  icon: const Icon(Icons.add),
+                  onPressed: openCreate,
+                ),
+              IconButton(
+                tooltip: AppText.t(
+                  'ملخص عدم المطابقة',
+                  'Non-conformance summary',
+                ),
+                icon: const Icon(Icons.analytics_outlined),
+                onPressed: () => context.push(AppRoutes.qcNcr),
+              ),
+              IconButton(
+                tooltip: AppText.t('تصدير جدول', 'Export table'),
+                onPressed: cubit.state.rows.isEmpty
+                    ? null
+                    : () => TablePdfExport.export(
+                        context,
+                        filePrefix: 'ncr',
+                        title: ncrExportTitle(),
+                        headers: ncrHeaders(),
+                        rows: ncrExportRows(cubit.state.rows),
+                      ),
+                icon: const Icon(Icons.table_view_outlined),
+              ),
+              IconButton(
+                tooltip: AppText.t('تصفية', 'Filters'),
+                onPressed: () => openNcrFilters(context, state, cubit),
+                icon: Badge(
+                  isLabelVisible: state.hasFilters,
+                  child: const Icon(Icons.filter_list),
+                ),
+              ),
+              IconButton(
+                tooltip: AppText.t('تحديث', 'Refresh'),
+                onPressed: state.loading ? null : cubit.load,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          body: AppMobileAddLayout(
+            floating: FormFactor.current.isMobile,
+            tooltip: AppText.t('إنشاء عدم مطابقة', 'New non-conformance'),
+            onAdd: canCreate ? openCreate : null,
+            child: body,
           ),
         );
       },
+    );
+  }
+}
+
+/// The shared adaptive view over the register rows: the design-system
+/// data table on desktop (same headers/cells the PDF export uses), the
+/// card list on phones.
+class _NcrDataView extends StatelessWidget {
+  const _NcrDataView({
+    required this.cubit,
+    required this.state,
+    this.onOpenFinding,
+  });
+
+  final QcNcrCubit cubit;
+  final QcNcrState state;
+  final void Function(int findingId)? onOpenFinding;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppAdaptiveDataView(
+      compactMobile: true,
+      headers: ncrHeaders(),
+      rows: [
+        for (final r in state.rows)
+          AppDataRow(
+            cells: ncrCells(r),
+            onTap: onOpenFinding == null
+                ? null
+                : () => onOpenFinding!(r.findingId),
+          ),
+      ],
+      onRowTap: onOpenFinding == null
+          ? null
+          : (index) => onOpenFinding!(state.rows[index].findingId),
+      loading: state.loading,
+      empty: AppEmptyState(
+        icon: Icons.inbox_outlined,
+        title: AppText.t(
+          'لا توجد حالات مطابقة',
+          'No non-conformances match',
+        ),
+        subtitle: state.hasFilters
+            ? AppText.t(
+                'وسّع نطاق التاريخ أو أزل بعض عوامل التصفية',
+                'Widen the date range or drop a filter',
+              )
+            : null,
+      ),
+      headerTrailing: state.loading
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : null,
     );
   }
 }

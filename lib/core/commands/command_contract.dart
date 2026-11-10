@@ -43,6 +43,12 @@ const simpleEntityTypes = {
   'nutritionFormulation',
   'qcCustomTableRow',
 };
+const routineListEntityTypes = {
+  'qcTemplate',
+  'qcSection',
+  'qcItem',
+  'qcAudit',
+};
 const int firestoreAtomicRuleAccessLimit = 20;
 
 bool isSimpleBusinessOperation(Iterable<dynamic> writes) =>
@@ -276,6 +282,23 @@ int labDefinitionEffectLimit(Iterable<dynamic> writes) {
   return budget.clamp(0, maxLabDefinitionEffects).toInt();
 }
 
+/// One routine list per atomic operation: exactly one template (create or
+/// edit) plus its implicit section, its reconciled items and the single
+/// quality-audit row that documents the change. The compiled rules validate
+/// each effect the same way (`tableEffectAt`), and ten effects spend
+/// 7 shared lookups + receipt/event + effects + the template's unique-code
+/// reservation within Firestore's 20-access transaction ceiling — the
+/// maximum the free plan allows without the large-operation proof block.
+bool isRoutineListOperation(Iterable<dynamic> writes) =>
+    writes.isNotEmpty &&
+    writes.every(
+      (w) => w is Map && routineListEntityTypes.contains(w['entityType']),
+    ) &&
+    writes
+            .where((w) => w is Map && w['entityType'] == 'qcTemplate')
+            .length ==
+        1;
+
 /// Limits describe the verified direct rules budget, not the Spark daily quota.
 int businessEffectLimit(Iterable<dynamic> writes) =>
     isProductReferenceOperation(writes)
@@ -284,6 +307,8 @@ int businessEffectLimit(Iterable<dynamic> writes) =>
     ? labConsumptionEffectLimit(writes)
     : isLabDefinitionOperation(writes)
     ? labDefinitionEffectLimit(writes)
+    : isRoutineListOperation(writes)
+    ? maxBusinessEffects
     : writes.every(
         (write) =>
             write is Map &&

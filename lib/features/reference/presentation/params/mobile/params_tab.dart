@@ -21,9 +21,10 @@ import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_text_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../cubit/params_cubit.dart';
 import '../../cubit/params_state.dart';
+import '../../reference_access.dart';
 import '../desktop/params_tab.dart' show DesktopParamsTab;
 import '../params_editor.dart';
 
@@ -115,10 +116,12 @@ class _MobileParamsTabState extends State<MobileParamsTab> {
       // Add floats like the raw-material register (heroTag null: sibling
       // tabs share one IndexedStack).
       child: Scaffold(
-        floatingActionButton: AppAddFloatingActionButton(
-          tooltip: AppText.t('بارامتر جديد', 'New Parameter'),
-          onPressed: () => _openEditor(context),
-        ),
+        floatingActionButton: ReferenceAccess.canManageReference(context)
+            ? AppAddFloatingActionButton(
+                tooltip: AppText.t('بارامتر جديد', 'New Parameter'),
+                onPressed: () => _openEditor(context),
+              )
+            : null,
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -139,7 +142,7 @@ class _MobileParamsTabState extends State<MobileParamsTab> {
                 export: AppExportIconButton(
                   onPressed: state.rows.isEmpty
                       ? null
-                      : () => TableHtmlExport.export(
+                      : () => TablePdfExport.export(
                           context,
                           filePrefix: 'params',
                           title: _isChemical
@@ -241,6 +244,7 @@ class _MobileParamsTabState extends State<MobileParamsTab> {
             unit: '${p['unit'] ?? ''}',
             onEdit: () => _openEditor(context, p),
             onDelete: () => _delete(context, p),
+            canManage: ReferenceAccess.canManageReference(context),
           );
         },
       ),
@@ -255,12 +259,14 @@ class _ParamCard extends StatelessWidget {
     required this.unit,
     required this.onEdit,
     required this.onDelete,
+    required this.canManage,
   });
 
   final String name;
   final String? unit;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final bool canManage;
 
   @override
   Widget build(BuildContext context) {
@@ -298,22 +304,24 @@ class _ParamCard extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            tooltip: AppStrings.edit,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            onPressed: onEdit,
-            icon: Icon(Icons.edit_outlined, size: 20.r),
-          ),
-          IconButton(
-            tooltip: AppStrings.delete,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            onPressed: onDelete,
-            icon: Icon(
-              Icons.delete_outline,
-              size: 20.r,
-              color: AppColors.danger,
+          if (canManage)
+            IconButton(
+              tooltip: AppStrings.edit,
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              onPressed: onEdit,
+              icon: Icon(Icons.edit_outlined, size: 20.r),
             ),
-          ),
+          if (canManage)
+            IconButton(
+              tooltip: AppStrings.delete,
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              onPressed: onDelete,
+              icon: Icon(
+                Icons.delete_outline,
+                size: 20.r,
+                color: AppColors.danger,
+              ),
+            ),
         ],
       ),
     );

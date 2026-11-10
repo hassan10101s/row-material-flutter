@@ -17,6 +17,8 @@ flutter build windows --release
   `firebase emulators:exec --only firestore,auth --project demo-materiallab "flutter test test/security"`
   The `demo-` project prefix guarantees emulators never touch a real project.
 - Localizations are generated (`pubspec.yaml` has `generate: true`; output in `lib/l10n/generated/`). Edit `app_en.arb` / `app_ar.arb`, never the generated files. If `.dart_tool` build output is missing, run `flutter gen-l10n` or `pub get`.
+- **`firestore.rules` is generated** — do not hand-edit it. Edit `tool/central_migration/domain_manifest.json` / `release_limits.json`, then `node tool/central_migration/generate_rules.js`; CI (`.github/workflows/verify.yml`) rejects drift via `generate_rules.js --check`.
+- CI parity (run before pushing meaningful changes): `npm ci --prefix tool/central_migration/server` then `npm test --prefix tool/central_migration/server`, `node --test tool/central_migration/test/*.test.js`, `node tool/central_migration/generate_rules.js --check`, `node tool/firebase/prepare_rules_release.cjs` (rules compiled-size preflight).
 
 ## Firebase / build config
 
@@ -50,7 +52,7 @@ flutter build windows --release
 
 - November 3 final user decision: Auth + Firestore on the free plan only; no Firebase Functions or billing activation. Analysis choices/fixed values live inside `formula_json.field_configs`, preserving chemical links as separate records with real server-validated parents. 25 and 1000 choice fields have been tested as one analysis effect, bounded by Firestore document size rather than a four-field UI cap. Direct lab-definition operations allow up to 6 physical effects only when `7 + 2*effects + distinct_external_parents <= 20`; the app lowers the bound for additional parents. QC definitions keep 10 effects / 9 columns, other/mixed operations keep 4. No splitting, automatic resubmission or relaxation of receipt/version/role rules. See `SYNC_CURRENT_CONTRACT.md` and `docs/CODE_OPERATIONAL_REVIEW_2026-11-03.md`; code/rule changes are local until deployment is verified.
 
-- `lib/` layout: `main.dart`, `app/`, `router/`, `di/` (get_it registration), `features/` (audit, auth, backup, dashboard, inspections, lab, members, notifications, organizations, qc_manager, reference, reports, settings, shell, sync), `core/` (database, firebase, security, services, sync, settings, utils, …), `design_system/`, `l10n/`.
+- `lib/` layout: `main.dart`, `app/`, `router/`, `di/` (get_it registration), `features/` (audit, auth, backup, connection, dashboard, drafts, formulations, inspections, lab, members, notifications, organizations, qc_manager, reference, reports, settings, shell), `core/` (database, firebase, security, services, sync, settings, utils, …), `design_system/`, `l10n/`.
 - Local DB is SQLite via `sqflite_common_ffi` (`core/database/database_helper.dart` — connection-lock diagnostics go through `sqflite_common` directly; version pinned at 2.4.0).
 - Security is a byte-compatible port of the Python original: PBKDF2-HMAC-SHA256 password hashing, AES-GCM seals with `enc1:` prefix, QR payloads, local secret at `%APPDATA%/MaterialLab/.secret`. Don't change these formats casually — cross-runtime compatibility matters.
 - The formula engine is safe (no `eval`), decision rules / entry-code scheme are faithful ports of the Python/Vue app.
@@ -60,7 +62,7 @@ flutter build windows --release
 
 ## Testing conventions
 
-- 143 test files; widget/unit suites meshed under `test/` grouped by area (architecture, security, sync, features…). Use `mocktail` for fakes.
+- 250 test files; widget/unit suites meshed under `test/` grouped by area (architecture, security, sync, features…). Use `mocktail` for fakes.
 - Security/emulator suites: always run against emulators (see Commands). Never point tests at a production Firebase project.
 - Squad/banner conventions: tests detect the emulator env and skip plain runs on purpose — don't "fix" skipped green suites by pointing them at real Firebase.
 

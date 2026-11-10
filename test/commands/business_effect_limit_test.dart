@@ -153,6 +153,44 @@ void main() {
       expect(businessEffectLimit([root(37, 1)]), 0);
     },
   );
+  test(
+    'one routine list per operation allows ten atomic effects within its family',
+    () {
+      List<Map<String, dynamic>> list(int items) => [
+        {'entityType': 'qcTemplate', 'entityId': 'tpl', 'operation': 'update'},
+        {'entityType': 'qcSection', 'entityId': 'sec', 'operation': 'update'},
+        for (var i = 0; i < items; i++)
+          {
+            'entityType': 'qcItem',
+            'entityId': 'item-$i',
+            'operation': 'update',
+          },
+        {'entityType': 'qcAudit', 'entityId': 'audit', 'operation': 'update'},
+      ];
+      expect(isRoutineListOperation(list(7)), isTrue);
+      expect(businessEffectLimit(list(7)), 10);
+      expect(isRoutineListOperation(list(8)), isTrue);
+      expect(businessEffectLimit(list(8)), lessThan(11));
+      // A foreign effect drops the operation back to the standard family.
+      expect(
+        businessEffectLimit([...list(7), {'entityType': 'sample'}]),
+        4,
+      );
+      // Exactly one template per operation; two templates stay standard.
+      expect(
+        businessEffectLimit([
+          ...list(7),
+          {'entityType': 'qcTemplate', 'entityId': 'tpl2'},
+        ]),
+        4,
+      );
+      // A lone audit without its template is not a routine-list operation.
+      expect(
+        businessEffectLimit([{'entityType': 'qcAudit'}]),
+        4,
+      );
+    },
+  );
   test('Dart and rules generator use the same scoped release limits', () {
     final config =
         jsonDecode(
@@ -174,6 +212,10 @@ void main() {
       maxChemicalDefinitionProofBlocks,
     );
     expect((config['simpleEntityTypes'] as List).toSet(), simpleEntityTypes);
+    expect(
+      (config['routineListEntityTypes'] as List).toSet(),
+      routineListEntityTypes,
+    );
     expect(config['expandedEntityTypes'], [
       'qcCustomTable',
       'qcCustomTableField',

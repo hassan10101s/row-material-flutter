@@ -11,6 +11,7 @@ import '../../../../../design_system/widgets/app_top_app_bar.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../cubit/inspection_detail_cubit.dart';
 import '../../cubit/inspection_detail_state.dart';
+import '../../../domain/inspection_decision_history.dart';
 import '../widgets/decision_opener.dart';
 import '../widgets/detail_parts.dart';
 import '../../../../lab/presentation/batch/product_batch_section.dart';
@@ -43,6 +44,10 @@ class MobileInspectionDetailScreen extends StatelessWidget {
       body = Center(child: Text(AppText.t('غير موجود', 'Not found')));
     } else {
       final samples = sampleLabels(inspection);
+      final decisionHistory = inspectionDecisionHistory(
+        inspection,
+        state.history,
+      );
       body = SingleChildScrollView(
         padding: const EdgeInsets.all(AppSpacing.pageMobile),
         // One-shot page entrance: header + facts slide in together, the
@@ -96,9 +101,9 @@ class MobileInspectionDetailScreen extends StatelessWidget {
               ],
               // Decision history is raw-only; products decide per sample.
               if ('${inspection['inspection_kind'] ?? 'raw'}' != 'product' &&
-                  state.history.isNotEmpty) ...[
+                  decisionHistory.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.md),
-                HistoryCard(history: state.history),
+                HistoryCard(history: decisionHistory),
               ],
               const SizedBox(height: AppSpacing.lg),
               DetailFooterActions(

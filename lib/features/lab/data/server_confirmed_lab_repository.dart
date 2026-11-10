@@ -954,7 +954,7 @@ class ServerConfirmedLabRepository extends LabRepo
     Map<String, dynamic>? user,
     DatabaseExecutor? executor,
   }) async {
-    _check(Permission.labResultsUpdate);
+    _check(Permission.referenceUpdate);
     late final Map<String, dynamic> product;
     await dbHelper.businessTransaction((txn) async {
       product = await super.createProduct(
@@ -998,7 +998,7 @@ class ServerConfirmedLabRepository extends LabRepo
     Map<String, dynamic> fields, [
     DatabaseExecutor? executor,
   ]) async {
-    _check(Permission.labResultsUpdate);
+    _check(Permission.referenceUpdate);
     late final Map<String, dynamic> product;
     await dbHelper.businessTransaction((txn) async {
       product = await super.updateProduct(productId, fields, txn);
@@ -1039,7 +1039,7 @@ class ServerConfirmedLabRepository extends LabRepo
     int productId, [
     DatabaseExecutor? executor,
   ]) async {
-    _check(Permission.labResultsUpdate);
+    _check(Permission.referenceUpdate);
     return dbHelper.businessTransaction((txn) async {
       final result = await super.deleteProduct(productId, txn);
       await _enqueueConfig(
@@ -1984,6 +1984,7 @@ class ServerConfirmedLabRepository extends LabRepo
     Map<String, dynamic>? user,
     String entryCode = '',
     bool manualResult = false,
+    bool draftOnly = false,
     bool keepSourceRefId = false,
     DatabaseExecutor? exec,
   }) async {
@@ -1999,6 +2000,7 @@ class ServerConfirmedLabRepository extends LabRepo
         user: user,
         entryCode: entryCode,
         manualResult: manualResult,
+        draftOnly: draftOnly,
         keepSourceRefId: keepSourceRefId,
         exec: exec,
       );
@@ -2016,6 +2018,7 @@ class ServerConfirmedLabRepository extends LabRepo
         user: user,
         entryCode: entryCode,
         manualResult: manualResult,
+        draftOnly: draftOnly,
         keepSourceRefId: keepSourceRefId,
         exec: txn,
       );
@@ -2023,7 +2026,7 @@ class ServerConfirmedLabRepository extends LabRepo
       // Mirror the FEFO consumption lines the save just wrote (lot draws +
       // ledger + lot/item queue rows). Without this they stay device-local.
       final testId = ((result['test'] as Map?)?['id'] as num?)?.toInt();
-      if (testId != null) {
+      if (testId != null && !draftOnly) {
         final swept = await _sweepConsumptionLines(
           txn,
           testIds: [testId],
@@ -2044,6 +2047,10 @@ class ServerConfirmedLabRepository extends LabRepo
   @override
   Future<Map<String, dynamic>> updateSampleTest(
     int testId, {
+    int? analysisId,
+    String? sourceType,
+    int? sourceRefId,
+    String? sourceName,
     String? sampleName,
     String? resultText,
     Map<String, dynamic>? dynamicValues,
@@ -2054,6 +2061,10 @@ class ServerConfirmedLabRepository extends LabRepo
     if (executor != null) {
       return super.updateSampleTest(
         testId,
+        analysisId: analysisId,
+        sourceType: sourceType,
+        sourceRefId: sourceRefId,
+        sourceName: sourceName,
         sampleName: sampleName,
         resultText: resultText,
         dynamicValues: dynamicValues,
@@ -2066,6 +2077,10 @@ class ServerConfirmedLabRepository extends LabRepo
     return dbHelper.businessTransaction((txn) async {
       final result = await super.updateSampleTest(
         testId,
+        analysisId: analysisId,
+        sourceType: sourceType,
+        sourceRefId: sourceRefId,
+        sourceName: sourceName,
         sampleName: sampleName,
         resultText: resultText,
         dynamicValues: dynamicValues,

@@ -60,12 +60,13 @@ void main() {
   late FirestoreDirectStore store;
   late Map<String, dynamic> manifest;
   var device = 'dev0';
+  var activeRole = 'lab';
   SessionSource source() => SessionSource(
     () => AppSession(
       uid: uid,
       organizationId: org,
       deviceId: device,
-      role: 'lab',
+      role: activeRole,
       status: 'active',
     ),
   );
@@ -86,6 +87,16 @@ void main() {
       }),
     );
     expect(response.statusCode, 200, reason: response.body);
+  }
+
+  Future<void> setRole(String role) async {
+    activeRole = role;
+    await seed('users/$uid', {
+      'organizationId': org,
+      'role': role,
+      'roles': [role],
+      'status': 'active',
+    });
   }
 
   FirestoreDirectCommandTransport transport() =>
@@ -325,8 +336,131 @@ void main() {
   );
 
   test(
+    'quality specialists can create, update and soft-delete product references',
+    () async {
+      const product = 'quality-specialist-reference';
+      final payload = <String, dynamic>{
+        'configType': 'lab_products',
+        'localId': 1,
+        'name': product,
+        'description': 'original',
+        'active': 1,
+      };
+      final created = await transport().submit(
+        frame('quality-specialist-reference-create', [
+          {
+            'entityType': 'labProduct',
+            'entityId': product,
+            'operation': 'create',
+            'expectedVersion': 0,
+            'relations': <String, dynamic>{},
+            'payload': payload,
+          },
+        ]),
+      );
+      expect(
+        created.isApproved,
+        isTrue,
+        reason: '${created.failure?.toJson()}',
+      );
+      final updated = await transport().submit(
+        frame('quality-specialist-reference-update', [
+          {
+            'entityType': 'labProduct',
+            'entityId': product,
+            'operation': 'update',
+            'expectedVersion': 1,
+            'relations': <String, dynamic>{},
+            'payload': {...payload, 'description': 'updated'},
+          },
+        ]),
+      );
+      expect(
+        updated.isApproved,
+        isTrue,
+        reason: '${updated.failure?.toJson()}',
+      );
+      final deleted = await transport().submit(
+        frame('quality-specialist-reference-tombstone', [
+          {
+            'entityType': 'labProduct',
+            'entityId': product,
+            'operation': 'tombstone',
+            'expectedVersion': 2,
+            'relations': <String, dynamic>{},
+            'payload': {...payload, 'description': 'updated'},
+          },
+        ]),
+      );
+      expect(
+        deleted.isApproved,
+        isTrue,
+        reason: '${deleted.failure?.toJson()}',
+      );
+      expect(
+        (await store.get('$root/labProducts/$product'))?.data['deletedAt'],
+        isNotNull,
+      );
+    },
+    skip: !enabled,
+  );
+
+  test(
+    'quality managers can create and update shared product references',
+    () async {
+      await setRole('quality_manager');
+      addTearDown(() async => setRole('lab'));
+      const product = 'quality-manager-reference';
+      final payload = <String, dynamic>{
+        'configType': 'lab_products',
+        'localId': 1,
+        'name': product,
+        'description': 'original',
+        'active': 1,
+      };
+      final created = await transport().submit(
+        frame('quality-manager-reference-create', [
+          {
+            'entityType': 'labProduct',
+            'entityId': product,
+            'operation': 'create',
+            'expectedVersion': 0,
+            'relations': <String, dynamic>{},
+            'payload': payload,
+          },
+        ]),
+      );
+      expect(
+        created.isApproved,
+        isTrue,
+        reason: '${created.failure?.toJson()}',
+      );
+      final updated = await transport().submit(
+        frame('quality-manager-reference-update', [
+          {
+            'entityType': 'labProduct',
+            'entityId': product,
+            'operation': 'update',
+            'expectedVersion': 1,
+            'relations': <String, dynamic>{},
+            'payload': {...payload, 'description': 'updated'},
+          },
+        ]),
+      );
+      expect(
+        updated.isApproved,
+        isTrue,
+        reason: '${updated.failure?.toJson()}',
+      );
+    },
+    skip: !enabled,
+  );
+
+  test(
     'six unique catalogue additions fit the budget and seven remain unsent',
     () async {
+      await setRole('admin');
+      addTearDown(() async => setRole('lab'));
       List<Map<String, dynamic>> rows(int count) => [
         for (var i = 0; i < count; i++)
           {
@@ -1633,6 +1767,8 @@ void main() {
   test(
     'product-reference-seven updates fit and reject expanded identity changes',
     () async {
+      await setRole('admin');
+      addTearDown(() async => setRole('lab'));
       const product = 'reference-seven';
       Map<String, dynamic> write(
         String type,

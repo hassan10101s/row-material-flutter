@@ -16,9 +16,10 @@ import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_window.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../cubit/units_cubit.dart';
 import '../../cubit/units_state.dart';
+import '../../reference_access.dart';
 import '../units_editor.dart';
 
 /// Desktop units settings — port of the Reference app Units Settings tab
@@ -106,7 +107,7 @@ class _DesktopUnitsTabState extends State<DesktopUnitsTab> {
   Future<void> _exportAll(
     List<Map<String, dynamic>> rows,
     Map<String, int> usage,
-  ) => TableHtmlExport.export(
+  ) => TablePdfExport.export(
     context,
     filePrefix: 'units',
     title: DesktopUnitsTab.exportTitle(),
@@ -122,7 +123,7 @@ class _DesktopUnitsTabState extends State<DesktopUnitsTab> {
       for (var i = 0; i < rows.length; i++)
         if (_selected.contains(i)) rows[i],
     ];
-    await TableHtmlExport.export(
+    await TablePdfExport.export(
       context,
       filePrefix: 'units',
       title: DesktopUnitsTab.exportTitle(),
@@ -154,12 +155,13 @@ class _DesktopUnitsTabState extends State<DesktopUnitsTab> {
                     : () => _exportAll(state.rows, state.usage),
                 icon: Icon(Icons.table_view_outlined, size: 18.r),
               ),
-              AppButton(
-                small: true,
-                icon: Icon(Icons.add, size: 16.r),
-                label: AppText.t('وحدة جديدة', 'New Unit'),
-                onPressed: () => _openEditor(context),
-              ),
+              if (ReferenceAccess.canManageReference(context))
+                AppButton(
+                  small: true,
+                  icon: Icon(Icons.add, size: 16.r),
+                  label: AppText.t('وحدة جديدة', 'New Unit'),
+                  onPressed: () => _openEditor(context),
+                ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
@@ -216,27 +218,28 @@ class _DesktopUnitsTabState extends State<DesktopUnitsTab> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  tooltip: AppStrings.edit,
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _openEditor(context, u),
-                                  icon: Icon(Icons.edit_outlined, size: 18.r),
-                                ),
-                                IconButton(
-                                  tooltip: AppStrings.delete,
-                                  visualDensity: VisualDensity.compact,
-                                  onPressed: () => _delete(context, u),
-                                  icon: Icon(
-                                    Icons.delete_outline,
-                                    size: 18.r,
-                                    color: AppColors.danger,
+                            if (ReferenceAccess.canManageReference(context))
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    tooltip: AppStrings.edit,
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () => _openEditor(context, u),
+                                    icon: Icon(Icons.edit_outlined, size: 18.r),
                                   ),
-                                ),
-                              ],
-                            ),
+                                  IconButton(
+                                    tooltip: AppStrings.delete,
+                                    visualDensity: VisualDensity.compact,
+                                    onPressed: () => _delete(context, u),
+                                    icon: Icon(
+                                      Icons.delete_outline,
+                                      size: 18.r,
+                                      color: AppColors.danger,
+                                    ),
+                                  ),
+                                ],
+                              ),
                           ],
                       ],
                       selectedIndices: _selected,

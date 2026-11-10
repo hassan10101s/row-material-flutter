@@ -20,7 +20,7 @@ import '../../../../../design_system/widgets/app_export_button.dart';
 import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../analysis_editor.dart';
 import '../../cubit/analyses_cubit.dart';
 import '../../cubit/analyses_state.dart';
@@ -134,7 +134,7 @@ class _MobileAnalysesTabState extends State<MobileAnalysesTab> {
                 export: AppExportIconButton(
                   onPressed: state.rows.isEmpty
                       ? null
-                      : () => TableHtmlExport.export(
+                      : () => TablePdfExport.export(
                           context,
                           filePrefix: 'analyses',
                           title: AnalysesTable.exportTitle(),

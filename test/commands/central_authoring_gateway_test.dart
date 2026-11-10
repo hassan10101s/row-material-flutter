@@ -91,6 +91,114 @@ void main() {
   }
 
   test(
+    'reference deletes are rejected when material, parameter, unit, or product is in use',
+    () async {
+      final plain = LabRepo(dbHelper: fixture.helper);
+      final plainReference = ReferenceRepo(dbHelper: fixture.helper);
+      final reference = ServerConfirmedReferenceRepository(
+        dbHelper: fixture.helper,
+        guard: SessionWriteGuard(
+          source: SessionSource(() => session),
+          isOnline: () => true,
+        ),
+        queue: queue,
+        audit: AuditLogger(queue: queue, session: () => session),
+      );
+
+      final materialId = await plainReference.createMaterial(
+        materialName: 'Linked material',
+        materialCode: 'M-LINK-01',
+      );
+      await fixture.db.insert('inspections', {
+        ...sampleRow(entryCode: 'LINKED-MATERIAL'),
+        'material_id': materialId,
+      });
+      await expectLater(
+        reference.deleteMaterial(materialId),
+        throwsA(isA<ValidationError>()),
+      );
+      expect(
+        (await fixture.db.query(
+          'reference_materials',
+          where: 'id = ?',
+          whereArgs: [materialId],
+        )).single['active'],
+        1,
+      );
+
+      await plainReference.upsertParameter('Linked parameter', '%');
+      final parameter = (await fixture.db.query(
+        'parameters',
+        where: 'parameter_name = ?',
+        whereArgs: ['Linked parameter'],
+      )).single;
+      final analysis = await plain.createAnalysis(
+        name: 'Linked parameter analysis',
+        parameterId: parameter['id'] as int,
+      );
+      await expectLater(
+        reference.deleteParameter('Linked parameter'),
+        throwsA(isA<ValidationError>()),
+      );
+      expect(
+        (await fixture.db.query(
+          'parameters',
+          where: 'id = ?',
+          whereArgs: [parameter['id']],
+        )).single['deleted_at'],
+        isNull,
+      );
+      expect(
+        (await fixture.db.query(
+          'lab_analyses',
+          where: 'id = ?',
+          whereArgs: [analysis['id']],
+        )).single['parameter_id'],
+        parameter['id'],
+      );
+
+      await plainReference.upsertUnit('linked-unit');
+      await plainReference.upsertParameter(
+        'Unit user',
+        'linked-unit',
+        parameterType: 'physical',
+      );
+      await expectLater(
+        reference.deleteUnit('linked-unit'),
+        throwsA(isA<ValidationError>()),
+      );
+      expect(
+        (await fixture.db.query(
+          'lab_units',
+          where: 'symbol = ?',
+          whereArgs: ['linked-unit'],
+        )).single['is_active'],
+        1,
+      );
+
+      final product = await plain.createProduct(name: 'Linked product');
+      await fixture.db.insert('inspections', {
+        ...sampleRow(entryCode: 'LINKED-PRODUCT'),
+        'inspection_kind': 'product',
+        'product_id': product['id'],
+      });
+      await expectLater(
+        lab().deleteProduct(product['id'] as int),
+        throwsA(isA<ValidationError>()),
+      );
+      expect(
+        (await fixture.db.query(
+          'lab_products',
+          where: 'id = ?',
+          whereArgs: [product['id']],
+        )).single['active'],
+        1,
+      );
+      expect(await outbox.list(), isEmpty);
+    },
+  );
+
+  test(
     'deleting an approved lab result stages its tombstone without removing the source cache',
     () async {
       final analysisId = await fixture.db.insert('lab_analyses', {
@@ -263,15 +371,9 @@ void main() {
                     whereArgs: ['Delete parameter'],
                   )).single['id']
                   as int;
-          final analysis = await plain.createAnalysis(
-            name: 'Linked analysis',
-            parameterId: id,
-          );
-          await approve('labAnalysis', 'lab_analyses', analysis['id'] as int);
           table = 'parameters';
           type = 'parameter';
           remove = () => reference.deleteParameter('Delete parameter');
-          expected = {'parameter', 'labAnalysis'};
         } else if (kind == 'qcTemplate') {
           final local = QcTemplateRepo(fixture.helper);
           id = await local.createTemplate(
@@ -389,15 +491,6 @@ void main() {
           )).single,
           before,
         );
-        if (kind == 'parameter') {
-          expect(
-            (effects.firstWhere(
-                  (w) => w['entityType'] == 'labAnalysis',
-                )['payload']
-                as Map)['parameterId'],
-            isNull,
-          );
-        }
         if (kind == 'batch') {
           expect(
             (await fixture.db.query('lab_sample_tests')).single['deleted_at'],

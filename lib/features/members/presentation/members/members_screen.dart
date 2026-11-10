@@ -21,7 +21,7 @@ import '../../../../design_system/widgets/app_field.dart';
 import '../../../../design_system/widgets/app_page_header.dart';
 import '../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../design_system/export/table_html_export.dart';
+import '../../../../design_system/export/table_pdf_export.dart';
 import '../../../../design_system/widgets/app_adaptive.dart';
 import '../../../organizations/domain/organization_repository.dart';
 import '../../domain/member_repository.dart';
@@ -168,23 +168,24 @@ class _MembersScreenState extends State<MembersScreen> {
   /// immutable in the rules, so a second `admin` is the supported form of
   /// co-ownership.
   void _toggleRole(Set<String> roles, String role) {
+    if (role == AppRoles.viewer && !roles.contains(role) && roles.length == 1) {
+      roles
+        ..clear()
+        ..add(role);
+      return;
+    }
     if (roles.contains(role)) {
       if (roles.length > 1) roles.remove(role);
       return;
     }
-    if (role == AppRoles.admin ||
-        role == AppRoles.trialOwner ||
-        role == AppRoles.viewer) {
+    if (role == AppRoles.admin || role == AppRoles.trialOwner) {
       roles
         ..clear()
         ..add(role);
       return;
     }
     roles.removeWhere(
-      (value) =>
-          value == AppRoles.admin ||
-          value == AppRoles.trialOwner ||
-          value == AppRoles.viewer,
+      (value) => value == AppRoles.admin || value == AppRoles.trialOwner,
     );
     roles.add(role);
   }
@@ -830,7 +831,7 @@ class _MembersScreenState extends State<MembersScreen> {
     ];
   }
 
-  Future<void> _exportRoster(List<Member> rows) => TableHtmlExport.export(
+  Future<void> _exportRoster(List<Member> rows) => TablePdfExport.export(
     context,
     filePrefix: 'members',
     title: AppText.t('أعضاء الشركة', 'Company members'),

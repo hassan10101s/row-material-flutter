@@ -78,26 +78,36 @@ class QcCustomTablesCubit extends AppCubit<QcCustomTablesState> {
   Future<void> createTable(
     QcCustomTable table,
     List<QcCustomTableField> fields,
-  ) => _write(() => repo.createTable(table, fields));
+  ) async {
+    await _write(() => repo.createTable(table, fields));
+  }
 
   Future<void> saveTable(
     QcCustomTable table,
     List<QcCustomTableField> fields,
-  ) => _write(() => repo.saveTable(table, fields));
+  ) async {
+    await _write(() => repo.saveTable(table, fields));
+  }
 
-  Future<void> deleteTable(int tableId) =>
+  Future<bool> deleteTable(int tableId) =>
       _write(() => repo.deleteTable(tableId));
 
-  Future<void> _write(Future<void> Function() action) async {
+  Future<bool> _write(Future<void> Function() action) async {
     safeEmit(state.copyWith(saving: true, error: null));
     try {
       await action();
       safeEmit(state.copyWith(saving: false, saved: true));
       await load();
+      return true;
+    } on PendingOperation catch (e) {
+      safeEmit(state.copyWith(saving: false, error: e.userMessage));
+      return false;
     } on AppError catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
+      return false;
     } catch (e) {
       safeEmit(state.copyWith(saving: false, error: AppError.friendly(e)));
+      return false;
     }
   }
 

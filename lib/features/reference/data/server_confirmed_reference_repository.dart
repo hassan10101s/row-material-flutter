@@ -41,6 +41,7 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
     int id,
     List<Map<String, dynamic>> bounds,
   ) async {
+    _check(Permission.referenceUpdate);
     await ServerConfirmedLabRepository(
       dbHelper: dbHelper,
       guard: guard,
@@ -122,7 +123,7 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
     Map<String, dynamic> units = const {},
     DatabaseExecutor? exec,
   }) async {
-    _check(Permission.samplesUpdate);
+    _check(Permission.referenceUpdate);
     late final int id;
     await _inTransaction(exec, (txn) async {
       id = await super.createMaterial(
@@ -168,7 +169,7 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
     Map<String, dynamic> units = const {},
     DatabaseExecutor? exec,
   }) async {
-    _check(Permission.samplesUpdate);
+    _check(Permission.referenceUpdate);
     await _inTransaction(exec, (txn) async {
       await super.updateMaterial(
         id,
@@ -207,7 +208,7 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
   /// the rest of the domain.
   @override
   Future<void> deleteMaterial(int id, [DatabaseExecutor? exec]) async {
-    _check(Permission.samplesUpdate);
+    _check(Permission.referenceUpdate);
     await _inTransaction(exec, (txn) async {
       final before = await getMaterialRaw(id, exec: txn);
       await super.deleteMaterial(id, txn);
@@ -235,7 +236,7 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
     String parameterType = 'chemical',
     DatabaseExecutor? exec,
   }) async {
-    _check(Permission.labResultsUpdate);
+    _check(Permission.referenceUpdate);
     await dbHelper.businessTransaction((txn) async {
       await super.upsertParameter(
         name,
@@ -267,58 +268,22 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
 
   @override
   Future<void> deleteParameter(String name, [DatabaseExecutor? exec]) async {
-    _check(Permission.labResultsUpdate);
+    _check(Permission.referenceUpdate);
     await dbHelper.businessTransaction((txn) async {
+      await ensureParameterCanBeDeleted(name, txn);
       final rows = await txn.query(
         'parameters',
         where: 'parameter_name = ?',
         whereArgs: [name],
       );
       for (final row in rows) {
-        final analyses = await txn.query(
-          'lab_analyses',
-          columns: ['id'],
-          where: 'parameter_id = ? AND deleted_at IS NULL',
-          whereArgs: [row['id']],
-        );
-        final at = nowIso();
         await txn.update(
-          'material_parameter_bounds',
-          {'deleted_at': at, 'active': 0},
-          where: 'parameter_id = ?',
+          'parameters',
+          {'deleted_at': nowIso()},
+          where: 'id = ?',
           whereArgs: [row['id']],
         );
-        await queueSharedRows(
-          txn,
-          type: 'materialBound',
-          queue: queue,
-          guard: guard,
-          where: 'parameter_id = ?',
-          whereArgs: [row['id']],
-        );
-        await txn.update(
-          'lab_analyses',
-          {'parameter_id': null, 'parameter_remote_id': ''},
-          where: 'parameter_id = ? AND deleted_at IS NULL',
-          whereArgs: [row['id']],
-        );
-        for (final analysis in analyses) {
-          await queueSharedRows(
-            txn,
-            type: 'labAnalysis',
-            queue: queue,
-            guard: guard,
-            where: 'id = ?',
-            whereArgs: [analysis['id']],
-          );
-        }
       }
-      await txn.update(
-        'parameters',
-        {'deleted_at': nowIso()},
-        where: 'parameter_name = ?',
-        whereArgs: [name],
-      );
       await queueSharedRows(
         txn,
         type: 'parameter',
@@ -346,7 +311,7 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
     String dimension = '',
     DatabaseExecutor? exec,
   }) async {
-    _check(Permission.labResultsUpdate);
+    _check(Permission.referenceUpdate);
     await dbHelper.businessTransaction((txn) async {
       await super.upsertUnit(
         symbol,
@@ -406,7 +371,7 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
 
   @override
   Future<void> deleteUnit(String symbol, [DatabaseExecutor? exec]) async {
-    _check(Permission.labResultsUpdate);
+    _check(Permission.referenceUpdate);
     await dbHelper.businessTransaction((txn) async {
       final trimmed = symbol.trim();
       final rows = await txn.query(
@@ -415,6 +380,7 @@ class ServerConfirmedReferenceRepository extends ReferenceRepo {
         whereArgs: [trimmed],
         limit: 1,
       );
+      await ensureUnitCanBeDeleted(trimmed, txn);
       await txn.update(
         'lab_units',
         {'is_active': 0, 'deleted_at': nowIso()},

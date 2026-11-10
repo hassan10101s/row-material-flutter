@@ -419,4 +419,128 @@ void main() {
     final lists = await repo.listRoutineLists();
     expect(lists.first.template.name, 'Shift cleanliness v2');
   });
+
+  test(
+    'removing an item does not renumber the remaining checklist rows',
+    () async {
+      final id = await repo.saveRoutineList(
+        name: 'Stable checklist',
+        items: const ['First', 'Remove me', 'Last'],
+      );
+      final db = await helper.database;
+      final before = await db.query(
+        'qc_items',
+        columns: ['item_id', 'label', 'order_index'],
+        where: 'template_id = ? AND deleted_at IS NULL',
+        whereArgs: [id],
+        orderBy: 'order_index ASC',
+      );
+
+      await repo.saveRoutineList(
+        templateId: id,
+        name: 'Stable checklist',
+        items: const ['First', 'Last'],
+      );
+
+      final after = await db.query(
+        'qc_items',
+        columns: ['item_id', 'label', 'order_index'],
+        where: 'template_id = ? AND deleted_at IS NULL',
+        whereArgs: [id],
+        orderBy: 'order_index ASC',
+      );
+      expect(after, [
+        {
+          'item_id': before[0]['item_id'],
+          'label': 'First',
+          'order_index': before[0]['order_index'],
+        },
+        {
+          'item_id': before[2]['item_id'],
+          'label': 'Last',
+          'order_index': before[2]['order_index'],
+        },
+      ]);
+      final removed = await db.query(
+        'qc_items',
+        where: 'item_id = ?',
+        whereArgs: [before[1]['item_id']],
+        limit: 1,
+      );
+      expect(removed.single['deleted_at'], isNotNull);
+    },
+  );
+
+  test('adding an item after a removal appends it to the checklist', () async {
+    final id = await repo.saveRoutineList(
+      name: 'Append after removal',
+      items: const ['First', 'Remove me', 'Last'],
+    );
+    final db = await helper.database;
+    final before = await db.query(
+      'qc_items',
+      columns: ['item_id', 'label'],
+      where: 'template_id = ? AND deleted_at IS NULL',
+      whereArgs: [id],
+      orderBy: 'order_index ASC',
+    );
+
+    await repo.saveRoutineList(
+      templateId: id,
+      name: 'Append after removal',
+      items: const ['First', 'Last', 'New'],
+    );
+
+    expect(await repo.listItemLabels(id), ['First', 'Last', 'New']);
+    final after = await db.query(
+      'qc_items',
+      columns: ['item_id', 'label'],
+      where: 'template_id = ? AND deleted_at IS NULL',
+      whereArgs: [id],
+      orderBy: 'order_index ASC',
+    );
+    expect(after[0]['item_id'], before[0]['item_id']);
+    expect(after[1]['item_id'], before[2]['item_id']);
+    expect(after[2]['item_id'], isNot(before[1]['item_id']));
+  });
+
+  test(
+    'deleting a list preserves its child rows for historical references',
+    () async {
+      final id = await dailyList();
+      final db = await helper.database;
+      final itemsBefore = await db.query(
+        'qc_items',
+        where: 'template_id = ? AND deleted_at IS NULL',
+        whereArgs: [id],
+      );
+      final sectionsBefore = await db.query(
+        'qc_sections',
+        where: 'template_id = ? AND deleted_at IS NULL',
+        whereArgs: [id],
+      );
+
+      await repo.deleteRoutineList(id);
+
+      final template = await db.query(
+        'qc_templates',
+        where: 'template_id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+      expect(template.single['deleted_at'], isNotNull);
+      final itemsAfter = await db.query(
+        'qc_items',
+        where: 'template_id = ? AND deleted_at IS NULL',
+        whereArgs: [id],
+      );
+      final sectionsAfter = await db.query(
+        'qc_sections',
+        where: 'template_id = ? AND deleted_at IS NULL',
+        whereArgs: [id],
+      );
+      expect(itemsAfter, hasLength(itemsBefore.length));
+      expect(sectionsAfter, hasLength(sectionsBefore.length));
+    },
+  );
 }

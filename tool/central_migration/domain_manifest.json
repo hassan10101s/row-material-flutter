@@ -6,7 +6,7 @@
       "table": "parameters",
       "primaryKey": "id",
       "autoIncrement": true,
-      "permission": "lab_results.update",
+      "permission": "reference.update",
       "readPermission": "samples.read",
       "appendOnly": false,
       "fields": [
@@ -110,7 +110,7 @@
       "table": "material_parameter_bounds",
       "primaryKey": "id",
       "autoIncrement": true,
-      "permission": "lab_results.update",
+      "permission": "reference.update",
       "readPermission": "samples.read",
       "appendOnly": false,
       "fields": [
@@ -2558,7 +2558,7 @@
       "table": "lab_products",
       "primaryKey": "id",
       "autoIncrement": true,
-      "permission": "lab_results.update",
+      "permission": "reference.update",
       "readPermission": "lab_results.read",
       "appendOnly": false,
       "fields": [
@@ -2903,7 +2903,7 @@
       "table": "lab_product_analyses",
       "primaryKey": "id",
       "autoIncrement": true,
-      "permission": "lab_results.update",
+      "permission": "reference.update",
       "readPermission": "lab_results.read",
       "appendOnly": false,
       "fields": [
@@ -3047,7 +3047,7 @@
       "table": "lab_units",
       "primaryKey": "id",
       "autoIncrement": true,
-      "permission": "lab_results.update",
+      "permission": "reference.update",
       "readPermission": "lab_results.read",
       "appendOnly": false,
       "fields": [
@@ -4422,7 +4422,7 @@
       "table": "reference_materials",
       "primaryKey": "id",
       "autoIncrement": true,
-      "permission": "lab_results.update",
+      "permission": "reference.update",
       "readPermission": "samples.read",
       "appendOnly": false,
       "fields": [

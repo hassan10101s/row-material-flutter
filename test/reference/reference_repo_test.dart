@@ -266,12 +266,45 @@ Future<void> _run() async {
     isFalse,
   );
 
-  await _repo.deleteParameter('Purity');
+  final db = await _dbHelper.database;
+  final purityId =
+      params2.firstWhere((p) => p['parameter_name'] == 'Purity')['id'] as int;
+  final boundsBeforeDelete = await db.query(
+    'material_parameter_bounds',
+    where: 'parameter_id = ?',
+    whereArgs: [purityId],
+  );
+  final analysesBeforeDelete = await db.query(
+    'lab_analyses',
+    where: 'parameter_id = ?',
+    whereArgs: [purityId],
+  );
+  await expectLater(
+    _repo.deleteParameter('Purity'),
+    throwsA(isA<ValidationError>()),
+  );
   expect(
     (await _repo.listParameters(
       parameterType: 'chemical',
     )).any((p) => p['parameter_name'] == 'Purity'),
-    isFalse,
+    isTrue,
+    reason: 'a parameter used by material bounds cannot be deleted',
+  );
+  expect(
+    await db.query(
+      'material_parameter_bounds',
+      where: 'parameter_id = ?',
+      whereArgs: [purityId],
+    ),
+    boundsBeforeDelete,
+  );
+  expect(
+    await db.query(
+      'lab_analyses',
+      where: 'parameter_id = ?',
+      whereArgs: [purityId],
+    ),
+    analysesBeforeDelete,
   );
 
   // ── Device-scoped entry codes (two-device collision guard) ──────────

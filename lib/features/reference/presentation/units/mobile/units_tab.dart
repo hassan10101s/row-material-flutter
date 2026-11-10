@@ -21,9 +21,10 @@ import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_text_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../cubit/units_cubit.dart';
 import '../../cubit/units_state.dart';
+import '../../reference_access.dart';
 import '../desktop/units_tab.dart' show DesktopUnitsTab;
 import '../units_editor.dart';
 
@@ -106,10 +107,12 @@ class _MobileUnitsTabState extends State<MobileUnitsTab> {
       // Add floats like the raw-material register (heroTag null: sibling
       // tabs share one IndexedStack).
       child: Scaffold(
-        floatingActionButton: AppAddFloatingActionButton(
-          tooltip: AppText.t('وحدة جديدة', 'New Unit'),
-          onPressed: () => _openEditor(context),
-        ),
+        floatingActionButton: ReferenceAccess.canManageReference(context)
+            ? AppAddFloatingActionButton(
+                tooltip: AppText.t('وحدة جديدة', 'New Unit'),
+                onPressed: () => _openEditor(context),
+              )
+            : null,
         body: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -129,7 +132,7 @@ class _MobileUnitsTabState extends State<MobileUnitsTab> {
                 export: AppExportIconButton(
                   onPressed: state.rows.isEmpty
                       ? null
-                      : () => TableHtmlExport.export(
+                      : () => TablePdfExport.export(
                           context,
                           filePrefix: 'units',
                           title: DesktopUnitsTab.exportTitle(),
@@ -222,6 +225,7 @@ class _MobileUnitsTabState extends State<MobileUnitsTab> {
             usage: state.usage['${u['symbol'] ?? ''}'] ?? 0,
             onEdit: () => _openEditor(context, u),
             onDelete: () => _delete(context, u),
+            canManage: ReferenceAccess.canManageReference(context),
           );
         },
       ),
@@ -240,6 +244,7 @@ class _UnitCard extends StatelessWidget {
     this.usage = 0,
     required this.onEdit,
     required this.onDelete,
+    required this.canManage,
   });
 
   final String symbol;
@@ -248,6 +253,7 @@ class _UnitCard extends StatelessWidget {
   final int usage;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  final bool canManage;
 
   @override
   Widget build(BuildContext context) {
@@ -303,22 +309,24 @@ class _UnitCard extends StatelessWidget {
               ],
             ),
           ),
-          IconButton(
-            tooltip: AppStrings.edit,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            onPressed: onEdit,
-            icon: Icon(Icons.edit_outlined, size: 20.r),
-          ),
-          IconButton(
-            tooltip: AppStrings.delete,
-            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-            onPressed: onDelete,
-            icon: Icon(
-              Icons.delete_outline,
-              size: 20.r,
-              color: AppColors.danger,
+          if (canManage)
+            IconButton(
+              tooltip: AppStrings.edit,
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              onPressed: onEdit,
+              icon: Icon(Icons.edit_outlined, size: 20.r),
             ),
-          ),
+          if (canManage)
+            IconButton(
+              tooltip: AppStrings.delete,
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              onPressed: onDelete,
+              icon: Icon(
+                Icons.delete_outline,
+                size: 20.r,
+                color: AppColors.danger,
+              ),
+            ),
         ],
       ),
     );

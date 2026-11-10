@@ -12,6 +12,7 @@ import '../support/retired/core/sync/push_worker.dart';
 import 'package:material_lab/core/sync/remote/in_memory_data_source.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
+import 'package:material_lab/core/utils/app_exceptions.dart';
 import 'package:material_lab/features/organizations/data/member_write_guard.dart';
 import 'package:material_lab/features/qc_manager/data/server_confirmed_qc_custom_tables.dart';
 import 'package:material_lab/features/qc_manager/data/qc_custom_tables_repo.dart';
@@ -160,8 +161,11 @@ void main() {
           ),
         ],
       );
-      final weightRemoteLaptop = (await laptop.fields())
-          .firstWhere((f) => '${f['label']}' == 'Weight')['remote_id'] as String;
+      final weightRemoteLaptop =
+          (await laptop.fields()).firstWhere(
+                (f) => '${f['label']}' == 'Weight',
+              )['remote_id']
+              as String;
       final laptopRowId = await laptop.repo().addRow(
         QcCustomTableRow(
           tableId: laptopTableId,
@@ -190,11 +194,7 @@ void main() {
       expect(tableRemote, isNotEmpty);
       expect(
         remote.documents.keys,
-        containsAll(
-          <Matcher>[
-            contains('$orgId/qcCustomTables/$tableRemote'),
-          ],
-        ),
+        containsAll(<Matcher>[contains('$orgId/qcCustomTables/$tableRemote')]),
       );
 
       // ── Device 2 pulls and converges ─────────────────────────────────────
@@ -231,7 +231,9 @@ void main() {
       final labels = phoneFields.map((f) => '${f['label']}').toSet();
       expect(labels, {'Weight', 'Note'});
       final weightRemote =
-          (phoneFields.firstWhere((f) => '${f['label']}' == 'Weight'))['remote_id']
+          (phoneFields.firstWhere(
+                (f) => '${f['label']}' == 'Weight',
+              ))['remote_id']
               as String;
       expect(weightRemote, weightRemoteLaptop);
 
@@ -241,11 +243,15 @@ void main() {
         phoneTableId,
         reason: 'the origin table_id is meaningless on device 2',
       );
-      expect(convert.jsonDecode(phoneRow['values_json'] as String),
-          <String, dynamic>{
-        weightRemote: 24.5,
-      }, reason: 'values are keyed by the column remote ids, not labels');
-      expect(phoneRow['remote_id'], '${(await laptop.rows()).single['remote_id']}');
+      expect(
+        convert.jsonDecode(phoneRow['values_json'] as String),
+        <String, dynamic>{weightRemote: 24.5},
+        reason: 'values are keyed by the column remote ids, not labels',
+      );
+      expect(
+        phoneRow['remote_id'],
+        '${(await laptop.rows()).single['remote_id']}',
+      );
       expect(phoneRow['recorded_by'], laptop.session.uid);
       expect(phoneRow['sync_state'], 'synced');
 
@@ -254,113 +260,132 @@ void main() {
     },
   );
 
-  test(
-    'a record written on device 2 under the pulled definition travels back '
-    'to device 1, and a whole-table delete tombstones both sides',
-    () async {
-      // Seed device 1 → device 2 first.
-      final laptopTableId = await laptop.repo().createTable(
-        QcCustomTable(
-          title: 'Trial register',
+  test('a record written on device 2 under the pulled definition travels back '
+      'to device 1, and a whole-table delete tombstones both sides', () async {
+    // Seed device 1 → device 2 first.
+    final laptopTableId = await laptop.repo().createTable(
+      QcCustomTable(
+        title: 'Trial register',
+        createdAt: '2026-09-01T08:00:00.000',
+        updatedAt: '2026-09-01T08:00:00.000',
+      ),
+      [
+        QcCustomTableField(
+          label: 'Weight',
+          colType: QcCustomColType.number,
+          required: true,
           createdAt: '2026-09-01T08:00:00.000',
           updatedAt: '2026-09-01T08:00:00.000',
+        ),
+      ],
+    );
+    await laptop.pusher(remote).runOnce();
+    expect((await phone.puller(remote).runOnce()).applied, 2);
+    final phoneTableId = (await phone.tables()).single['table_id'] as int;
+    final weightRemote = (await phone.fields()).single['remote_id'] as String;
+
+    // ── Device 2 records offline, under ITS local ids ───────────────────
+    phone.online = false;
+    remote.offline = true;
+    await phone.repo().addRow(
+      QcCustomTableRow(
+        tableId: phoneTableId,
+        valuesJson: convert.jsonEncode({weightRemote: 18.5}),
+        note: 'from the phone',
+        recordedAt: '2026-09-01T10:00:00.000',
+        createdAt: '2026-09-01T10:00:00.000',
+        updatedAt: '2026-09-01T10:00:00.000',
+      ),
+    );
+    // ── Device 1 pulls the record back ──────────────────────────────────
+    phone.online = true;
+    remote.offline = false;
+    final pushed = await phone.pusher(remote).runOnce();
+    expect(pushed.failed, 0, reason: 'the record leaves the phone');
+    final back = await laptop.puller(remote).runOnce();
+    expect(back.applied, 1);
+    final incoming = (await laptop.rows()).single;
+    expect('${incoming['note']}', 'from the phone');
+    expect(incoming['recorded_by'], phone.session.uid);
+    expect(
+      convert.jsonDecode(incoming['values_json'] as String),
+      <String, dynamic>{weightRemote: 18.5},
+    );
+    expect((incoming['table_id'] as num).toInt(), laptopTableId);
+    expect(incoming['sync_state'], 'synced');
+    expect(incoming['row_id'], isNot(0));
+
+    // A table with live records cannot be deleted in the same command:
+    // deployed Firestore rules keep record deletes in their own family.
+    final ops = await laptop.fixture.db.query(
+      'sync_queue',
+      where: 'status != ?',
+      whereArgs: ['done'],
+    );
+    expect(
+      ops,
+      isEmpty,
+      reason: 'device 1 starts the delete with a clean outbox',
+    );
+    await expectLater(
+      laptop.repo().deleteTable(laptopTableId),
+      throwsA(isA<ValidationError>()),
+    );
+    expect(await laptop.queue.countPending(), 0);
+
+    // Delete and confirm the record first, then delete the definition.
+    final rowId = (incoming['row_id'] as num).toInt();
+    await laptop.repo().deleteRow(rowId);
+    final pushedRowTombstone = await laptop.pusher(remote).runOnce();
+    expect(pushedRowTombstone.failed, 0);
+    final pulledRowTombstone = await phone.puller(remote).runOnce();
+    expect(pulledRowTombstone.applied, 1);
+    expect('${(await phone.rows()).single['deleted_at']}', isNotEmpty);
+
+    await laptop.repo().deleteTable(laptopTableId);
+    final pending1 = await laptop.queue.countPending();
+    expect(pending1, 2, reason: '1 field + 1 table tombstone');
+    final pushedTombs = await laptop.pusher(remote).runOnce();
+    expect(pushedTombs.failed, 0);
+    final tombstones = await phone.puller(remote).runOnce();
+    expect(
+      tombstones.applied,
+      2,
+      reason:
+          'applied=${tombstones.applied} skipped=${tombstones.skipped} '
+          'pushedBack=${tombstones.pushedBack} failed=${tombstones.failed}',
+    );
+
+    for (final table in await phone.tables()) {
+      expect('${table['deleted_at']}', isNotEmpty);
+      expect(table['sync_state'], 'synced');
+    }
+    for (final field in await phone.fields()) {
+      expect('${field['deleted_at']}', isNotEmpty);
+    }
+    for (final row in await phone.rows()) {
+      expect('${row['deleted_at']}', isNotEmpty);
+    }
+
+    // A deleted definition frees its title on the receiving device too.
+    phone.online = true;
+    expect(
+      await phone.repo().createTable(
+        QcCustomTable(
+          title: 'Trial register',
+          createdAt: '2026-09-01T11:00:00.000',
+          updatedAt: '2026-09-01T11:00:00.000',
         ),
         [
           QcCustomTableField(
             label: 'Weight',
             colType: QcCustomColType.number,
-            required: true,
-            createdAt: '2026-09-01T08:00:00.000',
-            updatedAt: '2026-09-01T08:00:00.000',
-          ),
-        ],
-      );
-      await laptop.pusher(remote).runOnce();
-      expect((await phone.puller(remote).runOnce()).applied, 2);
-      final phoneTableId = (await phone.tables()).single['table_id'] as int;
-      final weightRemote = (await phone.fields()).single['remote_id'] as String;
-
-      // ── Device 2 records offline, under ITS local ids ───────────────────
-      phone.online = false;
-      remote.offline = true;
-      await phone.repo().addRow(
-        QcCustomTableRow(
-          tableId: phoneTableId,
-          valuesJson: convert.jsonEncode({weightRemote: 18.5}),
-          note: 'from the phone',
-          recordedAt: '2026-09-01T10:00:00.000',
-          createdAt: '2026-09-01T10:00:00.000',
-          updatedAt: '2026-09-01T10:00:00.000',
-        ),
-      );
-      // ── Device 1 pulls the record back ──────────────────────────────────
-      phone.online = true;
-      remote.offline = false;
-      final pushed = await phone.pusher(remote).runOnce();
-      expect(pushed.failed, 0, reason: 'the record leaves the phone');
-      final back = await laptop.puller(remote).runOnce();
-      expect(back.applied, 1);
-      final incoming = (await laptop.rows()).single;
-      expect('${incoming['note']}', 'from the phone');
-      expect(incoming['recorded_by'], phone.session.uid);
-      expect(convert.jsonDecode(incoming['values_json'] as String),
-          <String, dynamic>{weightRemote: 18.5});
-      expect((incoming['table_id'] as num).toInt(), laptopTableId);
-      expect(incoming['sync_state'], 'synced');
-      expect(
-        incoming['row_id'],
-        isNot(0),
-      );
-
-      // ── Device 1 deletes the whole table: tombstones both directions ────
-      final ops = await laptop.fixture.db.query(
-        'sync_queue',
-        where: 'status != ?',
-        whereArgs: ['done'],
-      );
-      expect(ops, isEmpty, reason: 'device 1 starts the delete with a clean outbox');
-      await laptop.repo().deleteTable(laptopTableId);
-      final pending1 = await laptop.queue.countPending();
-      expect(pending1, 3, reason: '1 row + 1 field + 1 table tombstone');
-      final pushedTombs = await laptop.pusher(remote).runOnce();
-      expect(pushedTombs.failed, 0);
-      final tombstones = await phone.puller(remote).runOnce();
-      expect(tombstones.applied, 3,
-          reason:
-              'applied=${tombstones.applied} skipped=${tombstones.skipped} '
-              'pushedBack=${tombstones.pushedBack} failed=${tombstones.failed}');
-
-      for (final table in await phone.tables()) {
-        expect('${table['deleted_at']}', isNotEmpty);
-        expect(table['sync_state'], 'synced');
-      }
-      for (final field in await phone.fields()) {
-        expect('${field['deleted_at']}', isNotEmpty);
-      }
-      for (final row in await phone.rows()) {
-        expect('${row['deleted_at']}', isNotEmpty);
-      }
-
-      // A deleted definition frees its title on the receiving device too.
-      phone.online = true;
-      expect(
-        await phone.repo().createTable(
-          QcCustomTable(
-            title: 'Trial register',
             createdAt: '2026-09-01T11:00:00.000',
             updatedAt: '2026-09-01T11:00:00.000',
           ),
-          [
-            QcCustomTableField(
-              label: 'Weight',
-              colType: QcCustomColType.number,
-              createdAt: '2026-09-01T11:00:00.000',
-              updatedAt: '2026-09-01T11:00:00.000',
-            ),
-          ],
-        ),
-        isNotNull,
-      );
-    },
-  );
+        ],
+      ),
+      isNotNull,
+    );
+  });
 }

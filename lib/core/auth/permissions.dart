@@ -34,6 +34,7 @@ enum Permission {
   formulationsRead('formulations.read', false),
   formulationsCreate('formulations.create', true),
   formulationsUpdate('formulations.update', true),
+  referenceUpdate('reference.update', true),
   auditRead('audit.read', false);
 
   const Permission(this.id, this.writes, {this.technical = false});
@@ -132,17 +133,15 @@ abstract final class AppRoles {
     return roles.toList(growable: false);
   }
 
-  /// Owners and viewer assignments are intentionally exclusive. This keeps
-  /// owner succession semantics and the read-only role unambiguous.
+  /// Owner roles remain exclusive to preserve company ownership semantics.
+  /// Viewer can be combined with employee roles as an additional read grant.
   static bool isValidAssignment(Iterable<String> values) {
     final list = values.toList();
     final roles = list.toSet();
     if (roles.length != list.length) return false;
     if (roles.isEmpty || roles.any((role) => !isValid(role))) return false;
     if (roles.length > 1 &&
-        roles.any(
-          (role) => role == admin || role == trialOwner || role == viewer,
-        )) {
+        roles.any((role) => role == admin || role == trialOwner)) {
       return false;
     }
     return true;
@@ -252,6 +251,7 @@ const Map<String, Set<Permission>> _rolePermissions = {
     Permission.formulationsRead,
     Permission.formulationsCreate,
     Permission.formulationsUpdate,
+    Permission.referenceUpdate,
   },
   AppRoles.qualityManager: {
     Permission.orgRead,
@@ -272,6 +272,7 @@ const Map<String, Set<Permission>> _rolePermissions = {
     Permission.devicesRegister,
     Permission.auditRead,
     Permission.formulationsRead,
+    Permission.referenceUpdate,
   },
   AppRoles.lab: {
     Permission.orgRead,
@@ -292,6 +293,7 @@ const Map<String, Set<Permission>> _rolePermissions = {
     Permission.devicesRegister,
     Permission.auditRead,
     Permission.formulationsRead,
+    Permission.referenceUpdate,
   },
   AppRoles.viewer: {
     Permission.orgRead,

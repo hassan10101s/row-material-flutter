@@ -33,7 +33,11 @@ class FormulationTrackingRequest {
         work += history.length;
       }
     }
-    return work * (buckets.length + 1) >= 20000;
+    // Lab-only fallback can inspect historical dates repeatedly even when
+    // there are few receipts. Daily phone graphs must not do that on the UI.
+    return work >= 1000 ||
+        work * (buckets.length + 1) >= 5000 ||
+        (dataSource == FormulationDataSource.lab && buckets.length > 7);
   }
 }
 

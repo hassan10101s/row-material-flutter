@@ -413,6 +413,32 @@ class LabRepo {
       if (fields.containsKey(key)) updates[key] = fields[key];
     }
 
+    // Lots, append-only consumption and ledger quantities use the item's
+    // stock unit. Relabelling just the master row would reinterpret history.
+    final changesUnit =
+        updates.containsKey('unit') &&
+        '${updates['unit']}'.trim().toLowerCase() !=
+            '${existing['unit']}'.trim().toLowerCase();
+    final changesCategory =
+        updates.containsKey('category') &&
+        updates['category'] != existing['category'];
+    if (changesUnit || changesCategory) {
+      final history = await fetchOne(
+        executor,
+        '''
+        SELECT 1 FROM inventory_lots WHERE inventory_id = ?
+        UNION ALL SELECT 1 FROM lab_consumption_log WHERE inventory_id = ?
+        UNION ALL SELECT 1 FROM inventory_transactions WHERE inventory_id = ?
+        UNION ALL SELECT 1 FROM lab_stock_adjustments WHERE inventory_id = ?
+        LIMIT 1
+      ''',
+        [itemId, itemId, itemId, itemId],
+      );
+      if ((safeFloat(existing['current_qty']) ?? 0) != 0 || history != null) {
+        throw ValidationError(AppErrors.inventoryUnitLocked);
+      }
+    }
+
     if (updates.containsKey('name')) {
       final newName = '${updates['name'] ?? ''}'.trim();
       if (newName.isEmpty) {
@@ -2352,11 +2378,24 @@ class LabRepo {
     int productId, [
     DatabaseExecutor? executor,
   ]) async {
-    await getProduct(productId, executor);
-    await execute(executor, 'UPDATE lab_products SET active = 0 WHERE id = ?', [
-      productId,
-    ]);
-    return {'archived': true};
+    Future<Map<String, dynamic>> delete(DatabaseExecutor txn) async {
+      await getProduct(productId, txn);
+      final linkedInspections = await fetchOne(
+        txn,
+        'SELECT 1 FROM inspections WHERE product_id = ? LIMIT 1',
+        [productId],
+      );
+      if (linkedInspections != null) {
+        throw ValidationError(AppErrors.referenceInUse);
+      }
+      await execute(txn, 'UPDATE lab_products SET active = 0 WHERE id = ?', [
+        productId,
+      ]);
+      return {'archived': true};
+    }
+
+    if (executor != null) return delete(executor);
+    return dbHelper.businessTransaction(delete);
   }
 
   // ── Analyses ──────────────────────────────────────────────────
@@ -2405,6 +2444,15 @@ class LabRepo {
       analysis['unit'] = canonicalUnit;
     }
     return analysis;
+  }
+
+  Future<bool> analysisNameExists(String name) async {
+    final row = await fetchOne(
+      null,
+      'SELECT 1 FROM lab_analyses WHERE name = ? LIMIT 1',
+      [name.trim()],
+    );
+    return row != null;
   }
 
   Future<Map<String, dynamic>> _decorateAnalysis(
@@ -2646,6 +2694,7 @@ class LabRepo {
         final unit = '${link['unit'] ?? ''}'.trim().isEmpty
             ? 'mL'
             : '${link['unit']}'.trim();
+        await _checkConsumedUnit(executor, inventoryId, unit);
         await registerUnit(executor ?? await _db, unit);
         await execute(
           executor,
@@ -3374,6 +3423,7 @@ class LabRepo {
     Map<String, dynamic>? user,
     String entryCode = '',
     bool manualResult = false,
+    bool draftOnly = false,
     // Product batch samples (محضر التشغيلة): keep the caller's
     // `sourceRefId` (the batch *sample* id) instead of resolving it to the
     // product id. Defaults to false, so every existing caller — raw and
@@ -3394,6 +3444,7 @@ class LabRepo {
         user: user,
         entryCode: entryCode,
         manualResult: manualResult,
+        draftOnly: draftOnly,
         keepSourceRefId: keepSourceRefId,
       );
     }
@@ -3411,6 +3462,7 @@ class LabRepo {
         user: user,
         entryCode: entryCode,
         manualResult: manualResult,
+        draftOnly: draftOnly,
         keepSourceRefId: keepSourceRefId,
       ),
     );
@@ -3428,6 +3480,7 @@ class LabRepo {
     Map<String, dynamic>? user,
     String entryCode = '',
     bool manualResult = false,
+    bool draftOnly = false,
     bool keepSourceRefId = false,
   }) async {
     {
@@ -3480,7 +3533,7 @@ class LabRepo {
       final formulaData = _mapOf(analysis['formula']);
       final formulaExpr = '${formulaData['expression'] ?? ''}'.trim();
       Map<String, dynamic>? computed;
-      if (formulaExpr.isNotEmpty && !manualResult && !failed) {
+      if (!draftOnly && formulaExpr.isNotEmpty && !manualResult && !failed) {
         final values = <String, Object?>{};
         for (final item in analysis['items'] as List? ?? []) {
           final m = item as Map<String, dynamic>;
@@ -3532,7 +3585,7 @@ class LabRepo {
           resolvedSourceRefId,
           cleanSourceName,
           cleanSampleName,
-          resultText.trim(),
+          draftOnly ? '' : resultText.trim(),
           jsonDumps(safeDynamics),
           cleanEntryCode,
           authorId,
@@ -3542,6 +3595,16 @@ class LabRepo {
           null,
         ],
       );
+      if (draftOnly) {
+        return {
+          'test': await getSampleTestTx(txn, testId),
+          'analysis_unit': '${analysis['unit'] ?? '%'}',
+          'consumption': const <Map<String, dynamic>>[],
+          'low_stock': const <Map<String, dynamic>>[],
+          'range_check': null,
+          'computed': null,
+        };
+      }
       final requested = <int, double>{};
       final neededIds = <int>{};
       for (final item in analysis['items'] as List? ?? []) {
@@ -3570,7 +3633,7 @@ class LabRepo {
         final id = int.tryParse('${m['inventory_id']}') ?? 0;
         final inventory = invMap[id];
         if (inventory == null) continue;
-        final qty = convertQuantity(
+        final qty = _convertConsumptionQuantity(
           safeFloat(m['qty_per_sample']) ?? 0.0,
           '${m['unit']}',
           '${inventory['unit']}',
@@ -3591,7 +3654,7 @@ class LabRepo {
         }
         final inventory = invMap[inventoryId];
         if (inventory == null) continue;
-        final qty = convertQuantity(
+        final qty = _convertConsumptionQuantity(
           qtyInput,
           '${lm['unit'] ?? ''}',
           '${inventory['unit']}',
@@ -3879,6 +3942,19 @@ class LabRepo {
     return result;
   }
 
+  Future<bool> hasCompletedResultsForAnalysis(int analysisId) async =>
+      await fetchOne(
+        null,
+        '''
+        SELECT 1 FROM lab_sample_tests
+        WHERE analysis_id = ? AND deleted_at IS NULL
+          AND TRIM(COALESCE(result_text, '')) <> ''
+        LIMIT 1
+        ''',
+        [analysisId],
+      ) !=
+      null;
+
   Future<Map<String, dynamic>> getSampleTestTx(
     DatabaseExecutor txn,
     int testId,
@@ -3902,11 +3978,14 @@ class LabRepo {
     return result;
   }
 
-  /// Edits the fillable fields of an existing sample test. Only the data
-  /// entry fields change (sample/result/dynamics/entry code) — the analysis,
-  /// source and consumption log are history and stay untouched.
+  /// Edits an existing sample test. Drafts may change analysis/source details
+  /// before completion; completed rows keep their analysis and source.
   Future<Map<String, dynamic>> updateSampleTest(
     int testId, {
+    int? analysisId,
+    String? sourceType,
+    int? sourceRefId,
+    String? sourceName,
     String? sampleName,
     String? resultText,
     Map<String, dynamic>? dynamicValues,
@@ -3921,6 +4000,30 @@ class LabRepo {
       [testId],
     );
     if (existing == null) throw NotFoundError(AppErrors.testNotFound);
+    final hasRecordedConsumption =
+        await fetchOne(
+          db,
+          'SELECT id FROM lab_consumption_log WHERE sample_test_id = ? LIMIT 1',
+          [testId],
+        ) !=
+        null;
+    // Older runs without a calculated result can still have inventory history.
+    // Do not reinterpret those rows as new drafts and charge their full draw
+    // again when their measurements are corrected.
+    final wasDraft =
+        isPendingLabResult(existing['result_text']) && !hasRecordedConsumption;
+    if (!wasDraft &&
+        (analysisId != null ||
+            sourceType != null ||
+            sourceRefId != null ||
+            sourceName != null)) {
+      throw ValidationError(
+        AppText.t(
+          'لا يمكن تعديل بيانات التحليل أو المصدر بعد تشغيله',
+          'Analysis and source details cannot be changed after a test is run',
+        ),
+      );
+    }
     // The entry code is the link key (inspection record, QR code, sync
     // document): once set it can never be rewritten, or the test orphans
     // from everything pointing at it. A code may only be filled into a
@@ -3943,6 +4046,42 @@ class LabRepo {
       }
     }
     final patch = <String, Object?>{};
+    final updatedAnalysisId = analysisId ?? existing['analysis_id'];
+    final updatedSourceType = sourceType ?? '${existing['source_type'] ?? ''}';
+    final updatedSourceRefId = sourceType != null
+        ? sourceRefId
+        : sourceRefId ?? existing['source_ref_id'];
+    final updatedSourceName = (sourceName ?? '${existing['source_name'] ?? ''}')
+        .trim();
+    if (analysisId != null) {
+      if (analysisId <= 0) {
+        throw ValidationError(
+          AppText.t('اختر التحليل أولاً', 'Select an analysis first'),
+        );
+      }
+      await getAnalysis(analysisId, db);
+      patch['analysis_id'] = analysisId;
+    }
+    if (sourceType != null || sourceRefId != null || sourceName != null) {
+      if (!sourceTypes.contains(updatedSourceType) ||
+          updatedSourceName.isEmpty ||
+          ((updatedSourceType == 'raw_material' ||
+                  updatedSourceType == 'product') &&
+              (updatedSourceRefId == null ||
+                  (int.tryParse('$updatedSourceRefId') ?? 0) <= 0)) ||
+          (updatedSourceType == 'sample' && updatedSourceRefId != null)) {
+        throw ValidationError(AppErrors.sampleAndSourceRequired);
+      }
+      if (storedCode.isNotEmpty &&
+          (updatedSourceType != '${existing['source_type'] ?? ''}' ||
+              '$updatedSourceRefId' != '${existing['source_ref_id'] ?? ''}')) {
+        throw ValidationError(AppErrors.entryCodeImmutable);
+      }
+      patch
+        ..['source_type'] = updatedSourceType
+        ..['source_ref_id'] = updatedSourceRefId
+        ..['source_name'] = updatedSourceName;
+    }
     if (sampleName != null) {
       final clean = sampleName.trim();
       if (clean.isEmpty) {
@@ -3951,14 +4090,20 @@ class LabRepo {
       patch['sample_name'] = clean.substring(0, clean.length.clamp(0, 50));
     }
     if (resultText != null) {
-      patch['result_text'] = resultText.trim().substring(
-        0,
-        resultText.trim().length.clamp(0, 50),
-      );
+      final clean = resultText.trim();
+      if (clean.isEmpty && !isPendingLabResult(existing['result_text'])) {
+        throw ValidationError(
+          AppText.t(
+            'لا يمكن مسح نتيجة تحليل مكتمل',
+            'A completed test result cannot be cleared',
+          ),
+        );
+      }
+      patch['result_text'] = clean.substring(0, clean.length.clamp(0, 50));
     }
     if (dynamicValues != null) {
       try {
-        final analysis = await getAnalysis(existing['analysis_id'] as int, db);
+        final analysis = await getAnalysis(int.parse('$updatedAnalysisId'), db);
         dynamicValues = _validatedMeasurementValues(analysis, dynamicValues);
       } on NotFoundError {
         // Legacy textual corrections remain possible if the definition is gone.
@@ -3983,11 +4128,22 @@ class LabRepo {
     // result_text on every read.
     Map<int, double>? oldMap;
     Map<int, double>? newMap;
-    if (dynamicValues != null) {
+    final updatedResultText =
+        '${patch['result_text'] ?? existing['result_text'] ?? ''}'.trim();
+    final remainsDraft = wasDraft && isPendingLabResult(updatedResultText);
+    final valuesForConsumption =
+        dynamicValues ??
+        (wasDraft && !remainsDraft
+            ? Map<String, dynamic>.from(
+                jsonLoads('${existing['dynamic_values_json'] ?? ''}'),
+              )
+            : null);
+    if (valuesForConsumption != null && !remainsDraft) {
       final plan = await _consumptionPlan(
         db,
-        existing,
-        Map<String, dynamic>.from(dynamicValues),
+        {...existing, 'analysis_id': updatedAnalysisId},
+        Map<String, dynamic>.from(valuesForConsumption),
+        previousDraft: wasDraft,
       );
       oldMap = plan?.$1;
       newMap = plan?.$2;
@@ -4013,8 +4169,9 @@ class LabRepo {
   Future<(Map<int, double>, Map<int, double>)?> _consumptionPlan(
     DatabaseExecutor db,
     Map<String, dynamic> existing,
-    Map<String, dynamic> newDynamics,
-  ) async {
+    Map<String, dynamic> newDynamics, {
+    bool previousDraft = false,
+  }) async {
     final analysisId = int.tryParse('${existing['analysis_id'] ?? 0}') ?? 0;
     if (analysisId <= 0) return null;
     Map<String, dynamic>? analysis;
@@ -4027,7 +4184,9 @@ class LabRepo {
     // block a textual correction: the plan is skipped and the text still
     // saves. Anything else (shortage, driver failure) aborts the edit.
     try {
-      final oldDynamics = jsonLoads('${existing['dynamic_values_json'] ?? ''}');
+      final oldDynamics = previousDraft
+          ? <String, dynamic>{}
+          : jsonLoads('${existing['dynamic_values_json'] ?? ''}');
       // An edit is captured inside the authoring transaction. Loading through
       // the database connection here would wait for this same transaction,
       // deadlocking the edit and every queued cache/sync read behind it.
@@ -4036,11 +4195,9 @@ class LabRepo {
         oldDynamics,
         executor: db,
       );
-      final oldMap = await worksheetConsumptionMap(
-        analysis,
-        oldDynamics,
-        inventoryMap,
-      );
+      final oldMap = previousDraft
+          ? <int, double>{}
+          : await worksheetConsumptionMap(analysis, oldDynamics, inventoryMap);
       final newMap = await worksheetConsumptionMap(
         analysis,
         newDynamics,
@@ -4170,6 +4327,7 @@ class LabRepo {
       JOIN lab_analyses a ON a.id = t.analysis_id
       LEFT JOIN parameters p ON p.id = a.parameter_id
       WHERE t.entry_code = ? AND t.deleted_at IS NULL AND COALESCE(t.secure_result, 0) = 0
+        AND TRIM(COALESCE(t.result_text, '')) <> ''
         AND (p.parameter_type = 'chemical' OR a.parameter_id IS NULL)
       ORDER BY t.tested_at DESC, t.id DESC
       ''',
@@ -4846,6 +5004,7 @@ class LabRepo {
                 FROM lab_sample_tests t
                 JOIN lab_analyses a ON a.id = t.analysis_id
                 WHERE t.entry_code = ? AND t.deleted_at IS NULL AND COALESCE(t.secure_result, 0) = 0
+                  AND TRIM(COALESCE(t.result_text, '')) <> ''
                 ORDER BY t.tested_at DESC, t.id DESC
                 ''',
         [entryCode],
@@ -4877,7 +5036,7 @@ class LabRepo {
       final inventory = providedMap
           ? await inventoryForConsumption(inventoryId, effectiveMap)
           : inventoryForConsumptionSync(inventoryId, effectiveMap);
-      final qty = convertQuantity(
+      final qty = _convertConsumptionQuantity(
         safeFloat(m['qty_per_sample']) ?? 0.0,
         '${m['unit']}',
         '${inventory['unit']}',
@@ -4896,10 +5055,25 @@ class LabRepo {
       final inventory = providedMap
           ? await inventoryForConsumption(inventoryId, effectiveMap)
           : inventoryForConsumptionSync(inventoryId, effectiveMap);
-      final qty = convertQuantity(fieldVal, linkUnit, '${inventory['unit']}');
+      final qty = _convertConsumptionQuantity(
+        fieldVal,
+        linkUnit,
+        '${inventory['unit']}',
+      );
       consumed[inventoryId] = (consumed[inventoryId] ?? 0.0) + qty;
     }
     return consumed;
+  }
+
+  double _convertConsumptionQuantity(double qty, String from, String to) {
+    // Empty legacy consumption units mean the stock unit. An unknown or
+    // incompatible explicit unit must never silently become a stock draw.
+    final source = from.trim().isEmpty ? to : from;
+    try {
+      return convertQuantityOrThrow(qty, source, to);
+    } on ArgumentError {
+      throw ValidationError(AppErrors.incompatibleConsumptionUnit(source, to));
+    }
   }
 
   /// Batch-loads every inventory row the analysis needs (items + dynamic
@@ -5889,6 +6063,7 @@ class LabRepo {
       LEFT JOIN users uc ON uc.id = t.created_by OR uc.uid = t.created_by
       WHERE t.deleted_at IS NULL AND COALESCE(t.secure_result, 0) = 0
         AND t.source_type = 'product' AND t.source_ref_id = ?
+        AND TRIM(COALESCE(t.result_text, '')) <> ''
       ORDER BY t.tested_at DESC, t.id DESC
       ''',
       [sample['batch_id'], sampleId],

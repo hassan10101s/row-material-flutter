@@ -225,6 +225,7 @@ class DirectWriteService {
     return entries
         .where(
           (entry) =>
+              _current(entry) &&
               entry.state != OutboxState.archived &&
               !dismissed.contains(entry.operationId) &&
               (includeCompleted ||

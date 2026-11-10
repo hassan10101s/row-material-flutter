@@ -11,7 +11,7 @@ import '../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../design_system/widgets/app_selection.dart';
-import '../../../../design_system/export/table_html_export.dart';
+import '../../../../design_system/export/table_pdf_export.dart';
 import '../audit_controller.dart';
 
 /// Read-only audit trail (plan §14-P9.2).
@@ -270,7 +270,7 @@ class _BodyState extends State<_Body> {
       for (var i = 0; i < entries.length; i++)
         if (_selected.contains(i)) entries[i],
     ];
-    await TableHtmlExport.export(
+    await TablePdfExport.export(
       context,
       filePrefix: 'audit',
       title: exportTitle(),
@@ -282,7 +282,7 @@ class _BodyState extends State<_Body> {
     }
   }
 
-  Future<void> _exportAll() => TableHtmlExport.export(
+  Future<void> _exportAll() => TablePdfExport.export(
     context,
     filePrefix: 'audit',
     title: exportTitle(),

@@ -22,7 +22,7 @@ class AppSupport {
 
   /// Deliberately shown in English on both language sides: the corporate
   /// identity (name, line of business, seat) reads as a formal letterhead.
-  static const companyLine = 'Software Development & AI for Industry';
+  static const companyLine = 'Software Development, Data Analysis & AI for Industry';
   static const companySeat = 'Mohandiseen, Cairo, Egypt';
 
   static Future<void> openLink(BuildContext context, String value) async {

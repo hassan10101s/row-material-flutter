@@ -6,6 +6,7 @@ import '../../../../core/constants/app_strings.dart';
 import '../../../../core/responsive/form_factor.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_adaptive.dart';
+import '../../../../design_system/widgets/app_control_strip.dart';
 import '../../../../design_system/widgets/app_page_size.dart'
     show kMobileMaxPageSize;
 import '../../../../di/service_locator.dart';
@@ -155,33 +156,30 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
             ),
           ),
         ),
-      SizedBox(
-        height: appUsesDesktopChrome(context) ? 46.h : 56,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-          child: Row(
-            children: [
-              _tab(
-                context,
-                index: 0,
-                label: AppText.t('فحص الخامات', 'Raw-material inspections'),
-                icon: Icons.fact_check_outlined,
-              ),
-              _tab(
-                context,
-                index: 1,
-                label: AppText.t('فحص المنتجات', 'Product inspections'),
-                icon: Icons.factory_outlined,
-              ),
-              _tab(
-                context,
-                index: 2,
-                label: AppText.t('تقارير الفحص', 'Inspection reports'),
-                icon: Icons.description_outlined,
-              ),
-            ],
-          ),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+        child: AppControlStrip(
+          height: appUsesDesktopChrome(context) ? 46.h : 56,
+          children: [
+            _tab(
+              context,
+              index: 0,
+              label: AppText.t('فحص الخامات', 'Raw-material inspections'),
+              icon: Icons.fact_check_outlined,
+            ),
+            _tab(
+              context,
+              index: 1,
+              label: AppText.t('فحص المنتجات', 'Product inspections'),
+              icon: Icons.factory_outlined,
+            ),
+            _tab(
+              context,
+              index: 2,
+              label: AppText.t('تقارير الفحص', 'Inspection reports'),
+              icon: Icons.description_outlined,
+            ),
+          ],
         ),
       ),
       Expanded(
@@ -217,16 +215,13 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
     required int index,
     required String label,
     required IconData icon,
-  }) => Padding(
-    padding: const EdgeInsetsDirectional.only(start: AppSpacing.sm),
-    child: ChoiceChip(
-      avatar: Icon(icon, size: 18.r),
-      label: Text(label),
-      selected: _selectedTab == index,
-      materialTapTargetSize: appUsesDesktopChrome(context)
-          ? MaterialTapTargetSize.shrinkWrap
-          : MaterialTapTargetSize.padded,
-      onSelected: (_) => _selectTab(index),
-    ),
+  }) => ChoiceChip(
+    avatar: Icon(icon, size: 18.r),
+    label: Text(label),
+    selected: _selectedTab == index,
+    materialTapTargetSize: appUsesDesktopChrome(context)
+        ? MaterialTapTargetSize.shrinkWrap
+        : MaterialTapTargetSize.padded,
+    onSelected: (_) => _selectTab(index),
   );
 }

@@ -714,6 +714,19 @@ th { background: #edf1f5 !important; color: #24364b !important; }
 
 html[dir="ltr"] body { direction:ltr; text-align:left; }
 html[dir="rtl"] body { direction:rtl; text-align:right; }
+
+.product-sample-results { width: 100%; table-layout: fixed; border-collapse: collapse; direction: {% if is_en %}ltr{% else %}rtl{% endif %}; }
+.product-sample-results .sample-identity { width: 25%; text-align: start; }
+.product-sample-results th, .product-sample-results td { overflow-wrap: anywhere; vertical-align: middle; }
+.product-sample-results .sample-result { text-align: center; font-variant-numeric: tabular-nums; }
+.product-sample-results .sample-meta { display: block; font-size: 9px; font-weight: normal; color: #64748b; margin-top: 3px; }
+.product-sample-results .parameter-unit { display: block; direction: ltr; font-size: 9px; font-weight: normal; }
+.product-sample-results thead { display: table-header-group; }
+.product-sample-results tr { break-inside: avoid; page-break-inside: avoid; }
+{% if is_product %}
+.sections { display: block !important; }
+.section { break-inside: auto !important; page-break-inside: auto !important; overflow: visible !important; }
+{% endif %}
 </style>
 </head>
 <body dir="rtl">
@@ -732,7 +745,7 @@ html[dir="rtl"] body { direction:rtl; text-align:right; }
 {% if organization_name %}<div class="organization-name" style="font-size:12px;font-weight:700;margin-top:6px;text-align:center;overflow-wrap:anywhere;">{{ organization_name }}</div>{% endif %}
                 <h1>{% if is_product %}{% if is_en %}Product Inspection Report{% else %}محضر فحص منتجات{% endif %}{% else %}{% if is_en %}Raw Material Inspection Report{% else %}محضر فحص خامات{% endif %}{% endif %}</h1>
                 <p>{{ department_label or "Quality Control Department" }}</p>
-                {% if form_no %}<p>{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
+                {% if form_no %}<p>Form No: {{ form_no }}</p>{% endif %}
             </div>
             <div class="header-side">
                 <div class="badge {{ decision_class }}">
@@ -857,32 +870,29 @@ html[dir="rtl"] body { direction:rtl; text-align:right; }
             {% if show_batch_samples %}
             <section class="section">
                 <h2 class="section-title section-chemical">{% if is_en %}Operational Samples{% else %}عينات التشغيلية{% endif %}</h2>
-                <table>
+                <table class="product-sample-results">
                     <thead>
                         <tr>
-                            <th rowspan="2">{% if is_en %}Parameter{% else %}البيان{% endif %}</th>
-                            {% for h in batch_merged_samples %}
-                            <th colspan="2" class="result-col">
-                                <span class="result-header-index">{{ h.label }}</span>
-                                <span class="result-header-name">{{ h.meta }}</span>
+                            <th class="sample-identity">{% if is_en %}Sample{% else %}العينة{% endif %}</th>
+                            {% for column in batch_result_columns %}
+                            <th>
+                                {{ column.name }}
+                                {% if column.unit %}<span class="parameter-unit">{{ column.unit }}</span>{% endif %}
+                                {% if column.show_family %}<span class="sample-meta">{% if column.family == 'physical' %}{% if is_en %}Visual{% else %}ظاهري{% endif %}{% else %}{% if is_en %}Chemical{% else %}كيميائي{% endif %}{% endif %}</span>{% endif %}
                             </th>
-                            {% endfor %}
-                        </tr>
-                        <tr>
-                            {% for h in batch_merged_samples %}
-                            <th class="result-col">{% if is_en %}Visual{% else %}ظاهري{% endif %}</th>
-                            <th class="result-col">{% if is_en %}Chemical{% else %}كيميائي{% endif %}</th>
                             {% endfor %}
                         </tr>
                     </thead>
                     <tbody>
-                        {% for row in batch_merged_rows %}
+                        {% for row in batch_result_rows %}
                         <tr>
-                            <td class="param-cell">{{ row.name }}</td>
-                            {% for cell in row.cells %}
-                            <td class="result-col">{% if cell.p %}{{ cell.p }}{% endif %}</td>
-                            <td class="minmax-col">{% if cell.c %}{{ cell.c }}{% endif %}</td>
-                            {% endfor %}
+                            <td class="sample-identity">
+                                <strong>{{ row.label }}</strong>
+                                <span class="sample-meta">{{ row.meta }}</span>
+                                {% if row.tested_by and row.tested_by != '-' %}<span class="sample-meta">{% if is_en %}Tested by: {% else %}القائم بالتحليل: {% endif %}{{ row.tested_by }}</span>{% endif %}
+                                {% if row.decision_reason %}<span class="sample-meta">{{ row.decision_reason }}</span>{% endif %}
+                            </td>
+                            {% for value in row.values %}<td class="sample-result">{{ value }}</td>{% endfor %}
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -935,7 +945,9 @@ html[dir="rtl"] body { direction:rtl; text-align:right; }
                                 <div class="timeline-meta">
                                     {{ step.changed_at or "-" }}
                                 </div>
+                                {% if step.reason and step.reason|trim != '' %}
                                 <div class="timeline-reason"><strong>{% if is_en %}Reason:{% else %}سبب القرار{% endif %}</strong> {{ step.reason }}</div>
+                                {% endif %}
                             </div>
                             {% if not loop.last %}
                             <div class="timeline-line"></div>

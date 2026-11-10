@@ -160,7 +160,7 @@ void main() {
         name: 'Acid',
         category: 'liquid',
         unit: 'mL',
-        qty: 10,
+        qty: 0,
         minQty: 1,
       );
       final id = (item['id'] as num).toInt();
@@ -178,8 +178,7 @@ void main() {
       expect(fixed['unit'], 'g');
     });
 
-    test('legacy CHECK migrates: count stores and pc rows normalize',
-        () async {
+    test('legacy CHECK migrates: count stores and pc rows normalize', () async {
       final db = await dbHelper.database;
       // Simulate a pre-count install: old two-value CHECK.
       await db.execute('DROP TABLE lab_inventory');

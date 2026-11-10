@@ -6,6 +6,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_adaptive.dart';
+import '../../../design_system/widgets/app_control_strip.dart';
 import '../../../di/service_locator.dart';
 import '../domain/lab_local_repository.dart';
 import '../domain/lab_result_repository.dart';
@@ -195,35 +196,25 @@ class LabScreen extends StatelessWidget {
               ),
             ),
           ),
-        SizedBox(
-          height: appUsesDesktopChrome(context) ? 46.h : 56,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-            child: Row(
-              children: [
-                for (var i = 0; i < tabs.length; i++)
-                  Padding(
-                    padding: const EdgeInsetsDirectional.only(
-                      start: AppSpacing.sm,
-                    ),
-                    child: ChoiceChip(
-                      label: Text(tabs[i].label),
-                      avatar: Icon(tabs[i].icon, size: 18.r),
-                      selected: tab == i,
-                      materialTapTargetSize: appUsesDesktopChrome(context)
-                          ? MaterialTapTargetSize.shrinkWrap
-                          : MaterialTapTargetSize.padded,
-                      labelStyle: TextStyle(
-                        fontWeight: tab == i
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                      onSelected: (_) => cubit.setTab(i),
-                    ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+          child: AppControlStrip(
+            height: appUsesDesktopChrome(context) ? 46.h : 56,
+            children: [
+              for (var i = 0; i < tabs.length; i++)
+                ChoiceChip(
+                  label: Text(tabs[i].label),
+                  avatar: Icon(tabs[i].icon, size: 18.r),
+                  selected: tab == i,
+                  materialTapTargetSize: appUsesDesktopChrome(context)
+                      ? MaterialTapTargetSize.shrinkWrap
+                      : MaterialTapTargetSize.padded,
+                  labelStyle: TextStyle(
+                    fontWeight: tab == i ? FontWeight.w700 : FontWeight.w500,
                   ),
-              ],
-            ),
+                  onSelected: (_) => cubit.setTab(i),
+                ),
+            ],
           ),
         ),
         Expanded(

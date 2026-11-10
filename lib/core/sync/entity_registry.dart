@@ -181,14 +181,14 @@ final List<SyncEntity> syncEntities = [
       SyncCollection.parameters,
       'parameters',
       'id',
-      'lab_results.update',
+      'reference.update',
     ),
     (
       'materialBound',
       SyncCollection.materialBounds,
       'material_parameter_bounds',
       'id',
-      'lab_results.update',
+      'reference.update',
     ),
     (
       'organizationSetting',
@@ -409,7 +409,7 @@ final List<SyncEntity> syncEntities = [
     localTable: 'lab_products',
     docId: labConfigDocId('lab_products'),
     accepts: labConfigSelector('lab_products'),
-    permission: 'lab_results.update',
+    permission: 'reference.update',
     mutableFields: {
       'payload',
       'configType',
@@ -446,7 +446,7 @@ final List<SyncEntity> syncEntities = [
     localTable: 'lab_product_analyses',
     docId: labConfigDocId('lab_product_analyses'),
     accepts: labConfigSelector('lab_product_analyses'),
-    permission: 'lab_results.update',
+    permission: 'reference.update',
     mutableFields: {
       'payload',
       'configType',
@@ -464,7 +464,7 @@ final List<SyncEntity> syncEntities = [
     localTable: 'lab_units',
     docId: labConfigDocId('lab_units'),
     accepts: labConfigSelector('lab_units'),
-    permission: 'lab_results.update',
+    permission: 'reference.update',
     mutableFields: {
       'payload',
       'configType',
@@ -653,7 +653,7 @@ final List<SyncEntity> syncEntities = [
     localTable: 'reference_materials',
     naturalKeyIdentity: true,
     docId: remoteIdDocId,
-    permission: 'lab_results.update',
+    permission: 'reference.update',
     mutableFields: {
       'materialName',
       'materialCode',

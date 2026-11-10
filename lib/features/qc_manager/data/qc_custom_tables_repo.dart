@@ -115,19 +115,19 @@ class QcCustomTablesRepo extends QcLocalRepo {
     await txn.update(
       'qc_custom_tables',
       stamp,
-      where: 'table_id = ?',
+      where: 'table_id = ? AND deleted_at IS NULL',
       whereArgs: [tableId],
     );
     await txn.update(
       'qc_custom_table_fields',
       stamp,
-      where: 'table_id = ?',
+      where: 'table_id = ? AND deleted_at IS NULL',
       whereArgs: [tableId],
     );
     await txn.update(
       'qc_custom_table_rows',
       stamp,
-      where: 'table_id = ?',
+      where: 'table_id = ? AND deleted_at IS NULL',
       whereArgs: [tableId],
     );
   }

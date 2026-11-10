@@ -80,23 +80,7 @@ class PdfRenderer {
       final doc = pw.Document(
         theme: pw.ThemeData.withFont(base: _baseFont!, bold: _bold()),
       );
-      doc.addPage(
-        pw.Page(
-          pageFormat: _a4(),
-          build: (c) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              _inspectionHeader(ctx),
-              ..._inspectionInfoBlocks(ctx),
-              ..._inspectionResultTables(ctx),
-              ..._inspectionNotes(ctx),
-              ..._inspectionTimeline(ctx),
-              pw.Spacer(),
-              _qrFooter(ctx, marginTop: 8),
-            ],
-          ),
-        ),
-      );
+      _addInspectionPages(doc, ctx);
       return doc.save();
     });
   }
@@ -168,15 +152,11 @@ class PdfRenderer {
   static String _formNo(Map<String, dynamic> ctx) =>
       '${ctx['form_no'] ?? ''}'.trim();
 
-  /// `نموذج رقم / Form No:` line, or null when no form number is configured.
+  /// `Form No:` line, or null when no form number is configured.
   static pw.Widget? _formNoLine(Map<String, dynamic> ctx, {double size = 7}) {
     final formNo = _formNo(ctx);
     if (formNo.isEmpty) return null;
-    return _txt(
-      _t('نموذج رقم / Form No: $formNo', 'Form No: $formNo'),
-      size: size,
-      color: _muted,
-    );
+    return _txt('Form No: $formNo', size: size, color: _muted);
   }
 
   static bool _hasArabic(String? s) {
@@ -253,24 +233,36 @@ class PdfRenderer {
     final doc = pw.Document(
       theme: pw.ThemeData.withFont(base: _baseFont!, bold: _bold()),
     );
-    doc.addPage(
-      pw.Page(
-        pageFormat: _a4(),
-        build: (c) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            _inspectionHeader(ctx),
-            ..._inspectionInfoBlocks(ctx),
-            ..._inspectionResultTables(ctx),
-            ..._inspectionNotes(ctx),
-            ..._inspectionTimeline(ctx),
-            pw.Spacer(),
-            _qrFooter(ctx, marginTop: 8),
-          ],
-        ),
-      ),
-    );
+    _addInspectionPages(doc, ctx);
     return doc.save();
+  }
+
+  static void _addInspectionPages(pw.Document doc, Map<String, dynamic> ctx) {
+    List<pw.Widget> content() => [
+      _inspectionHeader(ctx),
+      ..._inspectionInfoBlocks(ctx),
+      ..._inspectionResultTables(ctx),
+      ..._inspectionNotes(ctx),
+      ..._inspectionTimeline(ctx),
+    ];
+    if (ctx['is_product'] == true) {
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: _a4(),
+          build: (_) => [...content(), _qrFooter(ctx, marginTop: 8)],
+        ),
+      );
+    } else {
+      doc.addPage(
+        pw.Page(
+          pageFormat: _a4(),
+          build: (_) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [...content(), pw.Spacer(), _qrFooter(ctx, marginTop: 8)],
+          ),
+        ),
+      );
+    }
   }
 
   static pw.Widget _organizationBrand(
@@ -460,8 +452,7 @@ class PdfRenderer {
           ),
           if (ctx['decision_reason'] is String &&
               '${ctx['decision_reason']}' != '-' &&
-              '${ctx['decision_reason']}'.isNotEmpty &&
-              ctx['decision_status'] != 'APPROVED') ...[
+              '${ctx['decision_reason']}'.isNotEmpty) ...[
             _spacer(4),
             _txt(
               _t(
@@ -489,7 +480,7 @@ class PdfRenderer {
     final chemical = (ctx['chemical_data'] as List?) ?? const [];
 
     // Product reports carry their results inside the operational-samples
-    // (عينات التشغيلية) merged table below; the header-level references would
+    // (عينات التشغيلية) sample matrix below; the header-level references would
     // only render empty result columns, so they are skipped entirely.
     if (physical.isNotEmpty && !isProduct) {
       widgets.add(_spacer(10));
@@ -598,70 +589,31 @@ class PdfRenderer {
       );
     }
 
-    // Product batch samples (محضر التشغيلية): ONE merged table for all
-    // operational samples — every physical (فحص ظاهري) row first, each
-    // sample showing its physical cell right beside its chemical cell.
     if (ctx['show_batch_samples'] == true) {
-      final mergedSamples = (ctx['batch_merged_samples'] as List?) ?? const [];
-      final mergedRows = (ctx['batch_merged_rows'] as List?) ?? const [];
-      if (mergedSamples.isNotEmpty && mergedRows.isNotEmpty) {
-        widgets.add(_spacer(10));
-        widgets.add(
-          _sectionTitle(
-            _t('عينات التشغيلية / Operational Samples', 'Operational Samples'),
-          ),
-        );
-        widgets.add(_spacer(4));
-        final sampleCount = mergedSamples.length;
-        final cols = <int, pw.FlexColumnWidth>{
-          0: const pw.FlexColumnWidth(2.0),
-        };
-        final header = <String>[_t('البيان / Parameter', 'Parameter')];
-        // Two header rows are not supported by `_simpleTable`'s single-row
-        // header, so the sample label/meta takes the first result column and
-        // the visual/chemical split is signalled via the sub-header row below.
-        for (var i = 0; i < sampleCount; i++) {
-          final h = Map<String, dynamic>.from(mergedSamples[i] as Map);
-          cols[1 + i * 2] = const pw.FlexColumnWidth(1.1);
-          cols[2 + i * 2] = const pw.FlexColumnWidth(1.1);
-          header.addAll(['${h['label'] ?? ''}\n${h['meta'] ?? ''}', '']);
-        }
-        final rows = <List<pw.Widget>>[];
-        final subHeader = <pw.Widget>[_txt('', size: 8.2)];
-        for (var i = 0; i < sampleCount; i++) {
-          subHeader.addAll([
-            _txt(_t('فحص ظاهري', 'Visual'), size: 8, bold: true),
-            _txt(_t('فحص كيميائي', 'Chemical'), size: 8, bold: true),
-          ]);
-        }
-        rows.add(subHeader);
-        for (final rraw in mergedRows) {
-          final row = Map<String, dynamic>.from(rraw as Map);
-          final cells = <pw.Widget>[
-            _txt('${row['name'] ?? ''}', size: 8.5, bold: true),
-          ];
-          for (final craw in (row['cells'] as List?) ?? const []) {
-            final c = Map<String, dynamic>.from(craw as Map);
-            final lines = <pw.Widget>[];
-            if ('${c['p'] ?? ''}'.trim().isNotEmpty) {
-              lines.add(_txt('${c['p']}', size: 8.5));
-            }
-            if ('${c['c'] ?? ''}'.trim().isNotEmpty) {
-              lines.add(_txt('${c['c']}', size: 8.5));
-            }
-            cells.add(
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-                children: lines.isEmpty ? [_txt('')] : lines,
-              ),
-            );
-          }
-          rows.add(cells);
-        }
-        widgets.add(
-          _simpleTable(header, rows, cols, colorHeader: true, zebra: true),
+      final columns = (ctx['batch_result_columns'] as List?) ?? const [];
+      final samples = (ctx['batch_result_rows'] as List?) ?? const [];
+      widgets.add(_spacer(10));
+      widgets.add(_sectionTitle(_t('عينات التشغيلية', 'Operational Samples')));
+      widgets.add(_spacer(4));
+      final header = <String>[_t('العينة', 'Sample')];
+      final widths = <int, pw.FlexColumnWidth>{
+        0: const pw.FlexColumnWidth(2.4),
+      };
+      for (final column in columns) {
+        widths[header.length] = const pw.FlexColumnWidth(1);
+        header.add(
+          '${column['name']}${'${column['unit'] ?? ''}'.isEmpty ? '' : '\n${column['unit']}'}',
         );
       }
+      final rows = <List<pw.Widget>>[
+        for (final sample in samples)
+          [
+            _txt('${sample['label']}\n${sample['meta']}', size: 8, bold: true),
+            for (final value in sample['values'] as List)
+              _txt('$value', size: 8.5),
+          ],
+      ];
+      widgets.add(_simpleTable(header, rows, widths, zebra: true));
     }
     return widgets;
   }
@@ -679,6 +631,7 @@ class PdfRenderer {
     final tr = <pw.TableRow>[];
     tr.add(
       pw.TableRow(
+        repeat: true,
         decoration: pw.BoxDecoration(color: colorHeader ? _light : null),
         children: [
           for (final h in header)
@@ -1119,13 +1072,7 @@ class PdfRenderer {
                 runSpacing: 1,
                 children: [
                   if ('${ctx['form_no'] ?? ''}'.trim().isNotEmpty)
-                    _txt(
-                      _t(
-                        'نموذج رقم / Form No: ${ctx['form_no']}',
-                        'Form No: ${ctx['form_no']}',
-                      ),
-                      size: 7,
-                    ),
+                    _txt('Form No: ${ctx['form_no']}', size: 7),
                 ],
               ),
               _spacer(1),
@@ -1291,14 +1238,7 @@ class PdfRenderer {
               _txt('${label['material_name'] ?? ''}', size: 8.5, bold: true),
               if (formNo.trim().isNotEmpty) ...[
                 _spacer(1),
-                _txt(
-                  _t(
-                    'نموذج رقم / Form No: ${formNo.trim()}',
-                    'Form No: ${formNo.trim()}',
-                  ),
-                  size: 6,
-                  color: _muted,
-                ),
+                _txt('Form No: ${formNo.trim()}', size: 6, color: _muted),
               ],
               _spacer(1),
               _txt(

@@ -111,8 +111,15 @@ class TestHistoryDetailScreen extends StatelessWidget {
     // Write affordances follow the same gate the repository enforces
     // (`labResultsUpdate`): without it the screen is strictly read-only, so a
     // viewer/lab member can inspect a record but never reach the write path.
-    final canEdit = row['secure_result'] != 1 && getIt<AuthGate>().canWrite(Permission.labResultsUpdate);
-    final content = SecureDisplayGuard(access: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null, child: canEdit ? _editor(context) : _readOnly(context));
+    final canEdit =
+        row['secure_result'] != 1 &&
+        getIt<AuthGate>().canWrite(Permission.labResultsUpdate);
+    final content = SecureDisplayGuard(
+      access: getIt.isRegistered<SecureFieldAccess>()
+          ? getIt<SecureFieldAccess>()
+          : null,
+      child: canEdit ? _editor(context) : _readOnly(context),
+    );
     if (fullScreen) {
       return Scaffold(
         appBar: AppTopAppBar(
@@ -174,7 +181,9 @@ class TestHistoryDetailScreen extends StatelessWidget {
               ),
               _info(
                 AppText.t('النتيجة', 'Result'),
-                formatLabResult(row['result_text']),
+                isPendingLabResult(row['result_text'])
+                    ? AppText.t('مسودة غير مكتملة', 'Incomplete draft')
+                    : formatLabResult(row['result_text']),
               ),
               _info(
                 AppText.t('كود الدخول', 'Entry code'),

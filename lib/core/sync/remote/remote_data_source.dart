@@ -356,6 +356,10 @@ abstract interface class GoogleAuthDataSource {
   Future<GoogleAuthResult> signIn({required String clientId});
 
   Future<GoogleAuthResult?> signInSilently({required String clientId});
+
+  /// Clears the plugin's cached tokens/user on **this** adapter so the next
+  /// [signIn] never silently restores the previous account.
+  Future<void> signOut({required String clientId});
 }
 
 class GoogleAuthResult {

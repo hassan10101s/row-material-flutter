@@ -435,13 +435,33 @@ class ReferenceRepo implements ReferenceRepository {
 
   @override
   Future<void> deleteMaterial(int id, [DatabaseExecutor? exec]) async {
+    Future<void> delete(DatabaseExecutor db) async {
+      await ensureMaterialCanBeDeleted(id, db);
+      await db.update(
+        'reference_materials',
+        {'active': 0},
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+    }
+
+    if (exec != null) {
+      await delete(exec);
+    } else {
+      await dbHelper.businessTransaction(delete);
+    }
+  }
+
+  Future<void> ensureMaterialCanBeDeleted(
+    int id, [
+    DatabaseExecutor? exec,
+  ]) async {
     final db = exec ?? await _db;
-    await db.update(
-      'reference_materials',
-      {'active': 0},
-      where: 'id = ?',
-      whereArgs: [id],
+    final linked = await db.rawQuery(
+      'SELECT 1 FROM inspections WHERE material_id = ? LIMIT 1',
+      [id],
     );
+    if (linked.isNotEmpty) throw ValidationError(AppErrors.referenceInUse);
   }
 
   Future<void> _upsertMaterialParameters(
@@ -572,7 +592,9 @@ class ReferenceRepo implements ReferenceRepository {
       limit: 1,
     );
     if (rows.isEmpty) throw NotFoundError(AppErrors.productNotFound);
-    final product = effectiveSecureDefinition(Map<String, dynamic>.from(rows.first));
+    final product = effectiveSecureDefinition(
+      Map<String, dynamic>.from(rows.first),
+    );
     if ((product['active'] as num?) != 1) {
       throw const ValidationError(
         'Selected product is inactive (archived) and cannot be used in a new inspection.',
@@ -779,34 +801,52 @@ class ReferenceRepo implements ReferenceRepository {
 
   @override
   Future<void> deleteParameter(String name, [DatabaseExecutor? exec]) async {
+    Future<void> delete(DatabaseExecutor db) async {
+      await ensureParameterCanBeDeleted(name, db);
+      await db.delete(
+        'parameters',
+        where: 'parameter_name = ?',
+        whereArgs: [name],
+      );
+    }
+
+    if (exec != null) {
+      await delete(exec);
+    } else {
+      await dbHelper.businessTransaction(delete);
+    }
+  }
+
+  Future<void> ensureParameterCanBeDeleted(
+    String name, [
+    DatabaseExecutor? exec,
+  ]) async {
     final db = exec ?? await _db;
-    // Bounds rows and analysis links inherit the NAME from this origin; clear
-    // them so a reference parameter can be removed without FK violations.
     final rows = await db.query(
       'parameters',
       columns: ['id'],
       where: 'parameter_name = ?',
       whereArgs: [name],
     );
-    final pid = rows.isEmpty ? null : rows.first['id'];
-    if (pid != null) {
-      await db.delete(
-        'material_parameter_bounds',
-        where: 'parameter_id = ?',
-        whereArgs: [pid],
-      );
-      await db.update(
-        'lab_analyses',
-        <String, Object?>{'parameter_id': null},
-        where: 'parameter_id = ?',
-        whereArgs: [pid],
-      );
-    }
-    await db.delete(
-      'parameters',
-      where: 'parameter_name = ?',
-      whereArgs: [name],
+    if (rows.isEmpty) return;
+    final parameterId = rows.first['id'];
+    final linkedBounds = await db.query(
+      'material_parameter_bounds',
+      columns: ['id'],
+      where: 'parameter_id = ?',
+      whereArgs: [parameterId],
+      limit: 1,
     );
+    final linkedAnalyses = await db.query(
+      'lab_analyses',
+      columns: ['id'],
+      where: 'parameter_id = ?',
+      whereArgs: [parameterId],
+      limit: 1,
+    );
+    if (linkedBounds.isNotEmpty || linkedAnalyses.isNotEmpty) {
+      throw ValidationError(AppErrors.referenceInUse);
+    }
   }
 
   // ── Lab units ─────────────────────────────────────────────────
@@ -865,8 +905,36 @@ class ReferenceRepo implements ReferenceRepository {
 
   @override
   Future<void> deleteUnit(String symbol, [DatabaseExecutor? exec]) async {
+    Future<void> delete(DatabaseExecutor db) async {
+      await ensureUnitCanBeDeleted(symbol, db);
+      await db.delete('lab_units', where: 'symbol = ?', whereArgs: [symbol]);
+    }
+
+    if (exec != null) {
+      await delete(exec);
+    } else {
+      await dbHelper.businessTransaction(delete);
+    }
+  }
+
+  Future<void> ensureUnitCanBeDeleted(
+    String symbol, [
+    DatabaseExecutor? exec,
+  ]) async {
     final db = exec ?? await _db;
-    await db.delete('lab_units', where: 'symbol = ?', whereArgs: [symbol]);
+    final trimmed = symbol.trim();
+    final tables = (await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type = 'table'",
+    )).map((row) => '${row['name']}').toSet();
+    for (final (table, column) in unitSources) {
+      if (!tables.contains(table)) continue;
+      final rows = await db.rawQuery(
+        'SELECT 1 FROM "$table" '
+        'WHERE TRIM(COALESCE("$column", \'\')) = ? LIMIT 1',
+        [trimmed],
+      );
+      if (rows.isNotEmpty) throw ValidationError(AppErrors.referenceInUse);
+    }
   }
 
   /// Every table/column whose unit strings belong to the `lab_units` registry.

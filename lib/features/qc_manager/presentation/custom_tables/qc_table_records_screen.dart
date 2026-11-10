@@ -9,13 +9,14 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_exceptions.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/widgets/app_adaptive.dart';
 import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_adaptive_list.dart';
+import '../../../../../design_system/widgets/app_autocomplete_overlay.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_date_field.dart';
@@ -40,7 +41,7 @@ import '../cubit/qc_table_rows_cubit.dart';
 /// Record listing is the design-system data table (`AppPaginatedTable`):
 /// every column of the definition renders as a table column, rows are
 /// selectable (hidden checkbox column, long-press a row or tap the header
-/// toggle) and the selection exports as an HTML table file. On phones the
+/// toggle) and the selection exports as a templated PDF. On phones the
 /// same register falls back to the card list with the long-press affordance.
 class QcTableRecordsScreen extends StatelessWidget {
   const QcTableRecordsScreen._({required this.title, this.asWindow = false});
@@ -205,7 +206,7 @@ class _RecordToolbar extends StatelessWidget {
 }
 
 /// The register's action row: the filters toggle plus the table-export
-/// button. Export writes the SELECTED rows as a design-system HTML table
+/// button. Export writes the SELECTED rows as a templated PDF
 /// when anything is picked, otherwise all currently visible ones — so the
 /// button works both as a bulk action for the checkbox column and as a
 /// one-click "export what I see".
@@ -235,7 +236,7 @@ class _ActionBar extends StatelessWidget {
         AppButton(
           small: true,
           style: AppButtonStyle.ghost,
-          icon: Icon(Icons.table_view_outlined, size: 18.r),
+          icon: Icon(Icons.picture_as_pdf_outlined, size: 18.r),
           label: count > 0
               ? AppText.t('تصدير ($count)', 'Export ($count)')
               : AppText.t('تصدير الجدول', 'Export table'),
@@ -258,8 +259,7 @@ class _ActionBar extends StatelessWidget {
   }
 }
 
-/// The register as a design-system HTML table file (`TableHtmlExport`, the
-/// same shared export every ledger uses). Selected rows go first — in
+/// The register as a templated PDF. Selected rows go first — in
 /// table order; with nothing picked all currently visible rows export.
 Future<void> exportRowsTable(BuildContext context) async {
   final state = context.read<QcTableRowsCubit>().state;
@@ -281,7 +281,7 @@ Future<void> exportRowsTable(BuildContext context) async {
   }
 
   try {
-    await TableHtmlExport.export(
+    await TablePdfExport.export(
       context,
       filePrefix: 'qc_table',
       title: table?.title ?? AppText.t('سجل جدول', 'Table register'),
@@ -986,6 +986,9 @@ class _RecordFormState extends State<_RecordForm> {
             : _prefill(widget.editing!.values[f.remoteId]),
       ),
   };
+  late final Map<int, FocusNode> _valueFocusNodes = {
+    for (final f in widget.state.fields) f.fieldId!: FocusNode(),
+  };
   final TextEditingController _note = TextEditingController();
 
   @override
@@ -1002,6 +1005,9 @@ class _RecordFormState extends State<_RecordForm> {
   void dispose() {
     for (final c in _valueInputs.values) {
       c.dispose();
+    }
+    for (final node in _valueFocusNodes.values) {
+      node.dispose();
     }
     _note.dispose();
     super.dispose();
@@ -1174,6 +1180,14 @@ class _RecordFormState extends State<_RecordForm> {
       );
     }
     final number = f.colType == QcCustomColType.number;
+    if (!number && f.colType == QcCustomColType.text) {
+      return _buildTextFieldWithSuggestions(
+        f,
+        controller,
+        last: last,
+        autofocus: !_saving && index == 0,
+      );
+    }
     return AppField(
       label: number
           ? AppText.t('${f.label} (رقم)', '${f.label} (number)')
@@ -1204,6 +1218,91 @@ class _RecordFormState extends State<_RecordForm> {
       validator: (v) => _validate(f, v),
       autovalidateMode: AutovalidateMode.onUserInteraction,
     );
+  }
+
+  Widget _buildTextFieldWithSuggestions(
+    QcCustomTableField field,
+    TextEditingController controller, {
+    required bool last,
+    required bool autofocus,
+  }) {
+    final suggestions = _textSuggestions(field);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return RawAutocomplete<String>(
+          textEditingController: controller,
+          focusNode: _valueFocusNodes[field.fieldId!]!,
+          optionsBuilder: (value) {
+            final query = value.text.trim().toLowerCase();
+            if (query.isEmpty) return const Iterable<String>.empty();
+            return suggestions.where(
+              (suggestion) =>
+                  suggestion.toLowerCase().startsWith(query) &&
+                  suggestion.toLowerCase() != query,
+            );
+          },
+          optionsViewBuilder: autocompleteOverlayView<String>(
+            fieldWidth: constraints.maxWidth,
+            titleOf: (suggestion) => suggestion,
+          ),
+          fieldViewBuilder: (context, fieldController, focusNode, submit) {
+            return AppField(
+              label: field.label,
+              controller: fieldController,
+              focusNode: focusNode,
+              enabled: !_saving,
+              suffix: Icon(
+                Icons.text_fields_rounded,
+                size: 18.r,
+                color: AppColors.textMuted,
+              ),
+              autofocus: autofocus,
+              textInputAction: last
+                  ? TextInputAction.done
+                  : TextInputAction.next,
+              onFieldSubmitted: (value) {
+                final query = value.trim().toLowerCase();
+                final hasSuggestions = suggestions.any(
+                  (suggestion) =>
+                      suggestion.toLowerCase().startsWith(query) &&
+                      suggestion.toLowerCase() != query,
+                );
+                if (hasSuggestions) {
+                  submit();
+                } else {
+                  _submitField(last);
+                }
+              },
+              validator: (value) => _validate(field, value),
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+            );
+          },
+        );
+      },
+    );
+  }
+
+  List<String> _textSuggestions(QcCustomTableField field) {
+    if (widget.editing != null) return const [];
+    final seen = <String>{};
+    final suggestions = <String>[];
+    for (final row in widget.state.rows) {
+      if (row.isDeleted) continue;
+      final value = row.values[field.remoteId];
+      if (value is! String) continue;
+      final suggestion = value.trim();
+      if (suggestion.isEmpty || !seen.add(suggestion.toLowerCase())) continue;
+      suggestions.add(suggestion);
+    }
+    return suggestions;
+  }
+
+  void _submitField(bool last) {
+    if (last) {
+      _save();
+    } else {
+      FocusScope.of(context).nextFocus();
+    }
   }
 }
 

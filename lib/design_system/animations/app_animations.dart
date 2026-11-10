@@ -2,7 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../core/responsive/form_factor.dart';
+
 /// In-app page route with a subtle fade + slide transition.
+///
+/// Selected desktop routes can use a fade only, avoiding mobile-style motion.
 class AppPageRoute<T> extends PageRouteBuilder<T> {
   /// Notifier for app-wide appearance changes that need route content rebuilt.
   ///
@@ -16,6 +20,7 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
     super.settings,
     required WidgetBuilder builder,
     Duration duration = const Duration(milliseconds: 240),
+    bool desktopFadeOnly = false,
   }) : super(
          transitionDuration: duration,
          reverseTransitionDuration: Duration(
@@ -30,6 +35,9 @@ class AppPageRoute<T> extends PageRouteBuilder<T> {
            );
          },
          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+           if (desktopFadeOnly && FormFactor.current.isDesktop) {
+             return FadeTransition(opacity: animation, child: child);
+           }
            final slide = SlideTransition(
              position: Tween<Offset>(
                begin: const Offset(0, 0.018),
@@ -70,6 +78,7 @@ class AppPage<T> extends Page<T> {
   const AppPage({
     required this.builder,
     this.duration = const Duration(milliseconds: 240),
+    this.desktopFadeOnly = false,
     super.key,
     super.name,
   });
@@ -77,9 +86,16 @@ class AppPage<T> extends Page<T> {
   final WidgetBuilder builder;
   final Duration duration;
 
+  /// Omits the slide for this route on desktop while preserving it on mobile.
+  final bool desktopFadeOnly;
+
   @override
-  Route<T> createRoute(BuildContext context) =>
-      AppPageRoute<T>(settings: this, builder: builder, duration: duration);
+  Route<T> createRoute(BuildContext context) => AppPageRoute<T>(
+    settings: this,
+    builder: builder,
+    duration: duration,
+    desktopFadeOnly: desktopFadeOnly,
+  );
 }
 
 /// Fades + slides its child in once, with an optional delay.

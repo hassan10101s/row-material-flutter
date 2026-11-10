@@ -345,6 +345,78 @@ void main() {
       expect(afterDown.last['event_type'], 'REVERSAL');
     });
 
+    test('draft edits do not consume until a result is run', () async {
+      await db.delete(
+        'inventory_lots',
+        where: 'inventory_id = ?',
+        whereArgs: [titerId],
+      );
+      await repo.receiveLot(
+        inventoryId: titerId,
+        qty: 40,
+        expiryDate: '2027-01-01',
+        executor: db,
+      );
+      final draftAnalysis = await repo.createAnalysis(
+        name: 'Draft promotion check',
+        unit: '%',
+        dynamicFields: ['Titer'],
+        fieldChemicalLinks: [
+          {
+            'dynamic_field': 'Titer',
+            'kind': 'link',
+            'inventory_id': titerId,
+            'unit': 'mL',
+          },
+        ],
+      );
+      final draftAnalysisId = (draftAnalysis['id'] as num).toInt();
+      final result = await repo.runSampleTest(
+        analysisId: draftAnalysisId,
+        sourceType: 'raw_material',
+        sourceName: 'Wheat',
+        sampleName: 'Draft sample',
+        dynamicValues: {'Titer': '3'},
+        draftOnly: true,
+        user: null,
+      );
+      final testId = (result['test'] as Map)['id'] as int;
+      expect(
+        await repo.hasCompletedResultsForAnalysis(draftAnalysisId),
+        isFalse,
+      );
+      expect('${(await testRow(testId))['result_text']}', isEmpty);
+      expect(await titerQty(), 40.0);
+      expect(await logs(testId), isEmpty);
+
+      await repo.updateSampleTest(
+        testId,
+        analysisId: draftAnalysisId,
+        sourceType: 'sample',
+        sourceRefId: null,
+        sourceName: 'Draft sample updated',
+        sampleName: 'Draft sample updated',
+        dynamicValues: {'Titer': '5'},
+      );
+      expect(await titerQty(), 40.0);
+      expect(await logs(testId), isEmpty);
+      expect((await testRow(testId))['source_type'], 'sample');
+      expect((await testRow(testId))['source_ref_id'], isNull);
+
+      await repo.updateSampleTest(
+        testId,
+        resultText: '12',
+        dynamicValues: {'Titer': '5'},
+      );
+      expect((await testRow(testId))['result_text'], '12');
+      expect(
+        await repo.hasCompletedResultsForAnalysis(draftAnalysisId),
+        isTrue,
+      );
+      expect(await titerQty(), 35.0);
+      expect((await logs(testId)).last['event_type'], 'CONSUMPTION');
+    });
+
     test('an uncovered increase refuses the whole edit', () async {
       await db.delete(
         'inventory_lots',

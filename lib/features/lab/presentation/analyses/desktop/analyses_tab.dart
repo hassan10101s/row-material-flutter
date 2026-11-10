@@ -12,7 +12,7 @@ import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../../design_system/widgets/app_window.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../analysis_editor.dart';
 import '../../cubit/analyses_cubit.dart';
 import '../../cubit/analyses_state.dart';
@@ -90,7 +90,7 @@ class DesktopAnalysesTab extends StatelessWidget {
           AnalysesHeader(
             onAdd: () => _openEditor(context),
             canExport: state.rows.isNotEmpty,
-            onExportTable: () => TableHtmlExport.export(
+            onExportTable: () => TablePdfExport.export(
               context,
               filePrefix: 'analyses',
               title: AnalysesTable.exportTitle(),

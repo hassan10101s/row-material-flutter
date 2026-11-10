@@ -126,7 +126,7 @@ abstract interface class ReferenceRepository {
     String parameterType = 'chemical',
   });
 
-  /// Removes a parameter and the bounds/analysis links that inherited its name.
+  /// Removes a parameter only when no material bounds or analyses use it.
   Future<void> deleteParameter(String name);
 
   // ── Lab units ──────────────────────────────────────────────────

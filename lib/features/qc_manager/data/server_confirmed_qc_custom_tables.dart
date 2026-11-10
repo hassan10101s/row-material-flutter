@@ -20,7 +20,8 @@ import 'qc_custom_tables_repo.dart';
 /// QC table definitions and records use explicit server-confirmed writes.
 /// SQLite is the approved read cache, and offline edits remain manual drafts.
 /// A definition is capped at nine columns and must remain one atomic command.
-class ServerConfirmedQcCustomTablesRepository implements QcCustomTablesRepository {
+class ServerConfirmedQcCustomTablesRepository
+    implements QcCustomTablesRepository {
   ServerConfirmedQcCustomTablesRepository({
     required this._local,
     required this._guard,
@@ -392,25 +393,26 @@ class ServerConfirmedQcCustomTablesRepository implements QcCustomTablesRepositor
           ),
         );
       }
-      final rows = await _local.listRows(tableId, limit: 50000, exec: txn);
+      final rows = await _local.listRows(tableId, limit: 1, exec: txn);
+      if (rows.isNotEmpty) {
+        throw ValidationError(
+          AppText.t(
+            'احذف سجلات الجدول أولاً، ثم احذف الجدول. يجب اعتماد حذف كل سجل على حدة.',
+            "Delete this table's records first. Each record must be confirmed "
+                'as a separate deletion before deleting the table.',
+          ),
+        );
+      }
       final now = nowIso();
       await _local.tombstoneAll(tableId, now, exec: txn);
-      // Every child is tombstoned with its own version bump so the pull on
-      // another device converges on the same shape: an orphaned record of a
-      // dead table must not resurrect as a chip there.
+      // The deployed atomic rules support a table and its fields together,
+      // but rows are a separate operation family. Keep the table deletion
+      // within that verified contract.
       for (final field in bundle.fields) {
         await _enqueue(
           txn,
           entityType: 'qcCustomTableField',
           row: {...field.toMap(), 'deleted_at': now, 'updated_at': now},
-          operation: 'tombstone',
-        );
-      }
-      for (final row in rows) {
-        await _enqueue(
-          txn,
-          entityType: 'qcCustomTableRow',
-          row: {...row.toMap(), 'deleted_at': now, 'updated_at': now},
           operation: 'tombstone',
         );
       }

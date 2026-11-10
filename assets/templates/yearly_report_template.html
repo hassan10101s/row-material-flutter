@@ -486,7 +486,7 @@ html[dir="rtl"] body { direction:rtl; text-align:right; }
             <h1>{% if is_en %}Yearly raw material report{% else %}تقرير الخامات السنوي{% endif %}</h1>
             <p>{% if is_en %}For the year{% else %}للعام الميلادي{% endif %} {{ year }}</p>
             <p style="font-size: 10px;">{{ department_label }}</p>
-            {% if form_no %}<p style="font-size: 10px;">{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
+            {% if form_no %}<p style="font-size: 10px;">Form No: {{ form_no }}</p>{% endif %}
         </div>
 
         <div class="accent-strip"></div>

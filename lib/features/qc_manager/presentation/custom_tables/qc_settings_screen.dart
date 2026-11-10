@@ -114,20 +114,24 @@ class _SettingsBodyState extends State<_SettingsBody> {
       icon: Icons.delete_outline,
       title: AppText.t('حذف الجدول؟', 'Delete table?'),
       message: AppText.t(
-        'سيحذف الجدول وأعمدته وتسجيلاته. لا يمكن التراجع.',
-        'The table, its columns and its records will be deleted. '
-            'This cannot be undone.',
+        'احذف سجلات الجدول أولاً من صفحة الجدول، ثم احذف الجدول وأعمدته. لا يمكن التراجع.',
+        "Delete the table's records from its page first, then delete the "
+            'table and its columns. This cannot be undone.',
       ),
       confirmLabel: AppText.t('حذف', 'Delete'),
       cancelLabel: AppText.t('إلغاء', 'Cancel'),
     );
     if (confirmed != true || !context.mounted) return;
     try {
-      await context.read<QcCustomTablesCubit>().deleteTable(table.tableId!);
-      if (context.mounted) {
+      final deleted = await context.read<QcCustomTablesCubit>().deleteTable(
+        table.tableId!,
+      );
+      if (deleted && context.mounted) {
         AppFeedback.success(context, AppText.t('تم الحذف', 'Deleted.'));
       }
-    } catch (_) {}
+    } catch (error) {
+      if (context.mounted) AppFeedback.errorFrom(context, error);
+    }
   }
 
   Future<void> _openRecords(BuildContext context, QcCustomTable table) async {

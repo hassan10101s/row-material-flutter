@@ -9,6 +9,8 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/constants/app_strings.dart';
+import '../../../../app/auth_gate.dart';
+import '../../../../core/auth/permissions.dart';
 import '../../../../core/platform/camera_permission.dart';
 import '../../../../core/security/local_secret.dart';
 import '../../../../core/security/qr_payload.dart';
@@ -40,10 +42,11 @@ enum _CameraState { checking, ready, denied, unavailable }
 /// codes printed by this app are accepted: new prints carry the `ML1.`
 /// envelope (entry-code pointer + sealed body), legacy prints are the bare
 /// sealed token or the bare JSON, and everything else is rejected outright.
-/// The screen is never offered outside Android (see the scan button in
-/// [InspectionsScreen]).
+/// The shared mobile launcher is the only camera entry point.
 class QrScanScreen extends StatefulWidget {
-  const QrScanScreen({super.key});
+  const QrScanScreen({super.key, this.replaceOnOpen = false});
+
+  final bool replaceOnOpen;
 
   @override
   State<QrScanScreen> createState() => _QrScanScreenState();
@@ -118,7 +121,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
   }
 
   void _onDetect(BarcodeCapture capture) {
-    if (_handled) return;
+    if (_handled || _busy) return;
     final raw = capture.barcodes.firstOrNull?.rawValue;
     if (raw == null || raw.trim().isEmpty) return;
     _handled = true;
@@ -127,6 +130,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
   }
 
   Future<void> _searchManual() async {
+    if (_busy || _handled) return;
     final code = _manual.text.trim();
     if (code.isEmpty) {
       setState(() {
@@ -137,11 +141,25 @@ class _QrScanScreenState extends State<QrScanScreen> {
       });
       return;
     }
-    await _lookup(code);
+    _handled = true;
+    unawaited(_controller?.stop());
+    if (tryParseAppQr(code) != null) {
+      await _resolveQr(code);
+    } else if (code.toUpperCase().startsWith('EQ-')) {
+      await _lookupEquipment(code);
+    } else {
+      await _lookup(code);
+    }
   }
 
   /// Parses scanned text, then opens its inspection immediately.
   Future<void> _resolveQr(String raw) async {
+    if (mounted) {
+      setState(() {
+        _busy = true;
+        _error = null;
+      });
+    }
     final parsed = tryParseAppQr(raw);
     if (parsed == null) {
       if (!mounted) return;
@@ -157,7 +175,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
     }
     var entryCode = parsed.entryCode;
     final body = parsed.body;
-    final kind = parsed.kind;
+    var kind = parsed.kind;
     if (body.startsWith(sealedTextPrefix)) {
       // Tamper check when verifiable: a sealed body that opens but points
       // at a different code than the envelope is a forged print.
@@ -168,6 +186,12 @@ class _QrScanScreenState extends State<QrScanScreen> {
           try {
             final decoded = jsonDecode(plain);
             if (decoded is Map) {
+              final sealedKind = '${decoded['kind'] ?? ''}';
+              if (!parsed.legacy && sealedKind != kind) {
+                _rejectUnknownTarget();
+                return;
+              }
+              kind = sealedKind;
               final sealedCode = '${decoded['ec'] ?? ''}';
               if (sealedCode.isNotEmpty) {
                 if (entryCode.isNotEmpty && sealedCode != entryCode) {
@@ -216,17 +240,51 @@ class _QrScanScreenState extends State<QrScanScreen> {
     }
     // Equipment labels point at a device code (`EQ-0001`), not an entry
     // code: open the device file (card + event log) instead of an inspection.
-    if (kind == appQrKindEquipment) {
-      await _lookupEquipment(entryCode);
-      return;
+    switch (kind) {
+      case appQrKindEquipment:
+        await _lookupEquipment(entryCode);
+      case '':
+        await _lookup(entryCode);
+      default:
+        _rejectUnknownTarget();
     }
-    await _lookup(entryCode);
+  }
+
+  void _rejectUnknownTarget() {
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _error = AppText.t(
+        'نوع الرمز غير مدعوم أو لا يطابق محتواه. حدّث التطبيق أو راجع مصدر الرمز.',
+        'The code type is unsupported or does not match its content. Update the app or check the code source.',
+      );
+    });
+    _rearm();
+  }
+
+  bool _mayOpen(Permission permission) {
+    final gate = getIt.isRegistered<AuthGate>() ? getIt<AuthGate>() : null;
+    if (gate != null && gate.isAuthenticated && gate.session.can(permission)) {
+      return true;
+    }
+    if (mounted) {
+      setState(() {
+        _busy = false;
+        _error = AppText.t(
+          'ليس لديك صلاحية عرض هذا السجل.',
+          'You do not have permission to view this record.',
+        );
+      });
+      _rearm();
+    }
+    return false;
   }
 
   /// Loads the inspection by entry code from the local database and opens
   /// it at once — the inspection itself comes from the database (the
   /// trusted channel), never from the QR text.
   Future<void> _lookup(String entryCode) async {
+    if (!_mayOpen(Permission.samplesRead)) return;
     if (mounted) {
       setState(() {
         _busy = true;
@@ -278,6 +336,7 @@ class _QrScanScreenState extends State<QrScanScreen> {
   /// (device card + event log) at once — same trust model as inspections:
   /// the record comes from the database, never from the QR text.
   Future<void> _lookupEquipment(String code) async {
+    if (!_mayOpen(Permission.labResultsRead)) return;
     if (mounted) {
       setState(() {
         _busy = true;
@@ -306,12 +365,15 @@ class _QrScanScreenState extends State<QrScanScreen> {
         return;
       }
       setState(() => _busy = false);
-      await Navigator.of(context).push<void>(
-        AppPageRoute(
-          builder: (_) =>
-              EquipmentDetailScreen(equipmentId: (row!['id'] as num).toInt()),
-        ),
+      final route = AppPageRoute<void>(
+        builder: (_) =>
+            EquipmentDetailScreen(equipmentId: (row!['id'] as num).toInt()),
       );
+      if (widget.replaceOnOpen) {
+        await Navigator.of(context).pushReplacement<void, void>(route);
+      } else {
+        await Navigator.of(context).push<void>(route);
+      }
       if (!mounted) return;
       _scanAgain();
     } catch (e) {
@@ -344,26 +406,36 @@ class _QrScanScreenState extends State<QrScanScreen> {
   }
 
   Future<void> _openInspection(int id) async {
+    Widget detail() => BlocProvider(
+      create: (_) => InspectionDetailCubit(
+        secureAccess: getIt.isRegistered<SecureFieldAccess>()
+            ? getIt<SecureFieldAccess>()
+            : null,
+        inspectionId: id,
+        repo: getIt<InspectionRepository>(),
+        reports: getIt<ReportRepository>(),
+        labResults: getIt<LabResultRepository>(),
+      )..load(),
+      child: InspectionDetailScreen(inspectionId: id),
+    );
+    if (widget.replaceOnOpen) {
+      await Navigator.of(
+        context,
+      ).pushReplacement<bool, void>(AppPageRoute(builder: (_) => detail()));
+      return;
+    }
     await showAppContentSurface<bool>(
       context,
       builder: (_, fullScreen) {
-        final detail = BlocProvider(
-          create: (_) => InspectionDetailCubit(secureAccess: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null,
-            inspectionId: id,
-            repo: getIt<InspectionRepository>(),
-            reports: getIt<ReportRepository>(),
-            labResults: getIt<LabResultRepository>(),
-          )..load(),
-          child: InspectionDetailScreen(inspectionId: id),
-        );
+        final content = detail();
         return fullScreen
-            ? detail
+            ? content
             : AppWindow(
                 title: AppText.t('تفاصيل الفحص', 'Inspection Details'),
                 icon: Icons.fact_check_outlined,
                 size: AppWindowSize.lg,
                 scrollBody: false,
-                child: detail,
+                child: content,
               );
       },
     );
@@ -457,8 +529,8 @@ class _QrScanScreenState extends State<QrScanScreen> {
           children: [
             Text(
               AppText.t(
-                'أو ابحث برقم القيد المطبوع تحت الرمز',
-                'Or search by the entry code printed under the code',
+                'أو اكتب رقم القيد أو كود الجهاز المطبوع تحت الرمز',
+                'Or enter the entry code or equipment code printed under the code',
               ),
               style: TextStyle(fontSize: 13.spMax, color: AppColors.textMuted),
             ),
@@ -467,7 +539,10 @@ class _QrScanScreenState extends State<QrScanScreen> {
               children: [
                 Expanded(
                   child: AppField(
-                    label: AppText.t('رقم القيد', 'Entry code'),
+                    label: AppText.t(
+                      'رقم القيد أو كود الجهاز',
+                      'Entry or equipment code',
+                    ),
                     controller: _manual,
                     onFieldSubmitted: (_) => _searchManual(),
                   ),

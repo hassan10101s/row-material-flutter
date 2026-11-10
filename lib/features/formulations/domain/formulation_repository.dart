@@ -16,4 +16,5 @@ abstract interface class FormulationRepository {
   );
   Future<int> save(Map<String, dynamic> record, {int? id});
   Future<void> archive(int id);
+  Future<void> delete(int id);
 }

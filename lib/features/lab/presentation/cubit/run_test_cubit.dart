@@ -353,6 +353,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
     bool manualResult = false,
     Map<String, dynamic>? user,
     String? entryCode,
+    bool draftOnly = false,
   }) async {
     if (state.analysisId == null) {
       throw ValidationError(
@@ -393,6 +394,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
         user: user,
         entryCode: effectiveEntry,
         manualResult: manualResult,
+        draftOnly: draftOnly,
       );
     } finally {
       safeEmit(state.copyWith(running: false));
@@ -408,6 +410,7 @@ class RunTestCubit extends AppCubit<RunTestState> {
     required String resultText,
     required Map<String, dynamic> dynamicValues,
     Map<String, dynamic>? user,
+    bool updateBasicDetails = false,
   }) async {
     final id = int.tryParse('${editRow?['id'] ?? ''}');
     if (id == null) throw const AppError('تعذّر حفظ التعديل');
@@ -415,6 +418,21 @@ class RunTestCubit extends AppCubit<RunTestState> {
     try {
       return await results.updateSampleTest(
         id,
+        analysisId: updateBasicDetails ? state.analysisId : null,
+        sourceType: updateBasicDetails ? state.sourceType : null,
+        sourceRefId: updateBasicDetails
+            ? state.sourceType == 'sample'
+                  ? null
+                  : state.sourceType == 'product'
+                  ? state.productId
+                  : state.rawMaterialId
+            : null,
+        sourceName: updateBasicDetails
+            ? state.sourceType == 'sample'
+                  ? sampleName.trim()
+                  : state.selectedInspection['material_name'] ??
+                        state.sourceName
+            : null,
         sampleName: sampleName,
         resultText: resultText,
         dynamicValues: dynamicValues,

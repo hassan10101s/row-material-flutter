@@ -1,9 +1,12 @@
+import 'dart:convert' show jsonEncode;
+
 import 'package:intl/intl.dart';
 
 import '../../lab/core/formula_engine.dart';
 import '../../lab/core/lab_result_format.dart';
 import '../../lab/domain/product_batch_repository.dart'
     show decodeBatchChemical, decodeBatchPhysical;
+import '../../inspections/domain/inspection_decision_history.dart';
 import '../../qc_manager/data/ncr_export_service.dart';
 import '../../reference/data/reference_repo.dart';
 import '../../../core/utils/report_language.dart';
@@ -237,9 +240,8 @@ List<Map<String, dynamic>> buildStatusTimeline(
   Map<String, dynamic> inspection,
 ) {
   final timeline = <Map<String, dynamic>>[];
-  final raw = (inspection['status_history'] as List<dynamic>?) ?? const [];
-  for (final rawRow in raw.reversed) {
-    if (rawRow is! Map) continue;
+  final raw = inspectionDecisionHistory(inspection);
+  for (final rawRow in raw) {
     final statusCode = '${rawRow['new_status'] ?? ''}';
     if (!decisionCodes.contains(statusCode)) continue;
     final info = decisionMeta(statusCode);
@@ -248,7 +250,7 @@ List<Map<String, dynamic>> buildStatusTimeline(
       'label_ar': info['label_ar'],
       'label_en': info['label_en'],
       'css_class': info['css_class'],
-      'reason': '${rawRow['change_reason'] ?? '-'}',
+      'reason': '${rawRow['change_reason'] ?? ''}',
       'version': '${rawRow['version'] ?? ''}',
       'changed_at': '${rawRow['changed_at'] ?? ''}',
     });
@@ -256,8 +258,7 @@ List<Map<String, dynamic>> buildStatusTimeline(
   return timeline;
 }
 
-/// QA form number printed on a printed document
-/// (`نموذج رقم / Form No:`), editable from the gear buttons.
+/// QA form number printed on a printed document (`Form No:`), editable from the gear buttons.
 ///
 /// Reads the form's own [key] first; when that is empty it falls back to the
 /// legacy global `qa_form_no`, then to the legacy equipment-label key.
@@ -359,65 +360,58 @@ Map<String, dynamic> buildInspectionContext(
         'chemical_results': chemical,
       });
     }
-    // Product-only merged view: one table carrying every operational sample —
-    // all physical (فحص ظاهري) rows on top, each sample's chemical column right
-    // beside it. The header-level physical/chemical tables stay empty for
-    // products (values live per sample), so the report renders this only.
-    final mergedSamples = <Map<String, dynamic>>[];
-    final mergedRows = <Map<String, dynamic>>[];
-    if (isProduct && batchSamples.isNotEmpty) {
-      for (final s in batchSamples) {
-        mergedSamples.add({
-          'label': '${s['sample_no'] ?? ''} • ${s['sample_name'] ?? ''}',
-          'meta':
-              '${s['sample_taker'] ?? '-'} • ${s['tested_at'] ?? ''} • ${s['decision_label'] ?? ''}',
-        });
-      }
-      final physicalNames = <String>[];
-      final chemicalNames = <String>[];
-      final physicalCells = <String, List<String>>{};
-      final chemicalCells = <String, List<String>>{};
-      for (var i = 0; i < batchSamples.length; i++) {
-        final s = batchSamples[i];
-        for (final rraw in (s['physical_results'] as List?) ?? const []) {
-          final r = Map<String, dynamic>.from(rraw as Map);
-          final name = '${r['analysis_name'] ?? ''}';
-          if (!physicalCells.containsKey(name)) {
-            physicalNames.add(name);
-            physicalCells[name] = List.filled(batchSamples.length, '');
-          }
-          physicalCells[name]![i] = '${r['result_text'] ?? ''}';
-        }
-        for (final rraw in (s['chemical_results'] as List?) ?? const []) {
-          final r = Map<String, dynamic>.from(rraw as Map);
-          final name = '${r['analysis_name'] ?? ''}';
-          if (!chemicalCells.containsKey(name)) {
-            chemicalNames.add(name);
-            chemicalCells[name] = List.filled(batchSamples.length, '');
-          }
-          final result = '${r['result_text'] ?? ''}';
-          final unit = '${r['unit'] ?? ''}'.trim();
-          chemicalCells[name]![i] = unit.isEmpty ? result : '$result $unit';
+    // One row per sample and one column per parameter. A parameter's unit
+    // and family are part of its identity so different readings never collide.
+    final resultColumns = <Map<String, dynamic>>[];
+    final resultRows = <Map<String, dynamic>>[];
+    final valuesBySample = <Map<String, String>>[];
+    final columnsByKey = <String, Map<String, dynamic>>{};
+    for (final sample in batchSamples) {
+      final values = <String, String>{};
+      for (final family in ['physical', 'chemical']) {
+        for (final raw in sample['${family}_results'] as List) {
+          final row = raw as Map;
+          final name = '${row['analysis_name'] ?? ''}'.trim();
+          if (name.isEmpty) continue;
+          final unit = '${row['unit'] ?? ''}'.trim();
+          final key = jsonEncode([family, name, unit]);
+          columnsByKey.putIfAbsent(
+            key,
+            () => {'key': key, 'name': name, 'unit': unit, 'family': family},
+          );
+          final value = '${row['result_text'] ?? '-'}';
+          values[key] = values.containsKey(key)
+              ? '${values[key]} / $value'
+              : value;
         }
       }
-      for (final name in physicalNames) {
-        mergedRows.add({
-          'name': name,
-          'cells': [
-            for (var i = 0; i < batchSamples.length; i++)
-              {'p': physicalCells[name]![i], 'c': ''},
-          ],
-        });
-      }
-      for (final name in chemicalNames) {
-        mergedRows.add({
-          'name': name,
-          'cells': [
-            for (var i = 0; i < batchSamples.length; i++)
-              {'p': '', 'c': chemicalCells[name]![i]},
-          ],
-        });
-      }
+      valuesBySample.add(values);
+    }
+    for (final family in ['physical', 'chemical']) {
+      resultColumns.addAll(
+        columnsByKey.values.where((column) => column['family'] == family),
+      );
+    }
+    for (final column in resultColumns) {
+      column['show_family'] =
+          resultColumns
+              .where((other) => other['name'] == column['name'])
+              .length >
+          1;
+    }
+    for (var i = 0; i < batchSamples.length; i++) {
+      final sample = batchSamples[i];
+      resultRows.add({
+        'label': '${sample['sample_no']} • ${sample['sample_name']}',
+        'meta':
+            '${sample['sample_taker']} • ${sample['tested_at']} • ${sample['decision_label']}',
+        'tested_by': sample['tested_by'],
+        'decision_reason': sample['decision_reason'],
+        'values': [
+          for (final column in resultColumns)
+            valuesBySample[i][column['key']] ?? '-',
+        ],
+      });
     }
     return {
       'inspection_id': inspection['id'] ?? '-',
@@ -438,8 +432,8 @@ Map<String, dynamic> buildInspectionContext(
       'physical_data': physicalData,
       'chemical_data': chemicalData,
       'batch_samples': batchSamples,
-      'batch_merged_samples': mergedSamples,
-      'batch_merged_rows': mergedRows,
+      'batch_result_columns': resultColumns,
+      'batch_result_rows': resultRows,
       'show_batch_samples': isProduct && batchSamples.isNotEmpty,
       'decision_status': inspection['decision_status'],
       'decision_label': ReportText.t(

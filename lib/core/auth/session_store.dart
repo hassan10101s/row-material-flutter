@@ -1,4 +1,5 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 
 import 'app_session.dart';
 
@@ -24,6 +25,7 @@ class SessionStore {
           );
 
   static const String key = 'ml_session_v2';
+  static const String signedOutKey = 'ml_signed_out_v1';
 
   final FlutterSecureStorage _storage;
 
@@ -51,6 +53,20 @@ class SessionStore {
       return null;
     }
   }
+
+  Future<bool> isSignOutPending() async {
+    try {
+      return await _storage.read(key: signedOutKey) == 'true';
+    } on Object catch (e) {
+      debugPrint('[auth] sign-out marker could not be read: $e');
+      return true;
+    }
+  }
+
+  Future<void> markSignedOut() =>
+      _storage.write(key: signedOutKey, value: 'true');
+
+  Future<void> allowSignIn() => _storage.delete(key: signedOutKey);
 
   Future<void> clear() => _storage.delete(key: key);
 }

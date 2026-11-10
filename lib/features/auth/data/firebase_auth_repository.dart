@@ -91,14 +91,25 @@ class FirebaseAuthRepository implements AuthRepository {
 
   @override
   Future<AuthState> restoreSession() async {
+    final epoch = _authEpoch;
+    if (await sessionStore.isSignOutPending()) {
+      if (epoch != _authEpoch) return _state;
+      await signOut();
+      return AuthState.signedOut;
+    }
+    if (epoch != _authEpoch) return _state;
     if (bootstrap.isUnconfigured) return _set(AuthState.needsBootstrap);
     _deviceId = await metadata.ensureDeviceId(_generateDeviceId);
+    if (epoch != _authEpoch) return _state;
     if (identities != null) {
       _deviceId = await identities!.loadOrMigrate(_deviceId);
+      if (epoch != _authEpoch) return _state;
       await metadata.set(SyncMetadata.deviceIdKey, _deviceId);
+      if (epoch != _authEpoch) return _state;
     }
 
     final cached = await sessionStore.restore();
+    if (epoch != _authEpoch) return _state;
     if (cached != null &&
         SessionPolicy.requiresSignIn(
           cached.signedInAt,
@@ -111,6 +122,7 @@ class FirebaseAuthRepository implements AuthRepository {
     if (cached != null) _session = cached;
     if (connectivity.isOnline && remote.isConfigured) {
       final user = await remote.currentUser();
+      if (epoch != _authEpoch) return _state;
       if (user != null) return _set(await resolveProfile(user: user));
       await signOut();
       return AuthState.signedOut;
@@ -133,12 +145,18 @@ class FirebaseAuthRepository implements AuthRepository {
           _session = _session.copyWith(organizationStatus: OrgStatus.suspended);
           await _persistSession();
           await dbHelper.bindOrg(null);
+          if (epoch != _authEpoch) return _state;
           return _set(AuthState.awaitingActivation);
         }
         await _bindOrganization(_session.organizationId);
+        if (epoch != _authEpoch) {
+          await dbHelper.bindOrg(null);
+          return _state;
+        }
         return _set(AuthState.ready);
       }
       await dbHelper.bindOrg(null);
+      if (epoch != _authEpoch) return _state;
       return _set(AuthState.awaitingActivation);
     }
     return _set(AuthState.signedOut);
@@ -159,6 +177,7 @@ class FirebaseAuthRepository implements AuthRepository {
     }
     try {
       await remote.signInWithGoogle();
+      await sessionStore.allowSignIn();
     } on GoogleSignInException catch (e) {
       final code = _googleCode(e.message);
       debugPrint('[auth] google sign-in failed ($code): ${e.message}');
@@ -193,6 +212,7 @@ class FirebaseAuthRepository implements AuthRepository {
     }
     try {
       await remote.signInWithEmail(email: email, password: password);
+      await sessionStore.allowSignIn();
       final user = await remote.currentUser();
       if (user == null) {
         throw AuthFailure(
@@ -224,6 +244,7 @@ class FirebaseAuthRepository implements AuthRepository {
     }
     try {
       await remote.createPasswordAccount(email: email, password: password);
+      await sessionStore.allowSignIn();
       final user = await remote.currentUser();
       if (user == null) {
         throw AuthFailure(
@@ -335,6 +356,7 @@ class FirebaseAuthRepository implements AuthRepository {
         organizationId: '',
       );
       await dbHelper.bindOrg(null);
+      if (epoch != _authEpoch) return _state;
       return _set(AuthState.noProfile);
     }
 
@@ -438,7 +460,10 @@ class FirebaseAuthRepository implements AuthRepository {
       return _set(AuthState.awaitingActivation);
     }
     await _bindOrganization(_session.organizationId);
-    if (epoch != _authEpoch) return _state;
+    if (epoch != _authEpoch) {
+      await dbHelper.bindOrg(null);
+      return _state;
+    }
     await _persistSession();
     if (epoch != _authEpoch) return _state;
 
@@ -597,20 +622,33 @@ class FirebaseAuthRepository implements AuthRepository {
     _authEpoch++;
     _session = kEmptySession;
     _state = AuthState.signedOut;
-    await sessionStore.clear();
-    // Plan §3: leaving/sign-out drops the local binding (the company database
-    // is closed) and stops the sync cycle; records stay server-side as audit
-    // history and are never hard-deleted here.
-    await dbHelper.bindOrg(null);
     try {
-      await onSignedOut?.call();
-    } on Object {
-      // Stopping the engine must not block the local sign-out.
+      await sessionStore.markSignedOut();
+    } on Object catch (e) {
+      debugPrint('[auth] sign-out marker could not be saved: $e');
     }
     try {
       await remote.signOut();
-    } on Object {
-      // A failing network sign-out must not block the local sign-out.
+    } on Object catch (e) {
+      debugPrint('[auth] Firebase sign-out failed: $e');
+    }
+    try {
+      await sessionStore.clear();
+    } on Object catch (e) {
+      debugPrint('[auth] cached session could not be cleared: $e');
+    }
+    // Plan §3: leaving/sign-out drops the local binding (the company database
+    // is closed) and stops the sync cycle; records stay server-side as audit
+    // history and are never hard-deleted here.
+    try {
+      await dbHelper.bindOrg(null);
+    } on Object catch (e) {
+      debugPrint('[auth] organization database could not be unbound: $e');
+    }
+    try {
+      await onSignedOut?.call();
+    } on Object catch (e) {
+      debugPrint('[auth] sync shutdown after sign-out failed: $e');
     }
     _emit();
   }
@@ -624,12 +662,15 @@ class FirebaseAuthRepository implements AuthRepository {
   /// locally the session is dropped exactly like [signOut].
   @override
   Future<void> signOutThisDevice() async {
-    try {
-      await devices?.signOutThisDevice();
-    } on Object {
-      // Offline or revoked: the local sign-out below must still happen.
-    }
+    final revoke = devices?.signOutThisDevice();
     await signOut();
+    if (revoke != null) {
+      try {
+        await revoke.timeout(const Duration(seconds: 5));
+      } on Object catch (e) {
+        debugPrint('[auth] device revocation did not complete: $e');
+      }
+    }
   }
 
   // ── Internals ───────────────────────────────────────────────────────────

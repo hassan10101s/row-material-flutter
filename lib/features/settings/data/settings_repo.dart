@@ -135,7 +135,7 @@ class SettingsRepo implements SettingsRepository {
       'export_root_path': ?exportRoot,
       'whatsapp_launch_url': 'https://web.whatsapp.com/',
       'department_label': 'Quality Assurance Department',
-      // Per-form QA form numbers (`نموذج رقم / Form No:` on the printed
+      // Per-form QA form numbers (`Form No: ` on the printed
       // document), each editable from the gear button beside its own report
       // or label. `qa_form_no` is the legacy global value, kept as a fallback
       // for any form whose own key is still empty.

@@ -143,6 +143,37 @@ void main() {
       expect(out, isNot(contains(r'{{')));
     });
 
+    test('decision reason stays visible after approval', () {
+      final row = _row()
+        ..['decision_status'] = 'APPROVED'
+        ..['decision_reason'] = 'Accepted after retest';
+      final ctx = buildInspectionContext(row, settings: settings)
+        ..['qr_image_data_uri'] = '';
+      final out = tinyJinjaRender(_tpl('report_template.html'), ctx);
+
+      expect(ctx['show_decision_reason'], isTrue);
+      expect(out, contains('Accepted after retest'));
+    });
+
+    test('initial decision appears in report timeline without update rows', () {
+      final row = _row()
+        ..['decision_status'] = 'FULL_REJECTION'
+        ..['decision_reason'] = 'Moisture above limit'
+        ..['decision_version'] = 1
+        ..['created_at'] = '2026-11-09T10:00:00';
+      final ctx = buildInspectionContext(row, settings: settings);
+
+      expect(ctx['status_timeline'], hasLength(1));
+      expect(
+        (ctx['status_timeline'] as List).single['label_en'],
+        'Full Rejection',
+      );
+      expect(
+        (ctx['status_timeline'] as List).single['reason'],
+        'Moisture above limit',
+      );
+    });
+
     test('report_template.html (product batch samples, own results)', () {
       final row = _row(entryCode: 'BATCH-50T')
         ..['inspection_kind'] = 'product'

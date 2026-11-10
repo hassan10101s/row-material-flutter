@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:material_lab/core/app_paths.dart';
 import 'package:material_lab/features/formulations/presentation/formulation_view_prefs.dart';
@@ -312,6 +313,137 @@ void main() {
     await tester.runAsync(() => directory.delete(recursive: true));
   });
 
+  testWidgets(
+    'phone delete asks for confirmation and only deletes the selected formula',
+    (tester) async {
+      FormFactor.debugSet(AppFormFactor.mobile);
+      when(() => repo.delete(1)).thenAnswer((_) async {});
+      await tester.pumpWidget(
+        ScreenUtilInit(
+          designSize: const Size(400, 860),
+          builder: (_, _) =>
+              const MaterialApp(home: Scaffold(body: FormulationsScreen())),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Delete formulation'));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete formulation?'), findsOneWidget);
+      verifyNever(() => repo.delete(any()));
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      verifyNever(() => repo.delete(any()));
+      await tester.tap(find.byTooltip('Delete formulation'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+      verify(() => repo.delete(1)).called(1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'phone daily lab-only graph opens, switches sources and handles chart taps',
+    (tester) async {
+      FormFactor.debugSet(AppFormFactor.mobile);
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      when(() => repo.list(archived: any(named: 'archived'))).thenAnswer(
+        (_) async => [
+          {
+            'id': 1,
+            'name': 'Daily lab only',
+            'items_json':
+                '[{"material_id":1,"material_name":"Maize","quantity_kg":100}]',
+            'parameters_json':
+                '{"period":"month","from":"2026-01-01","chart_interval":"day","data_source":"lab"}',
+            'graph_parameters_json': '["protein","fat"]',
+          },
+        ],
+      );
+      var reads = 0;
+      when(() => repo.receipts(any(), any(), any())).thenAnswer((_) async {
+        reads++;
+        return [
+          MaterialReceipt(
+            materialId: 1,
+            code: 'R1',
+            receivedAt: DateTime(2026, 1, 1),
+            source: 'lab',
+            values: const {'protein': 12},
+            inspectionValues: const {'protein': 10, 'fat': 5},
+            labHistory: {
+              'protein': [
+                ParameterObservation(
+                  sample: 'A',
+                  at: DateTime(2026, 1, 10),
+                  value: 12,
+                ),
+                ParameterObservation(
+                  sample: 'A',
+                  at: DateTime(2026, 1, 15),
+                  value: null,
+                ),
+                ParameterObservation(
+                  sample: 'A',
+                  at: DateTime(2026, 1, 20),
+                  value: 14,
+                ),
+              ],
+            },
+          ),
+        ];
+      });
+      await tester.pumpWidget(
+        ScreenUtilInit(
+          designSize: const Size(400, 860),
+          builder: (_, _) =>
+              const MaterialApp(home: Scaffold(body: FormulationsScreen())),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Open the graph'));
+      await tester.pump();
+      Future<void> finishTracking() async {
+        for (var attempt = 0; attempt < 500; attempt++) {
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+          await tester.pump();
+          if (find.byType(CircularProgressIndicator).evaluate().isEmpty) break;
+        }
+        await tester.pumpAndSettle();
+      }
+
+      await finishTracking();
+      expect(find.byType(LineChart), findsOneWidget);
+      final readsAtOpen = reads;
+      for (final source in [
+        FormulationDataSource.all,
+        FormulationDataSource.lab,
+        FormulationDataSource.nir,
+        FormulationDataSource.lab,
+      ]) {
+        tester
+            .widget<AppSelectField<FormulationDataSource>>(
+              find.byKey(const ValueKey('formulation-data-source')),
+            )
+            .onChanged!(source);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
+        await finishTracking();
+        final chart = find.byType(LineChart);
+        await tester.ensureVisible(chart);
+        await tester.tap(chart);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+      expect(reads, readsAtOpen);
+      verifyNever(() => repo.save(any(), id: any(named: 'id')));
+    },
+  );
+
   testWidgets('rapid daily Min and Max changes keep the newest worker result', (
     tester,
   ) async {
@@ -575,6 +707,57 @@ void main() {
           tester.getTopLeft(cards.at(0)).dy,
           closeTo(tester.getTopLeft(cards.at(1)).dy, 1),
         );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  for (final width in [320.0, 390.0]) {
+    testWidgets(
+      'phone $width card fits the long unavailable-reference pill it displays',
+      (tester) async {
+        FormFactor.debugSet(AppFormFactor.mobile);
+        final size = Size(width, 844);
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.reset);
+        when(
+          () => repo.list(archived: any(named: 'archived')),
+        ).thenAnswer((call) async {
+          if (call.namedArguments[#archived] == true) return <Map<String, dynamic>>[];
+          return [
+            {
+              'id': 2,
+              'name': 'Long label regression',
+              'items_json': jsonEncode(
+                List.generate(12, (index) => {'material_id': index + 2}),
+              ),
+              'parameters_json': '{"period":"day"}',
+              '_missing_references': true,
+              'calculation_json': '{"total_kg":1234.5,"cost_per_kg":12.345}',
+              'updated_at': '2026-01-15 10:00',
+            },
+          ];
+        });
+        await tester.pumpWidget(
+          ScreenUtilInit(
+            designSize: size,
+            builder: (_, _) => const MaterialApp(home: FormulationsScreen()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        // The card truly displays both pills: the long unavailable-reference
+        // label and the twelve-ingredient count.
+        expect(
+          find.text('A material or product is unavailable on this device'),
+          findsOneWidget,
+        );
+        expect(find.text('12 ingredients'), findsOneWidget);
+        final longPill = tester.widget<Text>(
+          find.text('A material or product is unavailable on this device'),
+        );
+        expect(longPill.maxLines, 1);
+        expect(longPill.overflow, TextOverflow.ellipsis);
         expect(tester.takeException(), isNull);
       },
     );

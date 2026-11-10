@@ -1375,11 +1375,11 @@ void main() {
         );
         await seed('users/$uid', {
           ...profile,
-          'roles': ['lab', 'nutritionist'],
+          'roles': ['lab', 'nutritionist', 'viewer'],
         });
         await seed('organizations/$_org/members/$memberId', {
           ...member,
-          'roles': ['lab', 'nutritionist'],
+          'roles': ['lab', 'nutritionist', 'viewer'],
         });
         await seed('organizations/$_org/devices/dev_$uid', {
           'uid': uid,
@@ -1445,7 +1445,7 @@ void main() {
         );
         for (final roles in [
           <String>[],
-          ['lab', 'viewer'],
+          ['lab', 'admin'],
           ['lab', 'unknown'],
           ['lab', 'lab'],
         ]) {

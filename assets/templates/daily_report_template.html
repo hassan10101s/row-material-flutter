@@ -523,7 +523,7 @@ html[dir="rtl"] body { direction:rtl; text-align:right; }
               <div class="eyebrow">{% if is_en %}Raw material inspections{% else %}فحص الخامات{% endif %}</div>
               <h1 class="title">{% if is_en %}Daily raw material report{% else %}تقرير الخامات اليومي{% endif %}</h1>
               <p class="subtitle">{{ department_label }}</p>
-              {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
+              {% if form_no %}<p class="subtitle">Form No: {{ form_no }}</p>{% endif %}
               <p class="subtitle">{{ formatted_date }} | {{ date_str }}</p>
               {% if shift_label %}
               <p

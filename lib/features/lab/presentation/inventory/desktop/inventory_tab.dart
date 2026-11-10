@@ -12,7 +12,7 @@ import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../../core/formula_engine.dart';
 import '../../cubit/inventory_cubit.dart';
 import '../../cubit/inventory_state.dart';
@@ -112,7 +112,7 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
   }
 
   Future<void> _exportAll(List<Map<String, dynamic>> rows) =>
-      TableHtmlExport.export(
+      TablePdfExport.export(
         context,
         filePrefix: 'inventory',
         title: DesktopInventoryTab.exportTitle(),
@@ -125,7 +125,7 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
       for (var i = 0; i < rows.length; i++)
         if (_selected.contains(i)) rows[i],
     ];
-    await TableHtmlExport.export(
+    await TablePdfExport.export(
       context,
       filePrefix: 'inventory',
       title: DesktopInventoryTab.exportTitle(),

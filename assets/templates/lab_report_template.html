@@ -456,7 +456,7 @@ html[dir="rtl"] body { direction:rtl; text-align:right; }
               <span class="eyebrow">{% if is_en %}Lab Tests{% else %}تحاليل المعمل{% endif %}</span>
               <h1 class="title">{{ title }}</h1>
               <p class="subtitle">{{ period_label }}</p>
-              {% if form_no %}<p class="subtitle">{% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}</p>{% endif %}
+              {% if form_no %}<p class="subtitle">Form No: {{ form_no }}</p>{% endif %}
             </div>
             <div class="header-side"></div>
           </div>

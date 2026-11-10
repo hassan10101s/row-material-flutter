@@ -41,6 +41,7 @@ void main() {
     connectivity = _MockConnectivity();
     metadata = _MockSyncMetadata();
     when(() => remote.isConfigured).thenReturn(true);
+    when(() => store.allowSignIn()).thenAnswer((_) async {});
   });
 
   FirebaseAuthRepository build() => FirebaseAuthRepository(

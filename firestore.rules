@@ -195,9 +195,11 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
       let consumption = first.protocol.entityType == 'labResult';
       let product = first.protocol.entityType == 'labProduct';
       let simple = first.protocol.entityType in 'parameter,materialBound,organizationSetting,labConstant,labUnit,equipment,equipmentEvent,worksheet,referenceMaterial,labMaterialAnalysis,nutritionFormulation,qcCustomTableRow'.split(',');
-      let types = table ? ['qcCustomTable','qcCustomTableField'] : consumption ? ['consumption','inventoryTransaction','inventoryLot','inventoryItem','secureFieldSubmission'] : simple ? 'parameter,materialBound,organizationSetting,labConstant,labUnit,equipment,equipmentEvent,worksheet,referenceMaterial,labMaterialAnalysis,nutritionFormulation,qcCustomTableRow'.split(',') : ['labAnalysis','labAnalysisItem','labFieldLink','labUnit'];
+      let rt = ['qcAudit','qcItem','qcSection','qcTemplate'];
+      let routine = first.protocol.entityType in rt;
+      let types = table ? ['qcCustomTable','qcCustomTableField'] : consumption ? ['consumption','inventoryTransaction','inventoryLot','inventoryItem','secureFieldSubmission'] : simple ? 'parameter,materialBound,organizationSetting,labConstant,labUnit,equipment,equipmentEvent,worksheet,referenceMaterial,labMaterialAnalysis,nutritionFormulation,qcCustomTableRow'.split(',') : routine ? rt : ['labAnalysis','labAnalysisItem','labFieldLink','labUnit'];
       return e.records.size() > 0 && e.records.size() <= (simple ? 12 : 10)
-        && (product ? e.records.size() <= 7 : (table || consumption || simple || e.records.size() <= 6))
+        && (product ? e.records.size() <= 7 : (table || consumption || simple || routine || e.records.size() <= 6))
         && e.organizationId == orgId && first.organizationId == orgId
         && first.deviceId == e.deviceId && first.centralSequence == e.sequence
         && e.recordPaths.toSet().size() == e.records.size()
@@ -1451,7 +1453,7 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
         && roles[0] == primaryRole
         && roles.hasOnly(['admin','quality_manager','lab','nutritionist','viewer','trial_owner'])
         && roles.toSet().size() == roles.size()
-        && (roles.size() == 1 || !roles.hasAny(['admin','viewer','trial_owner']));
+        && (roles.size() == 1 || !roles.hasAny(['admin','trial_owner']));
     }
 
     function rolesMatch(a, b) {
@@ -1472,7 +1474,7 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
         'qc.read','qc.write','qc.approve','qc.reject',
         'reports.read','reports.create','reports.export',
         'devices.read','devices.register','devices.update','audit.read',
-        'formulations.read','formulations.create','formulations.update'
+        'formulations.read','formulations.create','formulations.update','reference.update'
       ] : role == 'trial_owner' ? [
         'org.read',
         'samples.read','samples.create','samples.update',
@@ -1486,13 +1488,13 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
         'lab_results.read','lab_results.create','lab_results.update',
         'qc.read','qc.write','qc.approve','qc.reject',
         'reports.read','reports.create','reports.export','devices.register','audit.read',
-        'formulations.read'
+        'formulations.read','reference.update'
       ] : role == 'lab' ? [
         'org.read','users.read',
         'samples.read','samples.create','samples.update',
         'lab_results.read','lab_results.create','lab_results.update',
         'qc.read','qc.write','qc.approve','qc.reject',
-        'reports.read','reports.create','reports.export','devices.register','audit.read','formulations.read'
+        'reports.read','reports.create','reports.export','devices.register','audit.read','formulations.read','reference.update'
       ] : role == 'viewer' ? [
         'org.read','samples.read','lab_results.read','qc.read','reports.read','reports.export','devices.register',
         'formulations.read'
@@ -1543,6 +1545,11 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
             && doc.data.role in ['quality_manager','lab','trial_owner']) ? true
         : (perm in ['qc.approve','qc.reject'] && doc.data.role in ['quality_manager','lab']) ? true
         : roleCanRoles(perm, doc.data));
+    }
+    function labConfigCanWrite(configType, action) {
+      return roleCan(configType in ['lab_products','lab_product_analyses','lab_units']
+        ? 'reference.update'
+        : (configType.matches('nutrition_.*') ? 'formulations.' : 'lab_results.') + action);
     }
     function roleCanRoles(perm, data) {
       let roles = rolesOf(data);
@@ -2224,8 +2231,8 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
           return request.resource.data.remoteId == docId && (shape_parameter(orgId, request.resource.data));
         }
         allow read: if can(orgId, 'samples.read');
-        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
-        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
+        allow create: if roleCan('reference.update') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('reference.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
       match /materialBounds/{docId} {
@@ -2233,8 +2240,8 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
           return request.resource.data.remoteId == docId && (shape_materialBound(orgId, request.resource.data));
         }
         allow read: if can(orgId, 'samples.read');
-        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
-        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
+        allow create: if roleCan('reference.update') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('reference.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
       match /organizationSettings/{docId} {
@@ -2354,11 +2361,9 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
         allow read: if resource != null && (resource.data.configType == 'secure_field_submissions'
           ? secureReveal(orgId) : (resource.data.configType.matches('nutrition_.*')
             ? can(orgId, 'formulations.read') : can(orgId, 'samples.read')));
-        allow create: if (request.resource.data.configType.matches('nutrition_.*')
-          ? roleCan('formulations.create') : roleCan('lab_results.create'))
+        allow create: if labConfigCanWrite(request.resource.data.configType, 'create')
           && hasEnvelope(orgId) && directShape();
-        allow update: if (request.resource.data.configType.matches('nutrition_.*')
-          ? roleCan('formulations.update') : roleCan('lab_results.update'))
+        allow update: if labConfigCanWrite(request.resource.data.configType, 'update')
           && request.resource.data.configType == resource.data.configType
           && bumped(orgId) && directShape();
         allow delete: if false;
@@ -2452,8 +2457,8 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
           return request.resource.data.remoteId == docId && (shape_referenceMaterial(orgId, request.resource.data));
         }
         allow read: if can(orgId, 'samples.read');
-        allow create: if roleCan('lab_results.create') && hasEnvelope(orgId) && directShape();
-        allow update: if roleCan('lab_results.update') && bumped(orgId) && directShape();
+        allow create: if roleCan('reference.update') && hasEnvelope(orgId) && directShape();
+        allow update: if roleCan('reference.update') && bumped(orgId) && directShape();
         allow delete: if false;
       }
 

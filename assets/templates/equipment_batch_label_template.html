@@ -259,7 +259,7 @@ html[dir="rtl"] body { direction:rtl; text-align:right; }
                                     <div class="info-value {{ 'overdue' if lbl.overdue else '' }}">{{ lbl.next_calibration_date or '-' }}</div>
                                 </div>
                             </div>
-                            <div class="label-footer">{{ department_label }}{% if form_no %} | {% if is_en %}Form No: {% else %}نموذج رقم {% endif %}{{ form_no }}{% endif %}</div>
+                            <div class="label-footer">{{ department_label }}{% if form_no %} | Form No: {{ form_no }}{% endif %}</div>
                         </div>
                     </div>
                     <div class="label-qr-col">

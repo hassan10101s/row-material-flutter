@@ -141,7 +141,7 @@ class SelectionActionBar extends StatefulWidget {
   final Future<void> Function() onExportLabels;
   final VoidCallback onClear;
 
-  /// Optional generic table export (HTML file, same as every register):
+  /// Optional generic table export (templated PDF, same as every register):
   /// shown as a third action when provided.
   final Future<void> Function()? onExportTable;
 

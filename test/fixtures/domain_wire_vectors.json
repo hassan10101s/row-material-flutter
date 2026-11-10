@@ -4,7 +4,7 @@
       "writes": [
         {
           "entityType": "sample",
-          "entityId": "62235810-ab07-4d1b-8a17-784b1b31031f",
+          "entityId": "3dada632-0a48-4263-b982-0c758a41df25",
           "operation": "create",
           "expectedVersion": 0,
           "payload": {
@@ -41,7 +41,7 @@
             "publicPrivacyEpoch": 0,
             "version": 1,
             "deletedAt": null,
-            "remoteId": "62235810-ab07-4d1b-8a17-784b1b31031f",
+            "remoteId": "3dada632-0a48-4263-b982-0c758a41df25",
             "updatedBy": "uid_admin",
             "deviceId": "dev_1",
             "organizationId": "org_test",
@@ -58,14 +58,14 @@
         }
       ]
     },
-    "payloadHash": "03cf71794d3623a0f645c31d874f1aea65732c84165023edbb0539ec382da400"
+    "payloadHash": "7d285f123d15d53c084b3b63d798e8d3d9041a15b1d012c0a0383ac83aff3c05"
   },
   "inventory": {
     "payload": {
       "writes": [
         {
           "entityType": "inventoryItem",
-          "entityId": "7d28f9a4-8d8a-4b2f-9aef-cd53f1dc196c",
+          "entityId": "34b11028-d5cb-4bb6-9d04-385859610147",
           "operation": "create",
           "expectedVersion": 0,
           "payload": {
@@ -80,7 +80,7 @@
             "updatedAt": "__SERVER_TIMESTAMP__",
             "version": 1,
             "deletedAt": null,
-            "remoteId": "7d28f9a4-8d8a-4b2f-9aef-cd53f1dc196c",
+            "remoteId": "34b11028-d5cb-4bb6-9d04-385859610147",
             "updatedBy": "uid_admin",
             "deviceId": "dev_1",
             "organizationId": "org_test",
@@ -90,12 +90,12 @@
         },
         {
           "entityType": "inventoryLot",
-          "entityId": "14b69c92-ec9f-421a-8f82-fc6bbee9554b",
+          "entityId": "61b441fe-0d82-4bf0-9013-d729779b6642",
           "operation": "create",
           "expectedVersion": 0,
           "payload": {
             "localId": 1,
-            "remoteId": "14b69c92-ec9f-421a-8f82-fc6bbee9554b",
+            "remoteId": "61b441fe-0d82-4bf0-9013-d729779b6642",
             "inventoryId": 1,
             "inventoryRemoteId": null,
             "lotNo": "L-0001",
@@ -105,7 +105,7 @@
             "supplier": "",
             "note": "",
             "receivedBy": null,
-            "receivedAt": "2026-11-08 08:21:45",
+            "receivedAt": "2026-11-09 20:03:08",
             "updatedAt": "__SERVER_TIMESTAMP__",
             "updatedBy": "uid_admin",
             "deviceId": "dev_1",
@@ -118,21 +118,21 @@
           "relations": {
             "inventoryId": {
               "entityType": "inventoryItem",
-              "entityId": "7d28f9a4-8d8a-4b2f-9aef-cd53f1dc196c",
+              "entityId": "34b11028-d5cb-4bb6-9d04-385859610147",
               "expectedVersion": 0
             }
           }
         },
         {
           "entityType": "inventoryTransaction",
-          "entityId": "6c842c40-93b5-469e-8a9c-340179d91e7d",
+          "entityId": "2af7cc5e-b26d-440b-8fed-d8db6f093da9",
           "operation": "create",
           "expectedVersion": 0,
           "payload": {
             "localId": 1,
-            "remoteId": "6c842c40-93b5-469e-8a9c-340179d91e7d",
+            "remoteId": "2af7cc5e-b26d-440b-8fed-d8db6f093da9",
             "inventoryId": 1,
-            "inventoryRemoteId": "7d28f9a4-8d8a-4b2f-9aef-cd53f1dc196c",
+            "inventoryRemoteId": "34b11028-d5cb-4bb6-9d04-385859610147",
             "quantityDelta": 10.0,
             "transactionType": "OPENING_BALANCE",
             "referenceType": null,
@@ -151,14 +151,14 @@
           "relations": {
             "inventoryId": {
               "entityType": "inventoryItem",
-              "entityId": "7d28f9a4-8d8a-4b2f-9aef-cd53f1dc196c",
+              "entityId": "34b11028-d5cb-4bb6-9d04-385859610147",
               "expectedVersion": 0
             }
           }
         }
       ]
     },
-    "payloadHash": "76c639ff5d4a9e43753a2c9980364fc817a80780341ecdd9653fd135d37c1831"
+    "payloadHash": "c41741647e919e4d27c323ae3b9e4f4d48191bd83fe6b49b881d4584c5404e53"
   },
   "qualityDecision": {
     "payload": {
@@ -218,7 +218,7 @@
         },
         {
           "entityType": "qualityCheck",
-          "entityId": "7244b371-391d-4048-b27d-69dc2fd0bf36",
+          "entityId": "7d75aead-dfe9-4113-a1b6-3d894fe4a85b",
           "operation": "create",
           "expectedVersion": 0,
           "payload": {
@@ -232,9 +232,9 @@
             "rejectedQuantity": "",
             "changedBy": "uid_admin",
             "changedByName": "Test Admin",
-            "changedAt": "2026-11-08 08:21:45",
+            "changedAt": "2026-11-09 20:03:08",
             "deletedAt": null,
-            "remoteId": "7244b371-391d-4048-b27d-69dc2fd0bf36",
+            "remoteId": "7d75aead-dfe9-4113-a1b6-3d894fe4a85b",
             "updatedAt": "__SERVER_TIMESTAMP__",
             "updatedBy": "uid_admin",
             "deviceId": "dev_1",
@@ -253,7 +253,7 @@
         }
       ]
     },
-    "payloadHash": "058ee3bdee35362f411c32a97a52648c936e09b2b4f452f6e62daa3715265d89",
+    "payloadHash": "f639b4be258c5ee9e2ac8155bef4cfce2a04b1dd35a29dd5b94bc3e50a0e7b52",
     "current": {
       "entryCode": "WIRE-EXISTING",
       "materialId": 1,

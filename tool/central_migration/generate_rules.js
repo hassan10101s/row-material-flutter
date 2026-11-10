@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const manifest = require('./domain_manifest.json');
-const {maxBusinessEffects, maxLabDefinitionEffects, maxProductReferenceEffects, maxSimpleBusinessEffects, simpleEntityTypes: simpleTypes, maxChemicalDefinitions, maxChemicalDefinitionProofBlocks} = require('./release_limits.json');
+const {maxBusinessEffects, maxLabDefinitionEffects, maxProductReferenceEffects, maxSimpleBusinessEffects, simpleEntityTypes: simpleTypes, routineListEntityTypes: routineTypes, maxChemicalDefinitions, maxChemicalDefinitionProofBlocks} = require('./release_limits.json');
 const tableTypes = ['qcCustomTable','qcCustomTableField'];
 const labTypes = ['labAnalysis','labAnalysisItem','labFieldLink','labUnit'];
 const consumptionTypes = ['labResult','consumption','inventoryTransaction','inventoryLot','inventoryItem','secureFieldSubmission'];
@@ -272,9 +272,11 @@ ${Array.from({length:4},(_,i)=>`        && (e.records.size() <= ${i} || effectAt
       let consumption = first.protocol.entityType == 'labResult';
       let product = first.protocol.entityType == 'labProduct';
       let simple = first.protocol.entityType in ${literal(simpleTypes)};
-      let types = table ? ${literal(tableTypes)} : consumption ? ${literal(consumptionTypes.filter(t=>t!=='labResult'))} : simple ? ${literal(simpleTypes)} : ${literal(labTypes)};
+      let rt = ${literal(routineTypes)};
+      let routine = first.protocol.entityType in rt;
+      let types = table ? ${literal(tableTypes)} : consumption ? ${literal(consumptionTypes.filter(t=>t!=='labResult'))} : simple ? ${literal(simpleTypes)} : routine ? rt : ${literal(labTypes)};
       return e.records.size() > 0 && e.records.size() <= (simple ? ${maxSimpleBusinessEffects} : ${maxBusinessEffects})
-        && (product ? e.records.size() <= ${maxProductReferenceEffects} : (table || consumption || simple || e.records.size() <= ${maxLabDefinitionEffects}))
+        && (product ? e.records.size() <= ${maxProductReferenceEffects} : (table || consumption || simple || routine || e.records.size() <= ${maxLabDefinitionEffects}))
         && e.organizationId == orgId && first.organizationId == orgId
         && first.deviceId == e.deviceId && first.centralSequence == e.sequence
         && e.recordPaths.toSet().size() == e.records.size()

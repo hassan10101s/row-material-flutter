@@ -36,15 +36,19 @@ void main() {
       );
     });
 
-    test('a viewer keeps org.read screens, read-only', () {
-      final s = session();
-      expect(s.permissions.contains(Permission.orgRead), isTrue);
-      expect(AppRouter.guardRoute(AppRoutes.settings, s), AppRoutes.dashboard);
+    test('every role can view reference data', () {
+      for (final role in AppRoles.all) {
+        final s = session(role: role);
+        expect(s.permissions.contains(Permission.samplesRead), isTrue);
+        expect(
+          AppRouter.guardRoute(AppRoutes.reference, s),
+          isNull,
+          reason: role,
+        );
+      }
       expect(
-        AppRouter.guardRoute(AppRoutes.reference, s),
-        isNull,
-        reason:
-            'the screen itself hides its write buttons (canWrite → org.update)',
+        AppRouter.guardRoute(AppRoutes.settings, session()),
+        AppRoutes.dashboard,
       );
     });
 

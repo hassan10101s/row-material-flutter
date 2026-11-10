@@ -11,5 +11,6 @@
   "simpleEntityTypes": ["parameter", "materialBound", "organizationSetting", "labConstant", "labUnit", "equipment", "equipmentEvent", "worksheet", "referenceMaterial", "labMaterialAnalysis", "nutritionFormulation", "qcCustomTableRow"],
   "firestoreAtomicRuleAccessLimit": 20,
   "expandedEntityTypes": ["qcCustomTable", "qcCustomTableField"],
+  "routineListEntityTypes": ["qcAudit", "qcItem", "qcSection", "qcTemplate"],
   "largeOperations": "draft_only_no_submission_no_partial_commit"
 }

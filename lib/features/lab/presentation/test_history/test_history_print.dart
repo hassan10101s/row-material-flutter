@@ -54,9 +54,9 @@ class TestHistoryPrinter {
         '<td>${esc('${r['sample_name'] ?? '-'}')}</td>'
         '<td>$source</td>'
         '<td dir="ltr">${esc('${r['entry_code'] ?? '-'}')}</td>'
-        '<td><b>${esc(formatLabResultWithUnit(r['result_text'], '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}'))}</b></td>'
+        '<td><b>${esc(isPendingLabResult(r['result_text']) ? AppText.t('مسودة', 'Draft') : formatLabResultWithUnit(r['result_text'], '${r['range_unit'] ?? r['analysis_unit'] ?? '%'}'))}</b></td>'
         '<td>${esc(range)}</td>'
-        '<td>${esc(thRangeLabel('${r['range_state'] ?? 'none'}'))}</td>'
+        '<td>${esc(isPendingLabResult(r['result_text']) ? AppText.t('مسودة', 'Draft') : thRangeLabel('${r['range_state'] ?? 'none'}'))}</td>'
         '<td>${esc('${r['tested_by_name'] ?? '-'}')}</td></tr>',
       );
     }
@@ -98,8 +98,8 @@ class TestHistoryPrinter {
 
   /// Writes [rows] next to the other exports and offers open/share, so the
   /// user can print from the browser. Never throws into the UI: failures
-  /// surface as feedback banners. File flow is shared with every register
-  /// table through [TableHtmlExport].
+  /// surface as feedback banners. This explicit browser-print action remains
+  /// HTML; register-table exports use the shared PDF template.
   static Future<void> printRows(
     BuildContext context,
     List<Map<String, dynamic>> rows,

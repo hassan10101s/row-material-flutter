@@ -12,10 +12,7 @@ import '../../core/test_history_logic.dart';
 /// PDF export for the test log.
 ///
 /// Formats the register rows into plain strings and hands them to the shared
-/// report pipeline ([ReportRepository.tableReport]) — the same HTML document
-/// the "print HTML" action writes, converted to a PDF (headless browser on
-/// desktop, native dart-pdf table on phones) and saved with the usual
-/// open/share sheet.
+/// table-report template ([ReportRepository.tableReport]) for PDF export.
 class TestHistoryPdf {
   TestHistoryPdf._();
 
@@ -33,7 +30,8 @@ class TestHistoryPdf {
   ];
 
   static List<List<String>> rows(List<Map<String, dynamic>> source) => [
-    for (final r in source) if (r['secure_result'] != 1) _cells(r),
+    for (final r in source)
+      if (r['secure_result'] != 1) _cells(r),
   ];
 
   static List<String> _cells(Map<String, dynamic> r) {
@@ -52,9 +50,13 @@ class TestHistoryPdf {
       '${r['sample_name'] ?? '-'}',
       source,
       '${r['entry_code'] ?? '-'}',
-      formatLabResultWithUnit(r['result_text'], unit),
+      isPendingLabResult(r['result_text'])
+          ? AppText.t('مسودة', 'Draft')
+          : formatLabResultWithUnit(r['result_text'], unit),
       range,
-      thRangeLabel('${r['range_state'] ?? 'none'}'),
+      isPendingLabResult(r['result_text'])
+          ? AppText.t('مسودة', 'Draft')
+          : thRangeLabel('${r['range_state'] ?? 'none'}'),
       '${r['tested_by_name'] ?? '-'}',
     ];
   }

@@ -4,7 +4,7 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_exceptions.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback_export.dart';
 import '../../../../../di/service_locator.dart';
@@ -72,9 +72,9 @@ Future<void> exportSelectedReports(BuildContext context) async {
   }
 }
 
-/// The ledger as an HTML table file (same shared export as every register):
-/// the selected rows in ledger column order. Selection clears on success
-/// only, mirroring the PDF/label actions above.
+/// The ledger as a templated PDF (same shared export as every register): the
+/// selected rows in ledger column order. Selection clears on success only,
+/// mirroring the PDF/label actions above.
 Future<void> exportSelectedTable(BuildContext context) async {
   final cubit = context.read<InspectionsCubit>();
   final ids = cubit.state.selectedIds.toList()..sort();
@@ -88,7 +88,7 @@ Future<void> exportSelectedTable(BuildContext context) async {
     rows.add(byId[id] ?? await cubit.repo.getById(id));
   }
   if (!context.mounted) return;
-  await TableHtmlExport.export(
+  await TablePdfExport.export(
     context,
     filePrefix: isProduct ? 'product_inspections' : 'inspections',
     title: isProduct

@@ -34,7 +34,7 @@ List<String> ncrHeaders() => [
 ];
 
 /// Plain-string export mapping mirroring [ncrCells] (pills become their
-/// labels): feeds the shared HTML table export so the register exports
+/// labels): feeds the shared PDF table export so the register exports
 /// exactly the table it shows.
 List<List<String>> ncrExportRows(List<NcrReportRow> rows) => [
   for (final r in rows)

@@ -14,11 +14,12 @@ import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
 import '../../../../lab/domain/lab_result_repository.dart';
 import '../../cubit/reference_cubit.dart';
 import '../../cubit/reference_state.dart';
+import '../../reference_access.dart';
 import '../../../domain/reference_repository.dart';
 import 'material_editor.dart';
 
@@ -111,7 +112,7 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
   /// Export mapping shared by the desktop table and the mobile list: the
   /// exported HTML file is a table either way.
   Future<void> _exportAll(List<Map<String, dynamic>> rows) =>
-      TableHtmlExport.export(
+      TablePdfExport.export(
         context,
         filePrefix: 'materials',
         title: DesktopMaterialsTab.exportTitle(),
@@ -124,7 +125,7 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
       for (var i = 0; i < rows.length; i++)
         if (_selected.contains(i)) rows[i],
     ];
-    await TableHtmlExport.export(
+    await TablePdfExport.export(
       context,
       filePrefix: 'materials',
       title: DesktopMaterialsTab.exportTitle(),
@@ -169,12 +170,13 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
                 onPressed: rows.isEmpty ? null : () => _exportAll(rows),
                 icon: Icon(Icons.table_view_outlined, size: 18.r),
               ),
-              AppButton(
-                small: true,
-                icon: Icon(Icons.add, size: 16.r),
-                label: AppText.t('إضافة مادة', 'Add New Material'),
-                onPressed: () => _openEditor(),
-              ),
+              if (ReferenceAccess.canManageReference(context))
+                AppButton(
+                  small: true,
+                  icon: Icon(Icons.add, size: 16.r),
+                  label: AppText.t('إضافة مادة', 'Add New Material'),
+                  onPressed: () => _openEditor(),
+                ),
             ],
           ),
           const SizedBox(height: AppSpacing.md),
@@ -285,7 +287,7 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (inactive)
+          if (inactive || !ReferenceAccess.canManageReference(context))
             const SizedBox.shrink()
           else ...[
             IconButton(

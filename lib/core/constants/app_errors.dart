@@ -57,9 +57,24 @@ class AppErrors {
       );
   static String get unitNotSupported =>
       AppText.t('الوحدة غير مدعومة.', 'Unit is not supported.');
+  static String get inventoryUnitLocked => AppText.t(
+    'لا يمكن تغيير وحدة أو نوع مادة لها رصيد أو سجل حركات. استخدم وحدة الاستهلاك في التحليل للتحويل بين اللتر والملليلتر أو الكيلوجرام والجرام.',
+    'The unit or category cannot change after stock or movements have been recorded. Set the analysis consumption unit to convert between L and mL or kg and g.',
+  );
+  static String incompatibleConsumptionUnit(
+    Object from,
+    Object to,
+  ) => AppText.t(
+    'لا يمكن تحويل وحدة الاستهلاك "$from" إلى وحدة المخزون "$to". راجع إعدادات كيماويات التحليل.',
+    'Cannot convert consumption unit "$from" to stock unit "$to". Review the analysis chemical settings.',
+  );
   static String get materialExists => AppText.t(
     'يوجد مادة بنفس الاسم بالفعل.',
     'A material with this name already exists.',
+  );
+  static String get referenceInUse => AppText.t(
+    'لا يمكن حذف هذا المرجع لأنه مرتبط بسجلات.',
+    'This reference cannot be deleted because it is linked to records.',
   );
   static String get inventoryItemNotFound =>
       AppText.t('مادة المخزون غير موجودة.', 'Inventory item was not found.');

@@ -185,7 +185,7 @@ void main() {
   /// shell uses.
   List<ShellNavEntry> entriesFor(String role) => shellNavEntries(
     canSeeSettings: rolePermissions(role).contains(Permission.orgUpdate),
-    canReadReference: rolePermissions(role).contains(Permission.usersRead),
+    canReadReference: rolePermissions(role).contains(Permission.samplesRead),
     canReadMembers: rolePermissions(role).contains(Permission.usersRead),
   );
 
@@ -954,18 +954,27 @@ void main() {
       await pumpRole(tester, AppRoles.viewer);
     });
 
-    testWidgets(
-      'a lab user reads reference and members without organization settings',
-      (tester) async {
-        // The current lab role reads the roster and reference data; organization
-        // administration still requires org.update.
-        final lab = entriesFor(AppRoles.lab);
-        expect(lab.map((e) => e.path), contains('/reference'));
-        expect(lab.map((e) => e.path), contains('/members'));
-        expect(lab.map((e) => e.path), isNot(contains('/settings')));
-        await pumpRole(tester, AppRoles.lab);
-      },
-    );
+    testWidgets('all employee roles can view reference', (tester) async {
+      for (final role in [
+        AppRoles.admin,
+        AppRoles.qualityManager,
+        AppRoles.lab,
+        AppRoles.nutritionist,
+        AppRoles.viewer,
+        AppRoles.trialOwner,
+      ]) {
+        expect(
+          entriesFor(role).map((e) => e.path).contains('/reference'),
+          isTrue,
+          reason: role,
+        );
+      }
+
+      final lab = entriesFor(AppRoles.lab);
+      expect(lab.map((e) => e.path), contains('/members'));
+      expect(lab.map((e) => e.path), isNot(contains('/settings')));
+      await pumpRole(tester, AppRoles.lab);
+    });
 
     testWidgets(
       'account avatar and sync badge open independent pages for a viewer',

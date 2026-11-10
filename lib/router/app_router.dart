@@ -39,6 +39,7 @@ import '../features/inspections/presentation/cubit/inspection_form_cubit.dart';
 import '../features/inspections/presentation/cubit/inspections_cubit.dart';
 import '../features/inspections/presentation/center/inspection_center_screen.dart';
 import '../features/inspections/presentation/form/inspection_form_screen.dart';
+import '../features/inspections/presentation/qr/mobile_qr_overlay.dart';
 import '../features/lab/presentation/cubit/lab_cubit.dart';
 import '../features/lab/presentation/lab_screen.dart';
 import '../features/organizations/domain/organization_repository.dart';
@@ -120,8 +121,12 @@ class AppRouter {
   AppRouter({required AuthGate authGate}) : _gate = authGate;
 
   final AuthGate _gate;
+  final qrNavigation = MobileQrNavigation();
+  final navigatorKey = GlobalKey<NavigatorState>();
 
   late final GoRouter router = GoRouter(
+    navigatorKey: navigatorKey,
+    observers: [qrNavigation.rootObserver],
     initialLocation: AppRoutes.login,
     refreshListenable: _gate,
     redirect: _redirect,
@@ -181,6 +186,7 @@ class AppRouter {
         ),
       ),
       ShellRoute(
+        observers: [qrNavigation.shellObserver],
         builder: (context, state, child) => AppShell(
           // The shell is the one widget that needs the whole graph, so the
           // router - the app's composition root - is where it is resolved.
@@ -392,6 +398,7 @@ class AppRouter {
             path: AppRoutes.qcManagement,
             pageBuilder: (c, s) => AppPage<QcManagementScreen>(
               name: s.uri.path,
+              desktopFadeOnly: true,
               builder: (c) => const QcManagementScreen(),
             ),
           ),
@@ -399,6 +406,7 @@ class AppRouter {
             path: AppRoutes.qcNcr,
             pageBuilder: (c, s) => AppPage<QcNcrDashboardScreen>(
               name: s.uri.path,
+              desktopFadeOnly: true,
               // `create` so the router's scope closes the cubit on pop; the
               // cubit holds the active filter and page, and a leaked one would
               // hand the next visitor a report already filtered for someone else.
@@ -418,6 +426,7 @@ class AppRouter {
             path: AppRoutes.qcNcrList,
             pageBuilder: (c, s) => AppPage<QcNcrListScreen>(
               name: s.uri.path,
+              desktopFadeOnly: true,
               builder: (context) => BlocProvider(
                 create: (_) {
                   final cubit = getIt<QcNcrCubit>();
@@ -457,6 +466,7 @@ class AppRouter {
             path: AppRoutes.qcNcrDetail,
             pageBuilder: (c, s) => AppPage<QcNcrDetailScreen>(
               name: s.uri.path,
+              desktopFadeOnly: true,
               builder: (context) {
                 final id = int.tryParse(
                   s.uri.queryParameters['findingId'] ?? '',
@@ -473,6 +483,7 @@ class AppRouter {
             path: AppRoutes.qcInspections,
             pageBuilder: (c, s) => AppPage<RoutineListsScreen>(
               name: s.uri.path,
+              desktopFadeOnly: true,
               // The hub cubit carries the list scope, created per visit and
               // closed by the router's scope on pop.
               builder: (context) => BlocProvider(
@@ -485,6 +496,7 @@ class AppRouter {
             path: AppRoutes.qcInspectionDetail,
             pageBuilder: (c, s) => AppPage<RoutineSheetScreen>(
               name: s.uri.path,
+              desktopFadeOnly: true,
               builder: (context) {
                 final id = int.tryParse(
                   s.uri.queryParameters['inspectionId'] ?? '',
@@ -504,6 +516,7 @@ class AppRouter {
             path: AppRoutes.qcSops,
             pageBuilder: (c, s) => AppPage<QcSopsScreen>(
               name: s.uri.path,
+              desktopFadeOnly: true,
               // The register cubit carries the filter scope and is also what the
               // detail screen pushes a lifecycle change through, so it is created
               // per visit and closed with the route.
@@ -580,7 +593,7 @@ class AppRouter {
           return AppRoutes.dashboard;
         }
       case AppRoutes.reference:
-        if (!session.permissions.contains(Permission.orgRead)) {
+        if (!session.permissions.contains(Permission.samplesRead)) {
           return AppRoutes.dashboard;
         }
       case AppRoutes.inspectionNew:

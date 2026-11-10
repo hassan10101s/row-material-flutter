@@ -12,10 +12,11 @@ import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../cubit/products_cubit.dart';
 import '../../cubit/products_state.dart';
 import 'product_editor.dart';
+import '../../reference_access.dart';
 import '../widgets/products_list.dart';
 
 /// Desktop products tab — port of the Reference app Products section:
@@ -76,8 +77,9 @@ class DesktopProductsTab extends StatelessWidget {
         children: [
           ProductsHeader(
             onAdd: () => _openEditor(context),
+            showAdd: ReferenceAccess.canManageReference(context),
             canExport: state.rows.isNotEmpty,
-            onExportTable: () => TableHtmlExport.export(
+            onExportTable: () => TablePdfExport.export(
               context,
               filePrefix: 'products',
               title: ProductsTable.exportTitle(),
@@ -110,12 +112,14 @@ class DesktopProductsTab extends StatelessWidget {
                 'أضف أول منتج لبدء تتبع دفعاته.',
                 'Add your first product to start tracking its batches.',
               ),
-              action: AppButton(
-                small: true,
-                label: AppText.t('منتج جديد', 'New product'),
-                icon: Icon(Icons.add, size: 18.r),
-                onPressed: () => _openEditor(context),
-              ),
+              action: ReferenceAccess.canManageReference(context)
+                  ? AppButton(
+                      small: true,
+                      label: AppText.t('منتج جديد', 'New product'),
+                      icon: Icon(Icons.add, size: 18.r),
+                      onPressed: () => _openEditor(context),
+                    )
+                  : null,
             )
           else ...[
             if (state.loading) const LinearProgressIndicator(),

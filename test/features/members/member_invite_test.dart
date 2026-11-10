@@ -122,6 +122,29 @@ void main() {
       expect(rosterChanges, 1);
     });
 
+    test(
+      'passes viewer and employee roles through as an additive assignment',
+      () async {
+        await build(_FakeGuard()).members.invite(
+          email: 'nutrition@lab.test',
+          role: AppRoles.nutritionist,
+          roles: const [AppRoles.nutritionist, AppRoles.viewer],
+        );
+
+        final captured = verify(
+          () => remote.createInvite(
+            organizationId: any(named: 'organizationId'),
+            email: any(named: 'email'),
+            role: captureAny(named: 'role'),
+            roles: captureAny(named: 'roles'),
+            invitedBy: any(named: 'invitedBy'),
+          ),
+        ).captured;
+        expect(captured[0], AppRoles.nutritionist);
+        expect(captured[1], [AppRoles.nutritionist, AppRoles.viewer]);
+      },
+    );
+
     test('invalid emails are rejected before any remote call', () async {
       for (final bad in [
         '',

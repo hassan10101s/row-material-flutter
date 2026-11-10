@@ -11,6 +11,7 @@ import '../../../../design_system/widgets/app_dropdown.dart';
 import '../../../../design_system/widgets/app_quantity_field.dart';
 import '../../../../design_system/widgets/app_unit_field.dart';
 import '../../../../design_system/widgets/app_window.dart';
+import '../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../di/service_locator.dart';
 import '../../core/formula_engine.dart'
     show
@@ -43,6 +44,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
   // The analysis definition replicates; the chemical stock it draws on does not,
   // so this dialog legitimately needs both contracts.
   final _repo = getIt<LabConfigurationRepository>();
+  late final _results = getIt<LabResultRepository>();
   final _stock = getIt<LabLocalRepository>();
   final _reference = getIt<ReferenceRepository>();
   late final TextEditingController _name = TextEditingController(
@@ -63,6 +65,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
   );
   final _newFieldController = TextEditingController();
   final List<TextEditingController> _fieldControllers = [];
+  late final Set<TextEditingController> _originalFieldControllers;
   final List<Map<String, dynamic>> _fieldLinks = [];
   final List<Map<String, dynamic>> _consumedItems = [];
   List<Map<String, dynamic>> _inventory = [];
@@ -71,6 +74,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
   int? _parameterId;
   Future<void>? _parameterLoad;
   bool _saving = false;
+  bool _creatingNewForHistory = false;
   String? _parameterError;
   String? _nameError;
 
@@ -102,6 +106,7 @@ class AnalysisEditorState extends State<AnalysisEditor> {
       _fieldControllers.add(TextEditingController(text: f));
       _fieldLinks.add(_decodeFieldConfig(links[f]));
     }
+    _originalFieldControllers = Set.of(_fieldControllers);
     for (final item in (widget.analysis?['items'] as List?) ?? const []) {
       if (item is Map) {
         final m = Map<String, dynamic>.from(item);
@@ -404,15 +409,50 @@ class AnalysisEditorState extends State<AnalysisEditor> {
         },
     ];
     try {
-      if (widget.analysis == null) {
+      if (widget.analysis != null && _addsOrRemovesFields()) {
+        final hasCompletedResults = await _results
+            .hasCompletedResultsForAnalysis(
+              (widget.analysis!['id'] as num).toInt(),
+            );
+        if (!mounted) return;
+        if (hasCompletedResults) {
+          final createNew = await showAppConfirm(
+            context,
+            title: AppText.t(
+              'تحليل مرتبط بسجلات فعلية',
+              'Analysis has completed records',
+            ),
+            message: AppText.t(
+              'توجد سجلات تحليل فعلية مرتبطة بهذا التحليل. إضافة أو حذف حقل قد يسبب تعارضًا مع بنية السجلات السابقة. يمكنك إنشاء تحليل جديد بالتعديلات مع إبقاء التحليل وسجلاته دون تغيير.',
+              'Completed test records are linked to this analysis. Adding or removing a field could conflict with the structure of those records. Create a new analysis with these changes and keep the existing analysis and records unchanged.',
+            ),
+            confirmLabel: AppText.t('إنشاء تحليل جديد', 'Create new analysis'),
+            cancelLabel: AppText.t('إلغاء الحفظ', 'Cancel save'),
+            icon: Icons.warning_amber_rounded,
+          );
+          if (!mounted) return;
+          if (!createNew) {
+            setState(() => _saving = false);
+            return;
+          }
+          _creatingNewForHistory = true;
+          _name.text = await _uniqueCopyName(_name.text);
+          _parameterId = null;
+        }
+      }
+
+      if (widget.analysis == null || _creatingNewForHistory) {
+        final formula = _creatingNewForHistory
+            ? _formulaForCopy()
+            : _formula.text.trim();
         await _repo.createAnalysis(
           name: _name.text,
           unit: _unit.text,
-          parameterId: _parameterId,
+          parameterId: _creatingNewForHistory ? null : _parameterId,
           description: _description.text,
           reference: _referenceText.text,
           dynamicFields: _fieldList,
-          formula: _formula.text.trim(),
+          formula: formula,
           items: consumedItems,
           fieldChemicalLinks: links,
         );
@@ -445,6 +485,32 @@ class AnalysisEditorState extends State<AnalysisEditor> {
       setState(() => _saving = false);
       if (mounted) AppFeedback.errorFrom(context, e);
     }
+  }
+
+  bool _addsOrRemovesFields() {
+    return _fieldControllers.length != _originalFieldControllers.length ||
+        _fieldControllers.any(
+          (controller) => !_originalFieldControllers.contains(controller),
+        );
+  }
+
+  Map<String, dynamic> _formulaForCopy() {
+    final current = widget.analysis?['formula'];
+    final formula = current is Map
+        ? Map<String, dynamic>.from(current)
+        : <String, dynamic>{};
+    formula['expression'] = _formula.text.trim();
+    return formula;
+  }
+
+  Future<String> _uniqueCopyName(String original) async {
+    final suffix = AppText.t('نسخة جديدة', 'copy');
+    final base = '${original.trim()} ($suffix)';
+    var candidate = base;
+    for (var index = 2; await _repo.analysisNameExists(candidate); index++) {
+      candidate = '$base ($index)';
+    }
+    return candidate;
   }
 
   void _addField() {

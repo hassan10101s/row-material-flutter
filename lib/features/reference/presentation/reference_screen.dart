@@ -2,10 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
+import '../../../app/auth_gate.dart';
+import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_strings.dart';
 import '../../../core/commands/pending_entity_actions.dart';
 import '../../../design_system/tokens/app_spacing.dart';
 import '../../../design_system/widgets/app_adaptive.dart';
+import '../../../design_system/widgets/app_control_strip.dart';
 import '../../../di/service_locator.dart';
 import '../../lab/domain/lab_result_repository.dart';
 import '../domain/parameter_type.dart';
@@ -17,6 +20,7 @@ import 'cubit/units_cubit.dart';
 import 'materials/materials_tab.dart';
 import 'params/params_tab.dart';
 import 'products/products_tab.dart';
+import 'reference_access.dart';
 import 'units/units_tab.dart';
 
 class _RefTab {
@@ -132,60 +136,66 @@ class _ReferenceScreenState extends State<ReferenceScreen> {
     ];
     // Title lives in the shell topbar (both experiences); the tab chips
     // below already say where you are.
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: AppSpacing.page),
-        SizedBox(
-          height: appUsesDesktopChrome(context) ? 46.h : 56,
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
+    final canManageReference = getIt<AuthGate>().canWrite(
+      Permission.referenceUpdate,
+    );
+    return ReferenceAccess(
+      canManage: canManageReference,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!canManageReference)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
+              child: Text(
+                AppText.t(
+                  'المرجعية متاحة للعرض فقط. يمكن لأخصائي الجودة ومدير الجودة ومدير المؤسسة تعديلها وحذفها.',
+                  'Reference data is view-only. The quality specialist, quality manager and organization owner can edit or delete it.',
+                ),
+              ),
+            ),
+          const SizedBox(height: AppSpacing.page),
+          Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.page),
-            child: Row(
+            child: AppControlStrip(
+              height: appUsesDesktopChrome(context) ? 46.h : 56,
               children: [
                 for (var i = 0; i < tabs.length; i++)
-                  Padding(
-                    padding: const EdgeInsetsDirectional.only(
-                      start: AppSpacing.sm,
+                  ChoiceChip(
+                    label: Text(tabs[i].label),
+                    avatar: Icon(tabs[i].icon, size: 18.r),
+                    selected: _tab == i,
+                    materialTapTargetSize: appUsesDesktopChrome(context)
+                        ? MaterialTapTargetSize.shrinkWrap
+                        : MaterialTapTargetSize.padded,
+                    labelStyle: TextStyle(
+                      fontWeight: _tab == i ? FontWeight.w700 : FontWeight.w500,
                     ),
-                    child: ChoiceChip(
-                      label: Text(tabs[i].label),
-                      avatar: Icon(tabs[i].icon, size: 18.r),
-                      selected: _tab == i,
-                      materialTapTargetSize: appUsesDesktopChrome(context)
-                          ? MaterialTapTargetSize.shrinkWrap
-                          : MaterialTapTargetSize.padded,
-                      labelStyle: TextStyle(
-                        fontWeight: _tab == i
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                      onSelected: (_) => setState(() => _tab = i),
-                    ),
+                    onSelected: (_) => setState(() => _tab = i),
                   ),
               ],
             ),
           ),
-        ),
-        Expanded(
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onHorizontalDragEnd: appUsesDesktopChrome(context)
-                ? null
-                : (details) => _swipeTab(details, tabs.length),
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.page),
-              child: IndexedStack(
-                index: _tab,
-                children: [
-                  for (var i = 0; i < tabs.length; i++)
-                    _LazyTab(active: _tab == i, builder: tabs[i].builder),
-                ],
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onHorizontalDragEnd: appUsesDesktopChrome(context)
+                  ? null
+                  : (details) => _swipeTab(details, tabs.length),
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.page),
+                child: IndexedStack(
+                  index: _tab,
+                  children: [
+                    for (var i = 0; i < tabs.length; i++)
+                      _LazyTab(active: _tab == i, builder: tabs[i].builder),
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

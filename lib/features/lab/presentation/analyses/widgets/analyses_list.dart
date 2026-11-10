@@ -9,7 +9,7 @@ import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_card.dart';
 import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 
 /// Small list widgets for the analyses tab, composed by both variants.
 ///
@@ -33,7 +33,7 @@ class AnalysesHeader extends StatelessWidget {
   final VoidCallback onAdd;
   final bool compact;
 
-  /// Export-all action (HTML table file). Shown when [canExport] is true.
+  /// Export-all action (templated PDF). Shown when [canExport] is true.
   final VoidCallback? onExportTable;
   final bool canExport;
 
@@ -143,7 +143,7 @@ class _AnalysesTableState extends State<AnalysesTable> {
       for (var i = 0; i < widget.rows.length; i++)
         if (_selected.contains(i)) widget.rows[i],
     ];
-    await TableHtmlExport.export(
+    await TablePdfExport.export(
       context,
       filePrefix: 'analyses',
       title: AnalysesTable.exportTitle(),

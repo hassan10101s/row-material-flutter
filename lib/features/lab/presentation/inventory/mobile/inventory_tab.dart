@@ -17,7 +17,7 @@ import '../../../../../design_system/widgets/app_export_button.dart';
 import '../../../../../design_system/widgets/app_field.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
-import '../../../../../design_system/export/table_html_export.dart';
+import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../../core/formula_engine.dart';
 import '../../cubit/inventory_cubit.dart';
 import '../../cubit/inventory_state.dart';
@@ -151,7 +151,7 @@ class _MobileInventoryTabState extends State<MobileInventoryTab> {
                     AppExportIconButton(
                       onPressed: state.rows.isEmpty
                           ? null
-                          : () => TableHtmlExport.export(
+                          : () => TablePdfExport.export(
                               context,
                               filePrefix: 'inventory',
                               title: DesktopInventoryTab.exportTitle(),

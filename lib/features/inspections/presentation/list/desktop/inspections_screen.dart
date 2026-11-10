@@ -1,6 +1,5 @@
 import '../../../../../core/security/secure_field_access.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
@@ -9,7 +8,6 @@ import '../../../../../app/auth_gate.dart';
 import '../../../../../core/constants/app_strings.dart';
 import '../../../../../core/utils/app_dates.dart';
 import '../../../../../core/utils/app_exceptions.dart';
-import '../../../../../design_system/animations/app_animations.dart';
 import '../../../../../design_system/feedback/app_error_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback.dart';
 import '../../../../../design_system/feedback/app_feedback_export.dart';
@@ -37,7 +35,6 @@ import '../../cubit/inspections_cubit.dart';
 import '../../cubit/inspections_state.dart';
 import '../../detail/inspection_detail_screen.dart';
 import '../../form/inspection_form_screen.dart';
-import '../../qr/qr_scan_screen.dart';
 
 const _allStatuses = [
   'APPROVED',
@@ -120,7 +117,10 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
       size: AppWindowSize.lg,
       scrollBody: false,
       child: BlocProvider(
-        create: (c) => InspectionDetailCubit(secureAccess: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null,
+        create: (c) => InspectionDetailCubit(
+          secureAccess: getIt.isRegistered<SecureFieldAccess>()
+              ? getIt<SecureFieldAccess>()
+              : null,
           inspectionId: id,
           repo: getIt<InspectionRepository>(),
           reports: getIt<ReportRepository>(),
@@ -426,16 +426,6 @@ class _DesktopInspectionsScreenState extends State<DesktopInspectionsScreen> {
                         ? null
                         : () => _exportFollowUp(context),
                   ),
-                  if (!kIsWeb &&
-                      defaultTargetPlatform == TargetPlatform.android)
-                    AppButton(
-                      icon: Icon(Icons.qr_code_scanner_outlined, size: 18.r),
-                      label: AppText.t('مسح رمز', 'Scan QR'),
-                      style: AppButtonStyle.secondary,
-                      onPressed: () => Navigator.of(context).push(
-                        AppPageRoute(builder: (_) => const QrScanScreen()),
-                      ),
-                    ),
                 ],
               ),
               InspectionFilterChips(

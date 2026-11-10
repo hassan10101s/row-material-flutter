@@ -47,6 +47,7 @@ const ROLE_PERMISSIONS = {
     "reports.read","reports.create","reports.export",
     "devices.read","devices.register","devices.update","audit.read",
     "formulations.read","formulations.create","formulations.update",
+    "reference.update",
   ],
   trial_owner: [
     "org.read",
@@ -64,6 +65,7 @@ const ROLE_PERMISSIONS = {
     "reports.read","reports.create","reports.export","devices.register",
     "audit.read",
     "formulations.read",
+    "reference.update",
   ],
   lab: [
     "org.read","users.read",
@@ -71,6 +73,7 @@ const ROLE_PERMISSIONS = {
     "lab_results.read","lab_results.create","lab_results.update",
     "qc.read","qc.write","qc.approve","qc.reject",
     "reports.read","reports.create","reports.export","devices.register","audit.read","formulations.read",
+    "reference.update",
   ],
   nutritionist: [
     "org.read","samples.read","lab_results.read","reports.read","devices.register",

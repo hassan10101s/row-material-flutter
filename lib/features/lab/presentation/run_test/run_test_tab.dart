@@ -104,6 +104,8 @@ class _RunTestTabState extends State<RunTestTab> {
   final Map<String, String> _initialDynamic = {};
 
   bool get _editing => widget.editRow != null;
+  bool get _editingDraft =>
+      _editing && isPendingLabResult(widget.editRow?['result_text']);
 
   Map<String, dynamic>? get _currentUserMap {
     final user = getIt<AuthGate>().currentUser;
@@ -125,7 +127,7 @@ class _RunTestTabState extends State<RunTestTab> {
     if (row != null) {
       // Editing keeps the stored result editable (never silently re-derived);
       // the formula toggle is still available to recompute on demand.
-      _formulaAuto = false;
+      _formulaAuto = isPendingLabResult(row['result_text']);
       // Old rows may carry the double's full precision; the editable field gets
       // the same fixed-three-decimal text every other surface shows. Non-numeric
       // text (and empty) passes through unchanged.
@@ -165,45 +167,8 @@ class _RunTestTabState extends State<RunTestTab> {
   Future<void> _run() async {
     final cubit = context.read<RunTestCubit>();
     final state = cubit.state;
-    if (state.analysisId == null) {
-      AppFeedback.error(
-        context,
-        AppText.t('اختر التحليل', 'Select an analysis.'),
-      );
-      return;
-    }
-    final sampleName = state.selectedInspection.isEmpty
-        ? _standaloneSample.text.trim()
-        : state.selectedSampleName;
-    if (state.sourceType == 'product' &&
-        (state.productId == null || sampleName.isEmpty)) {
-      AppFeedback.error(
-        context,
-        AppText.t(
-          'اختر المنتج وأدخل اسم العينة أولاً',
-          'Select a product and enter a sample name first.',
-        ),
-      );
-      return;
-    }
-    if (state.sourceType == 'raw_material' &&
-        (state.rawMaterialId == null || sampleName.isEmpty)) {
-      AppFeedback.error(
-        context,
-        AppText.t(
-          'اختر الخامة وأدخل اسم العينة أولاً',
-          'Select a raw material and enter a sample name first.',
-        ),
-      );
-      return;
-    }
-    if (state.sourceType == 'sample' && sampleName.isEmpty) {
-      AppFeedback.error(
-        context,
-        AppText.t('أدخل اسم العينة أولاً', 'Enter a sample name first.'),
-      );
-      return;
-    }
+    final sampleName = _validatedSampleName(state);
+    if (sampleName == null) return;
     final comp = _computedResult(state);
     final formulaEnabled = comp['enabled'] == true;
     final autoOk = formulaEnabled && _formulaAuto && comp['ok'] == true;
@@ -243,6 +208,7 @@ class _RunTestTabState extends State<RunTestTab> {
           resultText: resultText,
           dynamicValues: dynamicValues,
           user: _currentUserMap,
+          updateBasicDetails: _editingDraft,
         );
         if (!mounted) return;
         _dirty = false;
@@ -268,6 +234,8 @@ class _RunTestTabState extends State<RunTestTab> {
       // dialog; it lives in the root overlay so it outlives the dialog anyway.
       _reportResult(result);
       Navigator.of(context).pop();
+    } on PendingOperation catch (e) {
+      _finishPendingWrite(e);
     } on AppError catch (e) {
       if (mounted) AppFeedback.errorFrom(context, e);
     } catch (e) {
@@ -276,6 +244,99 @@ class _RunTestTabState extends State<RunTestTab> {
       _saving = false;
       if (mounted) _closeGuard.canClose = !_dirty;
     }
+  }
+
+  Future<void> _saveDraft() async {
+    final cubit = context.read<RunTestCubit>();
+    final sampleName = _validatedSampleName(cubit.state);
+    if (sampleName == null) return;
+    try {
+      _saving = true;
+      _closeGuard.canClose = false;
+      if (_editingDraft) {
+        await cubit.saveEdit(
+          sampleName: sampleName,
+          resultText: '',
+          dynamicValues: _effectiveValues(cubit.state),
+          user: _currentUserMap,
+          updateBasicDetails: true,
+        );
+      } else {
+        await cubit.run(
+          sampleName: sampleName,
+          resultText: '',
+          dynamicValues: _effectiveValues(cubit.state),
+          user: _currentUserMap,
+          draftOnly: true,
+        );
+      }
+      if (!mounted) return;
+      _dirty = false;
+      _closeGuard.canClose = true;
+      widget.onTestRun();
+      Navigator.of(context).pop(true);
+    } on PendingOperation catch (e) {
+      _finishPendingWrite(e);
+    } on AppError catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    } catch (e) {
+      if (mounted) AppFeedback.errorFrom(context, e);
+    } finally {
+      _saving = false;
+      if (mounted) _closeGuard.canClose = !_dirty;
+    }
+  }
+
+  String? _validatedSampleName(RunTestState state) {
+    if (state.analysisId == null) {
+      AppFeedback.error(
+        context,
+        AppText.t('اختر التحليل', 'Select an analysis.'),
+      );
+      return null;
+    }
+    final sampleName = state.selectedInspection.isEmpty
+        ? _standaloneSample.text.trim()
+        : state.selectedSampleName.trim();
+    if (state.sourceType == 'product' &&
+        (state.productId == null || sampleName.isEmpty)) {
+      AppFeedback.error(
+        context,
+        AppText.t(
+          'اختر المنتج وأدخل اسم العينة أولاً',
+          'Select a product and enter a sample name first.',
+        ),
+      );
+      return null;
+    }
+    if (state.sourceType == 'raw_material' &&
+        (state.rawMaterialId == null || sampleName.isEmpty)) {
+      AppFeedback.error(
+        context,
+        AppText.t(
+          'اختر الخامة وأدخل اسم العينة أولاً',
+          'Select a raw material and enter a sample name first.',
+        ),
+      );
+      return null;
+    }
+    if (state.sourceType == 'sample' && sampleName.isEmpty) {
+      AppFeedback.error(
+        context,
+        AppText.t('أدخل اسم العينة أولاً', 'Enter a sample name first.'),
+      );
+      return null;
+    }
+    return sampleName;
+  }
+
+  void _finishPendingWrite(PendingOperation pending) {
+    if (!mounted) return;
+    AppFeedback.errorFrom(context, pending);
+    _dirty = false;
+    _closeGuard.canClose = true;
+    widget.onTestRun();
+    Navigator.of(context).pop(true);
   }
 
   void _reportResult(Map<String, dynamic> result) {
@@ -1039,7 +1100,11 @@ class _RunTestTabState extends State<RunTestTab> {
               ),
               const SizedBox(height: AppSpacing.sm),
               Text(
-                '${_editing ? AppText.t('عدّل بيانات العينة والنتيجة — التحليل والمصدر ثابتان.', 'Edit the sample and result — analysis and source are fixed.') : AppText.t('سجّل تحليلاً جديداً وفق إعدادات التحليل.', 'Record a new test following the analysis setup.')}'
+                '${_editingDraft
+                    ? AppText.t('أكمل بيانات المسودة أو عدّلها قبل تشغيل التحليل.', 'Complete or edit this draft before running the analysis.')
+                    : _editing
+                    ? AppText.t('عدّل بيانات العينة والنتيجة — التحليل والمصدر ثابتان.', 'Edit the sample and result — analysis and source are fixed.')
+                    : AppText.t('سجّل تحليلاً جديداً وفق إعدادات التحليل.', 'Record a new test following the analysis setup.')}'
                 '${analysis == null ? '' : ' — ${analysis['name']} (${analysis['unit'] ?? '%'})'}',
                 style: TextStyle(
                   color: AppColors.textMuted,
@@ -1052,7 +1117,7 @@ class _RunTestTabState extends State<RunTestTab> {
               if (state.loading && state.analyses.isEmpty) ...[
                 const AppSkeletonList(rows: 6, lines: 3, height: 380),
               ] else ...[
-                if (_editing) ...[
+                if (_editing && !_editingDraft) ...[
                   _sectionTitle(
                     '1',
                     AppText.t('بيانات ثابتة', 'Fixed details'),
@@ -1125,9 +1190,15 @@ class _RunTestTabState extends State<RunTestTab> {
                                     ),
                                   ),
                                 ],
-                                onChanged: (v) {
-                                  if (v != null) cubit.setSourceType(v);
-                                },
+                                onChanged:
+                                    _editingDraft &&
+                                        '${widget.editRow?['entry_code'] ?? ''}'
+                                            .trim()
+                                            .isNotEmpty
+                                    ? null
+                                    : (v) {
+                                        if (v != null) cubit.setSourceType(v);
+                                      },
                               ),
                             ),
                             if (state.sourceType != 'sample')
@@ -1190,6 +1261,11 @@ class _RunTestTabState extends State<RunTestTab> {
                                     (r) => '${r['material_name'] ?? ''}',
                                     (r) => '${r['material_code'] ?? ''}',
                                   ]),
+                                  enabled:
+                                      !_editingDraft ||
+                                      '${widget.editRow?['entry_code'] ?? ''}'
+                                          .trim()
+                                          .isEmpty,
                                   onSelected: (id) {
                                     if (id != null) {
                                       cubit.selectRawMaterial(
@@ -1220,7 +1296,12 @@ class _RunTestTabState extends State<RunTestTab> {
                                           'Loading inspection records…',
                                         )
                                       : null,
-                                  enabled: !state.loadingInspections,
+                                  enabled:
+                                      !state.loadingInspections &&
+                                      (!_editingDraft ||
+                                          '${widget.editRow?['entry_code'] ?? ''}'
+                                              .trim()
+                                              .isEmpty),
                                   displayOf: (r) =>
                                       '${r['entry_code']} · ${r['inspection_date']}',
                                   subtitleOf: (r) =>
@@ -1289,6 +1370,11 @@ class _RunTestTabState extends State<RunTestTab> {
                                   filter: (p, q) => entityMatches(p, q, [
                                     (r) => '${r['name'] ?? ''}',
                                   ]),
+                                  enabled:
+                                      !_editingDraft ||
+                                      '${widget.editRow?['entry_code'] ?? ''}'
+                                          .trim()
+                                          .isEmpty,
                                   onSelected: (v) {
                                     if (v != null) {
                                       cubit.selectProduct((v as num).toInt());
@@ -1317,7 +1403,12 @@ class _RunTestTabState extends State<RunTestTab> {
                                           'Loading inspection records…',
                                         )
                                       : null,
-                                  enabled: !state.loadingInspections,
+                                  enabled:
+                                      !state.loadingInspections &&
+                                      (!_editingDraft ||
+                                          '${widget.editRow?['entry_code'] ?? ''}'
+                                              .trim()
+                                              .isEmpty),
                                   displayOf: (r) =>
                                       '${r['entry_code']} · ${r['inspection_date']}',
                                   subtitleOf: (r) =>
@@ -1524,13 +1615,44 @@ class _RunTestTabState extends State<RunTestTab> {
                           ),
                         ),
                       const SizedBox(height: AppSpacing.lg),
-                      if (!_editing)
-                        AppButton(
-                          expanded: true,
-                          label: AppStrings.runTest,
-                          icon: Icon(Icons.play_arrow, size: 18.r),
-                          loading: state.running,
-                          onPressed: state.running ? null : _run,
+                      if (!_editing || _editingDraft)
+                        Wrap(
+                          spacing: AppSpacing.sm,
+                          runSpacing: AppSpacing.sm,
+                          alignment: WrapAlignment.end,
+                          children: [
+                            AppButton(
+                              style: AppButtonStyle.secondary,
+                              label: AppText.t('حفظ مسودة', 'Save draft'),
+                              icon: Icon(Icons.save_outlined, size: 18.r),
+                              loading: state.running,
+                              onPressed: state.running ? null : _saveDraft,
+                            ),
+                            AppButton(
+                              label: AppStrings.runTest,
+                              icon: Icon(Icons.play_arrow, size: 18.r),
+                              loading: state.running,
+                              onPressed: state.running ? null : _run,
+                            ),
+                            if (_editingDraft && widget.onDelete != null)
+                              AppButton(
+                                style: AppButtonStyle.danger,
+                                label: AppText.t('حذف', 'Delete'),
+                                icon: Icon(Icons.delete_outline, size: 18.r),
+                                onPressed: state.running
+                                    ? null
+                                    : widget.onDelete,
+                              ),
+                            if (_editingDraft)
+                              AppButton(
+                                style: AppButtonStyle.secondary,
+                                label: AppText.t('إغلاق', 'Close'),
+                                onPressed: state.running
+                                    ? null
+                                    : () =>
+                                          Navigator.of(context).maybePop(false),
+                              ),
+                          ],
                         )
                       else
                         // Wrap (not Row): the three edit CTAs fold onto a second

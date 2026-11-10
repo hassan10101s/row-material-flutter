@@ -2,7 +2,6 @@ import '../../../../../core/security/secure_field_access.dart';
 import '../../../../../design_system/widgets/app_add_floating_action_button.dart';
 import 'package:flutter/material.dart';
 import '../../../../../design_system/widgets/app_tooltip.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -40,7 +39,6 @@ import '../../cubit/inspections_cubit.dart';
 import '../../cubit/inspections_state.dart';
 import '../../detail/inspection_detail_screen.dart';
 import '../../form/inspection_form_screen.dart';
-import '../../qr/qr_scan_screen.dart';
 
 /// Mobile inspections: card list + full-screen routes (no tables/dialogs).
 class MobileInspectionsScreen extends StatelessWidget {
@@ -77,7 +75,10 @@ class MobileInspectionsScreen extends StatelessWidget {
     final changed = await Navigator.of(context).push<bool>(
       AppPageRoute(
         builder: (_) => BlocProvider(
-          create: (c) => InspectionDetailCubit(secureAccess: getIt.isRegistered<SecureFieldAccess>() ? getIt<SecureFieldAccess>() : null,
+          create: (c) => InspectionDetailCubit(
+            secureAccess: getIt.isRegistered<SecureFieldAccess>()
+                ? getIt<SecureFieldAccess>()
+                : null,
             inspectionId: id,
             repo: getIt<InspectionRepository>(),
             reports: getIt<ReportRepository>(),
@@ -375,23 +376,6 @@ class MobileInspectionsScreen extends StatelessWidget {
                                 ),
                               ),
                             ),
-                            if (!kIsWeb &&
-                                defaultTargetPlatform ==
-                                    TargetPlatform.android) ...[
-                              const SizedBox(width: AppSpacing.xs),
-                              IconButton.outlined(
-                                tooltip: AppText.t('مسح رمز', 'Scan QR'),
-                                onPressed: () => Navigator.of(context).push(
-                                  AppPageRoute(
-                                    builder: (_) => const QrScanScreen(),
-                                  ),
-                                ),
-                                icon: Icon(
-                                  Icons.qr_code_scanner_outlined,
-                                  size: 20.r,
-                                ),
-                              ),
-                            ],
                             const SizedBox(width: AppSpacing.xs),
                             PopupMenuButton<String>(
                               tooltip: AppText.t('المزيد', 'More'),

@@ -727,6 +727,97 @@ void main() {
           whereArgs: [bundle.table.remoteId],
         );
         expect(jsonDecode(syncedRows.single['values_json'] as String), values);
+        final localRows = await first.db.query(
+          'qc_custom_table_rows',
+          where: 'table_remote_id = ?',
+          whereArgs: [bundle.table.remoteId],
+        );
+        final localTableId =
+            (await first.db.query(
+                  'qc_custom_tables',
+                  where: 'remote_id = ?',
+                  whereArgs: [bundle.table.remoteId],
+                )).single['table_id']
+                as int;
+        await expectLater(
+          repository.deleteTable(localTableId),
+          throwsA(isA<ValidationError>()),
+        );
+        expect(await outbox.list(), hasLength(3));
+
+        await expectLater(
+          repository.deleteRow(localRows.single['row_id'] as int),
+          throwsA(isA<CentralDraftPending>()),
+        );
+        final rowDelete = (await outbox.list()).singleWhere(
+          (entry) =>
+              entry.payload['writes'] is List &&
+              (entry.payload['writes'] as List).any(
+                (write) =>
+                    write is Map &&
+                    write['entityType'] == 'qcCustomTableRow' &&
+                    write['operation'] == 'tombstone',
+              ),
+        );
+        final rowDeleted = await transport.submit(rowDelete.envelope());
+        expect(
+          rowDeleted.isApproved,
+          isTrue,
+          reason: '${rowDeleted.failure?.toJson()}',
+        );
+        await firstDriver.syncNow();
+        await secondDriver.syncNow();
+
+        await expectLater(
+          repository.deleteTable(localTableId),
+          throwsA(isA<CentralDraftPending>()),
+        );
+        final tableDelete = (await outbox.list()).singleWhere(
+          (entry) =>
+              entry.payload['writes'] is List &&
+              (entry.payload['writes'] as List).any(
+                (write) =>
+                    write is Map &&
+                    write['entityType'] == 'qcCustomTable' &&
+                    write['operation'] == 'tombstone',
+              ),
+        );
+        expect(tableDelete.payload['writes'], hasLength(10));
+        expect(
+          (tableDelete.payload['writes'] as List).every(
+            (write) =>
+                write is Map &&
+                const {
+                  'qcCustomTable',
+                  'qcCustomTableField',
+                }.contains(write['entityType']),
+          ),
+          isTrue,
+        );
+        final tableDeleted = await transport.submit(tableDelete.envelope());
+        expect(
+          tableDeleted.isApproved,
+          isTrue,
+          reason: '${tableDeleted.failure?.toJson()}',
+        );
+        await firstDriver.syncNow();
+        await secondDriver.syncNow();
+        expect(
+          await second.db.query(
+            'qc_custom_tables',
+            where: 'remote_id = ? AND deleted_at IS NULL',
+            whereArgs: [bundle.table.remoteId],
+          ),
+          isEmpty,
+        );
+        expect(
+          await second.db.query(
+            'qc_custom_table_rows',
+            where: 'table_remote_id = ? AND deleted_at IS NULL',
+            whereArgs: [bundle.table.remoteId],
+          ),
+          isEmpty,
+        );
         await expectLater(
           repository.createTable(
             const QcCustomTable(
@@ -746,7 +837,7 @@ void main() {
           ),
           throwsA(isA<ValidationError>()),
         );
-        expect(await outbox.list(), hasLength(3));
+        expect(await outbox.list(), hasLength(5));
       } finally {
         await first.dispose();
         await second.dispose();
@@ -1353,7 +1444,7 @@ void main() {
     timeout: const Timeout(Duration(minutes: 5)),
   );
 
-  for (final role in ['admin', 'lab']) {
+  for (final role in ['admin', 'quality_manager']) {
     test(
       '$role product sample NCR is one atomic server-confirmed command and remaps its link on a second device',
       () async {
@@ -2579,7 +2670,7 @@ void main() {
     skip: !enabled,
   );
   test(
-    'fresh trial owner registers first device, opens empty archive and saves first material',
+    'fresh trial owner registers first device and cannot create shared reference data',
     () async {
       final account = await user('fresh-first-device');
       final freshUid = account['localId'] as String;
@@ -2686,16 +2777,10 @@ void main() {
           source: source,
           manifest: () async => manifest,
         ).submit(command);
-        expect(
-          result.status,
-          CommandResult.statusApproved,
-          reason: '${result.failure}',
-        );
+        expect(result.status, CommandResult.statusRejected);
         await driver.syncNow();
-        expect(
-          (await local.db.query('reference_materials')).single['material_name'],
-          'First material',
-        );
+        expect(await driver.currentSequence(), 0);
+        expect(await local.db.query('reference_materials'), isEmpty);
       } finally {
         freshStore.close();
         await local.dispose();

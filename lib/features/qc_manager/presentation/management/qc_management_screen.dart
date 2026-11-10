@@ -6,8 +6,10 @@ import 'package:go_router/go_router.dart';
 import '../../../../app/auth_gate.dart';
 import '../../../../core/auth/permissions.dart';
 import '../../../../core/constants/app_strings.dart';
+import '../../../../design_system/tokens/app_colors.dart';
 import '../../../../design_system/tokens/app_spacing.dart';
 import '../../../../design_system/widgets/app_adaptive.dart';
+import '../../../../design_system/widgets/app_control_strip.dart';
 import '../../../../di/service_locator.dart';
 import '../../../../router/app_router.dart';
 import '../cubit/qc_custom_tables_cubit.dart';
@@ -101,6 +103,7 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
             ..loadOptions()
             ..load(),
           child: QcNcrListScreen(
+            embedded: true,
             onOpenFinding: (id) =>
                 context.push('${AppRoutes.qcNcrDetail}?findingId=$id'),
           ),
@@ -133,65 +136,79 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
           final allTabs = tabs;
           if (_selectedTab >= allTabs.length) _selectedTab = 0;
 
-          // Same hub anatomy as the Lab screen: title lives in the shell topbar
-          // (both experiences), ChoiceChip tab row below, page-padded body.
+          // The title lives in the shell topbar; the hub owns its navigation
+          // strip and page-padded content.
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               SizedBox(
                 height: appUsesDesktopChrome(context) ? AppSpacing.page : 8,
               ),
-              SizedBox(
-                height: appUsesDesktopChrome(context) ? 46.h : 56,
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: EdgeInsets.symmetric(
-                    horizontal: appUsesDesktopChrome(context)
-                        ? AppSpacing.page
-                        : 12,
-                  ),
-                  child: Row(
-                    children: [
-                      for (var index = 0; index < allTabs.length; index++)
-                        Padding(
-                          padding: const EdgeInsetsDirectional.only(
-                            end: AppSpacing.sm,
-                          ),
-                          child: ChoiceChip(
-                            label: Text(allTabs[index].label),
-                            avatar: Icon(allTabs[index].icon, size: 18.r),
-                            selected: _selectedTab == index,
-                            materialTapTargetSize: appUsesDesktopChrome(context)
-                                ? MaterialTapTargetSize.shrinkWrap
-                                : MaterialTapTargetSize.padded,
-                            onSelected: (_) =>
-                                setState(() => _selectedTab = index),
-                          ),
+              Padding(
+                padding: EdgeInsetsDirectional.only(
+                  start: appUsesDesktopChrome(context)
+                      ? AppSpacing.page
+                      : AppSpacing.md,
+                  end: appUsesDesktopChrome(context)
+                      ? AppSpacing.page
+                      : AppSpacing.md,
+                ),
+                child: AppControlStrip(
+                  height: appUsesDesktopChrome(context) ? 46.h : 56,
+                  children: [
+                    // Same ChoiceChip tab row as the Lab/Inspections/
+                    // Reference/Settings hubs: one control-strip look across
+                    // the program.
+                    for (var index = 0; index < allTabs.length; index++)
+                      ChoiceChip(
+                        label: Text(allTabs[index].label),
+                        avatar: Icon(allTabs[index].icon, size: 18.r),
+                        selected: _selectedTab == index,
+                        materialTapTargetSize: appUsesDesktopChrome(context)
+                            ? MaterialTapTargetSize.shrinkWrap
+                            : MaterialTapTargetSize.padded,
+                        labelStyle: TextStyle(
+                          fontWeight: _selectedTab == index
+                              ? FontWeight.w700
+                              : FontWeight.w500,
                         ),
-                      // User-authored registers ride the same row, but select
-                      // nothing: pressing one opens its dedicated window.
-                      for (final table in customTables)
-                        Padding(
-                          padding: const EdgeInsetsDirectional.only(
-                            end: AppSpacing.sm,
-                          ),
-                          child: ActionChip(
-                            label: Text(table.title),
-                            avatar: Icon(_customChipIcon, size: 18.r),
-                            onPressed: () => _openTable(context, table.tableId),
-                          ),
+                        onSelected: (_) =>
+                            setState(() => _selectedTab = index),
+                      ),
+                    if (customTables.isNotEmpty)
+                      Container(
+                        width: 1,
+                        height: 26,
+                        color: AppColors.borderMuted,
+                      ),
+                    for (final table in customTables)
+                      ChoiceChip(
+                        label: Text(table.title),
+                        avatar: Icon(_customChipIcon, size: 18.r),
+                        selected: false,
+                        materialTapTargetSize: appUsesDesktopChrome(context)
+                            ? MaterialTapTargetSize.shrinkWrap
+                            : MaterialTapTargetSize.padded,
+                        onSelected: (_) =>
+                            _openTable(context, table.tableId),
+                      ),
+                    if (_canManageDefs) ...[
+                      Container(
+                        width: 1,
+                        height: 26,
+                        color: AppColors.borderMuted,
+                      ),
+                      IconButton(
+                        tooltip: AppText.t(
+                          'إعدادات الجودة',
+                          'Quality settings',
                         ),
-                      if (_canManageDefs)
-                        IconButton(
-                          tooltip: AppText.t(
-                            'إعدادات الجودة',
-                            'Quality settings',
-                          ),
-                          icon: const Icon(Icons.settings_outlined),
-                          onPressed: () => _openSettings(context),
-                        ),
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.settings_outlined),
+                        onPressed: () => _openSettings(context),
+                      ),
                     ],
-                  ),
+                  ],
                 ),
               ),
               Expanded(

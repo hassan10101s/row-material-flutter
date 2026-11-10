@@ -236,6 +236,18 @@ void main() {
     expect(transport.sent, isEmpty);
   });
 
+  test('open requests hide another device\'s operations', () async {
+    final a = await stage('a');
+    expect(await service.openRequests(includeCompleted: true), hasLength(1));
+    scope = const CommandScope('org-1', 'uid-1', 'dev-2');
+    expect(await service.openRequests(includeCompleted: true), isEmpty);
+    scope = const CommandScope('org-1', 'uid-1', 'dev-1');
+    expect(
+      (await service.openRequests(includeCompleted: true)).single.operationId,
+      a.operationId,
+    );
+  });
+
   test(
     'monitor follows a lost reply after navigation and acknowledges success only once across restart',
     () async {

@@ -29,14 +29,16 @@ class LabReportsTab extends StatefulWidget {
 
 class _LabReportsTabState extends State<LabReportsTab> {
   final _date = TextEditingController(text: todayIso());
-  final _month = TextEditingController();
-  final _year = TextEditingController();
+  final _month = TextEditingController(text: '${DateTime.now().month}');
+  final _monthlyYear = TextEditingController(text: '${DateTime.now().year}');
+  final _yearlyYear = TextEditingController(text: '${DateTime.now().year}');
 
   @override
   void dispose() {
     _date.dispose();
     _month.dispose();
-    _year.dispose();
+    _monthlyYear.dispose();
+    _yearlyYear.dispose();
     super.dispose();
   }
 
@@ -148,7 +150,7 @@ class _LabReportsTabState extends State<LabReportsTab> {
                       Expanded(
                         child: AppField(
                           label: AppText.t('السنة', 'Year'),
-                          controller: _year,
+                          controller: _monthlyYear,
                         ),
                       ),
                     ],
@@ -161,7 +163,7 @@ class _LabReportsTabState extends State<LabReportsTab> {
                         ? null
                         : () => cubit.runMonthly(
                             int.tryParse(_month.text.trim()) ?? 0,
-                            int.tryParse(_year.text.trim()) ?? 0,
+                            int.tryParse(_monthlyYear.text.trim()) ?? 0,
                           ),
                   ),
                 ],
@@ -184,7 +186,7 @@ class _LabReportsTabState extends State<LabReportsTab> {
                   const SizedBox(height: AppSpacing.sm),
                   AppField(
                     label: AppText.t('السنة', 'Year'),
-                    controller: _year,
+                    controller: _yearlyYear,
                   ),
                   const SizedBox(height: AppSpacing.md),
                   AppButton(
@@ -193,7 +195,7 @@ class _LabReportsTabState extends State<LabReportsTab> {
                     onPressed: state.busy == 'yearly'
                         ? null
                         : () => cubit.runYearly(
-                            int.tryParse(_year.text.trim()) ?? 0,
+                            int.tryParse(_yearlyYear.text.trim()) ?? 0,
                           ),
                   ),
                 ],

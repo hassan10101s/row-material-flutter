@@ -42,6 +42,7 @@ import '../core/platform/file_delivery.dart';
 import '../core/platform/file_delivery_mobile.dart';
 import '../core/platform/folder_picker.dart';
 import '../core/security/local_secret.dart';
+import '../core/security/id_token_auth_time.dart';
 import '../core/security/password_hash.dart';
 import '../core/services/seed_service.dart';
 import '../core/sync/audit_logger.dart';
@@ -232,9 +233,15 @@ Future<void> initServiceLocator() async {
         final user = firebaseAuth?.currentUser;
         if (user == null || user.uid != sessionSource.session.uid) return null;
         final result = await user.getIdTokenResult();
-        return result.authTime == null
-            ? null
-            : result.authTime!.millisecondsSinceEpoch ~/ 1000;
+        if (result.authTime != null) {
+          return result.authTime!.millisecondsSinceEpoch ~/ 1000;
+        }
+        // The bundled Windows firebase_auth plugin returns only the token
+        // string from getIdToken, so IdTokenResult.authTime stays null there.
+        // The Rules compare the raw auth_time claim, so decode it from the
+        // token itself: the value then matches request.auth.token.auth_time
+        // on every platform.
+        return idTokenAuthTime(result.token);
       },
     ),
     dispose: (access) => access.dispose(),

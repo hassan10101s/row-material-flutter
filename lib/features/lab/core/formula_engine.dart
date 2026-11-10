@@ -134,7 +134,6 @@ double convertQuantity(double qty, String fromUnit, String toUnit) {
 double convertQuantityOrThrow(double qty, String fromUnit, String toUnit) {
   final f = fromUnit.trim();
   final t = toUnit.trim();
-  if (f.isEmpty || t.isEmpty || f.toLowerCase() == t.toLowerCase()) return qty;
   final fFactor = _unitFactors[f.toLowerCase()];
   final tFactor = _unitFactors[t.toLowerCase()];
   if (fFactor == null) throw ArgumentError('unknown fromUnit: $f');

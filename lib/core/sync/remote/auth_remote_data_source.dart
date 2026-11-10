@@ -263,6 +263,16 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   @override
   Future<void> signOut() async {
     await _auth?.signOut();
+    // google_sign_in keeps its own token cache (SharedPreferences on Windows)
+    // plus an in-memory user; without this the next Google sign-in silently
+    // restores the previous account instead of opening the account chooser.
+    try {
+      await google.signOut(
+        clientId: AuthRemoteDataSourceImpl.effectiveGoogleClientId,
+      );
+    } on Object catch (e) {
+      debugPrint('[auth] Google plugin sign-out failed: $e');
+    }
   }
 
   @override
@@ -992,5 +1002,13 @@ class GoogleAuthDataSourceImpl implements GoogleAuthDataSource {
       displayName: account.displayName,
       photoUrl: account.photoUrl,
     );
+  }
+
+  @override
+  Future<void> signOut({required String clientId}) async {
+    await AuthRemoteDataSourceImpl.ensureGoogleRegistered(clientId: clientId);
+    // Local + revokes nothing: clears the stored tokens/user id so the next
+    // sign-in opens the real account chooser instead of replaying the cache.
+    await _signIn.signOut();
   }
 }

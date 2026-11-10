@@ -64,6 +64,9 @@ class _FormulationsScreenState extends State<FormulationsScreen> {
   late Future<List<Map<String, dynamic>>> _rows = _repo.list();
   bool get _canWrite =>
       getIt<AuthGate>().canWrite(Permission.formulationsCreate);
+  bool get _canDelete =>
+      getIt<AuthGate>().canWrite(Permission.formulationsUpdate);
+  final _deleting = <int>{};
   bool _archived = false;
   bool _openedInitial = false;
   final TextEditingController _search = TextEditingController();
@@ -117,9 +120,12 @@ class _FormulationsScreenState extends State<FormulationsScreen> {
   }
 
   Future<void> _edit([Map<String, dynamic>? row, bool? view]) async {
-    final materials = await _repo.materials();
-    final products = await _repo.products();
-    final parameters = await _repo.parameters();
+    final catalogues = await Future.wait([
+      _repo.materials(),
+      _repo.products(),
+      _repo.parameters(),
+    ]);
+    final [materials, products, parameters] = catalogues;
     if (!mounted) return;
     final result = await showAppContentSurface<bool>(
       context,
@@ -165,6 +171,41 @@ class _FormulationsScreenState extends State<FormulationsScreen> {
       if (mounted) {
         AppFeedback.errorFrom(context, error);
       }
+    }
+  }
+
+  Future<void> _delete(Map<String, dynamic> row) async {
+    final id = (row['id'] as num).toInt();
+    if (_deleting.contains(id) || !_canDelete) return;
+    final confirmed = await showAppConfirm(
+      context,
+      title: AppText.t('حذف التركيبة؟', 'Delete formulation?'),
+      message: AppText.t(
+        'سيتم حذف «${row['name']}» من قائمة التركيبات. لن تتغير محاضر الفحص أو نتائج المعمل.',
+        'Delete “${row['name']}” from formulations? Inspection and laboratory records will be retained.',
+      ),
+      confirmLabel: AppText.t('حذف', 'Delete'),
+      danger: true,
+      icon: Icons.delete_outline,
+    );
+    if (!confirmed || !mounted || !_canDelete || _deleting.contains(id)) return;
+    setState(() => _deleting.add(id));
+    try {
+      await _repo.delete(id);
+      if (!mounted) return;
+      await _reload();
+      if (mounted) {
+        AppFeedback.success(
+          context,
+          AppText.t('تم حذف التركيبة', 'Formulation deleted'),
+        );
+      }
+    } on AppError catch (error) {
+      if (mounted) AppFeedback.errorFrom(context, error);
+    } catch (error) {
+      if (mounted) AppFeedback.errorFrom(context, error);
+    } finally {
+      if (mounted) setState(() => _deleting.remove(id));
     }
   }
 
@@ -383,6 +424,12 @@ class _FormulationsScreenState extends State<FormulationsScreen> {
       ),
     );
     final actions = [
+      if (_canDelete)
+        IconButton(
+          tooltip: AppText.t('حذف التركيبة', 'Delete formulation'),
+          onPressed: _deleting.contains(row['id']) ? null : () => _delete(row),
+          icon: Icon(Icons.delete_outline, color: AppColors.danger),
+        ),
       if (_canWrite)
         IconButton(
           tooltip: AppText.t('تعديل سريع', 'Quick edit'),
@@ -664,12 +711,16 @@ Widget _formulationPill(String text, {Color? color, IconData? icon}) =>
             Icon(icon, size: 12, color: color ?? AppColors.primary),
             const SizedBox(width: 4),
           ],
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 11.spMax,
-              fontWeight: FontWeight.w600,
-              color: color ?? AppColors.primary,
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.spMax,
+                fontWeight: FontWeight.w600,
+                color: color ?? AppColors.primary,
+              ),
             ),
           ),
         ],
@@ -1004,7 +1055,7 @@ class _FormulationEditorState extends State<_FormulationEditor> {
       // A finished older worker must never overwrite a newer selection.
       if (!mounted || generation != _refreshGeneration) return;
       _trackingCache[key] = tracking;
-      if (_trackingCache.length > 8) {
+      if (_trackingCache.length > (widget.fullScreen ? 3 : 8)) {
         _trackingCache.remove(_trackingCache.keys.first);
       }
       final current = tracking.current;
@@ -1012,7 +1063,7 @@ class _FormulationEditorState extends State<_FormulationEditor> {
         for (final entry in tracking.series.entries)
           entry.key: [
             for (var i = 0; i < entry.value.length; i++)
-              entry.value[i] == null
+              entry.value[i] == null || !entry.value[i]!.isFinite
                   ? FlSpot.nullSpot
                   : FlSpot(i.toDouble(), entry.value[i]!),
           ],
@@ -1317,7 +1368,11 @@ class _FormulationEditorState extends State<_FormulationEditor> {
       }
       return;
     }
-    final index = spots.first.x.round();
+    final touched = spots
+        .where((spot) => spot.x.isFinite && spot.y.isFinite)
+        .firstOrNull;
+    if (touched == null) return;
+    final index = touched.x.round();
     final series = _seriesOrder()
         .where(
           (entry) => _spotsByParameter[entry.$1]!.any((spot) => !spot.isNull()),
@@ -1464,7 +1519,7 @@ class _FormulationEditorState extends State<_FormulationEditor> {
           ..clear()
           ..addAll(selected);
       });
-      await _refresh();
+      await _refresh(loadSources: false);
     } catch (error) {
       if (mounted) {
         AppFeedback.errorFrom(
@@ -1723,7 +1778,7 @@ class _FormulationEditorState extends State<_FormulationEditor> {
                         lineBars.add(
                           LineChartBarData(
                             spots: spots,
-                            isCurved: true,
+                            isCurved: spots.length < 200,
                             preventCurveOverShooting: true,
                             barWidth: 2.5,
                             dotData: FlDotData(show: spots.length < 20),
@@ -1902,11 +1957,16 @@ class _FormulationEditorState extends State<_FormulationEditor> {
                         // Dense daily histories should not interpolate every
                         // point again on each animation/hover frame.
                         duration:
-                            lineBars.fold<int>(
-                                  0,
-                                  (count, bar) => count + bar.spots.length,
-                                ) >
-                                200
+                            widget.fullScreen ||
+                                lineBars.any(
+                                  (bar) =>
+                                      bar.spots.any((spot) => spot.isNull()),
+                                ) ||
+                                lineBars.fold<int>(
+                                      0,
+                                      (count, bar) => count + bar.spots.length,
+                                    ) >
+                                    200
                             ? Duration.zero
                             : const Duration(milliseconds: 150),
                       );
