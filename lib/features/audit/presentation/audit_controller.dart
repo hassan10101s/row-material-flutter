@@ -49,12 +49,28 @@ class AuditFilter {
 /// the same `AuditTrail` the sync cycle prunes through: one code path for the
 /// permission, the filters and the retention.
 class AuditController extends ChangeNotifier {
-  AuditController(this.trail, {this._pageSize = 200});
+  AuditController(
+    this.trail, {
+    this.refreshTrail,
+    this.canFetchFromServer = false,
+    this.pageSize = 200,
+  });
 
   final AuditTrailReader trail;
-  int _pageSize;
 
-  int get pageSize => _pageSize;
+  /// One-off download trigger injected by DI (the central sync driver). Never
+  /// wired for automatic refresh paths: only the explicit screen button.
+  final Future<void> Function()? refreshTrail;
+
+  /// Manager-only capability flag, resolved against the session at
+  /// registration.
+  final bool canFetchFromServer;
+
+  bool _refreshing = false;
+
+  bool get refreshing => _refreshing;
+
+  int pageSize;
 
   AuditFilter _filter = const AuditFilter();
   AuditPage _page = AuditPage.empty;
@@ -106,6 +122,32 @@ class AuditController extends ChangeNotifier {
     }
   }
 
+  /// The manual server refresh (manager-only). This is the ONLY way the
+  /// `auditLogs` collection is ever read: nothing automatic (sync tick,
+  /// reconnect, resume, rebuild) touches it. The fresh remote rows are
+  /// appended to the local trail by the sync driver, then re-read from the
+  /// local database here.
+  Future<void> refreshFromServer() async {
+    if (!canFetchFromServer || _refreshing) return;
+    _refreshing = true;
+    _error = null;
+    notifyListeners();
+    String? refreshFailure;
+    try {
+      await refreshTrail!();
+    } on Object catch (e) {
+      refreshFailure = AppError.friendly(e);
+    } finally {
+      _offset = 0;
+      _refreshing = false;
+      await load();
+      if (refreshFailure != null) {
+        _error = refreshFailure;
+        notifyListeners();
+      }
+    }
+  }
+
   /// Any filter change goes back to the first page - staying on page 4 of a
   /// list that now has one page would show an empty screen.
   Future<void> applyFilter(AuditFilter filter) async {
@@ -136,8 +178,8 @@ class AuditController extends ChangeNotifier {
   }
 
   Future<void> setPageSize(int size) async {
-    if (size <= 0 || size == _pageSize) return;
-    _pageSize = size;
+    if (size <= 0 || size == pageSize) return;
+    pageSize = size;
     _offset = 0;
     await load();
   }

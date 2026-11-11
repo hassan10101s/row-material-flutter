@@ -129,7 +129,7 @@ class LabScreen extends StatelessWidget {
       _LabTab(
         AppText.t('المعدات', 'Equipment'),
         Icons.precision_manufacturing_outlined,
-        (context) => const EquipmentTab(),
+        (context) => EquipmentTab(),
       ),
       _LabTab(
         AppText.t('المخزون', 'Inventory'),

@@ -52,32 +52,47 @@ void main() {
       );
     });
 
-    test('the standalone audit route requires audit.read', () {
+    test('the audit trail is owner-only, the roster owner + quality manager', () {
+      // Client-side visibility policy (November 2026): the audit log is a
+      // management screen — only the company owner opens it — and the roster
+      // additionally serves the quality manager. The Firestore rules keep
+      // their own independent `audit.read` matrix.
       expect(AppRouter.guardRoute('/audit', session()), AppRoutes.dashboard);
-      expect(
-        session().permissions.contains(Permission.auditRead),
-        isFalse,
-        reason: 'a viewer is not in the audit.read matrix',
-      );
 
       final admin = session(role: AppRoles.admin);
       expect(admin.permissions.contains(Permission.auditRead), isTrue);
       expect(AppRouter.guardRoute('/audit', admin), isNull);
       expect(
         AppRouter.guardRoute('/audit', session(role: AppRoles.qualityManager)),
+        AppRoutes.dashboard,
+      );
+      expect(
+        AppRouter.guardRoute('/audit', session(role: AppRoles.lab)),
+        AppRoutes.dashboard,
+      );
+
+      expect(AppRouter.guardRoute(AppRoutes.members, admin), isNull);
+      expect(
+        AppRouter.guardRoute(AppRoutes.members, session(
+          role: AppRoles.qualityManager,
+        )),
         isNull,
       );
-
-      final qualityManager = session(role: AppRoles.qualityManager);
       expect(
-        qualityManager.permissions.contains(Permission.auditRead),
-        isTrue,
-        reason: 'the quality manager reviews the trail',
+        AppRouter.guardRoute(AppRoutes.members, session(role: AppRoles.lab)),
+        AppRoutes.dashboard,
       );
-
-      final lab = session(role: AppRoles.lab);
-      expect(lab.permissions.contains(Permission.auditRead), isTrue);
-      expect(AppRouter.guardRoute('/audit', lab), isNull);
+      expect(
+        AppRouter.guardRoute(
+          AppRoutes.members,
+          session(role: AppRoles.nutritionist),
+        ),
+        AppRoutes.dashboard,
+      );
+      expect(
+        AppRouter.guardRoute(AppRoutes.members, session()),
+        AppRoutes.dashboard,
+      );
     });
 
     test('a viewer keeps the read-only screens', () {

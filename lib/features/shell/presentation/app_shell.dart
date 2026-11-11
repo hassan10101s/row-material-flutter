@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../app/auth_gate.dart';
 import '../../../core/auth/permissions.dart';
 import '../../../core/constants/app_strings.dart';
+import '../../../router/app_router.dart' show AppRouter;
 import '../../../core/network/transient_network_error.dart';
 import '../../../core/locale/locale_service.dart';
 import '../../../core/network/connectivity_service.dart';
@@ -322,8 +323,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   List<ShellNavEntry> _entries(User user) => shellNavEntries(
     canSeeSettings: user.canSeeSettings,
     canReadReference: user.permissions.contains(Permission.samplesRead),
-    canReadMembers: user.permissions.contains(Permission.usersRead),
-    canReadAudit: user.permissions.contains(Permission.auditRead),
+    // The roster is owner/quality-manager only and the audit trail is
+    // owner-only (client-side visibility; same helpers as the route guard so
+    // the sidebar and the deep link cannot drift apart).
+    canReadMembers: AppRouter.canSeeMembers(widget.gate.session),
+    canReadAudit: AppRouter.canSeeAudit(widget.gate.session),
     canReadQc: widget.gate.session.permissions.contains(Permission.qcRead),
     canReadFormulations: widget.gate.session.permissions.contains(
       Permission.formulationsRead,

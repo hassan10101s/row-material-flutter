@@ -193,15 +193,15 @@ class _InspectionCenterScreenState extends State<InspectionCenterScreen> {
             children: [
               BlocProvider.value(
                 value: context.read<InspectionsCubit>(),
-                child: const InspectionsScreen(),
+                child: InspectionsScreen(),
               ),
               BlocProvider.value(
                 value: _productCubit,
-                child: const InspectionsScreen(),
+                child: InspectionsScreen(),
               ),
               BlocProvider.value(
                 value: context.read<ReportsCubit>(),
-                child: const ReportsScreen(),
+                child: ReportsScreen(),
               ),
             ],
           ),

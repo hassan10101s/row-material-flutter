@@ -15,7 +15,7 @@ class InventoryTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) => appAdaptiveVariant(
     context,
-    desktop: (_) => const DesktopInventoryTab(),
-    mobile: (_) => const MobileInventoryTab(),
+    desktop: (_) => DesktopInventoryTab(),
+    mobile: (_) => MobileInventoryTab(),
   );
 }

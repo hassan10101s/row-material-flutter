@@ -64,27 +64,29 @@ class QcTableRecordsScreen extends StatelessWidget {
   static Future<void> open(BuildContext context, int tableId) {
     if (supportsDataTable) {
       final cubit = getIt<QcTableRowsCubit>(param1: tableId)..load();
-      final window = showDialog(
-        context: context,
-        builder: (_) => BlocProvider<QcTableRowsCubit>.value(
-          value: cubit,
-          child: Builder(
-            builder: (windowContext) {
-              final state = windowContext.watch<QcTableRowsCubit>().state;
-              return AppWindow(
-                title:
-                    state.table?.title ??
-                    AppText.t('سجل جدول', 'Table register'),
-                icon: Icons.table_chart_outlined,
-                subtitle: state.table?.description,
-                maxWidth: 1150,
-                scrollBody: false,
-                child: const QcTableRecordsScreen._(title: '', asWindow: true),
-              );
-            },
+        final window = showDialog(
+          context: context,
+          builder: appLocaleAwareBuilder(
+            (_) => BlocProvider<QcTableRowsCubit>.value(
+              value: cubit,
+              child: Builder(
+                builder: (windowContext) {
+                  final state = windowContext.watch<QcTableRowsCubit>().state;
+                  return AppWindow(
+                    title:
+                        state.table?.title ??
+                        AppText.t('سجل الجدول', 'Table register'),
+                    icon: Icons.table_chart_outlined,
+                    subtitle: state.table?.description,
+                    maxWidth: 1150,
+                    scrollBody: false,
+                    child: QcTableRecordsScreen._(title: '', asWindow: true),
+                  );
+                },
+              ),
+            ),
           ),
-        ),
-      );
+        );
       return window.whenComplete(() async => cubit.close());
     }
     return Navigator.of(context).push(

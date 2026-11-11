@@ -15,7 +15,7 @@ class UnitsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) => appAdaptiveVariant(
     context,
-    desktop: (_) => const DesktopUnitsTab(),
-    mobile: (_) => const MobileUnitsTab(),
+    desktop: (_) => DesktopUnitsTab(),
+    mobile: (_) => MobileUnitsTab(),
   );
 }

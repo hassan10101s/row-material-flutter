@@ -15,7 +15,7 @@ class AnalysesTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) => appAdaptiveVariant(
     context,
-    desktop: (_) => const DesktopAnalysesTab(),
-    mobile: (_) => const MobileAnalysesTab(),
+    desktop: (_) => DesktopAnalysesTab(),
+    mobile: (_) => MobileAnalysesTab(),
   );
 }

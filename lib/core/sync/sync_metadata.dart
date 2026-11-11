@@ -216,6 +216,36 @@ class SyncMetadata {
 
   Future<String> lastError() => get(lastErrorKey);
 
+  /// Malformed server records the reader quarantined instead of aborting the
+  /// archive. Kept so an organization/quality manager can see the exact
+  /// document paths and repair them at the source.
+  static String quarantineKey = 'central_quarantine';
+  static const int quarantineLimit = 50;
+
+  Future<void> markQuarantine(List<String> reports) async {
+    if (reports.isEmpty) {
+      await remove(quarantineKey);
+      return;
+    }
+    final bounded = reports.length > quarantineLimit
+        ? reports.sublist(reports.length - quarantineLimit)
+        : reports;
+    await set(quarantineKey, jsonEncode(bounded));
+  }
+
+  Future<List<String>> quarantinedRecords() async {
+    final raw = await get(quarantineKey);
+    if (raw.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(raw);
+      return decoded is List
+          ? decoded.whereType<String>().toList(growable: false)
+          : const [];
+    } on Object {
+      return const [];
+    }
+  }
+
   /// Master switch used by the Sync screen.
   Future<bool> isSyncEnabled() async => (await get(syncEnabledKey)) != '0';
 

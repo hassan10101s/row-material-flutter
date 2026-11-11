@@ -480,12 +480,12 @@ void _showSheetsWindow(BuildContext context) {
   showAppContentSurface<void>(
     context,
     builder: (_, fullScreen) => fullScreen
-        ? const _SheetsScreen()
+        ? _SheetsScreen()
         : AppWindow(
             title: AppText.t('سجل القوائم الكامل', 'Full sheet history'),
             size: AppWindowSize.lg,
             scrollBody: false,
-            child: const _SheetsScreen(windowed: true),
+            child: _SheetsScreen(windowed: true),
           ),
   );
 }

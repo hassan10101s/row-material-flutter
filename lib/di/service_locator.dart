@@ -159,11 +159,20 @@ Future<void> initServiceLocator() async {
     firestore: remote,
     google: GoogleAuthDataSourceImpl(),
     auth: firebaseAuth,
+    // Audit writes must carry the *registered* device id (the rules accept an
+    // audit entry only from an active device the signer owns). Read live from
+    // the session at write time — `gate` is registered further below, and the
+    // closure only runs once a member write happens, long after registration.
+    deviceIdReader: () => getIt<AuthGate>().session.deviceId,
   );
   final connectivity = getIt<ConnectivityService>();
   final metadata = SyncMetadata(dbHelper);
   final queue = SyncQueue(dbHelper);
   final sessionStore = SessionStore();
+
+  // Serialization for quarantined-record persistence: each skip report is
+  // appended onto the previous write so concurrent skips never lose one.
+  var quarantinePersist = Future<List<String>>.value([]);
 
   // The gate needs the repository and the repository needs the live session
   // (audit attribution, device registry). `late final` breaks the cycle: the
@@ -444,7 +453,15 @@ Future<void> initServiceLocator() async {
       () => AuditTrail(audit: audit, metadata: metadata, devices: devices),
     )
     ..registerFactory<AuditController>(
-      () => AuditController(getIt<AuditTrail>()),
+      // The manual "refresh from server" action is resolved against the live
+      // session at creation: only the organization manager (admin) shows the
+      // single button that ever reads `auditLogs` from Firestore. Nothing
+      // automatic ever syncs the trail again (November 10 decision).
+      () => AuditController(
+        getIt<AuditTrail>(),
+        canFetchFromServer: getIt<AuditTrail>().canRead,
+        refreshTrail: () => getIt<CentralSyncDriver>().refreshAuditTrail(),
+      ),
     )
     // ── QC Manager (plan V6_ENHANCED P3) ───────────────────────────────────
     // One [QcRepositories] holds all five contracts over the same guard and
@@ -633,6 +650,19 @@ Future<void> initServiceLocator() async {
               store: directStore,
               source: sessionSource,
               manifest: loadDirectManifest,
+              onSkippedRecord: (detail) {
+                debugPrint('[central-sync] $detail');
+                // Persist the report so an organization/quality manager can
+                // see the exact document path and repair it at the source.
+                // Chained so concurrent skips never lose a report.
+                quarantinePersist = quarantinePersist
+                    .then((current) async {
+                      current.remove(detail);
+                      current.add(detail);
+                      await metadata.markQuarantine(current);
+                      return current;
+                    });
+              },
             ),
     )
     ..registerSingleton<CentralSyncDriver>(

@@ -23,6 +23,7 @@ import 'package:material_lab/core/responsive/form_factor.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import 'package:material_lab/core/sync/sync_queue.dart';
 import 'package:material_lab/core/theme/theme_service.dart';
+import 'package:material_lab/router/app_router.dart' show AppRouter;
 import 'package:material_lab/features/auth/domain/auth_repository.dart';
 import 'package:material_lab/features/auth/domain/user.dart';
 import 'package:material_lab/features/settings/data/settings_repo.dart';
@@ -181,13 +182,22 @@ void main() {
     FormFactor.debugSet(null);
   });
 
-  /// The destinations for [role], resolved through the same permission matrix the
-  /// shell uses.
-  List<ShellNavEntry> entriesFor(String role) => shellNavEntries(
-    canSeeSettings: rolePermissions(role).contains(Permission.orgUpdate),
-    canReadReference: rolePermissions(role).contains(Permission.samplesRead),
-    canReadMembers: rolePermissions(role).contains(Permission.usersRead),
-  );
+  /// The destinations for [role], resolved through the same permission matrix
+  /// and visibility gates the shell uses (`AppRouter.canSeeMembers/canSeeAudit`).
+  List<ShellNavEntry> entriesFor(String role) {
+    final session = AppSession(
+      uid: 'u',
+      organizationId: 'org',
+      role: role,
+      status: 'active',
+    );
+    return shellNavEntries(
+      canSeeSettings: rolePermissions(role).contains(Permission.orgUpdate),
+      canReadReference: rolePermissions(role).contains(Permission.samplesRead),
+      canReadMembers: AppRouter.canSeeMembers(session),
+      canReadAudit: AppRouter.canSeeAudit(session),
+    );
+  }
 
   /// A badge that has never been started, so nothing here touches a database.
   ///
@@ -942,10 +952,11 @@ void main() {
       expect(entriesFor(AppRoles.admin), hasLength(5));
       await pumpRole(tester, AppRoles.admin);
     });
-
-    testWidgets('a viewer sees the same three on both', (tester) async {
+    testWidgets('a viewer sees the same four on both', (tester) async {
       final viewer = entriesFor(AppRoles.viewer);
-      expect(viewer, hasLength(3));
+      // Dashboard, inspections, lab and the shared reference library
+      // (`samples.read` is in the viewer matrix).
+      expect(viewer, hasLength(4));
       expect(
         viewer.map((e) => e.path),
         isNot(contains('/settings')),
@@ -970,9 +981,24 @@ void main() {
         );
       }
 
+      // Visibility policy: the roster is owner + quality manager, the audit
+      // trail owner-only; a lab member reaches neither from the shell.
       final lab = entriesFor(AppRoles.lab);
-      expect(lab.map((e) => e.path), contains('/members'));
+      expect(lab.map((e) => e.path), isNot(contains('/members')));
+      expect(lab.map((e) => e.path), isNot(contains('/audit')));
       expect(lab.map((e) => e.path), isNot(contains('/settings')));
+      final qualityManager = entriesFor(AppRoles.qualityManager);
+      expect(qualityManager.map((e) => e.path), contains('/members'));
+      expect(
+        qualityManager.map((e) => e.path),
+        isNot(contains('/audit')),
+      );
+      final owner = entriesFor(AppRoles.admin);
+      // The owner keeps Settings and reaches the roster/audit from inside it,
+      // so the standalone entries are suppressed when Settings is offered.
+      expect(owner.map((e) => e.path), contains('/settings'));
+      expect(owner.map((e) => e.path), isNot(contains('/members')));
+      expect(owner.map((e) => e.path), isNot(contains('/audit')));
       await pumpRole(tester, AppRoles.lab);
     });
 

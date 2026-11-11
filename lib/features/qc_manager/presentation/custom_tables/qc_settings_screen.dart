@@ -41,12 +41,12 @@ class QcSettingsScreen extends StatelessWidget {
     return showAppContentSurface<void>(
       context,
       builder: (_, fullScreen) => fullScreen
-          ? const QcSettingsScreen._()
+          ? QcSettingsScreen._()
           : AppWindow(
               title: AppText.t('إعدادات الجودة', 'Quality settings'),
               size: AppWindowSize.lg,
               scrollBody: false,
-              child: const QcSettingsScreen._(windowed: true),
+              child: QcSettingsScreen._(windowed: true),
             ),
     );
   }

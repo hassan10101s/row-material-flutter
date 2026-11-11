@@ -12,10 +12,29 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
     required this.store,
     required this.source,
     required this.manifest,
+    this.onSkippedRecord,
   });
   final FirestoreDirectStore store;
   final SessionSource source;
   final Future<Map<String, dynamic>> Function() manifest;
+
+  /// A single malformed server document (missing/invalid `version` or a
+  /// foreign `organizationId`) is quarantined — skipped deterministically by
+  /// every device so caches stay identical — instead of aborting the whole
+  /// archive download. Each skip is reported here with the document path and
+  /// the exact defect so the record can be repaired at the source.
+  final void Function(String detail)? onSkippedRecord;
+  final List<String> skippedRecords = [];
+  static const int _skippedReportLimit = 50;
+
+  void _skip(String path, String defect) {
+    final detail = 'سجل تالف تم تجاهله: $path — $defect';
+    skippedRecords.add(detail);
+    if (skippedRecords.length > _skippedReportLimit) {
+      skippedRecords.removeAt(0);
+    }
+    onSkippedRecord?.call(detail);
+  }
 
   String get _root => 'organizations/${source.session.organizationId}';
 
@@ -48,8 +67,11 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
   }
 
   Map _definition(Map definitions, String type) {
+    // The command audit trail is manual and manager-only (November 10
+    // decision): its pages are the largest automatic read consumer, so only
+    // the organization manager may walk `auditLogs`.
     final def = type == 'auditLog'
-        ? const {'collection': 'auditLogs', 'readPermission': 'audit.read'}
+        ? const {'collection': 'auditLogs', 'readPermission': 'devices.read'}
         : definitions[type];
     final permission = def is Map
         ? Permission.byId('${def['readPermission']}')
@@ -63,8 +85,25 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
     return def;
   }
 
-  ApprovedRecord _approved(String type, DirectDocument doc) {
-    _validRecord(doc, source.session.organizationId);
+  /// Returns a human-readable defect description when the document cannot
+  /// participate in the version protocol, or null when it is valid.
+  String? _defect(DirectDocument doc, String org) {
+    final version = doc.data['version'];
+    if (doc.data['organizationId'] != org) {
+      return 'organizationId غير متطابق (${doc.data['organizationId']})';
+    }
+    if (version is! int || version < 1) {
+      return 'version غير صالح ($version)';
+    }
+    return null;
+  }
+
+  ApprovedRecord? _approved(String type, DirectDocument doc, String path) {
+    final defect = _defect(doc, source.session.organizationId);
+    if (defect != null) {
+      _skip(path, defect);
+      return null;
+    }
     return ApprovedRecord(
       entityType: type,
       entityId: doc.id,
@@ -92,9 +131,15 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
       limit: 100,
     );
     checkDirectSession(source, actor);
-    return CentralRecordPage([
-      for (final doc in docs) _approved(entityType, doc),
-    ], docs.length == 100 ? docs.last.id : null);
+    final approved = <ApprovedRecord>[];
+    for (final doc in docs) {
+      final record = _approved(entityType, doc, '${def['collection']}/${doc.id}');
+      if (record != null) approved.add(record);
+    }
+    return CentralRecordPage(
+      approved,
+      docs.length == 100 ? docs.last.id : null,
+    );
   }
 
   @override
@@ -153,8 +198,9 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
     }
     final records = <ApprovedRecord>[];
     // Command audits are committed atomically with their business effects.
-    // Fetch them only for authorized audit readers, at the same read boundary.
-    if (actor.can(Permission.byId('audit.read')!)) {
+    // The trail itself is manual and manager-only: only the organization
+    // manager rides the change feed with the per-operation audit docs.
+    if (actor.can(Permission.byId('devices.read')!)) {
       for (final operation in operations) {
         targets['$_root/auditLogs/cmd_$operation'] = (
           type: 'auditLog',
@@ -170,10 +216,19 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
       for (final doc in docs) {
         final path = doc.name.substring(store.documents.length + 1);
         final target = targets[path];
-        if (target == null || doc.data['version'] != target.version) {
+        if (target == null) throw const CentralSyncGap();
+        // A malformed document is quarantined, not a gap: a gap would force a
+        // full snapshot rebuild that skips the same record and then gap again
+        // on the next event referencing it — an endless rebuild loop.
+        final defect = _defect(doc, actor.organizationId);
+        if (defect != null) {
+          _skip(path, defect);
+          continue;
+        }
+        if (doc.data['version'] != target.version) {
           throw const CentralSyncGap();
         }
-        records.add(_approved(target.type, doc));
+        records.add(_approved(target.type, doc, path)!);
       }
       checkDirectSession(source, actor);
     }
@@ -240,20 +295,26 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
             ? def['table'] as String
             : null,
       );
+      final pageRecords = <Map<String, dynamic>>[];
       for (final doc in docs) {
-        _validRecord(doc, actor.organizationId);
+        final docPath = '${def['collection']}/${doc.id}';
+        final defect = _defect(doc, actor.organizationId);
+        if (defect != null) {
+          // Quarantine deterministically so every device skips the same
+          // record and their installed caches stay byte-identical.
+          _skip(docPath, defect);
+          continue;
+        }
+        pageRecords.add({
+          'entityType': type,
+          'entityId': doc.id,
+          'version': doc.data['version'],
+          'data': doc.data,
+        });
       }
       result = {
         'throughSequence': watermark,
-        'records': [
-          for (final doc in docs)
-            {
-              'entityType': type,
-              'entityId': doc.id,
-              'version': doc.data['version'],
-              'data': doc.data,
-            },
-        ],
+        'records': pageRecords,
         'nextAfter': docs.length == 20 ? docs.last.id : null,
       };
     } else if (mode == 'events') {
@@ -291,7 +352,14 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
             '$root/${def['collection']}/${raw['entityId']}',
           );
           if (doc == null) throw const CentralSyncGap();
-          _validRecord(doc, actor.organizationId);
+          final docPath = '${def['collection']}/${doc.id}';
+          final defect = _defect(doc, actor.organizationId);
+          if (defect != null) {
+            // Quarantine the malformed document and keep the feed moving;
+            // the snapshot channel skips the same record deterministically.
+            _skip(docPath, defect);
+            continue;
+          }
           if ((doc.data['version'] as int) < (raw['version'] as int)) {
             throw const CentralSyncGap();
           }
@@ -326,16 +394,5 @@ class FirestoreDirectSyncReader implements ConsistentCentralSyncReader {
     }
     checkDirectSession(source, actor);
     return result;
-  }
-
-  void _validRecord(DirectDocument doc, String org) {
-    if (doc.data['organizationId'] != org ||
-        doc.data['version'] is! int ||
-        (doc.data['version'] as int) < 1) {
-      refuseDirect(
-        CommandErrorCodes.protocolNotReady,
-        'يوجد سجل يحتاج تجهيزًا قبل تنزيل الأرشيف.',
-      );
-    }
   }
 }

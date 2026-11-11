@@ -11,6 +11,8 @@ import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
+import '../../../../../design_system/widgets/app_window.dart'
+    show appLocaleAwareBuilder;
 import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
@@ -76,14 +78,16 @@ class _DesktopMaterialsTabState extends State<DesktopMaterialsTab> {
   }
 
   Future<void> _openEditor([int? materialId]) async {
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) => DesktopMaterialEditor(
-        refRepo: widget.refRepo,
-        labConfig: widget.labConfig,
-        materialId: materialId,
-      ),
-    );
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: appLocaleAwareBuilder(
+          (_) => DesktopMaterialEditor(
+            refRepo: widget.refRepo,
+            labConfig: widget.labConfig,
+            materialId: materialId,
+          ),
+        ),
+      );
     if (!mounted) return;
     await context.read<ReferenceCubit>().load();
     if (mounted && saved == true) {

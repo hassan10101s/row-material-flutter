@@ -24,11 +24,20 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
     required this.firestore,
     required this.google,
     this.auth,
+    this.deviceIdReader,
   });
 
   final FirestoreDataSource firestore;
   final GoogleAuthDataSource google;
   final FirebaseAuth? auth;
+
+  /// Live device id, read at write time (never captured at startup) so the
+  /// audit entries carry the *registered* device id. The Firestore rules
+  /// accept a client-written `auditLogs` entry only for an active device the
+  /// signer owns (`activeOwnedDevice`), so a missing/null id turns every
+  /// member/identity audit write into a permission-denied *after* the primary
+  /// write already committed — the "error although it succeeded" UX bug.
+  final String Function()? deviceIdReader;
 
   FirebaseAuth? get _auth => auth;
 
@@ -873,6 +882,9 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
   }) async {
     final uid = _auth?.currentUser?.uid ?? '';
     final now = firestore.serverTimestamp();
+    // The live session device id wins; the undocumented static (never
+    // populated anywhere in the app) stays as a fallback for tests.
+    final deviceId = deviceIdReader?.call() ?? _deviceId ?? '';
     // Sortable, collision-free id: the member id is stable while the
     // timestamp prefix keeps the audit log chronological.
     final logId =
@@ -885,7 +897,7 @@ class AuthRemoteDataSourceImpl implements AuthRemoteDataSource {
       'entityType': entityType,
       'entityId': entityId,
       'detailsJson': details == null ? null : SyncCodec.encode(details),
-      'deviceId': _deviceId,
+      'deviceId': deviceId,
       'occurredAt': now,
       'version': 1,
     });

@@ -468,6 +468,21 @@ class AppDialog extends StatelessWidget {
   );
 }
 
+/// Wraps a dialog/sheet builder so its content re-resolves the static
+/// `AppText.t` translations when the locale changes while the dialog is open.
+///
+/// Route pages rebuild through [AppPageRoute.appearanceChanges]; the root
+/// navigator's overlay routes (dialogs, sheets) are not touched by that
+/// cascade, so every overlay helper routes its builder through this.
+WidgetBuilder appLocaleAwareBuilder(WidgetBuilder builder) => (context) {
+  final changes = AppPageRoute.appearanceChanges;
+  if (changes == null) return builder(context);
+  return ListenableBuilder(
+    listenable: changes,
+    builder: (context, _) => builder(context),
+  );
+};
+
 /// Opens the same dialog content as a desktop window or a mobile sheet.
 Future<T?> showAppDialog<T>(
   BuildContext context, {
@@ -477,7 +492,7 @@ Future<T?> showAppDialog<T>(
     ? showDialog<T>(
         context: context,
         barrierDismissible: barrierDismissible,
-        builder: builder,
+        builder: appLocaleAwareBuilder(builder),
       )
     : showModalBottomSheet<T>(
         context: context,
@@ -486,7 +501,7 @@ Future<T?> showAppDialog<T>(
         showDragHandle: true,
         isDismissible: barrierDismissible,
         enableDrag: barrierDismissible,
-        builder: builder,
+        builder: appLocaleAwareBuilder(builder),
       );
 
 /// Mutable back/close guard for a unified editor surface (`showAppContent`).
@@ -647,7 +662,10 @@ Future<T?> showAppContentSurface<T>(
   Widget surface(BuildContext ctx) => builder(ctx, page);
   return page
       ? Navigator.of(context).push<T>(AppPageRoute(builder: surface))
-      : showDialog<T>(context: context, builder: surface);
+      : showDialog<T>(
+          context: context,
+          builder: appLocaleAwareBuilder(surface),
+        );
 }
 
 Future<T?> showAppWindow<T>(
@@ -668,18 +686,20 @@ Future<T?> showAppWindow<T>(
   return showDialog<T>(
     context: context,
     barrierDismissible: barrierDismissible,
-    builder: (_) => AppWindow(
-      title: title,
-      icon: icon,
-      accent: accent,
-      subtitle: subtitle,
-      actions: actions,
-      leadingActions: leadingActions,
-      size: size,
-      maxWidth: maxWidth,
-      height: height,
-      scrollBody: scrollBody,
-      child: child,
+    builder: appLocaleAwareBuilder(
+      (_) => AppWindow(
+        title: title,
+        icon: icon,
+        accent: accent,
+        subtitle: subtitle,
+        actions: actions,
+        leadingActions: leadingActions,
+        size: size,
+        maxWidth: maxWidth,
+        height: height,
+        scrollBody: scrollBody,
+        child: child,
+      ),
     ),
   );
 }

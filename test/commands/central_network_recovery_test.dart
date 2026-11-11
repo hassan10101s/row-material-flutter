@@ -12,6 +12,7 @@ import 'package:material_lab/core/commands/command_outbox.dart';
 import 'package:material_lab/core/commands/firestore_direct_store.dart';
 import 'package:material_lab/core/commands/firestore_direct_sync_reader.dart';
 import 'package:material_lab/core/network/transient_network_error.dart';
+import 'package:material_lab/core/sync/entity_registry.dart';
 import 'package:material_lab/core/sync/sync_metadata.dart';
 import '../sync/sync_test_fixture.dart';
 
@@ -26,6 +27,99 @@ class _InterruptedReads implements CentralSyncReader {
     }
     return {'events': <Object>[], 'throughSequence': 0, 'hasMore': false};
   }
+}
+
+/// Raises CentralSyncGap on every head read: a server-side gap the local
+/// cache can never heal. Without the storm guard this forced a full archive
+/// re-walk (including the whole `materialBounds` family) on every 30-second
+/// foreground tick.
+class _GappingHead implements ConsistentCentralSyncReader {
+  int heads = 0;
+
+  @override
+  Future<Map<String, dynamic>> call(Map<String, Object?> request) async {
+    throw StateError('Events channel is not used by a gapping head');
+  }
+
+  @override
+  Future<CentralReadBoundary> readHead() async {
+    heads++;
+    throw const CentralSyncGap();
+  }
+
+  @override
+  Future<CentralRecordPage> readSnapshotPage(
+    String entityType,
+    CentralReadBoundary boundary, {
+    String? after,
+  }) async {
+    throw const CentralSyncGap();
+  }
+
+  @override
+  Future<CentralChangeSet> readChanges(
+    int afterSequence,
+    CentralReadBoundary boundary,
+  ) async {
+    throw const CentralSyncGap();
+  }
+}
+
+/// Serves an empty snapshot page for every family except `referenceMaterial`,
+/// which spans three pages (`m-1`, `m-2`, end). Page probes are logged so the
+/// test can prove a resumed walk never re-reads a family that already
+/// finished, and a simulated restart can be injected after page N.
+class _ResumableWalk implements ConsistentCentralSyncReader {
+  final Future<ApprovedRecord> Function(String id) materialFor;
+
+  _ResumableWalk(this.materialFor);
+
+  int heads = 0;
+  int calls = 0;
+  int failAtCall = -1;
+  final pageLog = <String>[];
+
+  @override
+  Future<Map<String, dynamic>> call(Map<String, Object?> request) async {
+    throw StateError('Events channel is not used by the walk reader');
+  }
+
+  @override
+  Future<CentralReadBoundary> readHead() async {
+    heads++;
+    return const CentralReadBoundary(
+      sequence: 7,
+      readTime: '2026-11-10T10:00:00Z',
+      manifestVersion: 1,
+    );
+  }
+
+  @override
+  Future<CentralRecordPage> readSnapshotPage(
+    String entityType,
+    CentralReadBoundary boundary, {
+    String? after,
+  }) async {
+    calls++;
+    if (calls == failAtCall) throw StateError('simulated restart');
+    pageLog.add('$entityType/$after');
+    if (entityType == 'referenceMaterial') {
+      if (after == null) {
+        return CentralRecordPage([await materialFor('m-1')], 'm-1');
+      }
+      if (after == 'm-1') {
+        return CentralRecordPage([await materialFor('m-2')], 'm-2');
+      }
+      return const CentralRecordPage([], null);
+    }
+    return const CentralRecordPage([], null);
+  }
+
+  @override
+  Future<CentralChangeSet> readChanges(
+    int afterSequence,
+    CentralReadBoundary boundary,
+  ) async => const CentralChangeSet(records: [], operationIds: {});
 }
 
 void main() {
@@ -200,6 +294,170 @@ void main() {
       expect(reader.calls, 5, reason: 'Explicit refresh remains available');
       expect(await fixture.db.query('reference_materials'), cached);
       expect(await fixture.db.query('command_outbox'), isEmpty);
+    },
+  );
+  test('a persistent gap cannot re-walk the archive on every 30-second tick', () async {
+    final fixture = await openSyncFixture();
+    addTearDown(fixture.dispose);
+    await fixture.seedOrganization();
+    await fixture.db.insert('central_sync_state', {
+      'organization_id': 'org_test',
+      'uid': 'uid_admin',
+      'role': 'admin',
+      'bootstrap_state': 'ready',
+      'protocol_schema': 3,
+      'applied_sequence': 0,
+    });
+    const actor = AppSession(
+      uid: 'uid_admin',
+      organizationId: 'org_test',
+      deviceId: 'device',
+      role: 'admin',
+      status: 'active',
+    );
+    final source = SessionSource(() => actor);
+    final reader = _GappingHead();
+    var now = DateTime(2026, 11, 10, 10);
+    final driver = CentralSyncDriver(
+      databaseHelper: fixture.helper,
+      source: source,
+      projection: CentralProjection(
+        databaseHelper: fixture.helper,
+        source: source,
+      ),
+      transport: reader,
+      outbox: CommandOutbox(fixture.helper),
+      metadata: SyncMetadata(fixture.helper),
+      interval: const Duration(seconds: 30),
+      now: () => now,
+    );
+    addTearDown(driver.stop);
+    await driver.refreshForeground();
+    expect(reader.heads, 1, reason: 'First gap attempt honestly retries');
+    await driver.refreshForeground();
+    expect(reader.heads, 1, reason: 'The storm guard defers the next tick');
+    now = now.add(const Duration(seconds: 30));
+    await driver.refreshForeground();
+    expect(reader.heads, 1, reason: 'Still inside the 10-minute backoff');
+    now = now.add(const Duration(minutes: 10, seconds: 1));
+    await driver.refreshForeground();
+    expect(reader.heads, 2, reason: 'After the backoff one attempt is allowed');
+    try {
+      await driver.syncNow();
+    } on CentralSyncGap catch(_) {
+      // Expected: the server-side gap persists past the guard.
+    }
+    expect(reader.heads, 3, reason: 'A manual refresh always bypasses the guard');
+  });
+
+  test(
+    'an interrupted consistent walk resumes from its disk-staged cursor',
+    () async {
+      final fixture = await openSyncFixture();
+      addTearDown(fixture.dispose);
+      await fixture.seedOrganization();
+      const actor = AppSession(
+        uid: 'uid_admin',
+        organizationId: 'org_test',
+        deviceId: 'device',
+        memberId: 'member',
+        role: 'admin',
+        status: 'active',
+      );
+      final source = SessionSource(() => actor);
+      Future<ApprovedRecord> materialFor(String id) async {
+        final raw =
+            Map<String, dynamic>.from(
+                (await fixture.db.query(
+                  'reference_materials',
+                  where: 'id = 1',
+                )).single,
+              )
+              ..['id'] = 913
+              ..['material_name'] = 'Resumed material $id'
+              ..['material_code'] = 'RES-$id';
+        final data = {
+          ...buildRemotePayload(
+            SyncEntity.byType('referenceMaterial')!,
+            raw,
+            const SyncPayloadContext(
+              organizationId: 'org_test',
+              uid: 'uid_admin',
+              deviceId: 'origin',
+              version: 1,
+              versionField: 'version',
+            ),
+            asCreate: true,
+          ),
+          'organizationId': 'org_test',
+          'remoteId': id,
+          'version': 1,
+          'createdBy': 'uid_admin',
+          'updatedBy': 'uid_admin',
+          'createdAt': '2026-11-10T00:00:00.000Z',
+          'updatedAt': '2026-11-10T00:00:00.000Z',
+          'deletedAt': null,
+          'parentRefs': const <String, dynamic>{},
+        };
+        return ApprovedRecord(
+          entityType: 'referenceMaterial',
+          entityId: id,
+          version: 1,
+          data: data,
+        );
+      }
+
+      final reader = _ResumableWalk(materialFor)..failAtCall = 4;
+      final driver = CentralSyncDriver(
+        databaseHelper: fixture.helper,
+        source: source,
+        projection: CentralProjection(
+          databaseHelper: fixture.helper,
+          source: source,
+        ),
+        transport: reader,
+        outbox: CommandOutbox(fixture.helper),
+        metadata: SyncMetadata(fixture.helper),
+      );
+      await expectLater(driver.syncNow(), throwsStateError);
+      final firstPass = List.of(reader.pageLog);
+      expect(firstPass, hasLength(3));
+      final materialProbes = firstPass
+          .where((probe) => probe.startsWith('referenceMaterial'))
+          .toList();
+      expect(
+        materialProbes,
+        isEmpty,
+        reason: 'The fourth family walk stops before referenceMaterial',
+      );
+
+      reader.failAtCall = -1;
+      await driver.syncNow();
+
+      expect(reader.heads, 2);
+      // The completed families keep exactly one probe each, and the
+      // referenceMaterial pages were served exactly once.
+      expect(reader.pageLog.toSet().length, reader.pageLog.length);
+      expect(
+        reader.pageLog.where((p) => p.startsWith('referenceMaterial')),
+        ['referenceMaterial/null', 'referenceMaterial/m-1',
+         'referenceMaterial/m-2'],
+      );
+      final m1 = (await fixture.db.query(
+        'reference_materials',
+        where: "remote_id = 'm-1'",
+      )).single;
+      final m2 = (await fixture.db.query(
+        'reference_materials',
+        where: "remote_id = 'm-2'",
+      )).single;
+      expect(m1['material_name'], 'Resumed material m-1');
+      expect(m2['material_name'], 'Resumed material m-2');
+      final state = (await fixture.db.query('central_sync_state')).single;
+      expect(state['bootstrap_state'], 'ready');
+      expect(state['applied_sequence'], 7);
+      expect(await fixture.db.query('central_bootstrap_staging'), isEmpty);
+      expect(await fixture.db.query('central_bootstrap_state'), isEmpty);
     },
   );
 }

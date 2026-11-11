@@ -42,8 +42,10 @@ class AuditPage {
 /// The screen depends on this contract only, so it can be rendered against a
 /// stub instead of a live database.
 abstract class AuditTrailReader {
-  /// `audit.read` (plan §7.2). A device without it must not see the trail: the
-  /// rows are synced down from `auditLogs`.
+  /// Manager-only gate (November 10 decision). The trail is no longer a
+  /// permission-scoped automatic download of `auditLogs`: only the
+  /// organization manager may list it on the server, so only the manager
+  /// (devices.read, which also holds audit.read) may view it locally.
   bool get canRead;
 
   Future<AuditPage> page({
@@ -89,7 +91,9 @@ class AuditTrail implements AuditTrailReader {
   AppSession get _session => devices.source.session;
 
   @override
-  bool get canRead => _session.can(Permission.auditRead);
+  bool get canRead =>
+      _session.can(Permission.auditRead) &&
+      _session.can(Permission.byId('devices.read')!);
 
   @override
   Future<AuditPage> page({

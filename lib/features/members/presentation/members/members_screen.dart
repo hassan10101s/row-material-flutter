@@ -128,8 +128,12 @@ class _MembersScreenState extends State<MembersScreen> {
     }
   }
 
-  Future<void> _run(Future<void> Function() action) async {
-    if (_repo == null) return;
+  /// Runs an online member operation. Returns `true` only when the action and
+  /// the reload both finished without an error, so callers can show a success
+  /// confirmation (and reset their input) for verified successes only — a
+  /// failed send must keep the typed input and never print "Invite sent.".
+  Future<bool> _run(Future<void> Function() action) async {
+    if (_repo == null) return false;
     setState(() {
       _busy = true;
       _error = null;
@@ -137,12 +141,15 @@ class _MembersScreenState extends State<MembersScreen> {
     try {
       await action();
       await _load();
+      return true;
     } on OrganizationFailure catch (e) {
       if (mounted) setState(() => _error = e.message);
       if (mounted) AppFeedback.errorFrom(context, e);
+      return false;
     } on Object catch (e) {
       if (mounted) setState(() => _error = '$e');
       if (mounted) AppFeedback.errorFrom(context, e);
+      return false;
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -221,8 +228,9 @@ class _MembersScreenState extends State<MembersScreen> {
       }
       // Invited/pending → treat as resend so the manager does not create
       // confusion with two rows for one address.
-      await _run(() => _repo!.resendInvite(memberId: existing.id));
-      if (mounted) {
+      final resent = await _run(() => _repo!.resendInvite(memberId: existing.id));
+      if (mounted && resent) {
+        _formKey.currentState?.reset();
         AppFeedback.success(
           context,
           AppText.t('تمت إعادة إرسال الدعوة', 'Invite resent.'),
@@ -230,9 +238,17 @@ class _MembersScreenState extends State<MembersScreen> {
       }
       return;
     }
-    await _run(() => _repo!.invite(email: email, role: role, roles: roles));
-    if (mounted) {
-      _email.clear();
+    final sent = await _run(
+      () => _repo!.invite(email: email, role: role, roles: roles),
+    );
+    if (mounted && sent) {
+      // `reset()` (not `clear()`): the field's external controller fires
+      // `didChange` on a programmatic `clear()`, which counts as a user
+      // interaction and trips the `onUserInteraction` autovalidate against
+      // the now-empty field — the user saw "Email is required." right under
+      // the "Invite sent." confirmation. `reset()` empties the text through
+      // the same controller *and* clears the error/interaction state.
+      _formKey.currentState?.reset();
       _roles
         ..clear()
         ..add(AppRoles.lab);
@@ -247,8 +263,8 @@ class _MembersScreenState extends State<MembersScreen> {
   }
 
   Future<void> _resend(Member member) async {
-    await _run(() => _repo!.resendInvite(memberId: member.id));
-    if (mounted) {
+    final resent = await _run(() => _repo!.resendInvite(memberId: member.id));
+    if (mounted && resent) {
       AppFeedback.success(
         context,
         AppText.t('تمت إعادة إرسال الدعوة', 'Invite resent.'),
@@ -481,11 +497,11 @@ class _MembersScreenState extends State<MembersScreen> {
           const SizedBox(height: AppSpacing.sm),
         ],
         if (_busy && _members.isEmpty) const AppSkeletonList(rows: 8),
-        SizedBox(
-          height: 420.h,
-          child: appAdaptiveVariant(
-            context,
-            desktop: (ctx) => AppPaginatedTable(
+        appAdaptiveVariant(
+          context,
+          desktop: (ctx) => SizedBox(
+            height: 420.h,
+            child: AppPaginatedTable(
               minTableWidth: 860,
               columnFlex: const [1.3, 1.4, 1.0, 0.8, 1.5],
               headers: [
@@ -510,8 +526,11 @@ class _MembersScreenState extends State<MembersScreen> {
                       ),
               ),
             ),
-            mobile: (ctx) => _membersMobile(ctx, visible, query, isSelf),
           ),
+          // Phone: the cards flow straight into the enclosing ListView — a
+          // fixed-height slot clipped large rosters (RenderFlex overflow) and
+          // made the members below 420.h unreachable by scrolling.
+          mobile: (ctx) => _membersMobile(ctx, visible, query, isSelf),
         ),
         const SizedBox(height: AppSpacing.lg),
         Row(
@@ -540,6 +559,7 @@ class _MembersScreenState extends State<MembersScreen> {
               SizedBox(
                 width: 260.w,
                 child: AppField(
+                  key: const Key('inviteEmailField'),
                   label: AppText.t('البريد الإلكتروني', 'Email'),
                   controller: _email,
                   hint: 'name@company.com',

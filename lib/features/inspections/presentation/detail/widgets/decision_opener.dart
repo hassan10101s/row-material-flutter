@@ -75,10 +75,12 @@ Future<void> openDecisionDialog(
   final saved = FormFactor.current.isDesktop
       ? await showDialog<bool>(
           context: context,
-          builder: (_) => DecisionForm(
-            inspectionId: inspectionId,
-            inspection: inspection,
-            windowed: true,
+          builder: appLocaleAwareBuilder(
+            (_) => DecisionForm(
+              inspectionId: inspectionId,
+              inspection: inspection,
+              windowed: true,
+            ),
           ),
         )
       : await Navigator.of(context).push<bool>(

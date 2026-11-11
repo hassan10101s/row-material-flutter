@@ -8,6 +8,8 @@ import '../../../../../design_system/tokens/app_colors.dart';
 import '../../../../../design_system/tokens/app_spacing.dart';
 import '../../../../../design_system/widgets/app_button.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
+import '../../../../../design_system/widgets/app_window.dart'
+    show appLocaleAwareBuilder;
 import '../../../../../design_system/widgets/app_paginated_table.dart';
 import '../../../../../design_system/widgets/app_search_field.dart';
 import '../../../../../design_system/widgets/app_selection.dart';
@@ -68,7 +70,7 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
     final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => const InventoryItemDialog(),
+      builder: appLocaleAwareBuilder((_) => InventoryItemDialog()),
     );
     if (saved == true) await cubit.load();
   }
@@ -77,7 +79,7 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
     final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => InventoryItemDialog(item: row),
+      builder: appLocaleAwareBuilder((_) => InventoryItemDialog(item: row)),
     );
     if (saved == true) await cubit.load();
   }
@@ -89,7 +91,7 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
     final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => InventoryAdjustDialog(item: row),
+      builder: appLocaleAwareBuilder((_) => InventoryAdjustDialog(item: row)),
     );
     if (saved == true) await cubit.load();
   }
@@ -101,7 +103,7 @@ class _DesktopInventoryTabState extends State<DesktopInventoryTab> {
     final cubit = context.read<InventoryCubit>();
     final saved = await showDialog<bool>(
       context: context,
-      builder: (_) => InventoryReceiveDialog(item: row),
+      builder: appLocaleAwareBuilder((_) => InventoryReceiveDialog(item: row)),
     );
     if (saved == true) await cubit.load();
   }

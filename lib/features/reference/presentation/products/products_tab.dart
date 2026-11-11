@@ -15,7 +15,7 @@ class ProductsTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) => appAdaptiveVariant(
     context,
-    desktop: (_) => const DesktopProductsTab(),
-    mobile: (_) => const MobileProductsTab(),
+    desktop: (_) => DesktopProductsTab(),
+    mobile: (_) => MobileProductsTab(),
   );
 }

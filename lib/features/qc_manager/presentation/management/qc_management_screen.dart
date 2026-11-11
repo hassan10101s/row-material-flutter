@@ -92,7 +92,7 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
         icon: Icons.checklist_rtl_outlined,
         builder: (_) => BlocProvider(
           create: (_) => getIt<RoutineListsCubit>()..load(),
-          child: const RoutineListsScreen(),
+          child: RoutineListsScreen(),
         ),
       ),
       _QualityTab(
@@ -114,7 +114,7 @@ class _QcManagementScreenState extends State<QcManagementScreen> {
         icon: Icons.menu_book_outlined,
         builder: (_) => BlocProvider(
           create: (_) => getIt<QcSopsCubit>()..load(),
-          child: const QcSopsScreen(embedded: true),
+          child: QcSopsScreen(embedded: true),
         ),
       ),
     ];

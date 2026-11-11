@@ -25,6 +25,21 @@ class ApprovedRecord {
   final Map<String, dynamic> data;
 }
 
+/// Per-family snapshot-walk progress markers live inside the SAME disk
+/// staging table as the staged records (`central_bootstrap_staging` is
+/// keyed by `(organization_id, uid, entity_type, entity_id)`), so an
+/// interrupted consistent bootstrap can resume the walk where it stopped
+/// instead of re-reading every page of every family again (November 10
+/// read-budget rule: repeated full `consumption` / `labConfig` walks were
+/// the largest remaining read consumer after the audit trail). Real staged
+/// records are filtered away by `_stagingBatch`; markers leave staging with
+/// the rest once the snapshot installs.
+const String bootstrapProgressMarker = '__bootstrapProgress__';
+
+/// Marker payload for a family whose walk already completed on an earlier
+/// attempt: the family is skipped entirely on retry.
+const String bootstrapWalkDone = 'done';
+
 /// The pre-fix server wire format stamped event after-images with this literal
 /// instead of the real approval time (وقت الاعتماد). Fresh events carry real
 /// timestamps; the driver still resolves any legacy placeholder against the
@@ -226,6 +241,122 @@ class CentralProjection {
     if (records.isNotEmpty) SyncDataChanges.notify();
   }
 
+  /// Manual, manager-only materialization of the command audit trail
+  /// (November 10 decision). Runs OUTSIDE the canonical snapshot machinery:
+  /// it writes only `audit_logs` and the per-entity side tables, never the
+  /// business rows or the applied cursor, and every call opens its own small
+  /// transaction. Replays are idempotent: a stored approved version with an
+  /// identical payload hash is skipped; the same version with different
+  /// bytes aborts as a server inconsistency. Record frames validate like
+  /// `_apply` (organization, versions, no commit-time placeholders).
+  ///
+  /// Returns the number of freshly accepted records.
+  Future<int> applyAuditTrail(
+    List<ApprovedRecord> records,
+    SyncRunScope scope,
+  ) async {
+    if (!scope.session.can(Permission.byId('audit.read')!)) {
+      throw StateError('This session may not materialize the record');
+    }
+    final db = await databaseHelper.database;
+    var applied = 0;
+    await db.transaction((txn) async {
+      scope.check();
+      final columns = <String>{};
+      for (final info in await txn.rawQuery('PRAGMA table_info(audit_logs)')) {
+        final name = '${info['name']}';
+        if (name != 'id') columns.add(name);
+      }
+      for (final record in records) {
+        if (record.entityType != 'auditLog' ||
+            record.version < 1 ||
+            record.data['version'] != record.version ||
+            record.data['organizationId'] != scope.session.organizationId ||
+            _containsCommitTimePlaceholder(record.data)) {
+          throw StateError('Invalid approved audit record frame');
+        }
+        final key = record.entityId;
+        final fingerprint = hashPayload(record.data);
+        final stored = await txn.query(
+          'central_approved_records',
+          columns: const ['version', 'payload_hash'],
+          where: 'entity_type = ? AND entity_id = ?',
+          whereArgs: ['auditLog', key],
+          limit: 1,
+        );
+        if (stored.isNotEmpty) {
+          final version = (stored.single['version'] as num).toInt();
+          if (version >= record.version) {
+            if (version == record.version &&
+                stored.single['payload_hash'] != fingerprint) {
+              throw StateError('An approved version has inconsistent contents');
+            }
+            continue;
+          }
+        }
+        final row = remoteToLocalRow(
+          auditLogEntity,
+          record.data,
+          organizationId: scope.session.organizationId,
+        );
+        if (record.data['action'] == 'DOMAIN_COMMITTED' &&
+            record.data['records'] is List) {
+          row['details_json'] = jsonEncode({
+            'operationId': record.data['operationId'],
+            'records': record.data['records'],
+          });
+        }
+        row['synced'] = 1;
+        row.remove('id');
+        final filtered = <String, Object?>{
+          for (final entry in row.entries)
+            if (columns.contains(entry.key)) entry.key: entry.value,
+        };
+        final identity = await txn.query(
+          'central_entity_identities',
+          columns: const ['local_ref'],
+          where: 'entity_type = ? AND entity_id = ?',
+          whereArgs: ['auditLog', key],
+          limit: 1,
+        );
+        if (identity.isEmpty) {
+          final localRef = await txn.insert('audit_logs', filtered);
+          await txn.insert('central_entity_identities', {
+            'entity_type': 'auditLog',
+            'entity_id': key,
+            'local_ref': localRef,
+            'approved_version': record.version,
+          });
+        } else {
+          final localRef = (identity.single['local_ref'] as num).toInt();
+          await txn.update(
+            'audit_logs',
+            filtered,
+            where: 'id = ?',
+            whereArgs: [localRef],
+          );
+          await txn.update(
+            'central_entity_identities',
+            {'approved_version': record.version},
+            where: 'entity_type = ? AND entity_id = ?',
+            whereArgs: ['auditLog', key],
+          );
+        }
+        await txn.insert('central_approved_records', {
+          'entity_type': 'auditLog',
+          'entity_id': key,
+          'version': record.version,
+          'payload': jsonEncode(record.data),
+          'payload_hash': fingerprint,
+        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        applied += 1;
+        scope.check();
+      }
+    });
+    if (applied > 0) SyncDataChanges.notify();
+    return applied;
+  }
+
   /// Materializes the downloaded snapshot pages. It deliberately stores
   /// `catching_up`, not `ready`: authoring stays blocked until the driver has
   /// also applied every change event the server committed during the download
@@ -262,16 +393,32 @@ class CentralProjection {
     required int manifestVersion,
     required int h0,
     SyncRunScope? scope,
+    bool resumeStaging = false,
   }) async {
     final run = scope ?? SyncRunScope(source, databaseHelper);
     final db = await databaseHelper.database;
     await db.transaction((txn) async {
       run.check();
-      await txn.delete(
-        'central_bootstrap_staging',
-        where: 'organization_id = ? AND uid = ?',
-        whereArgs: [run.session.organizationId, run.session.uid],
-      );
+      var keepStaging = resumeStaging;
+      if (keepStaging) {
+        final rows = await txn.query(
+          'central_bootstrap_state',
+          where: 'organization_id = ? AND uid = ?',
+          whereArgs: [run.session.organizationId, run.session.uid],
+          limit: 1,
+        );
+        keepStaging = rows.length == 1 &&
+            rows.single['role'] == run.session.rolesKey &&
+            (rows.single['manifest_version'] as num).toInt() ==
+                manifestVersion;
+      }
+      if (!keepStaging) {
+        await txn.delete(
+          'central_bootstrap_staging',
+          where: 'organization_id = ? AND uid = ?',
+          whereArgs: [run.session.organizationId, run.session.uid],
+        );
+      }
       await txn.insert('central_bootstrap_state', {
         'organization_id': run.session.organizationId,
         'uid': run.session.uid,
@@ -282,6 +429,100 @@ class CentralProjection {
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
       run.check();
+    });
+  }
+
+  /// Whether an interrupted consistent bootstrap may RESUME instead of
+  /// re-walking every collection: the previous attempt left disk staging
+  /// plus a state row with the SAME role and manifest version, its
+  /// watermark equals the current server head (nothing committed in
+  /// between — otherwise a family marked done would miss change events
+  /// that arrived between the two read boundaries), and the canonical
+  /// cache is not a ready snapshot (otherwise install semantics would
+  /// replace a live archive).
+  Future<bool> canResumeStaging(
+    SyncRunScope run, {
+    required int manifestVersion,
+    required int throughSequence,
+  }) async {
+    final db = await databaseHelper.database;
+    final bootstrap = await db.query(
+      'central_bootstrap_state',
+      where: 'organization_id = ? AND uid = ?',
+      whereArgs: [run.session.organizationId, run.session.uid],
+      limit: 1,
+    );
+    if (bootstrap.length != 1 ||
+        bootstrap.single['role'] != run.session.rolesKey ||
+        (bootstrap.single['manifest_version'] as num).toInt() !=
+            manifestVersion ||
+        (bootstrap.single['h0'] as num).toInt() != throughSequence) {
+      return false;
+    }
+    final canonical = await db.query(
+      'central_sync_state',
+      where: 'organization_id = ? AND uid = ?',
+      whereArgs: [run.session.organizationId, run.session.uid],
+      limit: 1,
+    );
+    if (canonical.length == 1 &&
+        (canonical.single['bootstrap_state'] == 'ready' ||
+            canonical.single['role'] != run.session.rolesKey)) {
+      return false;
+    }
+    final staged = await db.rawQuery(
+      'SELECT 1 FROM central_bootstrap_staging '
+      'WHERE organization_id = ? AND uid = ? LIMIT 1',
+      [run.session.organizationId, run.session.uid],
+    );
+    return staged.isNotEmpty;
+  }
+
+  /// Per-family walk progress of the last interrupted bootstrap. `null`
+  /// value = the family finished its walk (skip it entirely); otherwise
+  /// the value is the document-name cursor (`START_AFTER`) to continue from.
+  Future<Map<String, String?>> stagedWalkProgress(SyncRunScope run) async {
+    final db = await databaseHelper.database;
+    final rows = await db.query(
+      'central_bootstrap_staging',
+      where:
+          'organization_id = ? AND uid = ? AND entity_type = ? AND version = 0',
+      whereArgs: [
+        run.session.organizationId,
+        run.session.uid,
+        bootstrapProgressMarker,
+      ],
+    );
+    return {
+      for (final row in rows)
+        '${row['entity_id']}':
+            '${row['payload']}' == bootstrapWalkDone
+                ? null
+                : '${row['payload']}',
+    };
+  }
+
+  /// Upserts one family's walk marker after each staged snapshot page. In
+  /// its own small transaction like [stageRecords] so a crash loses at most
+  /// the current page's progress.
+  Future<void> stageWalkProgress(
+    String type,
+    String? after, {
+    required SyncRunScope scope,
+  }) async {
+    final db = await databaseHelper.database;
+    await db.transaction((txn) async {
+      scope.check();
+      await txn.insert('central_bootstrap_staging', {
+        'organization_id': scope.session.organizationId,
+        'uid': scope.session.uid,
+        'entity_type': bootstrapProgressMarker,
+        'entity_id': type,
+        'version': 0,
+        'payload': after ?? bootstrapWalkDone,
+        'payload_hash': '',
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+      scope.check();
     });
   }
 
@@ -465,9 +706,15 @@ class CentralProjection {
     final rows = await txn.rawQuery(
       'SELECT rowid AS rid, entity_type, entity_id, version, payload '
       'FROM central_bootstrap_staging '
-      'WHERE organization_id = ? AND uid = ? AND rowid > ? '
-      'ORDER BY rowid LIMIT ?',
-      [run.session.organizationId, run.session.uid, afterRowid, limit],
+      "WHERE organization_id = ? AND uid = ? AND entity_type != ? "
+      'AND rowid > ? ORDER BY rowid LIMIT ?',
+      [
+        run.session.organizationId,
+        run.session.uid,
+        bootstrapProgressMarker,
+        afterRowid,
+        limit,
+      ],
     );
     final records = <ApprovedRecord>[];
     for (final row in rows) {
@@ -535,6 +782,9 @@ class CentralProjection {
       }
       await txn.delete(entity.localTable);
     }
+    // The trail is no longer a snapshot member (manual, manager-only
+    // download). A rebuild still resets it: the next explicit manager action
+    // (refreshAuditTrail) re-walks `auditLogs` and restores it idempotently.
     await txn.delete('audit_logs');
     await txn.delete('central_entity_identities');
     await txn.delete('central_approved_records');

@@ -12,6 +12,8 @@ import '../../../../../design_system/widgets/app_dialogs.dart';
 import '../../../../../design_system/widgets/app_empty_state.dart';
 import '../../../../../design_system/widgets/app_infinite_list.dart';
 import '../../../../../design_system/widgets/app_skeleton.dart';
+import '../../../../../design_system/widgets/app_window.dart'
+    show appLocaleAwareBuilder;
 import '../../../../../design_system/export/table_pdf_export.dart';
 import '../../cubit/products_cubit.dart';
 import '../../cubit/products_state.dart';
@@ -30,11 +32,12 @@ class DesktopProductsTab extends StatelessWidget {
     Map<String, dynamic>? product,
   ]) async {
     final cubit = context.read<ProductsCubit>();
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (_) =>
-          DesktopProductEditor(productsCubit: cubit, product: product),
-    );
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: appLocaleAwareBuilder(
+          (_) => DesktopProductEditor(productsCubit: cubit, product: product),
+        ),
+      );
     if (saved != true || !context.mounted) return;
     await context.read<ProductsCubit>().load();
     // The refreshed list is the confirmation; no "Saved." toast.

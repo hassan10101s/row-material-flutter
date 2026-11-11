@@ -32,7 +32,7 @@ class DraftsScreen extends StatefulWidget {
     icon: Icons.drafts_outlined,
     size: AppWindowSize.lg,
     scrollBody: false,
-    builder: (_, _) => const DraftsScreen(showTitle: false),
+    builder: (_, _) => DraftsScreen(showTitle: false),
     actionsBuilder: onRefreshData == null
         ? null
         : (_, _) => [

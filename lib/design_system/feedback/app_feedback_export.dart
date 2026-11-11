@@ -8,6 +8,7 @@ import '../../core/platform/file_delivery.dart';
 import '../../di/platform_ports.dart';
 import '../tokens/app_colors.dart';
 import '../tokens/app_spacing.dart';
+import '../widgets/app_window.dart' show appLocaleAwareBuilder;
 import 'app_feedback.dart';
 
 /// Offering the file the app just wrote.
@@ -62,15 +63,17 @@ class AppFeedbackExport {
     // half-screen dialog — a bottom sheet on a 1080p window looks broken and
     // forces the eye to the very bottom edge for two buttons.
     if (Platform.isAndroid || Platform.isIOS) {
-      await showModalBottomSheet<void>(
-        context: context,
-        showDragHandle: true,
-        builder: (sheetContext) => _ExportSheet(
-          filePath: filePath,
-          documentName: documentName,
-          delivery: delivery,
-        ),
-      );
+        await showModalBottomSheet<void>(
+          context: context,
+          showDragHandle: true,
+          builder: appLocaleAwareBuilder(
+            (sheetContext) => _ExportSheet(
+              filePath: filePath,
+              documentName: documentName,
+              delivery: delivery,
+            ),
+          ),
+        );
       // Sheet gone = user opened and/or shared (or dismissed). Either way the
       // staged temp copy has served its purpose — remove it after a grace
       // window so the external viewer/share target finishes reading first.
@@ -80,16 +83,21 @@ class AppFeedbackExport {
 
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        insetPadding: const EdgeInsets.symmetric(horizontal: 64, vertical: 48),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 480),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-            child: _ExportSheet(
-              filePath: filePath,
-              documentName: documentName,
-              delivery: delivery,
+      builder: appLocaleAwareBuilder(
+        (dialogContext) => Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 64,
+            vertical: 48,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+              child: _ExportSheet(
+                filePath: filePath,
+                documentName: documentName,
+                delivery: delivery,
+              ),
             ),
           ),
         ),

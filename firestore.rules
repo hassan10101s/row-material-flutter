@@ -2714,7 +2714,13 @@ function auditQuoted(v) { return "\"" + v.replace("\\\\", "\\\\\\\\").replace("\
       }
 
       match /auditLogs/{docId} {
-        allow read: if can(orgId, 'audit.read');
+        // Trail listing was the largest automatic read consumer: never fund
+        // it beyond the manager. `list` = devices.read (admin-only group);
+        // single `get` stays open to auditors because writer devices must
+        // resolve their else-own cmd_* audit doc through getAfter while
+        // creating their command receipt.
+        allow get: if can(orgId, 'audit.read');
+        allow list: if can(orgId, 'devices.read');
         allow create: if request.resource.data.userId == request.auth.uid
           && request.resource.data.organizationId == orgId
           && request.resource.data.version == 1

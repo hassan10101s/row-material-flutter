@@ -55,8 +55,8 @@ class _AuditScreenState extends State<AuditScreen> {
                 icon: Icons.lock_outline,
                 title: AppText.t('غير مصرح', 'Not permitted'),
                 subtitle: AppText.t(
-                  'سجل التدقيق يتطلب صلاحية مراجعة السجلات',
-                  'Reading the audit trail requires the audit.read permission',
+                  'سجل التدقيق متاح لجهاز مدير المؤسسة فقط',
+                  'The audit trail is available to the organization manager only',
                 ),
               )
             : Column(
@@ -185,6 +185,21 @@ class _Filters extends StatelessWidget {
               style: AppButtonStyle.ghost,
               label: AppText.t('مسح', 'Clear'),
               onPressed: controller.clearFilters,
+            ),
+          // The single, manual door to the server trail. Only the manager
+          // sees it, and pressing it is the only way `auditLogs` is ever
+          // read — no automatic background download exists any more.
+          if (controller.canFetchFromServer)
+            AppButton(
+              small: true,
+              style: AppButtonStyle.ghost,
+              label: controller.refreshing
+                  ? AppText.t('جارٍ التحديث…', 'Refreshing…')
+                  : AppText.t('تحديث من السيرفر', 'Refresh from server'),
+              icon: const Icon(Icons.cloud_download_outlined, size: 16),
+              onPressed: controller.refreshing
+                  ? null
+                  : controller.refreshFromServer,
             ),
         ],
       ),

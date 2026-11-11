@@ -19,8 +19,8 @@ class InspectionsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final content = appAdaptiveVariant(
       context,
-      desktop: (_) => const DesktopInspectionsScreen(),
-      mobile: (_) => const MobileInspectionsScreen(),
+      desktop: (_) => DesktopInspectionsScreen(),
+      mobile: (_) => MobileInspectionsScreen(),
     );
     if (!context.read<InspectionsCubit>().formulationReceiptsOnly) {
       return content;

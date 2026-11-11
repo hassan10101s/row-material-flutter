@@ -59,6 +59,12 @@ class CentralSyncDriver {
   void Function(Object error)? onError;
   final void Function()? onManualRequest;
 
+  /// When the last automatic gap-driven rebuild attempt started (storm guard:
+  /// a persistent CentralSyncGap must not re-walk every collection every 30
+  /// seconds). Cleared by a successful cycle in [_readRecovered].
+  DateTime? _lastGapRebuild;
+  static const Duration _gapRebuildBackoff = Duration(minutes: 10);
+
   void start() {
     if (_timer != null) return;
     unawaited(refreshForeground());
@@ -90,6 +96,7 @@ class CentralSyncDriver {
   void _readRecovered() {
     _quotaStopped = false;
     _networkFailures = 0;
+    _lastGapRebuild = null;
     _nextAutomaticRead = null;
     _reportedNetworkFailure = false;
   }
@@ -149,6 +156,23 @@ class CentralSyncDriver {
         );
       });
     }
+    // November 10 read-budget rule: a CentralSyncGap normally forces a full
+    // snapshot rebuild, which would re-walk EVERY collection — including the
+    // whole `materialBounds` / `consumption` reference families, one query
+    // page per 100 docs — on each 30-second foreground tick for as long as
+    // the server-side gap persists. Automatic gap-driven rebuilds now wait
+    // out a 10-minute backoff (the next tick defers instead of reading);
+    // explicit manual requests bypass the guard because an operator may
+    // want the full archive refreshed immediately.
+    if (!forceSnapshot && _needsSnapshot && !resumeQuota && throughSequence == null) {
+      final last = _lastGapRebuild;
+      if (last == null || _now().isBefore(last.add(_gapRebuildBackoff))) {
+        _lastGapRebuild ??= _now();
+        _nextAutomaticRead = _lastGapRebuild!.add(_gapRebuildBackoff);
+        return _appliedSequence();
+      }
+      _lastGapRebuild = _now();
+    }
     final rebuild = forceSnapshot || _needsSnapshot;
     final future = _sync(
       throughSequence: throughSequence,
@@ -158,6 +182,47 @@ class CentralSyncDriver {
     return future.whenComplete(() {
       if (identical(_flight, future)) _flight = null;
     });
+  }
+
+  /// Manual, manager-only download of the command audit trail.
+  ///
+  /// Nothing automatic ever reads `auditLogs` (November 10 decision): the
+  /// 30-second tick, reconnect, resume, catch-up and snapshot rebuilds all
+  /// exclude the trail, and the Firestore rules deny `list` to everyone but
+  /// the organization manager. One call walks the trail in 100-document
+  /// pages under one consistent read boundary and appends every page in its
+  /// own small transaction, so an interrupted refresh keeps what was applied
+  /// and the next press replays idempotently (append-only version check).
+  ///
+  /// Returns the number of freshly accepted rows.
+  Future<int> refreshAuditTrail() async {
+    final session = source.session;
+    if (!session.isSignedIn ||
+        !session.isActiveMember ||
+        !session.hasOrganization) {
+      throw StateError('An active organization session is required.');
+    }
+    if (!session.can(Permission.byId('devices.read')!)) {
+      throw StateError(
+        'تحديث سجل التدقيق متاح لجهاز مدير المؤسسة فقط (manual, manager-only).',
+      );
+    }
+    final reader = transport;
+    if (reader is! ConsistentCentralSyncReader) {
+      throw StateError('The direct backend does not expose the audit trail.');
+    }
+    final run = SyncRunScope(source, databaseHelper);
+    final boundary = await reader.readHead();
+    run.check();
+    var applied = 0;
+    String? after;
+    do {
+      final page = await reader.readSnapshotPage('auditLog', boundary, after: after);
+      run.check();
+      applied += await projection.applyAuditTrail(page.records, run);
+      after = page.nextAfter;
+    } while (after != null);
+    return applied;
   }
 
   Future<int> _sync({int? throughSequence, required bool forceSnapshot}) async {
@@ -369,36 +434,58 @@ class CentralSyncDriver {
         state['bootstrap_state'] == 'required' ||
         await projection.hasCommitTimePlaceholder();
     if (rebuild) {
-      await projection.invalidateSnapshot();
+      // November 10 read-budget rule: an interrupted snapshot walk resumes
+      // from its disk-staged page cursor instead of re-reading every page of
+      // every family (the `consumption` / `labConfig` walks are hundreds of
+      // pages). A resume is only valid while the server head stands still at
+      // the first attempt's watermark — otherwise the skipped families would
+      // miss change events committed between the two read boundaries, so any
+      // head movement falls back to a complete fresh walk.
+      final resume = !forceSnapshot &&
+          await projection.canResumeStaging(
+            scope,
+            manifestVersion: boundary.manifestVersion,
+            throughSequence: boundary.sequence,
+          );
+      if (!resume) await projection.invalidateSnapshot();
       await projection.beginBootstrap(
         manifestVersion: boundary.manifestVersion,
         h0: boundary.sequence,
         scope: scope,
+        resumeStaging: resume,
       );
       final definitions = manifest['entities'] as Map;
       final types = definitions.keys.cast<String>().toList()..sort();
-      if (session.can(Permission.byId('audit.read')!)) types.add('auditLog');
+      // The command audit trail (`auditLogs`) is NEVER part of an automatic
+      // cycle (November 10 decision): its paginated __name__ walk was the
+      // largest read consumer. Only the explicit admin action
+      // [refreshAuditTrail] downloads it, in its own bounded pass.
+      final walked = await (resume
+          ? projection.stagedWalkProgress(scope)
+          : Future<Map<String, String?>>.value(const {}));
       for (final type in types) {
-        final def = type == 'auditLog'
-            ? const {'readPermission': 'audit.read'}
-            : definitions[type] as Map;
+        final done = walked.containsKey(type) && walked[type] == null;
+        if (done) continue;
+        final def = definitions[type] as Map;
         final permission = Permission.byId('${def['readPermission']}');
         if (def['privateRead'] == true ||
             permission == null ||
             !session.can(permission)) {
           continue;
         }
-        String? after;
+        String after = walked[type] ?? '';
         do {
           final page = await reader.readSnapshotPage(
             type,
             boundary,
-            after: after,
+            after: after.isEmpty ? null : after,
           );
           scope.check();
           await projection.stageRecords(page.records, scope: scope);
-          after = page.nextAfter;
-        } while (after != null);
+          await projection.stageWalkProgress(type, page.nextAfter, scope: scope);
+          if (page.nextAfter == null) break;
+          after = page.nextAfter!;
+        } while (true);
       }
       await projection.installFromStaging(
         throughSequence: boundary.sequence,

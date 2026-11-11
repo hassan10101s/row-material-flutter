@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_lab/core/auth/app_session.dart';
 import 'package:material_lab/core/auth/session_source.dart';
@@ -823,5 +825,187 @@ void main() {
       (await fixture.db.query('central_sync_state')).single['bootstrap_state'],
       'catching_up',
     );
+  });
+
+  group('manual audit trail materialization', () {
+    ApprovedRecord auditFrame(
+      String id,
+      Map<String, dynamic> data, {
+      int version = 1,
+    }) => ApprovedRecord(
+      entityType: 'auditLog',
+      entityId: id,
+      version: version,
+      data: {
+        'organizationId': 'org_test',
+        'version': version,
+        ...data,
+      },
+    );
+
+    test('pages replay idempotently and identity rows stay reused', () async {
+      final scope = SyncRunScope(SessionSource(() => session), fixture.helper);
+      final page = [
+        auditFrame('al_dev1_t1_a1', {
+          'userId': 'uid_admin',
+          'userName': 'Admin',
+          'action': 'DOMAIN_COMMITTED',
+          'entityType': 'domainTransaction',
+          'entityId': 'op-1',
+          'detailsJson': '{}',
+          'operationId': 'op-1',
+          'records': [
+            {
+              'entityType': 'sample',
+              'entityId': 'inspection-global',
+              'version': 1,
+            },
+          ],
+          'deviceId': 'device',
+          'occurredAt': '2026-11-10T10:00:00Z',
+        }),
+      ];
+      expect(await projection.applyAuditTrail(page, scope), 1);
+
+      // A replay of the SAME page is skipped (append-once).
+      expect(await projection.applyAuditTrail(page, scope), 0);
+      expect(await fixture.db.query('audit_logs'), hasLength(1));
+      final row = (await fixture.db.query('audit_logs')).single;
+      expect(row['organization_id'], 'org_test');
+      expect(row['synced'], 1);
+      expect(row['user_id'], 'uid_admin');
+      expect(row['occurred_at'], '2026-11-10T10:00:00Z');
+      // The committed operation frame survives in details_json.
+      final details = jsonDecode('${row['details_json']}');
+      expect(details['operationId'], 'op-1');
+      expect(
+        (details['records'] as List).single['entityId'],
+        'inspection-global',
+      );
+      final identity = (await fixture.db.query(
+        'central_entity_identities',
+        where: "entity_type = 'auditLog'",
+      )).single;
+      expect(identity['entity_id'], 'al_dev1_t1_a1');
+      expect(identity['approved_version'], 1);
+
+      // A REPUBLISHED higher version converges through the identity row:
+      // the audit_logs table gains no second row (append-only domain).
+      final v2 = auditFrame(
+        'al_dev1_t1_a1',
+        {
+          'userId': 'uid_admin',
+          'userName': 'Admin',
+          'action': 'DOMAIN_COMMITTED',
+          'entityType': 'domainTransaction',
+          'entityId': 'op-1',
+          'detailsJson': '{}',
+          'operationId': 'op-1',
+          'records': const <Object>[],
+          'deviceId': 'device',
+          'occurredAt': '2026-11-10T10:00:00Z',
+        },
+        version: 2,
+      );
+      expect(await projection.applyAuditTrail([v2], scope), 1);
+      expect(await fixture.db.query('audit_logs'), hasLength(1));
+      expect(
+        (await fixture.db.query(
+          'central_entity_identities',
+          where: "entity_type = 'auditLog'",
+        )).single['approved_version'],
+        2,
+      );
+    });
+
+    test('tampered bytes for the same approved version abort the page', () async {
+      final scope = SyncRunScope(SessionSource(() => session), fixture.helper);
+      final record = auditFrame('al_dev2_t2_a2', {
+        'userId': 'uid_admin',
+        'userName': 'Admin',
+        'action': 'LOGIN',
+        'entityType': 'session',
+        'entityId': 'login-1',
+        'deviceId': 'device',
+        'occurredAt': '2026-11-10T11:00:00Z',
+      });
+      expect(await projection.applyAuditTrail([record], scope), 1);
+
+      final tampered = ApprovedRecord(
+        entityType: 'auditLog',
+        entityId: 'al_dev2_t2_a2',
+        version: 1,
+        data: {...record.data, 'userName': 'Impostor'},
+      );
+      await expectLater(
+        projection.applyAuditTrail([tampered], scope),
+        throwsStateError,
+      );
+      expect(
+        (await fixture.db.query('audit_logs')).single['user_name'],
+        'Admin',
+      );
+    });
+
+    test('invalid frames are rejected before any row is written', () async {
+      final scope = SyncRunScope(SessionSource(() => session), fixture.helper);
+      // A non-audit entity never enters the trail projection.
+      await expectLater(
+        projection.applyAuditTrail([
+          ApprovedRecord(
+            entityType: 'sample',
+            entityId: 'inspection-global',
+            version: 1,
+            data: const {
+              'organizationId': 'org_test',
+              'version': 1,
+            },
+          ),
+        ], scope),
+        throwsA(isA<StateError>()), // audit log path rejects foreign records
+      );
+      // A record claiming another organization is refused.
+      await expectLater(
+        projection.applyAuditTrail([
+          ApprovedRecord(
+            entityType: 'auditLog',
+            entityId: 'al_foreign',
+            version: 1,
+            data: const {
+              'organizationId': 'org_other',
+              'version': 1,
+              'action': 'LOGIN',
+              'entityType': 'session',
+              'entityId': 'login',
+              'deviceId': 'device',
+              'occurredAt': '2026-11-10T12:00:00Z',
+            },
+          ),
+        ], scope),
+        throwsA(isA<StateError>()), // foreign organization
+      );
+      expect(await fixture.db.query('audit_logs'), isEmpty);
+      expect(await fixture.db.query('central_approved_records'), isEmpty);
+    });
+
+    test('a session without audit.read cannot materialize the trail', () async {
+      final viewerScope = SyncRunScope(
+        SessionSource(
+          () => const AppSession(
+            uid: 'uid_admin',
+            organizationId: 'org_test',
+            deviceId: 'device',
+            memberId: 'member',
+            role: 'viewer',
+            status: 'active',
+          ),
+        ),
+        fixture.helper,
+      );
+      await expectLater(
+        projection.applyAuditTrail(const [], viewerScope),
+        throwsA(isA<StateError>()), // audit trail projection is admin-only
+      );
+    });
   });
 }

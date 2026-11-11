@@ -139,7 +139,7 @@ class AppRouter {
             create: (c) =>
                 LoginCubit(auth: getIt<AuthRepository>(), gate: _gate)
                   ..applyBootstrap(),
-            child: const LoginScreen(),
+            child: LoginScreen(),
           ),
         ),
       ),
@@ -153,7 +153,7 @@ class AppRouter {
               organizations: getIt<OrganizationRepository>(),
               gate: _gate,
             ),
-            child: const CreateOrganizationScreen(),
+            child: CreateOrganizationScreen(),
           ),
         ),
       ),
@@ -161,7 +161,7 @@ class AppRouter {
         path: AppRoutes.waitingActivation,
         pageBuilder: (c, s) => AppPage<void>(
           name: s.uri.path,
-          builder: (c) => const WaitingActivationScreen(),
+          builder: (c) => WaitingActivationScreen(),
         ),
       ),
       GoRoute(
@@ -181,7 +181,7 @@ class AppRouter {
                 },
               ),
             ),
-            body: const DraftsScreen(showTitle: false),
+            body: DraftsScreen(showTitle: false),
           ),
         ),
       ),
@@ -220,7 +220,7 @@ class AppRouter {
                     )..load(),
                   ),
                 ],
-                child: const DashboardScreen(),
+                child: DashboardScreen(),
               ),
             ),
           ),
@@ -316,7 +316,7 @@ class AppRouter {
                         ReportsCubit(repo: getIt<ReportRepository>()),
                   ),
                 ],
-                child: const InspectionCenterScreen(initialReportsTab: true),
+                child: InspectionCenterScreen(initialReportsTab: true),
               ),
             ),
           ),
@@ -358,21 +358,21 @@ class AppRouter {
             path: AppRoutes.reference,
             pageBuilder: (c, s) => AppPage<ReferenceScreen>(
               name: s.uri.path,
-              builder: (c) => const ReferenceScreen(),
+              builder: (c) => ReferenceScreen(),
             ),
           ),
           GoRoute(
             path: AppRoutes.members,
             pageBuilder: (c, s) => AppPage<MembersScreen>(
               name: s.uri.path,
-              builder: (c) => const MembersScreen(),
+              builder: (c) => MembersScreen(),
             ),
           ),
           GoRoute(
             path: AppRoutes.account,
             pageBuilder: (c, s) => AppPage<AccountScreen>(
               name: s.uri.path,
-              builder: (c) => const AccountScreen(),
+              builder: (c) => AccountScreen(),
             ),
           ),
           GoRoute(
@@ -399,7 +399,7 @@ class AppRouter {
             pageBuilder: (c, s) => AppPage<QcManagementScreen>(
               name: s.uri.path,
               desktopFadeOnly: true,
-              builder: (c) => const QcManagementScreen(),
+              builder: (c) => QcManagementScreen(),
             ),
           ),
           GoRoute(
@@ -488,7 +488,7 @@ class AppRouter {
               // closed by the router's scope on pop.
               builder: (context) => BlocProvider(
                 create: (_) => getIt<RoutineListsCubit>()..load(),
-                child: const RoutineListsScreen(),
+                child: RoutineListsScreen(),
               ),
             ),
           ),
@@ -522,7 +522,7 @@ class AppRouter {
               // per visit and closed with the route.
               builder: (context) => BlocProvider(
                 create: (_) => getIt<QcSopsCubit>()..load(),
-                child: const QcSopsScreen(),
+                child: QcSopsScreen(),
               ),
             ),
           ),
@@ -572,6 +572,16 @@ class AppRouter {
   /// dashboards (plan §14-P8.3) and never see these routes.
   String? _guardRoute(String path) => guardRoute(path, _gate.session);
 
+  /// Client-side visibility gates (UX only — the Firestore rules stay the
+  /// enforcement layer): the company roster is visible to the company owner
+  /// and the quality manager, and the audit trail to the company owner only.
+  static bool canSeeMembers(AppSession session) => session.effectiveRoles.any(
+    (role) => role == AppRoles.admin || role == AppRoles.qualityManager,
+  );
+
+  static bool canSeeAudit(AppSession session) =>
+      session.effectiveRoles.contains(AppRoles.admin);
+
   /// Pure route guard so it can be tested without any DI (plan §8.1/§14-P8.3):
   /// a `viewer`, a disabled member or a read-only device is sent back to the
   /// dashboard instead of a screen it may only read.
@@ -581,11 +591,11 @@ class AppRouter {
   static String? guardRoute(String path, AppSession session) {
     switch (path) {
       case AppRoutes.audit:
-        if (!session.permissions.contains(Permission.auditRead)) {
+        if (!canSeeAudit(session)) {
           return AppRoutes.dashboard;
         }
       case AppRoutes.members:
-        if (!session.permissions.contains(Permission.usersRead)) {
+        if (!canSeeMembers(session)) {
           return AppRoutes.dashboard;
         }
       case AppRoutes.settings:

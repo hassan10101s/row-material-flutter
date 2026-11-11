@@ -1517,15 +1517,32 @@ void main() {
         }),
       );
 
-      // Quality specialists review the audit trail; viewers remain excluded.
+      // The trail walk is manager-only (November 10 read-budget decision):
+      // a persistent __name__ ORDER_BY/LIMIT list was the largest automatic
+      // read consumer, so only the admin may list it at all. A single
+      // `get` stays available to auditors because writer devices must
+      // validate their receipt's cmd_* doc through getAfter.
       await signInAs('lab@lab.test');
-      expectAllowed(
-        'quality specialist reads the audit log',
+      expectDenied(
+        'quality specialist cannot list the audit trail any more',
         await userList('organizations/$_org/auditLogs'),
+      );
+      expectAllowed(
+        'quality specialist may still fetch a single audit doc by id',
+        await userGet('organizations/$_org/auditLogs/al1'),
       );
       await signInAs('viewer@lab.test');
       expectDenied(
         'viewer cannot read the administrative audit log',
+        await userGet('organizations/$_org/auditLogs/al1'),
+      );
+      expectDenied(
+        'viewer cannot list the administrative audit log',
+        await userList('organizations/$_org/auditLogs'),
+      );
+      await signInAs('admin@lab.test');
+      expectAllowed(
+        'the organization manager walks the trail',
         await userList('organizations/$_org/auditLogs'),
       );
     });

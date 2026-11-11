@@ -9,7 +9,6 @@ import 'package:material_lab/features/organizations/domain/organization_reposito
 import 'package:mocktail/mocktail.dart';
 
 class _MockRemote extends Mock implements AuthRemoteDataSource {}
-
 class _FakeGuard implements WriteGuard {
   _FakeGuard({
     this.memberId = 'member_owner',
@@ -60,6 +59,9 @@ void main() {
 
   setUpAll(() {
     registerFallbackValue(<String, dynamic>{});
+    registerFallbackValue(
+      const Invite(organizationId: 'f', email: 'f@lab.test', role: 'viewer'),
+    );
   });
 
   setUp(() {
@@ -581,6 +583,92 @@ void main() {
           ),
         ),
       );
+    });
+  });
+
+  group('audit writes are best-effort (the primary write decides the outcome)', () {
+    setUp(() {
+      when(
+        () => remote.writeAudit(
+          organizationId: any(named: 'organizationId'),
+          action: any(named: 'action'),
+          entityType: any(named: 'entityType'),
+          entityId: any(named: 'entityId'),
+          details: any(named: 'details'),
+        ),
+      ).thenThrow(Exception('permission-denied (auditLogs)'));
+    });
+
+    test('invite still reports success when the audit write is refused', () async {
+      await build(
+        _FakeGuard(),
+      ).members.invite(email: 'new@lab.test', role: AppRoles.lab);
+
+      verify(
+        () => remote.createInvite(
+          organizationId: 'org_1',
+          email: 'new@lab.test',
+          role: AppRoles.lab,
+          roles: [AppRoles.lab],
+          invitedBy: 'uid_owner',
+        ),
+      ).called(1);
+      expect(rosterChanges, 1);
+    });
+
+    test('activation still reports success when the audit write is refused', () async {
+      await build(
+        _FakeGuard(),
+      ).members.setStatus(memberId: 'member_2', status: 'active');
+
+      verify(
+        () => remote.updateMember(
+          organizationId: 'org_1',
+          memberId: 'member_2',
+          data: {'status': 'active', 'activatedAt': null},
+        ),
+      ).called(1);
+      expect(rosterChanges, 1);
+    });
+
+    test('joinWithInvite succeeds although INVITE_CLAIMED is refused', () async {
+      // Structurally refused by the rules: the claimant is still
+      // `pending_activation` at claim time, so `activeInOrg` is false.
+      const invite = Invite(
+        organizationId: 'org_join',
+        email: 'new@lab.test',
+        role: AppRoles.lab,
+        memberId: 'member_new',
+      );
+      when(() => remote.currentUser()).thenAnswer(
+        (_) async => const RemoteUser(
+          uid: 'uid_new',
+          email: 'new@lab.test',
+          emailVerified: true,
+        ),
+      );
+      when(
+        () => remote.findInvite('org_join', 'new@lab.test'),
+      ).thenAnswer((_) async => invite);
+      when(
+        () => remote.acceptInvite(
+          organizationId: any(named: 'organizationId'),
+          invite: any(named: 'invite'),
+          uid: any(named: 'uid'),
+          email: any(named: 'email'),
+        ),
+      ).thenAnswer((_) async {});
+
+      await build(_FakeGuard()).joinWithInvite(organizationId: 'org_join');
+
+      verify(
+        () => remote.acceptInvite(
+          organizationId: 'org_join',
+          invite: invite,
+          uid: 'uid_new',
+          email: 'new@lab.test',
+        ),
+      ).called(1);
     });
   });
 }

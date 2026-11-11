@@ -19,6 +19,7 @@ import '../../../design_system/widgets/app_tooltip.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 
 import '../../../core/constants/app_strings.dart';
+import '../../../core/auth/permissions.dart';
 import '../../../core/locale/locale_service.dart';
 import '../../../core/theme/theme_service.dart';
 import '../../../design_system/tokens/app_colors.dart';
@@ -103,6 +104,9 @@ class ShellTopBar extends StatelessWidget {
                 onTap: () =>
                     DraftsScreen.open(context, onRefreshData: onRefreshData),
                 compact: true,
+                canReviewQuarantine: user.effectiveRoles.any(
+                  (r) => r == AppRoles.admin || r == AppRoles.qualityManager,
+                ),
               ),
             ),
             const SizedBox(width: 48, height: 48, child: NotificationBell()),
@@ -242,6 +246,9 @@ class ShellTopBar extends StatelessWidget {
               status: syncStatus.status,
               onTap: () =>
                   DraftsScreen.open(context, onRefreshData: onRefreshData),
+              canReviewQuarantine: user.effectiveRoles.any(
+                (r) => r == AppRoles.admin || r == AppRoles.qualityManager,
+              ),
             ),
           ],
         ),

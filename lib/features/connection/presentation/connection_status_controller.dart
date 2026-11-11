@@ -12,11 +12,16 @@ class ConnectionStatus {
     this.lastSync,
     this.hasError = false,
     this.pullIncomplete = false,
+    this.quarantined = const [],
   });
 
   final bool online;
   final bool hasError;
   final bool pullIncomplete;
+
+  /// Malformed server records the reader skipped instead of aborting the
+  /// archive. Shown to the organization/quality manager for manual repair.
+  final List<String> quarantined;
 
   /// Last successful refresh of approved server data.
   final DateTime? lastSync;
@@ -26,11 +31,13 @@ class ConnectionStatus {
     DateTime? lastSync,
     bool? hasError,
     bool? pullIncomplete,
+    List<String>? quarantined,
   }) => ConnectionStatus(
     online: online ?? this.online,
     lastSync: lastSync ?? this.lastSync,
     hasError: hasError ?? this.hasError,
     pullIncomplete: pullIncomplete ?? this.pullIncomplete,
+    quarantined: quarantined ?? this.quarantined,
   );
 }
 
@@ -103,9 +110,11 @@ class ConnectionStatusController extends ChangeNotifier {
           SyncMetadata.pullIncompleteKey,
         ]),
 
+        metadata.quarantinedRecords(),
         if (centralReady != null) centralReady!(),
       ]);
       final keys = results[0] as Map<String, String>;
+      final quarantined = results[1] as List<String>;
       final push = _asDate(keys[SyncMetadata.lastPushAtKey]);
       final pull = _asDate(keys[SyncMetadata.lastPullAtKey]);
       final ready = centralReady == null ? true : results.last as bool;
@@ -117,11 +126,13 @@ class ConnectionStatusController extends ChangeNotifier {
         pullIncomplete: centralReady == null
             ? keys[SyncMetadata.pullIncompleteKey] == '1'
             : !ready,
+        quarantined: quarantined,
       );
       if (next.online != _status.online ||
           next.lastSync != _status.lastSync ||
           next.hasError != _status.hasError ||
-          next.pullIncomplete != _status.pullIncomplete) {
+          next.pullIncomplete != _status.pullIncomplete ||
+          !_sameRecords(next.quarantined, _status.quarantined)) {
         _status = next;
         notifyListeners();
       }
@@ -137,6 +148,9 @@ class ConnectionStatusController extends ChangeNotifier {
     if (b == null) return a;
     return a.isAfter(b) ? a : b;
   }
+
+  static bool _sameRecords(List<String> a, List<String> b) =>
+      a.length == b.length && a.every(b.contains);
 
   static DateTime? _asDate(String? iso) =>
       (iso == null || iso.isEmpty) ? null : DateTime.tryParse(iso);

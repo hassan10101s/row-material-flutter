@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../../core/auth/permissions.dart';
 import '../../../core/sync/remote/auth_remote_data_source.dart'
     show RemoteAuthException;
@@ -172,12 +174,17 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
       uid: user.uid,
       email: user.email,
     );
-    await remote.writeAudit(
+    // Best-effort audit: the claim batch above already committed, so a refused
+    // audit entry must not flip the join to an error while the account *is*
+    // bound. INVITE_CLAIMED is even structurally refused by the rules while
+    // the claimant is `pending_activation` (`activeInOrg` requires `active`).
+    await _writeAuditSafe(
       organizationId: orgId,
       action: 'INVITE_CLAIMED',
       entityType: 'member',
       entityId: invite.memberId,
       details: {'email': user.email, 'role': invite.role},
+      subject: 'joinWithInvite',
     );
   }
 
@@ -233,6 +240,32 @@ class FirestoreOrganizationRepository implements OrganizationRepository {
         ),
         code: 'not_allowed',
       );
+    }
+  }
+
+  /// Audit trails for identity/member operations are **best-effort**: the
+  /// primary write (invite, member update, claim batch) already committed
+  /// remotely, so an audit refusal — a transient blip, or INVITE_CLAIMED which
+  /// the rules refuse for a still-pending claimant — must never flip the
+  /// user-visible outcome to "error" while the operation *did* happen.
+  Future<void> _writeAuditSafe({
+    required String organizationId,
+    required String action,
+    required String entityType,
+    required String entityId,
+    Map<String, dynamic>? details,
+    required String subject,
+  }) async {
+    try {
+      await remote.writeAudit(
+        organizationId: organizationId,
+        action: action,
+        entityType: entityType,
+        entityId: entityId,
+        details: details,
+      );
+    } on Object catch (e) {
+      debugPrint('[org] audit write skipped ($action in $subject): $e');
     }
   }
 }
@@ -346,12 +379,13 @@ class _Members implements MemberRepository {
       };
       throw OrganizationFailure(message, code: error.code);
     }
-    await _remote.writeAudit(
+    await _owner._writeAuditSafe(
       organizationId: _orgId,
       action: 'MEMBER_INVITED',
       entityType: 'member',
       entityId: memberId,
       details: {'email': normalized, 'role': role, 'roles': assignedRoles},
+      subject: 'invite',
     );
     await _owner.onRosterChanged?.call();
   }
@@ -396,7 +430,7 @@ class _Members implements MemberRepository {
       roles: target.effectiveRoles,
       invitedBy: _guard.uid,
     );
-    await _remote.writeAudit(
+    await _owner._writeAuditSafe(
       organizationId: _orgId,
       action: 'MEMBER_INVITE_RESENT',
       entityType: 'member',
@@ -406,6 +440,7 @@ class _Members implements MemberRepository {
         'role': target.role,
         'roles': target.effectiveRoles,
       },
+      subject: 'resendInvite',
     );
     await _owner.onRosterChanged?.call();
   }
@@ -447,12 +482,13 @@ class _Members implements MemberRepository {
     } on Object catch (e) {
       throw _mapRemoteError(e);
     }
-    await _remote.writeAudit(
+    await _owner._writeAuditSafe(
       organizationId: _orgId,
       action: 'MEMBER_ROLE_CHANGED',
       entityType: 'member',
       entityId: memberId,
       details: {'role': role, 'roles': assignedRoles},
+      subject: 'changeRole',
     );
     await _owner.onRosterChanged?.call();
   }
@@ -488,11 +524,12 @@ class _Members implements MemberRepository {
     } on Object catch (e) {
       throw _mapRemoteError(e);
     }
-    await _remote.writeAudit(
+    await _owner._writeAuditSafe(
       organizationId: _orgId,
       action: status == 'active' ? 'MEMBER_ACTIVATED' : 'MEMBER_DISABLED',
       entityType: 'member',
       entityId: memberId,
+      subject: 'setStatus',
     );
     await _owner.onRosterChanged?.call();
   }
@@ -515,11 +552,12 @@ class _Members implements MemberRepository {
     } on Object catch (e) {
       throw _mapRemoteError(e);
     }
-    await _remote.writeAudit(
+    await _owner._writeAuditSafe(
       organizationId: _orgId,
       action: 'MEMBER_REMOVED',
       entityType: 'member',
       entityId: memberId,
+      subject: 'removeMember',
     );
     await _owner.onRosterChanged?.call();
   }
@@ -549,12 +587,13 @@ class _Members implements MemberRepository {
       memberId: memberId,
       uid: uid,
     );
-    await _remote.writeAudit(
+    await _owner._writeAuditSafe(
       organizationId: _orgId,
       action: 'MEMBER_LEFT',
       entityType: 'member',
       entityId: memberId,
       details: {'email': _guard.email},
+      subject: 'leave',
     );
     // `onRosterChanged` is intentionally not fired: the caller unbinds the
     // organization and signs out immediately afterwards.

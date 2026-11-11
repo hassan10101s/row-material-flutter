@@ -13,11 +13,17 @@ class ConnectionBadge extends StatelessWidget {
     required this.status,
     this.onTap,
     this.compact = false,
+    this.canReviewQuarantine = false,
   });
 
   final ConnectionStatus status;
   final VoidCallback? onTap;
   final bool compact;
+
+  /// True only for the organization manager and the quality manager: the
+  /// quarantine detail (malformed server records skipped instead of aborting
+  /// the archive) is management information, not general chatter.
+  final bool canReviewQuarantine;
 
   static const Key badgeKey = Key('sync-badge');
   static const Key pendingKey = Key('sync-badge-pending');
@@ -26,13 +32,18 @@ class ConnectionBadge extends StatelessWidget {
   Color get _color {
     if (!status.online) return AppColors.warning;
     if (status.hasError) return AppColors.danger;
+    if (_quarantineVisible) return AppColors.warning;
     if (status.pullIncomplete) return AppColors.info;
     return AppColors.success;
   }
 
+  bool get _quarantineVisible =>
+      canReviewQuarantine && status.quarantined.isNotEmpty;
+
   IconData get _icon {
     if (!status.online) return Icons.cloud_off_outlined;
     if (status.hasError) return Icons.sync_problem_outlined;
+    if (_quarantineVisible) return Icons.report_problem_outlined;
     if (status.pullIncomplete) return Icons.cloud_sync_outlined;
     return Icons.cloud_done_outlined;
   }
@@ -53,7 +64,20 @@ class ConnectionBadge extends StatelessWidget {
         : status.online
         ? AppText.t('آخر تحديث', 'Last refresh')
         : AppText.t('عرض البيانات المحفوظة', 'Showing cached data');
-    return '$connection • $detail: $last\n${AppText.t('اضغط لعرض المسودات', 'Open drafts')}';
+    var message =
+        '$connection • $detail: $last\n${AppText.t('اضغط لعرض المسودات', 'Open drafts')}';
+    if (_quarantineVisible) {
+      // Management-only: the exact skipped records and how to clear them.
+      final records = status.quarantined
+          .take(5)
+          .map((r) => '\n• $r')
+          .join();
+      message += '\n${AppText.t(
+        'سجلّات تالفّة على السيرفر تم تجاهلها ولا توقف العمل؛ يحذفها مدير المؤسسة أو مدير الجودة من Firebase:',
+        'Malformed server records were skipped (the app keeps working); the organization/quality manager deletes them from Firebase:',
+      )}$records';
+    }
+    return message;
   }
 
   static String _stamp(DateTime at) {
